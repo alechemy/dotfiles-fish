@@ -1,0 +1,58 @@
+# espanso configuration file
+
+# This is the default configuration file, change it as you like it
+# You can refer to the official documentation:
+# https://espanso.org/docs/
+
+# Settings
+secure_input_notification: false
+# This causes conflicts with some of my hyper-key shortcuts
+toggle_key: OFF
+# Don't auto restart
+auto_restart: false
+
+# Matches are the substitution rules, when you type the "trigger" string
+# it gets replaced by the "replace" string.
+matches:
+  # Simple text replacement
+  - trigger: ':espanso'
+    replace: 'Hi there!'
+
+  # princeum ipsum
+  - trigger: ':princeum'
+    replace: >
+      Now, this is a story all about how
+      My life got flipped-turned upside down
+      And I'd like to take a minute
+      Just sit right there
+      I'll tell you how I became the prince of a town called Bel Air.
+
+  # Dates
+  - trigger: ':date'
+    replace: '{{mydate}}'
+    vars:
+      - name: mydate
+        type: date
+        params:
+          format: '%m/%d/%Y'
+
+  # Shell commands
+  - trigger: ':shell'
+    replace: '{{output}}'
+    vars:
+      - name: output
+        type: shell
+        params:
+          cmd: 'echo Hello from your shell'
+
+  # Cypress context
+  - trigger: ':context'
+    replace: "context('$|$', () => {});"
+
+  # Thumbs up
+  - trigger: ':plus1'
+    replace: '👍'
+
+  # console.log(|)
+  - trigger: ':log'
+    replace: 'console.log($|$);'

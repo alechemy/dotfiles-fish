@@ -1,0 +1,8 @@
+yaml name: misspellings
+parent: default
+
+matches:
+  # teh -> the
+  - trigger: 'teh'
+    replace: 'the'
+    word: true

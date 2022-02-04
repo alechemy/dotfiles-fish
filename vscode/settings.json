@@ -1,0 +1,121 @@
+{
+  // EDITOR
+  // ----------------------------------------
+  "editor.accessibilitySupport": "off",
+  "editor.bracketPairColorization.enabled": true,
+  "editor.colorDecorators": false,
+  "editor.defaultFormatter": "esbenp.prettier-vscode",
+  "editor.detectIndentation": false,
+  "editor.formatOnSave": true,
+  "editor.fontFamily": "Operator Mono SSm Lig",
+  "editor.fontLigatures": true,
+  "editor.fontSize": 14,
+  "editor.inlineSuggest.enabled": true,
+  "editor.linkedEditing": true,
+  "editor.minimap.renderCharacters": false,
+  "editor.renderWhitespace": "all",
+  "editor.rulers": [
+    {
+      "column": 80,
+      "color": "#102a44"
+    }
+  ],
+  "editor.snippetSuggestions": "bottom",
+  "editor.suggest.localityBonus": true,
+  "editor.suggestSelection": "first",
+
+  // FILES
+  // ----------------------------------------
+  "files.exclude": {
+    "**/.cache": true,
+    "**/node_modules": true,
+    "**/target": true,
+    "**/.classpath": true,
+    "**/.project": true,
+    "**/.settings": true,
+    "**/.factorypath": true
+  },
+  // "files.insertFinalNewline": true,
+  // "files.trimFinalNewlines": true,
+  // "files.trimTrailingWhitespace": true,
+
+  // SEARCH
+  // ----------------------------------------
+  "search.exclude": {
+    "package-lock.json": true
+  },
+
+  // SECURITY
+  // ----------------------------------------
+  "security.workspace.trust.banner": "never",
+  "security.workspace.trust.startupPrompt": "never",
+  "security.workspace.trust.enabled": false,
+
+  // WORKBENCH
+  // ----------------------------------------
+  "workbench.editor.tabSizing": "shrink",
+  "workbench.fontAliasing": "antialiased",
+  "workbench.settings.editor": "json",
+  "workbench.startupEditor": "newUntitledFile",
+  "workbench.colorCustomizations": {
+    "[Night Owl]": {
+      "activityBar.background": "#000C1D",
+      "activityBar.border": "#102a44",
+      "sideBar.background": "#001122",
+      "sideBar.border": "#102a44",
+      "sideBar.foreground": "#8BADC1"
+    },
+    "[Night Owl No Italics]": {
+      "activityBar.background": "#000C1D",
+      "activityBar.border": "#102a44",
+      "sideBar.background": "#001122",
+      "sideBar.border": "#102a44",
+      "sideBar.foreground": "#8BADC1"
+    }
+  },
+  "workbench.colorTheme": "Night Owl",
+  "workbench.iconTheme": "vscode-icons",
+  "workbench.editor.untitled.hint": "hidden",
+  "workbench.enableExperiments": false,
+  "workbench.settings.enableNaturalLanguageSearch": false,
+
+  // JAVASCRIPT
+  // ----------------------------------------
+  "javascript.preferences.importModuleSpecifier": "relative",
+  "javascript.updateImportsOnFileMove.enabled": "never",
+  // allow Path Intellisense to act as default autocompletion engine
+  "javascript.suggest.paths": false,
+
+  // TYPESCRIPT
+  // ----------------------------------------
+  "typescript.preferences.importModuleSpecifier": "relative",
+  "typescript.updateImportsOnFileMove.enabled": "never",
+  // allow Path Intellisense to act as default autocompletion engine
+  "typescript.suggest.paths": false,
+
+  // PYTHON
+  // ----------------------------------------
+  "python.defaultInterpreterPath": "/Users/acuster/.pyenv/shims/python",
+  "python.languageServer": "Pylance",
+  "python.linting.pylintEnabled": true,
+
+  // PRIVACY
+  // ----------------------------------------
+  "redhat.telemetry.enabled": false,
+  "telemetry.telemetryLevel": "off",
+
+  // TERMINAL
+  // ----------------------------------------
+  "terminal.integrated.fontFamily": "Operator Mono SSm Lig",
+  "terminal.integrated.defaultProfile.osx": "fish",
+  "terminal.integrated.cursorStyle": "line",
+
+  // EVERYTHING ELSE
+  // ----------------------------------------
+  "diffEditor.ignoreTrimWhitespace": false,
+  "eslint.alwaysShowStatus": true,
+  "eslint.lintTask.enable": true,
+  "eslint.format.enable": true,
+  "explorer.confirmDragAndDrop": false,
+  "vsicons.dontShowNewVersionMessage": true
+}

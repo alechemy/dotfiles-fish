@@ -1,0 +1,51 @@
+yaml name: dreyers
+parent: default
+
+matches:
+  - trigger: "very"
+    replace: ""
+    word: true
+
+  - trigger: "rather"
+    replace: ""
+    word: true
+
+  - trigger: "really"
+    replace: ""
+    word: true
+
+  - trigger: "quite"
+    replace: ""
+    word: true
+
+  - trigger: "in fact"
+    replace: ""
+    word: true
+
+  # - trigger: "just"
+  #   replace: ""
+  #   word: true
+
+  # - trigger: "so"
+  #   replace: ""
+  #   word: true
+
+  - trigger: "pretty"
+    replace: ""
+    word: true
+
+  - trigger: "of course"
+    replace: ""
+    word: true
+
+  - trigger: "surely"
+    replace: ""
+    word: true
+
+  - trigger: "that said"
+    replace: ""
+    word: true
+
+  - trigger: "actually"
+    replace: ""
+    word: true

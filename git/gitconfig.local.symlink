@@ -1,0 +1,16 @@
+[core]
+  excludesfile = ~/.gitignore
+  editor = nano
+  compression = -1
+[apply]
+  whitespace = nowarn
+[help]
+  autocorrect = 1
+[diff]
+  tool = diffmerge
+[pull]
+  ff = only
+[init]
+  defaultBranch = main
+[includeIf "gitdir:~/Work/"]
+  path = ~/.gitconfig.work
