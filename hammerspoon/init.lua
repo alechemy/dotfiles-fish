@@ -33,7 +33,7 @@ end)
 -- the preferences of the respective app.
 hyper_bindings = {
   ["C"] = {
-    ["name"] = "Visual Studio Code - Insiders",
+    ["name"] = "Code - Insiders",
     ["bundleID"] = "com.microsoft.VSCodeInsiders",
     ["newWindowMenuItem"] = {"File", "New Window"}
   },
@@ -79,7 +79,7 @@ hyper_bindings = {
   },
   ["S"] = {
     ["name"] = "Slack",
-    ["newWindowMenuItem"] = {"File", "Workspace", "Xperi"}
+    ["newWindowMenuItem"] = {"File", "Workspace", "Condé Nast"}
   },
 --[[["T"] = {
     ["name"] = "Tot"
