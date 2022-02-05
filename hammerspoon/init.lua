@@ -99,7 +99,7 @@ shyper_bindings = {
     ["newWindowMenuItem"] = {"File", "New Finder Window"}
   },
   ["M"] = {
-    ["name"] = "Messages",
+    ["name"] = "Texty",
     ["newWindowMenuItem"] = {"Window", "Messages"}
   },
   ["S"] = {
@@ -142,6 +142,7 @@ for key, app in pairs(shyper_bindings) do
   end
 end
 
+-- Shyper-V => Paste by typing each character. Useful where regular pasting is disabled.
 hs.urlevent.bind('fnv', function() hs.eventtap.keyStrokes(hs.pasteboard.getContents()) end)
 
 -- This will just log the event; useful for debugging...
