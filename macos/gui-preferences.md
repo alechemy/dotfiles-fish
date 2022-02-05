@@ -11,6 +11,11 @@ Probably some of it can be automated, but I can't be bothered.
 
 ## System Preferences
 
+### Desktop & Screen Saver
+
+- Screen Saver
+  - Click "Hot Corners...". De-select "Quick Note".
+
 ### Dock & Menu Bar
 
 - Enable 'Automatically hide and show the Dock'
@@ -31,15 +36,17 @@ Probably some of it can be automated, but I can't be bothered.
 
 ### Security & Privacy
 
-- Location Services
-  - Scroll to "System Services". Click "Details". De-select "Location-Based Suggestions" and "Significant Locations".
+- General
+  - Change "Require password x minutes after sleep..." option to "immediately".
 - Privacy
-  - De-select "Personalized Ads"
+  - Location Services
+    - Scroll to "System Services". Click "Details". De-select "Location-Based Suggestions" and "Significant Locations".
+    - Scroll to "Apple Advertising". De-select "Personalized Ads"
 
 ### Accessibility
 
 - Pointer Control
-- Click "Trackpad Options'85". Enable "Enable dragging with three finger drag".
+- Click "Trackpad Options". Enable "Enable dragging with three finger drag".
 
 ### Software Update
 
