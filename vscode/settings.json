@@ -117,5 +117,6 @@
   "eslint.lintTask.enable": true,
   "eslint.format.enable": true,
   "explorer.confirmDragAndDrop": false,
+  "git.autofetch": false,
   "vsicons.dontShowNewVersionMessage": true
 }
