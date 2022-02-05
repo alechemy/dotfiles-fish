@@ -11,6 +11,10 @@ Probably some of it can be automated, but I can't be bothered.
 
 ## System Preferences
 
+### General
+
+- De-select "Allow Handoff between this Mac and your iCloud devices"
+
 ### Desktop & Screen Saver
 
 - Screen Saver

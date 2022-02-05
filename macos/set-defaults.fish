@@ -10,6 +10,8 @@ defaults write com.apple.LaunchServices LSQuarantine -bool false
 defaults write com.apple.Finder FXPreferredViewStyle Nlsv
 # Disable the warning when changing a file extension
 defaults write com.apple.Finder FXEnableExtensionChangeWarning -bool false
+# Expand save panel by default
+defaults write NSGlobalDomain NSNavPanelExpandedStateForSaveMode -bool true
 # Always show all files
 defaults write com.apple.Finder AppleShowAllFiles -bool true
 # Maccy preferences
