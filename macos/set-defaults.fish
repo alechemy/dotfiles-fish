@@ -12,9 +12,14 @@ defaults write com.apple.Finder FXPreferredViewStyle Nlsv
 defaults write com.apple.Finder FXEnableExtensionChangeWarning -bool false
 # Always show all files
 defaults write com.apple.Finder AppleShowAllFiles -bool true
-# Maccy paste on select:
-defaults write org.p0deje.Maccy pasteByDefault true
-# Disable font smoothing:
+# Maccy preferences
+defaults write org.p0deje.Maccy pasteByDefault -bool true
+defaults write org.p0deje.Maccy fuzzySearch -bool true
+defaults write org.p0deje.Maccy maxMenuItems -int 10
+# Disable font smoothing
 defaults -currentHost write -g AppleFontSmoothing -int 0
-# Open new blank file in TextEdit:
+# Open new blank file in TextEdit
 defaults write com.apple.TextEdit NSShowAppCentricOpenPanelInsteadOfUntitledFile -bool false
+# Speed up the dock hide/show animation
+defaults write com.apple.dock autohide-delay -float 0.1
+defaults write com.apple.dock autohide-time-modifier -float 0.5
