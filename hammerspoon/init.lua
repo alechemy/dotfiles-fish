@@ -55,7 +55,7 @@ hyper_bindings = {
   },
   ["K"] = {
     ["name"] = "kitty",
-    ["newWindowMenuItem"] = {"Shell", "New OS window"}
+    ["newWindowMenuItem"] = {"Shell", "New OS Window"}
   },
   ["M"] = {
     ["name"] = "Music",
