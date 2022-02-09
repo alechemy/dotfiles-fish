@@ -24,6 +24,7 @@ redhat.vscode-yaml
 richie5um2.vscode-sort-json
 sdras.night-owl
 stkb.rewrap
+styled-components.vscode-styled-components
 stylelint.vscode-stylelint
 syler.sass-indented
 Tyriar.sort-lines
