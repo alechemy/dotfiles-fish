@@ -15,5 +15,8 @@ if command -qs code
     and git config --global mergetool.vscode.cmd "code --wait $MERGED"
 end
 
-# Abbreviations
+# clean log
 abbr -a glog 'git log -n10 --oneline'
+# "git stash unpop"
+abbr -a unpop 'git reset --merge'
+
