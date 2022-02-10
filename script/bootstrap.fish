@@ -28,7 +28,7 @@ function setup_gitconfig
   set managed (git config --global --get dotfiles.managed)
   # if there is no user.email, we'll assume it's a new machine/setup and ask it
   if test -z (git config --global --get user.email)
-    user 'What is your git author name?'
+    user 'What is your git author name (Firstname Lastname)?'
     read user_name
     user 'What is your git author email?'
     read user_email
@@ -114,9 +114,6 @@ fisher update
 mkdir -p ~/.config/fish/completions/
   and success 'completions'
   or abort 'completions'
-
-# clear fish user paths before running installers
-set -U fish_user_paths
 
 for installer in */install.fish
   $installer
