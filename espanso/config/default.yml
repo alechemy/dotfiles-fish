@@ -1,0 +1,6 @@
+# Disable annoying notification when a secure input is focused
+secure_input_notification: false
+# This causes conflicts with some of my hyper-key shortcuts
+toggle_key: OFF
+# Don't auto restart
+auto_restart: false

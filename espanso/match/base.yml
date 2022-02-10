@@ -1,18 +1,6 @@
-# espanso configuration file
-
-# This is the default configuration file, change it as you like it
-# You can refer to the official documentation:
-# https://espanso.org/docs/
-
-# Settings
-secure_input_notification: false
-# This causes conflicts with some of my hyper-key shortcuts
-toggle_key: OFF
-# Don't auto restart
-auto_restart: false
-
 # Matches are the substitution rules, when you type the "trigger" string
 # it gets replaced by the "replace" string.
+
 matches:
   # Simple text replacement
   - trigger: ':espanso'

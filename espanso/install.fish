@@ -1,8 +1,5 @@
 #!/usr/bin/env fish
-set ESPANSO_HOME "$HOME/Library/Preferences/espanso"
-ln -sf "$DOTFILES/espanso/default.yml" "$ESPANSO_HOME/default.yml"
+set ESPANSO_HOME "$HOME/Library/Application Support/espanso"
 
-mkdir -p "$ESPANSO_HOME/user"
-ln -sf $DOTFILES/espanso/user/* $ESPANSO_HOME/user/
-
-espanso register
+ln -sf $DOTFILES/espanso/config/* $ESPANSO_HOME/config/
+ln -sf $DOTFILES/espanso/match/* $ESPANSO_HOME/match/
