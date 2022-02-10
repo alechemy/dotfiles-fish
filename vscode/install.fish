@@ -10,4 +10,5 @@ while read module
     code-insiders --install-extension "$module" || true
 end < "$DOTFILES/vscode/extensions.txt"
 
-ln -sf "$DOTFILES/vscode/projects.json" "$VSCODE_HOME/User/globalStorage/alefragnani.project-manager/projects.json"
+# FIXME, doesn't work on a clean install
+# ln -sf "$DOTFILES/vscode/projects.json" "$VSCODE_HOME/User/globalStorage/alefragnani.project-manager/projects.json"
