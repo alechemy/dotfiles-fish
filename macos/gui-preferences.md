@@ -34,6 +34,10 @@ Probably some of it can be automated, but I can't be bothered.
 
 - Enable 'Automatically hide and show the Dock'
 
+### Mission Control
+
+- Disable "Displays have separate Spaces"
+
 ### Spotlight
 
 - Search Results

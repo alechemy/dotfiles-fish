@@ -4,3 +4,5 @@ secure_input_notification: false
 toggle_key: OFF
 # Don't auto restart
 auto_restart: false
+# Disable the search bar
+search_shortcut: off
