@@ -72,5 +72,9 @@
   {
     "key": "ctrl+3",
     "command": "workbench.action.focusThirdEditorGroup"
+  },
+  {
+    "key": "cmd+alt+w",
+    "command": "workbench.action.closeOtherEditors"
   }
 ]
