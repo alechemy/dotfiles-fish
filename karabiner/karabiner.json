@@ -16,7 +16,7 @@
         },
         "rules": [
           {
-            "description": "Change caps_lock to right command + right control + right option+ right shift.",
+            "description": "Change caps_lock to right_command + right_control + right_option + right_shift.",
             "manipulators": [
               {
                 "from": {
@@ -165,11 +165,11 @@
             ]
           },
           {
-            "description": "Remap Hyper-tab to Rectangle next monitor shortcut",
+            "description": "Remap Hyper-up_arrow to Swish's global modifier (fn) + up_arrow",
             "manipulators": [
               {
                 "from": {
-                  "key_code": "tab",
+                  "key_code": "up_arrow",
                   "modifiers": {
                     "mandatory": [
                       "right_command",
@@ -181,13 +181,108 @@
                 },
                 "to": [
                   {
-                    "key_code": "9",
-                    "modifiers": [
+                    "key_code": "up_arrow",
+                    "modifiers": ["fn"]
+                  }
+                ],
+                "type": "basic"
+              }
+            ]
+          },
+          {
+            "description": "Remap Hyper-left_arrow to Swish's global modifier (fn) + left_arrow",
+            "manipulators": [
+              {
+                "from": {
+                  "key_code": "left_arrow",
+                  "modifiers": {
+                    "mandatory": [
                       "right_command",
                       "right_control",
                       "right_shift",
                       "right_option"
                     ]
+                  }
+                },
+                "to": [
+                  {
+                    "key_code": "left_arrow",
+                    "modifiers": ["fn"]
+                  }
+                ],
+                "type": "basic"
+              }
+            ]
+          },
+          {
+            "description": "Remap Hyper-down_arrow to Swish's global modifier (fn) + down_arrow",
+            "manipulators": [
+              {
+                "from": {
+                  "key_code": "down_arrow",
+                  "modifiers": {
+                    "mandatory": [
+                      "right_command",
+                      "right_control",
+                      "right_shift",
+                      "right_option"
+                    ]
+                  }
+                },
+                "to": [
+                  {
+                    "key_code": "down_arrow",
+                    "modifiers": ["fn"]
+                  }
+                ],
+                "type": "basic"
+              }
+            ]
+          },
+          {
+            "description": "Remap Hyper-right_arrow to Swish's global modifier (fn) + right_arrow",
+            "manipulators": [
+              {
+                "from": {
+                  "key_code": "right_arrow",
+                  "modifiers": {
+                    "mandatory": [
+                      "right_command",
+                      "right_control",
+                      "right_shift",
+                      "right_option"
+                    ]
+                  }
+                },
+                "to": [
+                  {
+                    "key_code": "right_arrow",
+                    "modifiers": ["fn"]
+                  }
+                ],
+                "type": "basic"
+              }
+            ]
+          },
+          {
+            "description": "Remap Hyper-enter to Swish's global modifier (fn) + up_arrow",
+            "manipulators": [
+              {
+                "from": {
+                  "key_code": "return_or_enter",
+                  "modifiers": {
+                    "mandatory": [
+                      "right_command",
+                      "right_control",
+                      "right_shift",
+                      "right_option"
+                    ]
+                  }
+                },
+                "to": [
+                  {
+                    "key_code": "up_arrow",
+                    "modifiers": ["fn"]
                   }
                 ],
                 "type": "basic"
