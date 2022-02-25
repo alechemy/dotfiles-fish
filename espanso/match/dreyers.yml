@@ -46,3 +46,7 @@ matches:
   - trigger: 'actually'
     replace: ''
     word: true
+
+  - trigger: 'i think'
+    replace: ''
+    word: true
