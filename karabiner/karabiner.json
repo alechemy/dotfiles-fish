@@ -82,7 +82,7 @@
                 },
                 "to": [
                   {
-                    "shell_command": "open -g hammerspoon://Texty"
+                    "shell_command": "open -g hammerspoon://Messages"
                   }
                 ],
                 "type": "basic"

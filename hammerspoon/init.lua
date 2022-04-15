@@ -9,12 +9,12 @@ hyper = {"rightcmd", "rightoption", "rightctrl", "rightshift"}
 ---- UTILITY BINDINGS ----
 --------------------------]]
 
--- hyperkey + "L" = Lock screen
+-- hyperkey + "L" => Lock screen
 hs.hotkey.bind(hyper, "L", function()
   hs.caffeinate.lockScreen()
 end)
 
--- hyperkey + "0" = reload hammerspoon config
+-- hyperkey + "0" => reload hammerspoon config
 hs.hotkey.bind(hyper, "0", function()
   hs.reload()
 end)
@@ -53,6 +53,9 @@ hyper_bindings = {
     ["bundleID"] = "com.culturedcode.ThingsMac",
     ["newWindowMenuItem"] = {"File", "New Things Window"}
   },
+--[[["H"] = {
+    ["name"] = "HazeOver"
+  }]]
   ["K"] = {
     ["name"] = "kitty",
     ["newWindowMenuItem"] = {"Shell", "New OS Window"}
@@ -69,9 +72,6 @@ hyper_bindings = {
   ["O"] = {
     ["name"] = "Mimestream",
     ["newWindowMenuItem"] = {"Window", "Main Window"}
-  },
-  ["P"] = {
-    ["name"] = "Pins"
   },
   ["R"] = {
     ["name"] = "Reeder",
@@ -99,7 +99,7 @@ shyper_bindings = {
     ["newWindowMenuItem"] = {"File", "New Finder Window"}
   },
   ["M"] = {
-    ["name"] = "Texty",
+    ["name"] = "Messages",
     ["newWindowMenuItem"] = {"Window", "Messages"}
   },
   ["S"] = {
@@ -142,7 +142,7 @@ for key, app in pairs(shyper_bindings) do
   end
 end
 
--- Shyper-V => Paste by typing each character. Useful where regular pasting is disabled.
+-- Shyper-V => Paste by individually typing each character. Useful where regular pasting is disabled.
 hs.urlevent.bind('fnv', function() hs.eventtap.keyStrokes(hs.pasteboard.getContents()) end)
 
 -- This will just log the event; useful for debugging...
