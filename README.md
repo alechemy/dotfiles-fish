@@ -10,14 +10,24 @@ My dotfiles for fish shell.
 - fzf
 - fd
 - bat
+- espanso
+- Karabiner Elements
+- Visual Studio Code Insiders
 
 ```fish
-brew install fish starship fzf fd bat
+brew install fish starship fzf fd bat espanso
+```
+
+```fish
+brew tap homebrew/cask-versions && brew install --cask karabiner-elements visual-studio-code-insiders
 ```
 
 ## Installation
 
+If possible, transfer `.gitignore`d files from prior machine.
+
 ```fish
+git clone https://github.com/alechemy/dotfiles-fish.git ~/.dotfiles
 cd ~/.dotfiles
 ./script/bootstrap.fish
 ```
