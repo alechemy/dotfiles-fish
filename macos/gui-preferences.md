@@ -6,18 +6,24 @@ Probably some of it can be automated, but I can't be bothered.
 
 ## Finder
 
-- When performing a search:
-  - Select "Search the current folder"
-  - Disable "Show warning before removing from iCloud Drive"
+- Advanced
+  - When performing a search:
+    - Select "Search the current folder"
+    - Disable "Show warning before removing from iCloud Drive"
 
 ## Safari
 
+- AutoFill
+  - Disable all categories. 1Password does this better.
 - Search
   - Disable "Include Safari Suggestions"
 - Privacy
   - Disable "Allow privacy-preserving measurement of ad effectiveness"
 - Websites
-  - Disable "Allow websites to ask for permission to send notifications"
+  - Scroll down to Notifications. Disable "Allow websites to ask for permission to send notifications"
+- Advanced
+  - Beside "Smart Search Field", enable "Show full website address"
+  - Enable "Show Develop menu in menu bar"
 
 ## System Preferences
 
@@ -28,6 +34,7 @@ Probably some of it can be automated, but I can't be bothered.
 ### Desktop & Screen Saver
 
 - Screen Saver
+  - De-select "Show screen saver after ..."
   - Click "Hot Corners...". De-select "Quick Note".
 
 ### Dock & Menu Bar
@@ -49,11 +56,10 @@ Probably some of it can be automated, but I can't be bothered.
   - Disable "Allow notifications"
 - Focus
   - Disable "Share Focus Status"
-  - Disable "Share across devices"
 
-### Internet accounts
+### Internet Accounts
 
-- Remove "Game Center"
+- Remove "Game Center" if present
 
 ### Passwords
 
@@ -65,7 +71,7 @@ Probably some of it can be automated, but I can't be bothered.
   - Change "Require password x minutes after sleep..." option to "immediately".
 - Privacy
   - Location Services
-    - Scroll to "System Services". Click "Details". De-select "Location-Based Suggestions" and "Significant Locations".
+    - Scroll to "System Services". Click "Details...". De-select "Location-Based Suggestions" and "Significant Locations". (I'm reconsidering this one.)
   - Apple Advertising
     - De-select "Personalized Ads"
   - Analytics & Improvement
@@ -83,9 +89,12 @@ Probably some of it can be automated, but I can't be bothered.
 
 ### Sound
 
-- Uncheck "Play sound on startup"
-- Uncheck "Play user interface sound effects"
-- Set "Show Sound in menu bar" to "Always"
+- Sound Effects
+  - Uncheck "Play sound on startup"
+  - Uncheck "Play user interface sound effects"
+  - Set "Show Sound in menu bar" to "Always"
+- Input
+  - Increase "Input Volume" to max value
 
 ### Keyboard
 
@@ -95,14 +104,33 @@ Probably some of it can be automated, but I can't be bothered.
 - Text
   - De-select "Capitalize words automatically"
   - De-select "Add period with double-space"
+  - Delete the default "omw" -> "On my way!" text replacement
 
 ### Trackpad
 
-- Enable tap to click
-- Disable natural scroll direction
-- Increase tracking speed by 1
+- Point & Click
+  - Enable "Tap to click"
+  - Increase tracking speed by 1
+- Sroll & Zoom
+  - Disable "Scroll direction: Natural"
 
 ### Battery
 
 - Battery
   - Enable "Low power mode"
+
+## Mail.app
+
+- Junk Mail
+  - Enable "Enable junk mail filtering"
+  - Under "When junk mail arrives:", select "Move it to the Junk mailbox"
+- Viewing
+  - Enable "Show most recent messages at the top"
+
+## Messages.app
+
+- General
+  - Disable "Notify me about messages from unknown contacts"
+  - Disable "Play sound effects"
+- iMessage
+  - Enable "Enable Messages in iCloud"

@@ -10,7 +10,9 @@ defaults write com.apple.Finder FXPreferredViewStyle Nlsv
 defaults write com.apple.Finder FXEnableExtensionChangeWarning -bool false
 # Expand save panel by default
 defaults write NSGlobalDomain NSNavPanelExpandedStateForSaveMode -bool true
-# Always show all files
+# Always show all files elsewhere
+defaults write -g AppleShowAllFiles -bool false
+# Always show all files in Finder
 defaults write com.apple.Finder AppleShowAllFiles -bool true
 # Maccy preferences
 defaults write org.p0deje.Maccy pasteByDefault -bool true
