@@ -16,7 +16,7 @@
         },
         "rules": [
           {
-            "description": "Change caps_lock to right command + right control + right option+ right shift.",
+            "description": "HYPER KEY! Change caps_lock to right command + right control + right option+ right shift.",
             "manipulators": [
               {
                 "from": {
@@ -45,7 +45,7 @@
             ]
           },
           {
-            "description": "Remap Hyper-left_command-KEY to Hammerspoon URL events",
+            "description": "SUPER-HYPER (a.k.a. 'SHYPER') KEY! Remap Hyper-left_command-KEY to Hammerspoon URL events",
             "manipulators": [
               {
                 "from": {
@@ -69,6 +69,26 @@
               },
               {
                 "from": {
+                  "key_code": "l",
+                  "modifiers": {
+                    "mandatory": [
+                      "left_command",
+                      "right_command",
+                      "right_control",
+                      "right_shift",
+                      "right_option"
+                    ]
+                  }
+                },
+                "to": [
+                  {
+                    "shell_command": "open -g hammerspoon://Lock"
+                  }
+                ],
+                "type": "basic"
+              },
+              {
+                "from": {
                   "key_code": "m",
                   "modifiers": {
                     "mandatory": [
@@ -83,51 +103,6 @@
                 "to": [
                   {
                     "shell_command": "open -g hammerspoon://Messages"
-                  }
-                ],
-                "type": "basic"
-              },
-              {
-                "from": {
-                  "key_code": "s",
-                  "modifiers": {
-                    "mandatory": [
-                      "left_command",
-                      "right_command",
-                      "right_control",
-                      "right_shift",
-                      "right_option"
-                    ]
-                  }
-                },
-                "to": [
-                  {
-                    "shell_command": "open -g hammerspoon://Safari"
-                  }
-                ],
-                "type": "basic"
-              }
-            ]
-          },
-          {
-            "description": "Remap Hyper-left_command-v to Hammerspoon URL event",
-            "manipulators": [
-              {
-                "from": {
-                  "key_code": "v",
-                  "modifiers": {
-                    "mandatory": [
-                      "left_command",
-                      "right_command",
-                      "right_control",
-                      "right_shift",
-                      "right_option"
-                    ]
-                  }
-                },
-                "to": [
-                  {
-                    "shell_command": "open -g hammerspoon://fnv"
                   }
                 ],
                 "type": "basic"
@@ -186,36 +161,6 @@
                       "right_command",
                       "right_control",
                       "right_shift",
-                      "right_option"
-                    ]
-                  }
-                ],
-                "type": "basic"
-              }
-            ]
-          },
-          {
-            "description": "Remap Hyper-left_command-c to Cardhop shortcut",
-            "manipulators": [
-              {
-                "from": {
-                  "key_code": "c",
-                  "modifiers": {
-                    "mandatory": [
-                      "left_command",
-                      "right_command",
-                      "right_control",
-                      "right_shift",
-                      "right_option"
-                    ]
-                  }
-                },
-                "to": [
-                  {
-                    "key_code": "c",
-                    "modifiers": [
-                      "right_command",
-                      "right_control",
                       "right_option"
                     ]
                   }

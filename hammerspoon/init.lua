@@ -9,11 +9,6 @@ hyper = {"rightcmd", "rightoption", "rightctrl", "rightshift"}
 ---- UTILITY BINDINGS ----
 --------------------------]]
 
--- hyperkey + "L" => Lock screen
-hs.hotkey.bind(hyper, "L", function()
-  hs.caffeinate.lockScreen()
-end)
-
 -- hyperkey + "0" => reload hammerspoon config
 hs.hotkey.bind(hyper, "0", function()
   hs.reload()
@@ -60,6 +55,9 @@ hyper_bindings = {
     ["name"] = "kitty",
     ["newWindowMenuItem"] = {"Shell", "New OS Window"}
   },
+  ["L"] = {
+    ["name"] = "Logseq"
+  },
   ["M"] = {
     ["name"] = "Music",
     ["triggerOnRelease"] = true,
@@ -84,8 +82,8 @@ hyper_bindings = {
 --[[["T"] = {
     ["name"] = "Tot"
   }]]
---[[["V"] = {
-    ["name"] = "Maccy"
+  --[[["X"] = {
+    ["name"] = "Clip to DEVONthink"
   }]]
   ["Z"] = {
     ["name"] = "zoom.us",
@@ -101,10 +99,6 @@ shyper_bindings = {
   ["M"] = {
     ["name"] = "Messages",
     ["newWindowMenuItem"] = {"Window", "Messages"}
-  },
-  ["S"] = {
-    ["name"] = "Safari",
-    ["newWindowMenuItem"] = {"File", "New Window"}
   }
 }
 
@@ -145,8 +139,11 @@ end
 -- Shyper-V => Paste by individually typing each character. Useful where regular pasting is disabled.
 hs.urlevent.bind('fnv', function() hs.eventtap.keyStrokes(hs.pasteboard.getContents()) end)
 
--- This will just log the event; useful for debugging...
-hs.urlevent.bind("karabiner", function(eventName, params)
+-- Shyper-L => Lock screen
+hs.urlevent.bind('Lock', function() hs.caffeinate.lockScreen() end)
+
+-- Binds 'hammerspoon://debug' to a log of said event. (Useful for, you guessed it, debugging.)
+hs.urlevent.bind("debug", function(eventName, params)
   print("Event: "..eventName)
   print(hs.inspect(params))
 end)
