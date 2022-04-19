@@ -178,7 +178,7 @@
           "identifiers": {
             "is_keyboard": false,
             "is_pointing_device": true,
-            "product_id": 32792,
+            "product_id": 32793,
             "vendor_id": 1149
           },
           "ignore": false,
@@ -186,27 +186,33 @@
           "simple_modifications": [
             {
               "from": {
-                "pointing_button": "button2"
-              },
-              "to": {
-                "pointing_button": "button3"
-              }
-            },
-            {
-              "from": {
                 "pointing_button": "button3"
               },
-              "to": {
-                "pointing_button": "button1"
-              }
+              "to": [
+                {
+                  "pointing_button": "button1"
+                }
+              ]
             },
             {
               "from": {
                 "pointing_button": "button4"
               },
-              "to": {
+              "to": [
+                {
+                  "pointing_button": "button2"
+                }
+              ]
+            },
+            {
+              "from": {
                 "pointing_button": "button2"
-              }
+              },
+              "to": [
+                {
+                  "pointing_button": "button3"
+                }
+              ]
             }
           ]
         }
