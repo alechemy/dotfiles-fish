@@ -20,7 +20,9 @@ plugins:
   - scrub
   - zero
 
-include: secrets.yaml
+# .gitignore'd file with various API keys
+include:
+  - secrets.yaml
 
 import:
   move: yes
