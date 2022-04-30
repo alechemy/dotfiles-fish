@@ -34,7 +34,7 @@ hyper_bindings = {
   },
   ["D"] = {
     ["name"] = "DEVONthink 3",
-    ["newWindowMenuItem"] = {"File", "New Window", "Notebox"}
+    ["newWindowMenuItem"] = {"File", "New Window", "My Database"}
   },
   ["E"] = {
     ["name"] = "Mail",
