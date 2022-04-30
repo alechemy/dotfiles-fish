@@ -29,6 +29,7 @@ Probably some of it can be automated, but I can't be bothered.
 
 ### General
 
+- De-select "Allow wallpaper tinting in windows"
 - De-select "Allow Handoff between this Mac and your iCloud devices"
 
 ### Desktop & Screen Saver
@@ -134,3 +135,8 @@ Probably some of it can be automated, but I can't be bothered.
   - Disable "Play sound effects"
 - iMessage
   - Enable "Enable Messages in iCloud"
+
+## Music.app
+
+- Files
+  -Disable "Keep Music Media folder organized"
