@@ -1,0 +1,5 @@
+beets
+beets[fetchart,lyrics,lastgenre]
+pyacoustid
+python3-discogs-client
+https://github.com/ocelma/python-itunes/archive/master.zip

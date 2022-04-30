@@ -1,0 +1,101 @@
+####################
+# Global Options
+####################
+
+library: ~/Music/Beets/musiclibrary.db
+directory: ~/Music/Music/Media.localized/Music
+plugins:
+  - chroma
+  - discogs
+  - deezer
+  - edit
+  - embedart
+  - fetchart
+  - fromfilename
+  - ftintitle
+  - goingrunning
+  - hook
+  - lastgenre
+  - missing
+  - scrub
+  - zero
+
+include: secrets.yaml
+
+import:
+  move: yes
+  # Still not sure on this one
+  # incremental: yes
+  log: beets.log
+match:
+  strong_rec_thresh: 0.20
+  # Enable below line if doing a full library import
+  # strong_rec_thresh: 0.30
+  max_rec:
+    missing_tracks: strong
+  distance_weights:
+    missing_tracks: 0.90
+    # Enable below line if doing a full library import
+    # missing_tracks: 0.15
+  preferred:
+    countries: ['US', 'GB|UK', 'XW']
+    media: ['Digital Media|File', 'Digital Media', 'CD']
+    original_year: yes
+
+####################
+# Plugin Options
+####################
+
+chroma:
+  auto: no
+
+fetchart:
+  enforce_ratio: yes
+  minwidth: 800
+  sources:
+    - coverart
+    - itunes
+    - amazon
+    - albumart
+    - fanarttv
+    - google
+    - wikipedia
+    - lastfm
+    - filesystem
+
+ftintitle:
+  format: (feat. {0})
+
+goingrunning:
+  targets:
+    MPD1:
+      device_root: ~/Desktop/
+      device_path: Playlists/
+      clean_target: no
+      generate_playlist: yes
+      copy_files: no
+  trainings:
+    10K:
+      query:
+        bpm: 160..180
+        # mood_aggressive: 0.6..
+        ^genre: Reggae
+      ordering:
+        bpm: 100
+        average_loudness: 50
+      use_flavours: []
+      duration: 60
+      target: MPD1
+
+hook:
+  hooks:
+    - event: after_write
+      command: osascript /Users/alec/Music/Beets/MusicRefresh.scpt "{item.path}"
+
+lastgenre:
+  canonical: yes
+  min_weight: 30
+  fallback: 'Unknown'
+
+zero:
+  fields: comments
