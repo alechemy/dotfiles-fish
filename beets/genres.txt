@@ -1,0 +1,27 @@
+alternative
+ambient
+bluegrass
+blues
+classical
+comedy
+country
+disco
+easy listening
+electronic
+emo
+experimental
+folk
+funk
+heavy metal
+hip-hop
+jazz
+lo-fi
+mashup
+pop
+punk rock
+reggae
+r&b
+rock
+ska
+soul
+soundtrack

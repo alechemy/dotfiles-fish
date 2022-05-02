@@ -26,8 +26,6 @@ include:
 
 import:
   move: yes
-  # Still not sure on this one
-  # incremental: yes
   log: beets.log
 match:
   strong_rec_thresh: 0.20
@@ -95,9 +93,10 @@ hook:
       command: osascript /Users/alec/Music/Beets/MusicRefresh.scpt "{item.path}"
 
 lastgenre:
-  canonical: yes
-  min_weight: 30
+  whitelist: ~/.config/beets/genres.txt
+  canonical: ~/.config/beets/genres-tree.yaml
   fallback: 'Unknown'
+  source: artist
 
 zero:
   fields: comments
