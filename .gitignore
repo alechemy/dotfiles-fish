@@ -1,7 +1,8 @@
 *~
-dist
 condenast
-private.yml
+dist
 gitconfig.work.symlink
+keychain
+private.yml
 projects.json
 secrets.yaml
