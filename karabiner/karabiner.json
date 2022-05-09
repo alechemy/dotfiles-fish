@@ -168,6 +168,36 @@
                 "type": "basic"
               }
             ]
+          },
+          {
+            "description": "Remap Shyper-H to Hook Copy Markdown Link Shortcut",
+            "manipulators": [
+              {
+                "from": {
+                  "key_code": "h",
+                  "modifiers": {
+                    "mandatory": [
+                      "left_command",
+                      "right_command",
+                      "right_control",
+                      "right_shift",
+                      "right_option"
+                    ]
+                  }
+                },
+                "to": [
+                  {
+                    "key_code": "m",
+                    "modifiers": [
+                      "right_command",
+                      "right_shift",
+                      "right_option"
+                    ]
+                  }
+                ],
+                "type": "basic"
+              }
+            ]
           }
         ]
       },
