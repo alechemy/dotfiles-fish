@@ -15,6 +15,7 @@ plugins:
   - ftintitle
   - goingrunning
   - hook
+  - info
   - lastgenre
   - missing
   - scrub
@@ -99,4 +100,5 @@ lastgenre:
   source: artist
 
 zero:
-  fields: comments
+  fields: albumartist_sort artist_sort comments composer_sort
+  update_database: true
