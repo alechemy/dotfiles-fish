@@ -12,6 +12,9 @@ for f in $DOTFILES/*/functions
   set -Up fish_function_path $f
 end
 
+# Deduplicate fish_function_path
+set -U fish_function_path (printf '%s\n' $fish_function_path | sort -u)
+
 for f in $DOTFILES/*/conf.d/*.fish
   ln -sf $f ~/.config/fish/conf.d/(basename $f)
 end
