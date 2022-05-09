@@ -79,6 +79,12 @@
   "workbench.enableExperiments": false,
   "workbench.settings.enableNaturalLanguageSearch": false,
 
+  // FISH
+  // ----------------------------------------
+  "[fish]": {
+    "editor.defaultFormatter": "bmalehorn.vscode-fish"
+  },
+
   // JAVASCRIPT
   // ----------------------------------------
   "javascript.preferences.importModuleSpecifier": "relative",
