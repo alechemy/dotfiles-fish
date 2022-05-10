@@ -5,6 +5,7 @@
 library: ~/Music/Beets/musiclibrary.db
 directory: ~/Music/Music/Media.localized/Music
 plugins:
+  - acousticbrainz
   - chroma
   - discogs
   - deezer
@@ -46,6 +47,9 @@ match:
 ####################
 # Plugin Options
 ####################
+
+acousticbrainz:
+  tags: [bpm]
 
 chroma:
   auto: no
