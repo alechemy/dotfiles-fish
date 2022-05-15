@@ -1,5 +1,13 @@
 # Beets Guide
 
+## Installation
+
+```fish
+brew install aubio chromaprint imagemagick && pip3 install -r requirements.txt
+```
+
+## Usage
+
 Beets is great. Beets is also a little finicky. So that I don't forget later on,
 these are the basic commands I use to manage my library.
 

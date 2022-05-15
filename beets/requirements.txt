@@ -1,5 +1,6 @@
 beets
 beets[fetchart,lyrics,lastgenre]
+beets-bpmanalyser
 pyacoustid
 python3-discogs-client
 https://github.com/ocelma/python-itunes/archive/master.zip
