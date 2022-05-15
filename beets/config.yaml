@@ -6,6 +6,7 @@ library: ~/Music/Beets/musiclibrary.db
 directory: ~/Music/Music/Media.localized/Music
 plugins:
   - acousticbrainz
+  - bpmanalyser
   - chroma
   - discogs
   - deezer
@@ -74,20 +75,23 @@ ftintitle:
 goingrunning:
   targets:
     MPD1:
-      device_root: ~/Music/Beets
-      device_path: Playlists/
+      device_root: ~/Music/Beets/Playlists/
       clean_target: no
       generate_playlist: yes
       copy_files: no
   trainings:
-    10K:
+    60min:
       query:
         bpm: 160..180
-        # mood_aggressive: 0.6..
-        ^genre: Classical
+        genre:
+          - Electronic
+          - Hip-Hop
+          - Mashup
+          - Pop
+          - R&B
+          - Soundtrack
       ordering:
         bpm: 100
-        average_loudness: 50
       use_flavours: []
       duration: 60
       target: MPD1
