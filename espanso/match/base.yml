@@ -17,12 +17,12 @@ matches:
 
   # Dates
   - trigger: ':date'
-    replace: '{{mydate}}'
+    replace: '{{today}}'
     vars:
-      - name: mydate
+      - name: today
         type: date
         params:
-          format: '%m/%d/%Y'
+          format: '%F'
 
   # Shell commands
   - trigger: ':shell'
@@ -44,3 +44,19 @@ matches:
   # console.log(|)
   - trigger: ':log'
     replace: 'console.log($|$);'
+
+  # up arrow
+  - trigger: ':uar'
+    replace: '↑'
+
+  # right arrow
+  - trigger: ':rar'
+    replace: '→'
+
+  # down arrow
+  - trigger: ':dar'
+    replace: '↓'
+
+  # left arrow
+  - trigger: ':lar'
+    replace: '←'
