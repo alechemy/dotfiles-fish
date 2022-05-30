@@ -6,7 +6,6 @@
   "editor.bracketPairColorization.enabled": true,
   "editor.colorDecorators": false,
   "editor.defaultFormatter": "esbenp.prettier-vscode",
-  // "editor.detectIndentation": false,
   "editor.find.addExtraSpaceOnTop": false,
   "editor.fontFamily": "Operator Mono SSm Lig",
   "editor.fontLigatures": true,
@@ -23,7 +22,6 @@
       "color": "#102a44"
     }
   ],
-  // "editor.smoothScrolling": true,
   "editor.snippetSuggestions": "bottom",
   "editor.suggest.localityBonus": true,
   "editor.suggestSelection": "first",
@@ -61,12 +59,10 @@
   "workbench.editor.limit.enabled": true,
   "workbench.editor.limit.perEditorGroup": true,
   "workbench.editor.limit.value": 5,
-  "workbench.editor.tabCloseButton": "left",
   "workbench.editor.untitled.hint": "hidden",
   "workbench.enableExperiments": false,
   "workbench.fontAliasing": "antialiased",
   "workbench.iconTheme": "vscode-icons",
-  // "workbench.list.smoothScrolling": true,
   "workbench.settings.editor": "json",
   "workbench.settings.enableNaturalLanguageSearch": false,
   "workbench.startupEditor": "newUntitledFile",
@@ -107,6 +103,7 @@
     "**/tmp": true,
     "**/yarn.lock": true
   },
+  "search.quickOpen.history.filterSortOrder": "recency",
 
   // SECURITY
   // ----------------------------------------
@@ -123,7 +120,6 @@
   // GIT
   // ----------------------------------------
   "git.autofetch": false,
-  "git.untrackedChanges": "separate",
 
   // JAVASCRIPT
   // ----------------------------------------
@@ -134,7 +130,7 @@
 
   // PYTHON
   // ----------------------------------------
-  "python.defaultInterpreterPath": "/Users/acuster/.pyenv/shims/python",
+  "python.defaultInterpreterPath": "/opt/homebrew/bin/python3",
   "python.languageServer": "Pylance",
   "python.linting.pylintEnabled": true,
 
@@ -167,6 +163,10 @@
   "eslint.format.enable": true,
   "explorer.confirmDragAndDrop": false,
   "extensions.autoUpdate": "onlyEnabledExtensions",
+  "fileNestingUpdater.autoUpdateInterval": 10080, // 1 week
+  "fileNestingUpdater.promptOnAutoUpdate": false,
+  "projectManager.tags": ["1_Work", "2_Personal", "3_Archive"],
+  "projectManager.sortList": "Saved",
   "vsicons.dontShowNewVersionMessage": true,
 
   // FILE NESTING
@@ -174,7 +174,7 @@
   "explorer.fileNesting.enabled": true,
   "explorer.fileNesting.expand": false,
   "explorer.fileNesting.patterns": {
-    "//": "Last update at 5/15/2022, 8:15:28 AM",
+    "//": "Last update at 5/25/2022, 8:21:41 AM",
     "*.asax": "$(capture).*.cs, $(capture).*.vb",
     "*.ascx": "$(capture).*.cs, $(capture).*.vb",
     "*.ashx": "$(capture).*.cs, $(capture).*.vb",

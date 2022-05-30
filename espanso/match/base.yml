@@ -16,7 +16,7 @@ matches:
       I'll tell you how I became the prince of a town called Bel Air.
 
   # Dates
-  - trigger: ':date'
+  - trigger: ':today'
     replace: '{{today}}'
     vars:
       - name: today
