@@ -30,16 +30,13 @@ include:
 import:
   move: yes
   log: beets.log
+
 match:
-  strong_rec_thresh: 0.20
-  # Enable below line if doing a full library import
-  # strong_rec_thresh: 0.30
+  strong_rec_thresh: 0.30
   max_rec:
     missing_tracks: strong
   distance_weights:
-    missing_tracks: 0.90
-    # Enable below line if doing a full library import
-    # missing_tracks: 0.15
+    missing_tracks: 0.15
   preferred:
     countries: ['US', 'GB|UK', 'XW']
     media: ['Digital Media|File', 'Digital Media', 'CD']

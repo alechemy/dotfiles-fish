@@ -10,3 +10,5 @@ ln -sf "$DOTFILES/beets/config.yaml" "$BEETS_HOME/config.yaml"
 ln -sf "$DOTFILES/beets/genres.txt" "$BEETS_HOME/genres.txt"
 ln -sf "$DOTFILES/beets/genres-tree.yaml" "$BEETS_HOME/genres-tree.yaml"
 ln -sf "$DOTFILES/beets/secrets.yaml" "$BEETS_HOME/secrets.yaml"
+
+abbr -a beetlog "tail -f ~/.config/beets/beets.log"

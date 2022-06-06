@@ -1,2 +1,14 @@
+import:
+  quiet_fallback: asis
+
+fetchart:
+  enforce_ratio: 0.5%
+  minwidth: 400
+
+# skip genre lookup
 lastgenre:
   auto: no
+
+# don't bother trying to find a release
+match:
+  strong_rec_thresh: 0

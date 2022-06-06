@@ -72,18 +72,32 @@ beet lastgenre '/Users/alec/Music/Music/Media.localized/Music/Arcade Fire and Ow
 beet modify -a "laugh now cry later" genre="Hip-Hop"
 ```
 
-## Addendum: Soundtracks
+## Addendum: Soundtrack Playlists
 
-Here's how to import soundtracks, which are tricky.
+Here's how to import "soundtracks" (i.e., playlists containing a bunch of songs by different artists, usually associated with a TV series or film).
 
-1. Assign track and disc numbers using Mp3tag.app
-2. Import with `beet import`, taking care to specify `soundtrack-config.yaml`, which disables the Lastgenre auto-fetcher:
+1. After downloading, assign track and disc numbers using Mp3tag.app.
+2. Import the directory with `beet import`, taking care to specify `soundtrack-config.yaml`, which disables the Lastgenre auto-fetcher:
 
    ```fish
    beet -c "/Users/alec/.dotfiles/beets/soundtrack-config.yaml" import '/Users/alec/Downloads/To all the boys I’ve loved before/' \
-    --timid \
+    --quiet \
+    --set album="To All the Boys I've Loved Before (Music from the Motion Picture)" \
+    --set comp="True" \
     --set genre="Soundtrack" \
-    --set album="To All the Boys I've Loved Before (Music from the Motion Picture)"
+    --set year="2018"
    ```
 
-3. When prompted, choose "Use as-is".
+3. Embed the artwork if necessary:
+
+   ```fish
+   beet embedart -f '/Users/alec/Music/Music/Media.localized/Music/Compilations/Euphoria (Music from the HBO Original Series)/cover.jpg' "euphoria"
+   ```
+
+   - After running `embedart`, will likely need to run the "Restore Artwork From Album Folder" script in Music.app to refresh the art.
+
+4. Set BPM:
+
+   ```fish
+   beet bpmanalyser
+   ```
