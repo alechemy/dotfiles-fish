@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Quietly import the music to the beets library
-/opt/homebrew/bin/beet -c /Users/alec/.dotfiles/beets/hazel-config.yaml import --quiet "$1";
+/opt/homebrew/bin/beet import --quiet "$1";
 # Run bpmanalyser
 /opt/homebrew/bin/beet bpmanalyser;
 # trash the dir if it's still hanging around

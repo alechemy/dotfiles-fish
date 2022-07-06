@@ -32,9 +32,10 @@ import:
   log: beets.log
 
 match:
-  strong_rec_thresh: 0.30
+  strong_rec_thresh: 0.25
   max_rec:
     missing_tracks: strong
+    unmatched_tracks: strong
   distance_weights:
     missing_tracks: 0.15
   preferred:
