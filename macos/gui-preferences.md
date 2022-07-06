@@ -4,6 +4,12 @@ These are some of the things I like to change on a new computer.
 
 Probably some of it can be automated, but I can't be bothered.
 
+## App Store
+
+- Preferences
+  - Disable "Video Autoplay"
+  - Disable "In-App Ratings & Reviews"
+
 ## Finder
 
 - Advanced
@@ -17,6 +23,7 @@ Probably some of it can be automated, but I can't be bothered.
   - Disable all categories. 1Password does this better.
 - Search
   - Disable "Include Safari Suggestions"
+  - Disable "Preload Top Hit in the background" [(Here's why.)](https://lapcatsoftware.com/articles/preload-top-hit.html)
 - Privacy
   - Disable "Allow privacy-preserving measurement of ad effectiveness"
 - Websites
