@@ -152,6 +152,14 @@
   // allow Path Intellisense to act as default autocompletion engine
   "typescript.suggest.paths": false,
 
+  // CUSTOM CSS
+  // ----------------------------------------
+  "customizeUI.stylesheet": {
+    // Boost the width of the Quick Open panel (useful for viewing/very/long/file/paths)
+    // Upstream issue: https://github.com/microsoft/vscode/issues/85374
+    ".quick-input-widget": "width: 60% !important; left: 40%"
+  },
+
   // EVERYTHING ELSE
   // ----------------------------------------
   "cSpell.allowCompoundWords": true,
