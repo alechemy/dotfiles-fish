@@ -34,7 +34,7 @@
 
   // WINDOW
   // ----------------------------------------
-  "window.nativeTabs": true,
+  "window.titleBarStyle": "native",
 
   // WORKBENCH
   // ----------------------------------------
@@ -154,6 +154,8 @@
 
   // CUSTOM CSS
   // ----------------------------------------
+  "customizeUI.activityBar": "wide",
+  "customizeUI.titleBar": "inline",
   "customizeUI.stylesheet": {
     // Boost the width of the Quick Open panel (useful for viewing/very/long/file/paths)
     // Upstream issue: https://github.com/microsoft/vscode/issues/85374
