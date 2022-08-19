@@ -12,14 +12,14 @@ My dotfiles for fish shell.
 - bat
 - espanso
 - Karabiner Elements
-- Visual Studio Code Insiders
+- VSCodium
 
 ```fish
 brew install fish starship fzf fd bat espanso
 ```
 
 ```fish
-brew tap homebrew/cask-versions && brew install --cask karabiner-elements visual-studio-code-insiders
+brew install --cask karabiner-elements vscodium
 ```
 
 ## Installation

@@ -1,2 +1,2 @@
 #!/usr/bin/env fish
-alias code='code-insiders'
+alias code='codium'

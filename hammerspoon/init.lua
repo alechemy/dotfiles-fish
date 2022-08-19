@@ -28,8 +28,8 @@ end)
 -- the preferences of the respective app.
 hyper_bindings = {
   ["C"] = {
-    ["name"] = "Code - Insiders",
-    ["bundleID"] = "com.microsoft.VSCodeInsiders",
+    ["name"] = "VSCodium",
+    ["bundleID"] = "com.visualstudio.code.oss",
     ["newWindowMenuItem"] = {"File", "New Window"}
   },
   ["D"] = {
@@ -40,55 +40,48 @@ hyper_bindings = {
     ["name"] = "Mail",
     ["newWindowMenuItem"] = {"Window", "Message Viewer"}
   },
---[[["F"] = {
-    ["name"] = "Fantastical"
-  }]]
-  ["G"] = {
-    ["name"] = "Things",
-    ["bundleID"] = "com.culturedcode.ThingsMac",
-    ["newWindowMenuItem"] = {"File", "New Things Window"}
-  },
---[[["H"] = {
-    ["name"] = "HazeOver"
-  }]]
-  ["K"] = {
-    ["name"] = "kitty",
-    ["newWindowMenuItem"] = {"Shell", "New OS Window"}
-  },
-  ["L"] = {
-    ["name"] = "Logseq"
-  },
-  ["M"] = {
-    ["name"] = "Music",
-    ["triggerOnRelease"] = true,
-    ["newWindowMenuItem"] = {"Window", "Music"}
-  },
-  ["N"] = {
-    ["name"] = "Nova",
-    ["newWindowMenuItem"] = {"Window", "Launcher"}
-  },
-  ["O"] = {
-    ["name"] = "Mimestream",
-    ["newWindowMenuItem"] = {"Window", "Main Window"}
-  },
-  ["R"] = {
-    ["name"] = "Reeder",
-    ["newWindowMenuItem"] = {"Window", "Reeder"}
-  },
-  ["S"] = {
-    ["name"] = "Slack",
-    ["newWindowMenuItem"] = {"File", "Workspace", "Condé Nast"}
-  },
+  --[[["F"] = {
+  ["name"] = "Fantastical"
+}]]
+["G"] = {
+  ["name"] = "Things",
+  ["bundleID"] = "com.culturedcode.ThingsMac",
+  ["newWindowMenuItem"] = {"File", "New Things Window"}
+},
+["K"] = {
+  ["name"] = "kitty",
+  ["newWindowMenuItem"] = {"Shell", "New OS Window"}
+},
+["L"] = {
+  ["name"] = "Logseq"
+},
+["M"] = {
+  ["name"] = "Music",
+  ["triggerOnRelease"] = true,
+  ["newWindowMenuItem"] = {"Window", "Music"}
+},
+["O"] = {
+  ["name"] = "Mimestream",
+  ["newWindowMenuItem"] = {"Window", "Main Window"}
+},
+["R"] = {
+  ["name"] = "Reeder",
+  ["newWindowMenuItem"] = {"Window", "Reeder"}
+},
+["S"] = {
+  ["name"] = "Slack",
+  ["newWindowMenuItem"] = {"File", "Workspace", "Condé Nast"}
+},
 --[[["T"] = {
-    ["name"] = "Tot"
-  }]]
-  --[[["X"] = {
-    ["name"] = "Clip to DEVONthink"
-  }]]
-  ["Z"] = {
-    ["name"] = "zoom.us",
-    ["newWindowMenuItem"] = {"zoom.us", "About Zoom"}
-  },
+["name"] = "Tot"
+}]]
+--[[["X"] = {
+["name"] = "Clip to DEVONthink"
+}]]
+["Z"] = {
+  ["name"] = "zoom.us",
+  ["newWindowMenuItem"] = {"zoom.us", "About Zoom"}
+},
 }
 
 shyper_bindings = {

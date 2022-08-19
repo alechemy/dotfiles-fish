@@ -4,5 +4,6 @@ dist
 gitconfig.work.symlink
 keychain
 private.yml
+product.json
 projects.json
 secrets.yaml
