@@ -34,7 +34,7 @@
 
   // WINDOW
   // ----------------------------------------
-  "window.titleBarStyle": "native",
+  "window.titleBarStyle": "custom",
 
   // WORKBENCH
   // ----------------------------------------
@@ -117,9 +117,10 @@
     "editor.defaultFormatter": "bmalehorn.vscode-fish"
   },
 
-  // GIT
+  // GIT / GITHUB
   // ----------------------------------------
   "git.autofetch": false,
+  "githubPullRequests.pullBranch": "never",
 
   // JAVASCRIPT
   // ----------------------------------------
@@ -138,6 +139,12 @@
   // ----------------------------------------
   "redhat.telemetry.enabled": false,
   "telemetry.telemetryLevel": "off",
+
+  // SHELLSCRIPT
+  // ----------------------------------------
+  "[shellscript]": {
+    "editor.defaultFormatter": "mkhl.shfmt"
+  },
 
   // TERMINAL
   // ----------------------------------------
@@ -176,10 +183,11 @@
   "fileNestingUpdater.autoUpdateInterval": 10080, // 1 week
   "fileNestingUpdater.promptOnAutoUpdate": false,
   "projectManager.tags": ["1_Work", "2_Personal", "3_Archive"],
-  "projectManager.sortList": "Saved",
   "vsicons.dontShowNewVersionMessage": true,
 
   // FILE NESTING
+  // This section is automatically maintained by the antfu.file-nesting extension,
+  // so it needs to come last.
   // ----------------------------------------
   "explorer.fileNesting.enabled": true,
   "explorer.fileNesting.expand": false,
