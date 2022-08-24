@@ -1,0 +1,19 @@
+#!/usr/bin/env fish
+
+function log
+    echo (set_color --bold magenta) "$argv" (set_color normal)
+end
+
+log "Cleaning brew git repo..."
+cd (brew --repo) && git prune && git gc
+
+log "Running brew cleanup..."
+brew cleanup
+
+log "Running brew autoremove..."
+brew autoremove
+
+log "Clearing git cache..."
+rm -rf (brew --cache)
+
+echo (set_color --bold green) "Done!" (set_color normal)
