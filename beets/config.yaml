@@ -107,5 +107,5 @@ lastgenre:
 
 zero:
   fields: albumartist_sort artist_sort comments composer composer_sort
-  composer: (?!running_include|running_exclude)(^.*$)
+  comments: (?!running_include|running_exclude)(^.*$)
   update_database: true
