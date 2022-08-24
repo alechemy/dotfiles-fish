@@ -49,14 +49,10 @@ Probably some of it can be automated, but I can't be bothered.
 
 - Enable 'Automatically hide and show the Dock'
 
-### Mission Control
-
-- Disable "Displays have separate Spaces"
-
 ### Spotlight
 
 - Search Results
-  - Deselect "Siri Suggestions"
+  - De-select "Siri Suggestions"
 
 ### Notifications & Focus
 
@@ -87,6 +83,8 @@ Probably some of it can be automated, but I can't be bothered.
 
 ### Accessibility
 
+- Display
+  - Enable "Show window title icons" (AKA proxy icons)
 - Pointer Control
   - Click "Trackpad Options". Enable "Enable dragging with three finger drag".
 
@@ -119,7 +117,7 @@ Probably some of it can be automated, but I can't be bothered.
 - Point & Click
   - Enable "Tap to click"
   - Increase tracking speed by 1
-- Sroll & Zoom
+- Scroll & Zoom
   - Disable "Scroll direction: Natural"
 
 ### Battery
