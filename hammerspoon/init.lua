@@ -29,7 +29,7 @@ end)
 hyper_bindings = {
   ["C"] = {
     ["name"] = "VSCodium",
-    ["bundleID"] = "com.visualstudio.code.oss",
+    ["bundleID"] = "com.vscodium",
     ["newWindowMenuItem"] = {"File", "New Window"}
   },
   ["D"] = {
