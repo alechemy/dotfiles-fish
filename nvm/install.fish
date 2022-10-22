@@ -1,2 +1,2 @@
 #!/usr/bin/env fish
-set -U nvm_default_version v16
+set -U nvm_default_version latest
