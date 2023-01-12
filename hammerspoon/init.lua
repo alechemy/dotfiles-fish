@@ -24,9 +24,13 @@ end)
 ---- HYPER APPLICATION BINDINGS ----
 ------------------------------------]]
 
--- A commented out config here usually indicates that the binding is set within
--- the preferences of the respective app.
+-- A commented out config here is a note-to-self, indicating that the binding
+-- is set within the preferences of the respective app.
 hyper_bindings = {
+  --[[
+  ["A"] = {
+    ["name"] = "Anybox → Show Anydock"
+  }]]
   ["C"] = {
     ["name"] = "VSCodium",
     ["bundleID"] = "com.vscodium",
@@ -40,48 +44,51 @@ hyper_bindings = {
     ["name"] = "Mail",
     ["newWindowMenuItem"] = {"Window", "Message Viewer"}
   },
-  --[[["F"] = {
-  ["name"] = "Fantastical"
-}]]
-["G"] = {
-  ["name"] = "Things",
-  ["bundleID"] = "com.culturedcode.ThingsMac",
-  ["newWindowMenuItem"] = {"File", "New Things Window"}
-},
-["K"] = {
-  ["name"] = "kitty",
-  ["newWindowMenuItem"] = {"Shell", "New OS Window"}
-},
-["L"] = {
-  ["name"] = "Logseq"
-},
-["M"] = {
-  ["name"] = "Music",
-  ["triggerOnRelease"] = true,
-  ["newWindowMenuItem"] = {"Window", "Music"}
-},
-["O"] = {
-  ["name"] = "Mimestream",
-  ["newWindowMenuItem"] = {"Window", "Main Window"}
-},
-["R"] = {
-  ["name"] = "Reeder",
-  ["newWindowMenuItem"] = {"Window", "Reeder"}
-},
-["S"] = {
-  ["name"] = "Slack",
-  ["newWindowMenuItem"] = {"File", "Workspace", "Condé Nast"}
-},
---[[["T"] = {
-["name"] = "Tot"
-}]]
---[[["X"] = {
-["name"] = "Clip to DEVONthink"
-}]]
-["Z"] = {
-  ["name"] = "zoom.us",
-  ["newWindowMenuItem"] = {"zoom.us", "About Zoom"}
-},
+  --[[
+  ["F"] = {
+    ["name"] = "Fantastical"
+  }]]
+  ["G"] = {
+    ["name"] = "Things",
+    ["bundleID"] = "com.culturedcode.ThingsMac",
+    ["newWindowMenuItem"] = {"File", "New Things Window"}
+  },
+  ["K"] = {
+    ["name"] = "kitty",
+    ["newWindowMenuItem"] = {"Shell", "New OS Window"}
+  },
+  ["L"] = {
+    ["name"] = "Logseq"
+  },
+  ["M"] = {
+    ["name"] = "Music",
+    ["triggerOnRelease"] = true,
+    ["newWindowMenuItem"] = {"Window", "Music"}
+  },
+  ["O"] = {
+    ["name"] = "Mimestream",
+    ["newWindowMenuItem"] = {"Window", "Main Window"}
+  },
+  ["R"] = {
+    ["name"] = "Reeder",
+    ["newWindowMenuItem"] = {"Window", "Reeder"}
+  },
+  ["S"] = {
+    ["name"] = "Slack",
+    ["newWindowMenuItem"] = {"File", "Workspace", "Condé Nast"}
+  },
+--[[
+  ["T"] = {
+    ["name"] = "Tot"
+  }]]
+--[[
+  ["X"] = {
+    ["name"] = "Clip to DEVONthink"
+  }]]
+  ["Z"] = {
+    ["name"] = "zoom.us",
+    ["newWindowMenuItem"] = {"zoom.us", "About Zoom"}
+  },
 }
 
 shyper_bindings = {
