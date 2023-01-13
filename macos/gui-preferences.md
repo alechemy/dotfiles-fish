@@ -31,6 +31,13 @@ Probably some of it can be automated, but I can't be bothered.
 - Advanced
   - Beside "Smart Search Field", enable "Show full website address"
   - Enable "Show Develop menu in menu bar"
+- Develop
+  - Allow JavaScript from Apple Events
+
+## Chrome / Chromium
+
+- Develop
+  - Allow JavaScript from Apple Events
 
 ## System Preferences
 
@@ -143,5 +150,7 @@ Probably some of it can be automated, but I can't be bothered.
 
 ## Music.app
 
+- General
+  - Disable everything here ("Sync Library", "Automatic Downloads", "Always check...", "Show: ...", "Notifications")
 - Files
   -Disable "Keep Music Media folder organized"

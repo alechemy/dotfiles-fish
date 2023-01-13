@@ -82,6 +82,10 @@ hyper_bindings = {
     ["name"] = "Tot"
   }]]
 --[[
+  ["W"] = {
+    ["name"] = "Run 'Copy URL and title of current web page in Markdown format' KM macro"
+  }]]
+--[[
   ["X"] = {
     ["name"] = "Clip to DEVONthink"
   }]]
