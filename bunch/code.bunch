@@ -1,0 +1,27 @@
+---
+title: 🖥Code
+sequence: parallel
+---
+
+< snippets/quit-misc.bunch#Quit Misc. Apps
+
+Mail
+Messages
+Mimestream
+Slack
+Kitty^
+<<#VSCodium
+<<#Music.app
+
+< snippets/work-rectangle.bunch ~1
+
+___
+
+--[VSCodium]--
+!VSCodium
+{command-control-shift-opt-c} ~1
+
+--[Music.app]--
+if Music is not running
+    {command-control-shift-opt-m}
+end
