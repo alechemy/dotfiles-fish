@@ -28,6 +28,7 @@ include:
   - secrets.yaml
 
 import:
+  incremental: yes
   move: yes
   log: beets.log
 
