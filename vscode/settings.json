@@ -183,6 +183,45 @@
   // allow Path Intellisense to act as default autocompletion engine
   "typescript.suggest.paths": false,
 
+  // INLINE FOLD
+  // ----------------------------------------
+  "inlineFold.maskChar": "…",
+  "inlineFold.maskColor": "#808080",
+  "inlineFold.regex": "(class|className)=[`'{\"]([^`'\"}]{50,})[`'\"}]",
+  "inlineFold.regexFlags": "g",
+  "inlineFold.regexGroup": "2",
+  "inlineFold.supportedLanguages": [
+    "astro",
+    "vue",
+    "html",
+    "svelte",
+    "vue-html",
+    "php",
+    "blade",
+    "erb",
+    "twig",
+    "nunjucks",
+    "django-html",
+    "jinja-html",
+    "javascript",
+    "typescript",
+    "javascriptreact",
+    "typescriptreact",
+    "markdown"
+  ],
+  "inlineFold.unfoldOnLineSelect": true,
+  "inlineFold.unfoldedOpacity": 1,
+  "[markdown]": {
+    "inlineFold.regex": "\\[.*\\]\\((.*)\\)",
+    "inlineFold.regexFlags": "g",
+    "inlineFold.regexGroup": "1"
+  },
+  "[svg]": {
+    "inlineFold.regex": "<svg(\\s*.*?\\s*)<\\/svg>",
+    "inlineFold.regexFlags": "gs",
+    "inlineFold.regexGroup": "2"
+  },
+
   // =========================================
   // EVERYTHING ELSE
   // =========================================
