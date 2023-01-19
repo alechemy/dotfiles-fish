@@ -1,8 +1,26 @@
-#[Quit Misc. Apps]
+// ---------------------
+// Quit these apps
+// ---------------------
 !Alfred Preferences
+!AppCleaner
 !App Store
+!Home
+!Preview
 !Reeder
+!Step Two
+!System Settings
+!zoom.us
+
+// ------------------------------------
+// Close all windows in these apps
+// ------------------------------------
+Anybox
+- XX
+Appgate SDP
+- XX
+Finder
+- XX
 Stream Deck
 - XX
-// Safari
-// - XX
+Safari
+- XX
