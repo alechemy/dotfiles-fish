@@ -240,6 +240,7 @@
   "fileNestingUpdater.promptOnAutoUpdate": false,
   "projectManager.git.baseFolders": ["/Users/alec/Work"],
   "projectManager.tags": ["1_Work", "2_Personal", "3_Archive"],
+  "terraform.languageServer.ignoreSingleFileWarning": true,
   "vsicons.dontShowNewVersionMessage": true,
 
   // =========================================

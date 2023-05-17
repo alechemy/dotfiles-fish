@@ -38,6 +38,7 @@ hyper_bindings = {
   },
   ["D"] = {
     ["name"] = "DEVONthink 3",
+    ["bundleID"] = "com.devon-technologies.think3",
     ["newWindowMenuItem"] = {"File", "New Window", "My Database"}
   },
   ["E"] = {
@@ -58,7 +59,8 @@ hyper_bindings = {
     ["newWindowMenuItem"] = {"Shell", "New OS Window"}
   },
   ["L"] = {
-    ["name"] = "Logseq"
+    ["name"] = "Logseq",
+    ["newWindowMenuItem"] = {"File", "New Window"}
   },
   ["M"] = {
     ["name"] = "Music",

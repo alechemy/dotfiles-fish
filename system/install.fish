@@ -2,4 +2,4 @@
 
 # Make rm a little safer (have it prompt once when deleting
 # more than three files or when deleting recursively).
-abbr -a -U rm 'rm -I'
+abbr -a rm 'rm -I'
