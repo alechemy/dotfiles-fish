@@ -154,3 +154,7 @@ Probably some of it can be automated, but I can't be bothered.
   - Disable everything here ("Sync Library", "Automatic Downloads", "Always check...", "Show: ...", "Notifications")
 - Files
   -Disable "Keep Music Media folder organized"
+
+## Misc
+
+- Disable iOS backups by changing `~/Library/Application Support/MobileSync/Backup` to "readonly"
