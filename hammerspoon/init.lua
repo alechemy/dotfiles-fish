@@ -64,6 +64,7 @@ hyper_bindings = {
   },
   ["M"] = {
     ["name"] = "Music",
+    ["bundleID"] = "com.apple.Music",
     ["triggerOnRelease"] = true,
     ["newWindowMenuItem"] = {"Window", "Music"}
   },
