@@ -111,13 +111,13 @@ Prerequisite: `brew install youtube-dl atomicparsley`
 1. Download the track
 
    ```fish
-   youtube-dl -f bestaudio[ext=m4a] --embed-thumbnail --add-metadata 'https://www.youtube.com/watch?v=Yhivl6fln3s'
+   youtube-dl -f bestaudio[ext=m4a] --embed-thumbnail --add-metadata 'https://www.youtube.com/watch?v=Yhivl6fln3s' -o '~/Downloads/%(title)s.%(ext)s'
    ```
 
 2. Import to beets
 
    ```fish
-   beet import --singletons '/Users/alec/Downloads/Baby Keem & Kendrick Lamar - The Hillbillies-Yhivl6fln3s.m4a\'
+   beet import --singletons '/Users/alec/Downloads/Baby Keem & Kendrick Lamar - The Hillbillies.m4a\'
    ```
 
    - When prompted, choose "**U**se as-is"
