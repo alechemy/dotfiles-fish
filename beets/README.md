@@ -111,7 +111,7 @@ Prerequisite: `brew install youtube-dl atomicparsley`
 1. Download the track
 
    ```fish
-   youtube-dl -f bestaudio[ext=m4a] --embed-thumbnail --add-metadata 'https://www.youtube.com/watch?v=Yhivl6fln3s' -o '~/Downloads/%(title)s.%(ext)s'
+   yt-dlp -f bestaudio[ext=m4a] --embed-thumbnail --add-metadata 'https://www.youtube.com/watch?v=Yhivl6fln3s' -o '~/Downloads/%(title)s.%(ext)s'
    ```
 
 2. Import to beets
