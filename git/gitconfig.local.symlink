@@ -12,5 +12,7 @@
   ff = only
 [init]
   defaultBranch = main
+[push]
+  autoSetupRemote = true
 [includeIf "gitdir:~/Work/"]
   path = ~/.gitconfig.work
