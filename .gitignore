@@ -1,5 +1,4 @@
 *~
-condenast
 dist
 gitconfig.work.symlink
 keychain
@@ -8,3 +7,4 @@ product.json
 projects.json
 secrets.yaml
 macos/music/scripts
+work

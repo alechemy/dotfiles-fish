@@ -38,6 +38,9 @@ Probably some of it can be automated, but I can't be bothered.
 
 - Develop
   - Allow JavaScript from Apple Events
+- DevTools
+  - Network
+    - Enable "Disable cache"
 
 ## System Preferences
 

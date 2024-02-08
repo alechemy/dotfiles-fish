@@ -29,6 +29,7 @@ defaults write com.apple.dock autohide-delay -float 0.1
 defaults write com.apple.dock autohide-time-modifier -float 0.5
 # Quit running apps when auto-updating via MacUpdater
 defaults write com.corecode.MacUpdater HiddenOptionQuitAppsForAutoUpdate -bool YES
+defaults write com.corecode.MacUpdater HiddenOptionAutoUpdateAfterManualScan -bool YES
 # Prefer strongest signal
 sudo /System/Library/PrivateFrameworks/Apple80211.framework/Versions/Current/Resources/airport prefs joinMode=Strongest
 # Place system UI in dark mode by default
