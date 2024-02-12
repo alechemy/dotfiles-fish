@@ -69,8 +69,8 @@ hyper_bindings = {
     ["newWindowMenuItem"] = {"Window", "Music"}
   },
   ["O"] = {
-    ["name"] = "Mimestream",
-    ["newWindowMenuItem"] = {"Window", "Main Window"}
+    ["name"] = "Microsoft Outlook",
+    ["newWindowMenuItem"] = {"File", "New", "Main Window"}
   },
   ["R"] = {
     ["name"] = "Reeder",
@@ -78,7 +78,7 @@ hyper_bindings = {
   },
   ["S"] = {
     ["name"] = "Slack",
-    ["newWindowMenuItem"] = {"File", "Workspace", "Condé Nast"}
+    ["newWindowMenuItem"] = {"File", "Workspace", "Xperi"}
   },
 --[[
   ["T"] = {

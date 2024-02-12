@@ -10,16 +10,17 @@ My dotfiles for fish shell.
 - fzf
 - fd
 - bat
-- espanso
 - Karabiner Elements
+- Kitty
+- Hammerspoon
 - VSCodium
 
 ```fish
-brew install fish starship fzf fd bat espanso
+brew install fish starship fzf fd bat
 ```
 
 ```fish
-brew install --cask karabiner-elements vscodium
+brew install --cask hammerspoon karabiner-elements kitty vscodium
 ```
 
 ## Installation

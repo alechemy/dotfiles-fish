@@ -1,6 +1,6 @@
 #!/usr/bin/env fish
-pip3 install -r requirements.txt
-brew install chromaprint imagemagick
+brew install aubio chromaprint imagemagick
+pip3 install -r "$DOTFILES/beets/requirements.txt"
 
 set BEETS_HOME "$HOME/.config/beets"
 

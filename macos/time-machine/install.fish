@@ -1,5 +1,6 @@
 #!/usr/bin/env fish
 
+mkdir -p "$HOME/Library/LaunchAgents/"
 set LAUNCHAGENTS_HOME "$HOME/Library/LaunchAgents/"
 
 ln -sf "$DOTFILES/macos/time-machine/com.alec.DailyTimeMachineBackup.plist" "$LAUNCHAGENTS_HOME/com.alec.DailyTimeMachineBackup.plist"

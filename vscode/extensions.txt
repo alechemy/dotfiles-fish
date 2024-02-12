@@ -6,12 +6,12 @@ bmalehorn.vscode-fish
 bradlc.vscode-tailwindcss
 christian-kohler.npm-intellisense
 christian-kohler.path-intellisense
+d-biehl.robotcode
 DavidAnson.vscode-markdownlint
 dbaeumer.vscode-eslint
 eamodio.gitlens
 EditorConfig.EditorConfig
 esbenp.prettier-vscode
-floone.varnish-vcl
 formulahendry.auto-rename-tag
 GitHub.vscode-pull-request-github
 GraphQL.vscode-graphql
@@ -19,12 +19,8 @@ GraphQL.vscode-graphql-syntax
 hashicorp.terraform
 heybourn.headwind
 HookyQR.beautify
-iocave.customize-ui
-iocave.monkey-patch
 jbockle.jbockle-format-files
 jock.svg
-keyring.Lua
-kotfu.bunch
 mkhl.shfmt
 moalamri.inline-fold
 mrmlnc.vscode-duplicate
@@ -38,7 +34,6 @@ ms-toolsai.vscode-jupyter-cell-tags
 ms-toolsai.vscode-jupyter-slideshow
 naumovs.color-highlight
 nextfaze.comment-wrap
-nicollasricas.vscode-witcherscript
 redhat.java
 redhat.vscode-xml
 redhat.vscode-yaml
@@ -48,9 +43,8 @@ stkb.rewrap
 streetsidesoftware.code-spell-checker
 styled-components.vscode-styled-components
 stylelint.vscode-stylelint
+sumneko.lua
 syler.sass-indented
 Tyriar.sort-lines
 usernamehw.errorlens
 vscode-icons-team.vscode-icons
-webben.browserslist
-zhucy.project-tree

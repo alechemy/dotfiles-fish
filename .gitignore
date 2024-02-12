@@ -2,8 +2,8 @@
 dist
 gitconfig.work.symlink
 keychain
+kitty.conf.bak
 private.yml
-product.json
 projects.json
 secrets.yaml
 macos/music/scripts

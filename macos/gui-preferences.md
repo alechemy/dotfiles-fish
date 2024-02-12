@@ -49,11 +49,13 @@ Probably some of it can be automated, but I can't be bothered.
 - De-select "Allow wallpaper tinting in windows"
 - De-select "Allow Handoff between this Mac and your iCloud devices"
 
-### Desktop & Screen Saver
+### Desktop & Dock
 
 - Screen Saver
   - De-select "Show screen saver after ..."
   - Click "Hot Corners...". De-select "Quick Note".
+- Desktop & Stage Manager
+  - "Click wallpaper to reveal desktop" - set to "Only in Stage Manager"
 
 ### Dock & Menu Bar
 
