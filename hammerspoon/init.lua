@@ -27,10 +27,6 @@ end)
 -- A commented out config here is a note-to-self, indicating that the binding
 -- is set within the preferences of the respective app.
 hyper_bindings = {
-  --[[
-  ["A"] = {
-    ["name"] = "Anybox → Show Anydock"
-  }]]
   ["C"] = {
     ["name"] = "VSCodium",
     ["bundleID"] = "com.vscodium",
@@ -54,13 +50,12 @@ hyper_bindings = {
     ["bundleID"] = "com.culturedcode.ThingsMac",
     ["newWindowMenuItem"] = {"File", "New Things Window"}
   },
+  ["I"] = {
+    ["name"] = "IntelliJ IDEA"
+  },
   ["K"] = {
     ["name"] = "kitty",
     ["newWindowMenuItem"] = {"Shell", "New OS Window"}
-  },
-  ["L"] = {
-    ["name"] = "Logseq",
-    ["newWindowMenuItem"] = {"File", "New Window"}
   },
   ["M"] = {
     ["name"] = "Music",
