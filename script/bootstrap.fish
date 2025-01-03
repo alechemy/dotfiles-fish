@@ -93,6 +93,8 @@ function install_dotfiles
     or abort plugins
   link_file $DOTFILES_ROOT/kitty/kitty.conf $HOME/.config/kitty/kitty.conf backup
     or abort kitty
+  link_file $DOTFILES_ROOT/kitty/color-overrides.conf $HOME/.config/kitty/color-overrides.conf backup
+    or abort kitty
 end
 
 curl -sL git.io/fisher | source && fisher install jorgebucaran/fisher
