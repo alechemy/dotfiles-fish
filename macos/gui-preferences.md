@@ -19,18 +19,17 @@ Probably some of it can be automated, but I can't be bothered.
 
 ## Safari
 
-- AutoFill
-  - Disable all categories. 1Password does this better.
 - Search
   - Disable "Include Safari Suggestions"
   - Disable "Preload Top Hit in the background" [(Here's why.)](https://lapcatsoftware.com/articles/preload-top-hit.html)
 - Privacy
-  - Disable "Allow privacy-preserving measurement of ad effectiveness"
+  - Advanced
+    - Disable "Allow privacy-preserving measurement of ad effectiveness"
 - Websites
   - Scroll down to Notifications. Disable "Allow websites to ask for permission to send notifications"
 - Advanced
   - Beside "Smart Search Field", enable "Show full website address"
-  - Enable "Show Develop menu in menu bar"
+  - Enable "Show features for web developers"
 - Develop
   - Allow JavaScript from Apple Events
 
@@ -41,30 +40,36 @@ Probably some of it can be automated, but I can't be bothered.
 - DevTools
   - Network
     - Enable "Disable cache"
+- Flags
+  - Navigate to `chrome://flags`
+  - Set these:
+    - `#show-avatar-button` (Never)
+    - `#keep-old-history` (Enabled)
+    - `#disable-top-sites` (Enabled)
+    - `#no-default-browser-check` (Enabled)
 
-## System Preferences
+## System Settings
 
-### General
+### Appearance
 
 - De-select "Allow wallpaper tinting in windows"
+
+### AirDrop & Handoff
+
 - De-select "Allow Handoff between this Mac and your iCloud devices"
 
 ### Desktop & Dock
 
-- Screen Saver
-  - De-select "Show screen saver after ..."
-  - Click "Hot Corners...". De-select "Quick Note".
+- Enable 'Automatically hide and show the Dock'
 - Desktop & Stage Manager
   - "Click wallpaper to reveal desktop" - set to "Only in Stage Manager"
-
-### Dock & Menu Bar
-
-- Enable 'Automatically hide and show the Dock'
+- Click "Hot Corners...". De-select "Quick Note".
 
 ### Spotlight
 
 - Search Results
   - De-select "Siri Suggestions"
+- Disable "Help Apple Improve Search"
 
 ### Notifications & Focus
 
@@ -76,10 +81,6 @@ Probably some of it can be automated, but I can't be bothered.
 ### Internet Accounts
 
 - Remove "Game Center" if present
-
-### Passwords
-
-- De-select "Detect compromised passwords" (1Password does this already)
 
 ### Security & Privacy
 
@@ -120,9 +121,12 @@ Probably some of it can be automated, but I can't be bothered.
   - "Key Repeat": Fastest
   - "Delay Until Repeat": Shortest
 - Text
-  - De-select "Capitalize words automatically"
-  - De-select "Add period with double-space"
+  - Input Sources -> Edit...
+    - De-select "Capitalize words automatically"
+    - De-select "Add period with double-space"
   - Delete the default "omw" -> "On my way!" text replacement
+- Dictation
+  - Disable "Shortcut"
 
 ### Trackpad
 
@@ -131,11 +135,6 @@ Probably some of it can be automated, but I can't be bothered.
   - Increase tracking speed by 1
 - Scroll & Zoom
   - Disable "Scroll direction: Natural"
-
-### Battery
-
-- Battery
-  - Enable "Low power mode"
 
 ## Mail.app
 
