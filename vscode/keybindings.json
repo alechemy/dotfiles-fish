@@ -5,6 +5,10 @@
     "command": "workbench.action.quickOpen"
   },
   {
+    "key": "cmd+alt+f",
+    "command": "workbench.action.findInFiles"
+  },
+  {
     "key": "cmd+ctrl+`",
     "command": "workbench.action.focusNextGroup"
   },
@@ -80,5 +84,13 @@
   {
     "key": "cmd+alt+w",
     "command": "workbench.action.closeOtherEditors"
+  },
+  {
+    "key": "alt+enter",
+    "command": "workbench.action.moveEditorToNextGroup"
+  },
+  {
+    "key": "alt+shift+enter",
+    "command": "workbench.action.moveEditorToPreviousGroup"
   }
 ]
