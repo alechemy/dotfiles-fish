@@ -134,3 +134,27 @@ Prerequisite: `brew install youtube-dl atomicparsley`
    - Tip: Can use `&tbs=iar:s` query param on a Google Images search to narrow to square images.
    - Download the image, name it `cover.jpg`, and move it to the same folder as the song.
    - Then, embed it: `beet embedart -f <image-path> <song-path>`
+
+## Addendum: Moving Library to Another Location
+
+1. Copy the Music library file and its folder structure to the new location.
+
+   - e.g., Copy `~/Music/Music/Music\ Library.musiclibrary` to `/Volumes/MyNewNAS/Music`
+
+2. Create the Music directory in the new location.
+
+   - e.g., `mkdir -p /Volumes/MyNewNAS/Music/Media.localized/Music`
+
+3. Update the `beets` config `directory` value to point to the directory from step 2.
+
+   - e.g. `directory: /Volumes/MyNewNAS/Music/Media.localized/Music`
+
+4. Run `beet move` (do a dry run first: `beet move -p`).
+
+5. Launch Music.app in the new location. Create a test library and disable app settings related to organizing files (see `gui-preferences.md` in this repo). Quit Music.app.
+
+6. Launch Music.app in the new location. **Hold down the option key while launching.**. Select the moved `Music Library.musiclibrary` file.
+
+7. Update `library` in `beets` config.
+
+   - e.g., `library: /Volumes/MyNewNAS/Music/Beets/musiclibrary.db`
