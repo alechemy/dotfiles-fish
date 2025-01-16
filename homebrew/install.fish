@@ -1,5 +1,9 @@
 #!/usr/bin/env fish
 
+# Disable analytics
+brew analytics off
+
+# Configure autoupdate service
 mkdir -p "$HOME/Library/LaunchAgents"
 set AUTOUPDATE_PLIST "$HOME/Library/LaunchAgents/com.github.domt4.homebrew-autoupdate.plist"
 test -f "$AUTOUPDATE_PLIST" || touch "$AUTOUPDATE_PLIST"
