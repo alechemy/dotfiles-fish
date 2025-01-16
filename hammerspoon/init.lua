@@ -101,6 +101,9 @@ shyper_bindings = {
   ["M"] = {
     ["name"] = "Messages",
     ["newWindowMenuItem"] = {"Window", "Messages"}
+  },
+  ["O"] = {
+    ["name"] = "Obsidian",
   }
 }
 
@@ -120,10 +123,6 @@ for key, app in pairs(hyper_bindings) do
   end
 end
 
---[[------------------------
----- URL EVENT BINDINGS ----
-----------------------------]]
-
 -- These are emitted by Karabiner-Elements
 for key, app in pairs(shyper_bindings) do
   if app.triggerOnRelease then
@@ -137,6 +136,10 @@ for key, app in pairs(shyper_bindings) do
     end)
   end
 end
+
+--[[------------------------
+---- URL EVENT BINDINGS ----
+----------------------------]]
 
 -- Shyper-V => Paste by individually typing each character. Useful where regular pasting is disabled.
 hs.urlevent.bind('fnv', function() hs.eventtap.keyStrokes(hs.pasteboard.getContents()) end)
