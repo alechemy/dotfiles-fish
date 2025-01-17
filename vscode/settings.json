@@ -157,6 +157,18 @@
   "git.autofetch": false,
   "githubPullRequests.pullBranch": "never",
 
+  // JAVA
+  // ----------------------------------------
+  "java.jdt.ls.java.home": "/Library/Java/JavaVirtualMachines/openjdk-21.jdk/Contents/Home",
+  "java.configuration.runtimes": [
+    {
+      "default": true,
+      "name": "JavaSE-21",
+      "path": "/Library/Java/JavaVirtualMachines/openjdk-21.jdk/Contents/Home"
+    }
+  ],
+  "java.project.explorer.showNonJavaResources": false,
+
   // JAVASCRIPT
   // ----------------------------------------
   "javascript.preferences.importModuleSpecifier": "relative",
