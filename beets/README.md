@@ -2,9 +2,27 @@
 
 ## Installation
 
-```fish
-brew install aubio chromaprint imagemagick && pip3 install -r requirements.txt
-```
+1. Install Xcode (required for a beets dependency)
+
+   - After installing, will likely need to run:
+
+   ```fish
+     sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+   ```
+
+2. Install [MacPorts](https://www.macports.org/install.php)
+
+3. Install Beets with MacPorts (this takes a while)
+
+   ```fish
+   sudo port install beets-full
+   ```
+
+4. Install additional packages (edit: Maybe unnecessary when using `beets-full` package? Try skipping this next time...)
+
+   ```fish
+   brew install aubio chromaprint imagemagick
+   ```
 
 ## Usage
 
@@ -149,7 +167,12 @@ Prerequisite: `brew install youtube-dl atomicparsley`
 
    - e.g. `directory: /Volumes/MyNewNAS/Music/Media.localized/Music`
 
-4. Run `beet move` (do a dry run first: `beet move -p`).
+4. Update SQL database:
+
+   ```sql
+     update items set path = replace(path, '/old/location/', '/new/location/');
+     update albums set artpath = replace(artpath, '/old/location/', '/new/location/');
+   ```
 
 5. Launch Music.app in the new location. Create a test library and disable app settings related to organizing files (see `gui-preferences.md` in this repo). Quit Music.app.
 

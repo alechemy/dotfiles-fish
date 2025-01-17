@@ -2,10 +2,9 @@
 # Global Options
 ####################
 
-library: ~/Music/Beets/musiclibrary.db
-directory: ~/Music/Music/Media.localized/Music
+library: /Volumes/AlecsVault/Music/Beets/musiclibrary.db
+directory: /Volumes/AlecsVault/Music/Media.localized/Music
 plugins:
-  - acousticbrainz
   - bpmanalyser
   - chroma
   - discogs
@@ -15,7 +14,6 @@ plugins:
   - fetchart
   - fromfilename
   - ftintitle
-  - goingrunning
   - hook
   - info
   - lastgenre
@@ -48,9 +46,6 @@ match:
 # Plugin Options
 ####################
 
-acousticbrainz:
-  tags: [bpm]
-
 chroma:
   auto: no
 
@@ -71,34 +66,10 @@ fetchart:
 ftintitle:
   format: (feat. {0})
 
-goingrunning:
-  targets:
-    MPD1:
-      device_root: ~/Music/Beets/Playlists/
-      clean_target: no
-      generate_playlist: yes
-      copy_files: no
-  trainings:
-    60min:
-      query:
-        bpm: 160..180
-        genre:
-          - Electronic
-          - Hip-Hop
-          - Mashup
-          - Pop
-          - R&B
-          - Soundtrack
-      ordering:
-        bpm: 100
-      use_flavours: []
-      duration: 60
-      target: MPD1
-
 hook:
   hooks:
     - event: after_write
-      command: osascript /Users/alec/Music/Beets/MusicRefresh.scpt "{item.path}"
+      command: osascript /Volumes/AlecsVault/Music/Beets/MusicRefresh.scpt "{item.path}"
 
 lastgenre:
   whitelist: ~/.config/beets/genres.txt
