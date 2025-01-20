@@ -104,6 +104,7 @@ shyper_bindings = {
   },
   ["O"] = {
     ["name"] = "Obsidian",
+    ["bundleID"] = "md.obsidian",
   }
 }
 
