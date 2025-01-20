@@ -3,7 +3,7 @@
 ####################
 
 library: /Volumes/AlecsVault/Music/Beets/musiclibrary.db
-directory: /Volumes/AlecsVault/Music/Media.localized/Music
+directory: /Volumes/AlecsVault/Music/Music/Media.localized/Music
 plugins:
   - bpmanalyser
   - chroma

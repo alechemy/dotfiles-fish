@@ -18,12 +18,6 @@
    sudo port install beets-full
    ```
 
-4. Install additional packages (edit: Maybe unnecessary when using `beets-full` package? Try skipping this next time...)
-
-   ```fish
-   brew install aubio chromaprint imagemagick
-   ```
-
 ## Usage
 
 Beets is great. Beets is also a little finicky. So that I don't forget later on,
@@ -155,17 +149,20 @@ Prerequisite: `brew install youtube-dl atomicparsley`
 
 ## Addendum: Moving Library to Another Location
 
+Note that this guide does not use the recommended `beet move` command, because I find this strategy
+to be more transparent and straightforward.
+
 1. Copy the Music library file and its folder structure to the new location.
 
-   - e.g., Copy `~/Music/Music/Music\ Library.musiclibrary` to `/Volumes/MyNewNAS/Music`
+   - e.g., Copy `~/Music/Music/Music\ Library.musiclibrary` to `/Volumes/MyNewNAS/Music/Music`
 
-2. Create the Music directory in the new location.
+2. Create the Music directory in the new location and copy its contents there.
 
-   - e.g., `mkdir -p /Volumes/MyNewNAS/Music/Media.localized/Music`
+   - e.g., `mkdir -p /Volumes/MyNewNAS/Music/Music/Media.localized/Music`
 
 3. Update the `beets` config `directory` value to point to the directory from step 2.
 
-   - e.g. `directory: /Volumes/MyNewNAS/Music/Media.localized/Music`
+   - e.g. `directory: /Volumes/MyNewNAS/Music/Music/Media.localized/Music`
 
 4. Update SQL database:
 
@@ -178,6 +175,8 @@ Prerequisite: `brew install youtube-dl atomicparsley`
 
 6. Launch Music.app in the new location. **Hold down the option key while launching.**. Select the moved `Music Library.musiclibrary` file.
 
-7. Update `library` in `beets` config.
+7. Update `library` in `beets` `config.yaml`:
 
-   - e.g., `library: /Volumes/MyNewNAS/Music/Beets/musiclibrary.db`
+   ```shell
+   library: /Volumes/MyNewNAS/Music/Beets/musiclibrary.db
+   ```

@@ -1,7 +1,5 @@
 #!/usr/bin/env fish
 sudo port install beets-full
-# Unclear if this is needed still
-# brew install aubio chromaprint imagemagick
 
 set BEETS_HOME "$HOME/.config/beets"
 
