@@ -19,6 +19,8 @@ Probably some of it can be automated, but I can't be bothered.
 
 ## Safari
 
+- General
+  - Disable "Open 'safe' files after downloading"
 - Search
   - Disable "Include Safari Suggestions"
   - Disable "Preload Top Hit in the background" [(Here's why.)](https://lapcatsoftware.com/articles/preload-top-hit.html)
@@ -87,8 +89,6 @@ Probably some of it can be automated, but I can't be bothered.
 - General
   - Change "Require password x minutes after sleep..." option to "immediately".
 - Privacy
-  - Location Services
-    - Scroll to "System Services". Click "Details...". De-select "Location-Based Suggestions" and "Significant Locations". (I'm reconsidering this one.)
   - Apple Advertising
     - De-select "Personalized Ads"
   - Analytics & Improvement

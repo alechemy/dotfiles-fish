@@ -28,5 +28,3 @@ defaults write com.corecode.MacUpdater HiddenOptionQuitAppsForAutoUpdate -bool Y
 defaults write com.corecode.MacUpdater HiddenOptionAutoUpdateAfterManualScan -bool YES
 # Prefer strongest signal
 sudo /System/Library/PrivateFrameworks/Apple80211.framework/Versions/Current/Resources/airport prefs joinMode=Strongest
-# Force dark mode in DEVONthink
-defaults delete com.devon-technologies.think3 NSRequiresAquaSystemAppearance
