@@ -32,6 +32,7 @@ Probably some of it can be automated, but I can't be bothered.
 - Advanced
   - Beside "Smart Search Field", enable "Show full website address"
   - Enable "Show features for web developers"
+  - Disable "Allow Highlights to share web addresses with Apple"
 - Develop
   - Allow JavaScript from Apple Events
 
@@ -50,6 +51,11 @@ Probably some of it can be automated, but I can't be bothered.
     - `#disable-top-sites` (Enabled)
     - `#no-default-browser-check` (Enabled)
 
+## Transmit
+
+- Transfers
+  - "Uploading folders:" → Choose "Merge the existing folder"
+
 ## System Settings
 
 ### Appearance
@@ -65,6 +71,8 @@ Probably some of it can be automated, but I can't be bothered.
 - Enable 'Automatically hide and show the Dock'
 - Desktop & Stage Manager
   - "Click wallpaper to reveal desktop" - set to "Only in Stage Manager"
+- Mission Control
+  - Disable "Drag windows to top of screen to enter Mission Control"
 - Click "Hot Corners...". De-select "Quick Note".
 
 ### Spotlight

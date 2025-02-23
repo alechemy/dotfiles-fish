@@ -8,6 +8,8 @@ defaults write com.apple.LaunchServices LSQuarantine -bool false
 defaults write com.apple.Finder FXPreferredViewStyle Nlsv
 # Clear all preference files, to ensure that the above command takes effect
 sudo find $HOME -name ".DS_Store" -exec rm {} \;
+# Don't create .DS_Store files on network shares
+defaults write com.apple.desktopservices DSDontWriteNetworkStores -bool true
 # Disable the warning when changing a file extension
 defaults write com.apple.Finder FXEnableExtensionChangeWarning -bool false
 # Expand save panel by default
