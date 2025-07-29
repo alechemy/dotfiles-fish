@@ -108,7 +108,56 @@
                 "type": "basic"
               },
               {
+                "description": "Remap Shyper-C to Chromium Hammerspoon event",
                 "from": {
+                  "key_code": "c",
+                  "modifiers": {
+                    "mandatory": [
+                      "left_command",
+                      "right_command",
+                      "right_control",
+                      "right_shift",
+                      "right_option"
+                    ]
+                  }
+                },
+                "to": [
+                  {
+                    "shell_command": "open -g hammerspoon://Chromium"
+                  }
+                ],
+                "type": "basic"
+              },
+              {
+                "description": "Remap Shyper-T to Tot hotkey",
+                "from": {
+                  "key_code": "t",
+                  "modifiers": {
+                    "mandatory": [
+                      "left_command",
+                      "right_command",
+                      "right_control",
+                      "right_shift",
+                      "right_option"
+                    ]
+                  }
+                },
+                "to": [
+                  {
+                    "key_code": "5",
+                    "modifiers": [
+                      "right_command",
+                      "right_control",
+                      "right_shift",
+                      "right_option"
+                    ]
+                  }
+                ],
+                "type": "basic"
+              },
+              {
+                "from": {
+                  "description": "Remap Shyper-M to Messages Hammerspoon event",
                   "key_code": "m",
                   "modifiers": {
                     "mandatory": [
@@ -123,6 +172,33 @@
                 "to": [
                   {
                     "shell_command": "open -g hammerspoon://Messages"
+                  }
+                ],
+                "type": "basic"
+              },
+              {
+                "description": "Remap Shyper-R to Due quick create hotkey",
+                "from": {
+                  "key_code": "r",
+                  "modifiers": {
+                    "mandatory": [
+                      "left_command",
+                      "right_command",
+                      "right_control",
+                      "right_shift",
+                      "right_option"
+                    ]
+                  }
+                },
+                "to": [
+                  {
+                    "key_code": "3",
+                    "modifiers": [
+                      "right_command",
+                      "right_control",
+                      "right_shift",
+                      "right_option"
+                    ]
                   }
                 ],
                 "type": "basic"
@@ -180,7 +256,7 @@
             ]
           },
           {
-            "description": "Remap Hyper-tab to Rectangle next monitor shortcut",
+            "description": "Remap Hyper-tab to Rectangle tiling shortcut",
             "manipulators": [
               {
                 "from": {
@@ -285,6 +361,38 @@
               ]
             }
           ]
+        },
+        {
+          "identifiers": {
+            "is_pointing_device": true,
+            "product_id": 5,
+            "vendor_id": 7119
+          },
+          "ignore": false,
+          "ignore_vendor_events": true,
+          "simple_modifications": [
+            {
+              "from": { "pointing_button": "button4" },
+              "to": [
+                { "key_code": "open_bracket", "modifiers": ["left_command"] }
+              ]
+            },
+            {
+              "from": { "pointing_button": "button5" },
+              "to": [
+                { "key_code": "close_bracket", "modifiers": ["left_command"] }
+              ]
+            }
+          ]
+        },
+        {
+          "identifiers": {
+            "is_keyboard": true,
+            "is_pointing_device": true,
+            "product_id": 12290,
+            "vendor_id": 14000
+          },
+          "ignore": false
         }
       ],
       "fn_function_keys": [

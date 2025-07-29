@@ -31,7 +31,7 @@
   },
   {
     "key": "cmd+0",
-    "command": "workbench.action.openLastEditorInGroup"
+    "command": "workbench.action.zoomReset"
   },
   {
     "key": "cmd+1",
@@ -86,11 +86,24 @@
     "command": "workbench.action.closeOtherEditors"
   },
   {
-    "key": "alt+enter",
+    "key": "ctrl+alt+cmd+right",
     "command": "workbench.action.moveEditorToNextGroup"
   },
   {
-    "key": "alt+shift+enter",
+    "key": "ctrl+alt+cmd+left",
     "command": "workbench.action.moveEditorToPreviousGroup"
+  },
+  {
+    "key": "ctrl+alt+cmd+down",
+    "command": "workbench.action.moveEditorToBelowGroup"
+  },
+  {
+    "key": "ctrl+alt+cmd+up",
+    "command": "workbench.action.moveEditorToAboveGroup"
+  },
+  {
+    "key": "alt+space",
+    "command": "editor.action.triggerSuggest",
+    "when": "editorHasCompletionItemProvider && textInputFocus && !editorReadonly"
   }
 ]
