@@ -20,6 +20,16 @@
 
 ## Usage
 
+### TL;DR
+
+- Put new music in: `~/.beets/\_incoming`
+- Import locally (fast): `beet-import-incoming`
+- Publish to NAS + update Music: `./beet-publish`
+- NAS auto-mounts at `/Volumes/Media` via `autofs` (no “Media-1” suffix)
+- Music.app: Files → set media folder to `/Volumes/Media/Music`; uncheck copy/organize
+
+### Commands
+
 Beets is great. Beets is also a little finicky. So that I don't forget later on,
 these are the basic commands I use to manage my library.
 
@@ -167,8 +177,8 @@ to be more transparent and straightforward.
 4. Update SQL database:
 
    ```sql
-     update items set path = replace(path, '/old/location/', '/new/location/');
-     update albums set artpath = replace(artpath, '/old/location/', '/new/location/');
+     update items set path = replace(path, '/Volumes/MyOldNAS/', '/Volumes/MyNewNAS/');
+     update albums set artpath = replace(artpath, '/Volumes/MyOldNAS/', '/Volumes/MyNewNAS/');
    ```
 
 5. Launch Music.app in the new location. Create a test library and disable app settings related to organizing files (see `gui-preferences.md` in this repo). Quit Music.app.

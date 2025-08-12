@@ -1,0 +1,77 @@
+#!/bin/zsh
+
+# --- Configuration Variables ---
+# Move these from your .zshrc into the script file.
+BEETS_INCOMING="$HOME/.beets/_incoming"
+BEETS_CONFIG="$HOME/.config/beets/config.yaml"
+BEETS_NAS_CONFIG="$HOME/.config/beets/nas.yaml"
+BEETS_NAS_MOUNT="/Volumes/Media"
+
+
+# --- Main Function ---
+beet-publish() {
+  # 1. Check if the NAS is mounted.
+  if [[ ! -d "$BEETS_NAS_MOUNT" ]]; then
+    echo "❌ NAS not mounted at $BEETS_NAS_MOUNT. Aborting publish."
+    return 1
+  fi
+
+  # 2. Find items in the staging directory by querying the beets database.
+  echo "🔎 Checking for files to publish from staging..."
+  local staging_dir_path="$HOME/.beets/_staging"
+  local item_ids
+  item_ids=$(beet list -f '$id' path::"$staging_dir_path")
+
+  if [[ -z "$item_ids" ]]; then
+    echo "✅ No files found in staging directory to publish."
+    return 0
+  fi
+
+  local item_count
+  item_count=$(echo "$item_ids" | wc -l | tr -d ' ')
+  echo "🚀 Found $item_count item(s). Publishing library to NAS..."
+
+  # 3. Run the beets move command.
+  beet -c "$BEETS_CONFIG" -c "$BEETS_NAS_CONFIG" move -a
+  local move_status=$?
+
+  if [[ $move_status -ne 0 ]]; then
+    echo "❌ Beets move command failed. The library may be in an inconsistent state."
+    return 1
+  fi
+
+  # 4. Build a regex from the item IDs.
+  local id_regex="^($(echo "$item_ids" | tr '\n' '|' | sed 's/|$//'))$"
+
+  # 5. Query beets for the new paths of the items we just moved.
+  local new_files_str
+  new_files_str=$(beet -c "$BEETS_CONFIG" -c "$BEETS_NAS_CONFIG" ls -p "id::$id_regex")
+
+  if [[ -z "$new_files_str" ]]; then
+    echo "⚠️ Beets move ran, but couldn't find the new paths for the moved items."
+    return 1
+  fi
+
+  # 6. Convert the newline-separated string of paths into a Zsh array.
+  local -a new_files=("${(@f)new_files_str}")
+
+  echo "🎶 Adding ${#new_files[@]} new file(s) to the Music app..."
+
+  # 7. Use osascript to add the files to Music.app.
+  osascript -e 'on run argv' \
+            -e '  tell application "Music"' \
+            -e '    repeat with aFile in argv' \
+            -e '      add (POSIX file aFile)' \
+            -e '    end repeat' \
+            -e '  end tell' \
+            -e 'end run' -- "${new_files[@]}"
+
+  if [[ $? -eq 0 ]]; then
+    echo "✅ Success! Files moved to NAS and added to your Music library."
+  else
+    echo "⚠️ Files were moved to NAS, but the script failed to add them to Music.app."
+    return 1
+  fi
+}
+
+beet-publish

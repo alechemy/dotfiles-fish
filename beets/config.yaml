@@ -2,10 +2,9 @@
 # Global Options
 ####################
 
-library: /Volumes/AlecsVault/Music/Beets/musiclibrary.db
-directory: /Volumes/AlecsVault/Music/Music/Media.localized/Music
+library: /Users/alec/.beets/musiclibrary.db
+directory: /Users/alec/.beets/_staging
 plugins:
-  - bpmanalyser
   - chroma
   - discogs
   - deezer
@@ -14,7 +13,6 @@ plugins:
   - fetchart
   - fromfilename
   - ftintitle
-  - hook
   - info
   - lastgenre
   - missing
@@ -26,9 +24,13 @@ include:
   - secrets.yaml
 
 import:
-  incremental: yes
+  copy: no
   move: yes
-  log: beets.log
+  incremental: yes
+  write: yes
+  languages: en
+  autotag: yes
+  log: /Users/alec/.beets/beets.log
 
 match:
   strong_rec_thresh: 0.25
@@ -66,18 +68,16 @@ fetchart:
 ftintitle:
   format: (feat. {0})
 
-hook:
-  hooks:
-    - event: after_write
-      command: osascript /Volumes/AlecsVault/Music/Beets/MusicRefresh.scpt "{item.path}"
-
 lastgenre:
-  whitelist: ~/.config/beets/genres.txt
-  canonical: ~/.config/beets/genres-tree.yaml
+  whitelist: /Users/alec/.config/beets/genres.txt
+  canonical: /Users/alec/.config/beets/genres-tree.yaml
   fallback: 'Unknown'
   source: artist
 
+scrub:
+  auto: no
+
 zero:
-  fields: albumartist_sort artist_sort comments composer composer_sort
+  fields: acoustid_fingerprint acoustid_id albumartist_sort albumdisambig albumtype albumtypes artist_sort comments composer composer_sort lyrics mb_albumartistid mb_albumartistids mb_albumid mb_artistid mb_artistids mb_releasetrackid mb_releasegroupid mb_trackid media
   comments: (?!running_include|running_exclude)(^.*$)
   update_database: true
