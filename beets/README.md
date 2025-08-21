@@ -1,4 +1,6 @@
-# Beets Guide
+# Beets Guide [DEPRECATED]
+
+See `/music` dir for updated Music stack.
 
 ## Installation
 

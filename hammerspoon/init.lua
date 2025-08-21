@@ -67,6 +67,10 @@ hyper_bindings = {
     ["triggerOnRelease"] = true,
     ["newWindowMenuItem"] = {"Window", "Music"}
   },
+  ["N"] = {
+    ["name"] = "Navidrome",
+    ["newWindowMenuItem"] = {"File", "New Window"}
+  },
   ["O"] = {
     ["name"] = "Microsoft Outlook",
     ["newWindowMenuItem"] = {"File", "New", "Main Window"}

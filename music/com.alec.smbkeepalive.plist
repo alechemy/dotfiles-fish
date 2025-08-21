@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Install: launchctl load ~/Library/LaunchAgents/com.alec.smbkeepalive.plist -->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+  <dict>
+    <key>Label</key>
+    <string>com.alec.smbkeepalive</string>
+
+    <key>ProgramArguments</key>
+    <array>
+      <string>/Users/alec/.dotfiles/music/smb-keepalive.sh</string>
+    </array>
+
+    <key>StartInterval</key>
+    <integer>300</integer> <!-- every 5 min -->
+  </dict>
+</plist>

@@ -8,3 +8,4 @@ projects.json
 secrets.yaml
 macos/music/scripts
 work
+*.log
