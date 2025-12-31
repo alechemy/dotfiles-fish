@@ -62,7 +62,7 @@
                 },
                 "to": [
                   {
-                    "shell_command": "open -g hammerspoon://Finder"
+                    "shell_command": "open -g hammerspoon://bloom"
                   }
                 ],
                 "type": "basic"
@@ -82,7 +82,7 @@
                 },
                 "to": [
                   {
-                    "shell_command": "open -g hammerspoon://Lock"
+                    "shell_command": "open -g hammerspoon://lock"
                   }
                 ],
                 "type": "basic"
@@ -123,7 +123,7 @@
                 },
                 "to": [
                   {
-                    "shell_command": "open -g hammerspoon://Chromium"
+                    "shell_command": "open -g hammerspoon://chromium"
                   }
                 ],
                 "type": "basic"
@@ -171,34 +171,7 @@
                 },
                 "to": [
                   {
-                    "shell_command": "open -g hammerspoon://Messages"
-                  }
-                ],
-                "type": "basic"
-              },
-              {
-                "description": "Remap Shyper-R to Due quick create hotkey",
-                "from": {
-                  "key_code": "r",
-                  "modifiers": {
-                    "mandatory": [
-                      "left_command",
-                      "right_command",
-                      "right_control",
-                      "right_shift",
-                      "right_option"
-                    ]
-                  }
-                },
-                "to": [
-                  {
-                    "key_code": "3",
-                    "modifiers": [
-                      "right_command",
-                      "right_control",
-                      "right_shift",
-                      "right_option"
-                    ]
+                    "shell_command": "open -g hammerspoon://messages"
                   }
                 ],
                 "type": "basic"
@@ -218,7 +191,7 @@
                 },
                 "to": [
                   {
-                    "shell_command": "open -g hammerspoon://Obsidian"
+                    "shell_command": "open -g hammerspoon://outlook"
                   }
                 ],
                 "type": "basic"

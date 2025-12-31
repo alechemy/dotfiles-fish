@@ -34,6 +34,9 @@ end)
 -- A commented out config here is (usually) a note-to-self, indicating that the binding
 -- is set within the preferences of the respective app.
 hyper_bindings = {
+  ["A"] = {
+    ["name"] = "Anki"
+  },
   ["C"] = {
     ["name"] = "VSCodium",
     ["bundleID"] = "com.vscodium",
@@ -57,9 +60,17 @@ hyper_bindings = {
     ["bundleID"] = "com.culturedcode.ThingsMac",
     ["newWindowMenuItem"] = {"File", "New Things Window"}
   },
+  -- ["K"] = {
+  --   ["name"] = "kitty",
+  --   ["newWindowMenuItem"] = {"Shell", "New OS Window"}
+  -- },
   ["K"] = {
-    ["name"] = "kitty",
-    ["newWindowMenuItem"] = {"Shell", "New OS Window"}
+    ["name"] = "Ghostty",
+    ["newWindowMenuItem"] = {"File", "New Window"}
+  },
+  ["L"] = {
+    ["name"] = "LocalSend",
+    ["bundleID"] = "org.localsend.localsendApp",
   },
   ["M"] = {
     ["name"] = "Music",
@@ -72,8 +83,8 @@ hyper_bindings = {
     ["newWindowMenuItem"] = {"File", "New Window"}
   },
   ["O"] = {
-    ["name"] = "Microsoft Outlook",
-    ["newWindowMenuItem"] = {"File", "New", "Main Window"}
+    ["name"] = "Obsidian",
+    ["bundleID"] = "md.obsidian",
   },
   ["S"] = {
     ["name"] = "Safari",
@@ -90,31 +101,34 @@ hyper_bindings = {
   ["X"] = {
     ["name"] = "Clip to DEVONthink"
   }]]
-  -- ["Z"] = {
-  --   ["name"] = "zoom.us",
-  --   ["newWindowMenuItem"] = {"zoom.us", "About Zoom"}
-  -- },
+  ["Z"] = {
+    ["name"] = "Zed Preview",
+    ["bundleID"] = "dev.zed.Zed-Preview",
+    ["newWindowMenuItem"] = {"File", "New Window"}
+  },
 }
 
 -- Note: These bindings work by registering Karabiner Elements events
 -- Therefore, a new shyper binding requires a corresponding addition to karabiner.json!
 shyper_bindings = {
   ["C"] = {
-    ["name"] = "Chromium",
+    ["name"] = "chromium",
     ["newWindowMenuItem"] = {"File", "New Window"}
   },
   ["F"] = {
-    ["name"] = "Finder",
-    ["newWindowMenuItem"] = {"File", "New Finder Window"}
+    ["name"] = "bloom",
+    ["bundleID"] = "com.asiafu.Bloom",
+    ["newWindowMenuItem"] = {"File", "New Window"}
   },
   ["M"] = {
-    ["name"] = "Messages",
+    ["name"] = "messages",
     ["newWindowMenuItem"] = {"Window", "Messages"}
   },
   ["O"] = {
-    ["name"] = "Obsidian",
-    ["bundleID"] = "md.obsidian",
-  }
+    ["name"] = "outlook",
+    ["bundleID"] = "com.microsoft.Outlook",
+    ["newWindowMenuItem"] = {"File", "New", "Main Window"}
+  },
 }
 
 for key, app in pairs(hyper_bindings) do
@@ -150,18 +164,18 @@ end
 -- Rectangle "Fill" macro:
 -- Checks whether a window is on the left or right side of the screen. If the former,
 -- sends "fill left" to Rectangle, and "fill right" for the latter.
-hs.hotkey.bind(hyper, 'space', function()
-  local win = hs.window.frontmostWindow() ; if not win then return end
-  local scr = win:screen():frame()
-  local cx  = win:frame().x + win:frame().w / 2
-  local mid = scr.x + scr.w / 2
+-- hs.hotkey.bind(hyper, 'space', function()
+--   local win = hs.window.frontmostWindow() ; if not win then return end
+--   local scr = win:screen():frame()
+--   local cx  = win:frame().x + win:frame().w / 2
+--   local mid = scr.x + scr.w / 2
 
-  if cx < mid then
-      hs.execute('open -g "rectangle-pro://execute-action?name=fill-left"')
-  else
-      hs.execute('open -g "rectangle-pro://execute-action?name=fill-right"')
-  end
-end)
+--   if cx < mid then
+--       hs.execute('open -g "rectangle-pro://execute-action?name=fill-left"')
+--   else
+--       hs.execute('open -g "rectangle-pro://execute-action?name=fill-right"')
+--   end
+-- end)
 
 local function sendVscode(mods, key)
   hs.eventtap.keyStroke(mods, key)
@@ -179,25 +193,25 @@ end
 -- VSCodium editor manipulation
 -- If app occupies >50% screen width, alt+return splits horizontally
 -- Otherwise, splits vertically. Add shift key to move to previous split
-hs.hotkey.bind({"alt"}, "return", withVSCode(function()
-  local win = hs.window.frontmostWindow()
-  local sf, wf = win:screen():frame(), win:frame()
-  if wf.w < sf.w/2 then
-    sendVscode({"ctrl","alt","cmd"}, "down")
-  else
-    sendVscode({"ctrl","alt","cmd"}, "right")
-  end
-end))
+-- hs.hotkey.bind({"alt"}, "return", withVSCode(function()
+--   local win = hs.window.frontmostWindow()
+--   local sf, wf = win:screen():frame(), win:frame()
+--   if wf.w < sf.w/2 then
+--     sendVscode({"ctrl","alt","cmd"}, "down")
+--   else
+--     sendVscode({"ctrl","alt","cmd"}, "right")
+--   end
+-- end))
 
-hs.hotkey.bind({"alt","shift"}, "return", withVSCode(function()
-  local win = hs.window.frontmostWindow()
-  local sf, wf = win:screen():frame(), win:frame()
-  if wf.w < sf.w/2 then
-    sendVscode({"ctrl","alt","cmd"}, "up")
-  else
-    sendVscode({"ctrl","alt","cmd"}, "left")
-  end
-end))
+-- hs.hotkey.bind({"alt","shift"}, "return", withVSCode(function()
+--   local win = hs.window.frontmostWindow()
+--   local sf, wf = win:screen():frame(), win:frame()
+--   if wf.w < sf.w/2 then
+--     sendVscode({"ctrl","alt","cmd"}, "up")
+--   else
+--     sendVscode({"ctrl","alt","cmd"}, "left")
+--   end
+-- end))
 
 --[[------------------------
 ---- URL EVENT BINDINGS ----
@@ -205,9 +219,6 @@ end))
 
 -- Shyper-V => Paste by individually typing each character. Useful where regular pasting is disabled.
 hs.urlevent.bind('fnv', function() hs.eventtap.keyStrokes(hs.pasteboard.getContents()) end)
-
--- Shyper-R => New Item in Due
-hs.urlevent.bind('NewDueTimer', function() hs.eventtap.keyStroke({'ctrl', 'cmd', 'alt', 'shift'}, '3') end)
 
 -- Shyper-L => Lock screen
 hs.urlevent.bind('Lock', function() hs.caffeinate.lockScreen() end)
@@ -219,4 +230,3 @@ hs.urlevent.bind("debug", function(eventName, params)
 end)
 
 hs.notify.new({title="Hammerspoon", informativeText="Config loaded"}):send()
-
