@@ -1,5 +1,0 @@
-filter_class: 'com.tinyspeck.slackmacgap'
-
-excludes:
-  - '../match/base.yml'
-  - '../match/private.yml'

@@ -1,6 +1,0 @@
-/*
-Launches a Keyboard Maestro macro that forwards keyboard shortcuts to Rectangle.
-
-I found this more reliable than trying to execute the shortcuts in Bunch.
-*/
-kmtrigger://macro=E5B793A1-88EA-4301-AF34-83638D2CCB67

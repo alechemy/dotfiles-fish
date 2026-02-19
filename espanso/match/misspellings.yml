@@ -1,5 +1,0 @@
-matches:
-  # teh -> the
-  - trigger: 'teh'
-    replace: 'the'
-    word: true

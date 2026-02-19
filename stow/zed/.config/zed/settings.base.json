@@ -1,0 +1,319 @@
+{
+  // Editor
+  "session": {
+    "trust_all_worktrees": true
+  },
+  "hover_popover_enabled": true,
+  "show_completion_documentation": true,
+  "current_line_highlight": "all",
+  "inline_code_actions": true,
+  "excerpt_context_lines": 4,
+  "rounded_selection": false,
+  "toolbar": {
+    "code_actions": false
+  },
+  "gutter": {
+    "min_line_number_digits": 4
+  },
+  "buffer_font_family": "Operator Mono SSm Lig",
+  "buffer_font_size": 14.0,
+  "formatter": [
+    // { "code_action": "source.organizeImports" },
+    { "code_action": "source.fixAll.eslint" },
+    {
+      "external": {
+        "command": "prettier",
+        "arguments": ["--stdin-filepath", "{buffer_path}"]
+      }
+    }
+  ],
+  // "git": {
+  //   "git_gutter": "hide"
+  // },
+  "linked_edits": true,
+  "show_whitespaces": "boundary",
+  "soft_wrap": "editor_width",
+  "wrap_guides": [80],
+  "restore_on_startup": "launchpad",
+
+  // AI
+  "agent": {
+    "tool_permissions": {
+      "default": "allow"
+    },
+    "favorite_models": [
+      {
+        "provider": "google",
+        "model": "gemini-3-pro-preview"
+      },
+      {
+        "provider": "openrouter",
+        "model": "moonshotai/kimi-k2.5"
+      },
+      {
+        "provider": "anthropic",
+        "model": "claude-opus-4-6-thinking-latest"
+      }
+    ],
+    "default_profile": "write",
+    "use_modifier_to_send": true,
+    "enable_feedback": false,
+    "default_model": {
+      "enable_thinking": true,
+      "provider": "google",
+      "model": "gemini-3-pro-preview"
+    },
+    "inline_assistant_model": {
+      "provider": "anthropic",
+      "model": "claude-sonnet-4-5"
+    },
+    "commit_message_model": {
+      "provider": "anthropic",
+      "model": "claude-haiku-4-5"
+    },
+    "thread_summary_model": {
+      "provider": "anthropic",
+      "model": "claude-haiku-4-5"
+    },
+    "model_parameters": []
+  },
+  "agent_servers": {
+    "gemini": {
+      "ignore_system_version": false
+    },
+    "claude": {
+      "favorite_config_option_values": {
+        "mode": [
+          "bypassPermissions"
+        ]
+      },
+      "default_config_options": {
+        "mode": "bypassPermissions"
+      },
+      "env": {
+        "CLAUDE_CODE_EXECUTABLE": "~/.local/bin/claude"
+      }
+    }
+  },
+  "agent_buffer_font_size": 12.0,
+  "agent_ui_font_size": 16.0,
+  "context_servers": {
+    "nx-mcp": {
+      "command": "npx",
+      "args": [
+        "nx-mcp@latest"
+      ]
+    },
+    "mcp-server-context7": {
+      "settings": {}
+    },
+    "angular-cli": {
+      "command": "npx",
+      "args": ["-y", "@angular/cli", "mcp", "-E", "modernize"]
+    }
+  },
+  "show_edit_predictions": true,
+  "edit_predictions": {
+    "mode": "subtle"
+  },
+
+  // Appearance
+  "icon_theme": "VSCode Icons for Zed (Dark Angular)",
+  "minimap": {
+    "max_width_columns": 80,
+    "show": "never"
+  },
+  "theme": {
+    "mode": "dark",
+    "light": "One Light",
+    "dark": "Night Owl Dark"
+  },
+  "theme_overrides": {
+    "Night Owl Dark": {
+      "drop_target.background": "#7e57c273",
+      "created": "#9ccc65cc",
+      "modified": "#e2b93dcc",
+      "deleted": "#eF5350cc",
+      "editor.wrap_guide": "#102a44",
+      "editor.active_line.background": "#28707d29",
+      "editor.document_highlight.read_background": "#ffffff08",
+      "editor.document_highlight.write_background": "#5f7e9779",
+      "editor.subheader.background": "#0b2942",
+      "element.background": "#011627",
+      "error.background": "#011627",
+      "error.border": "#5f7e97",
+      "hint.background": "#011627",
+      "hint.border": "#5f7e97",
+      "link_text.hover": "#82aaff",
+      "search.match_background": "#1085bb5d",
+      "text.muted": "#89a4bb",
+      "warning": "#b39554",
+      "warning.background": "#011627",
+      "warning.border": "#5f7e97",
+      "syntax": {
+        "boolean": {
+          "color": "#ff5874",
+          "font_style": null,
+          "font_weight": null
+        },
+        "constructor": {
+          "color": "#82aaff",
+          "font_style": "normal",
+          "font_weight": null
+        },
+        "constant": {
+          "color": "#82aaff",
+          "font_style": null,
+          "font_weight": null
+        },
+        "constant.builtin": {
+          "color": "#ff5874",
+          "font_style": null,
+          "font_weight": null
+        },
+        "embedded": {
+          "color": "#d6deeb",
+          "font_style": null,
+          "font_weight": null
+        },
+        "function": {
+          "color": "#82aaff",
+          "font_style": "italic",
+          "font_weight": null
+        },
+        "function.method": {
+          "color": "#82aaff",
+          "font_style": "italic",
+          "font_weight": null
+        },
+        "keyword": {
+          "color": "#c792ea",
+          "font_style": "normal",
+          "font_weight": null
+        },
+        "keyword.control": {
+          "color": "#c792ea",
+          "font_style": "normal",
+          "font_weight": null
+        },
+        "operator": {
+          "color": "#c792ea",
+          "font_style": null,
+          "font_weight": null
+        },
+        "property": {
+          "color": "#d6deeb",
+          "font_style": null,
+          "font_weight": null
+        },
+        "punctuation.bracket": {
+          "color": "#ffd602",
+          "font_style": "normal",
+          "font_weight": null
+        },
+        "punctuation.delimiter": {
+          "color": "#d6deeb",
+          "font_style": "normal",
+          "font_weight": null
+        },
+        "punctuation.special": {
+          "color": "#82aaff",
+          "font_style": "italic",
+          "font_weight": null
+        },
+        "type": {
+          "color": "#ffcb8b",
+          "font_style": null,
+          "font_weight": null
+        },
+        "type.builtin": {
+          "color": "#c5e478",
+          "font_style": null,
+          "font_weight": null
+        },
+        "variable": {
+          "color": "#d6deeb",
+          "font_style": null,
+          "font_weight": null
+        }
+      },
+      "players": [
+        {
+          "cursor": "#80a4c2",
+          "selection": "#1d3b53"
+        }
+      ]
+    }
+  },
+  "ui_font_size": 16.0,
+  "ui_font_weight": 400.0,
+
+  // Search
+  "seed_search_query_from_cursor": "never",
+  "use_smartcase_search": true,
+
+  // Panels
+  "git_panel": {
+    "sort_by_path": false,
+    "dock": "right",
+    "default_width": 550,
+    "status_style": "label_color"
+  },
+  "max_tabs": 5,
+  "project_panel": {
+    "hide_root": true,
+    "dock": "right",
+    "default_width": 500
+  },
+
+  // Language and file settings
+  "file_types": {},
+  "languages": {
+    "Angular": {
+      "prettier": {
+        "allowed": true
+      }
+    },
+    "CSS": {
+      "code_actions_on_format": {
+        "source.fixAll.stylelint": true
+      }
+    },
+    "SCSS": {
+      "code_actions_on_format": {
+        "source.fixAll.stylelint": true
+      }
+    }
+  },
+
+  // Search
+  "search": {
+    "include_ignored": false
+  },
+
+  // LSP
+  "lsp": {
+    "stylelint-lsp": {
+      "settings": {
+        "stylelint": {
+          "validate": ["css", "postcss", "scss"]
+        }
+      }
+    }
+  },
+
+  // Terminal
+  "terminal": {
+    "font_size": 14.0,
+    "font_family": "Operator Mono SSm Lig",
+    "cursor_shape": "bar"
+  },
+
+  // System
+  "base_keymap": "VSCode",
+  "telemetry": {
+    "diagnostics": false,
+    "metrics": false
+  },
+  "use_system_path_prompts": false
+}

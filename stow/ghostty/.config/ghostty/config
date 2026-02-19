@@ -1,0 +1,15 @@
+font-family = Operator Mono SSm Lig
+font-size = 14.0
+background-opacity = .90
+background-blur = true
+theme = Catppuccin Macchiato
+cursor-style = bar
+cursor-style-blink = false
+adjust-cursor-thickness = 1
+macos-icon = retro
+quit-after-last-window-closed = true
+shell-integration-features = no-cursor
+macos-window-shadow = false
+macos-titlebar-style = tabs
+keybind = shift+enter=text:\x1b\r
+clipboard-paste-protection = false
