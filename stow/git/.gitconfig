@@ -1,0 +1,26 @@
+[core]
+  excludesfile = ~/.gitignore
+  editor = nano
+  pager = delta
+[interactive]
+  diffFilter = delta --color-only
+[delta]
+  navigate = true
+  line-numbers = true
+  hyperlinks = true
+[merge]
+  conflictstyle = zdiff3
+[apply]
+  whitespace = nowarn
+[help]
+  autocorrect = prompt
+[pull]
+  ff = only
+[init]
+  defaultBranch = main
+[push]
+  autoSetupRemote = true
+[include]
+  path = ~/.gitconfig.local
+[includeIf "gitdir:~/Work/"]
+  path = ~/.gitconfig.work
