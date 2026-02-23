@@ -1,34 +1,31 @@
 #!/usr/bin/env bash
 #
-# Merges settings.base.json (JSONC, tracked) + settings.secrets.json (gitignored)
-# into settings.json (gitignored, symlinked by stow).
-#
-# Note: sed strips // comments at the beginning of lines so jq can parse the JSONC.
-# This avoids breaking URLs (e.g., https://) but assumes no inline comments at
-# the end of lines containing values.
+# Injects secrets into settings.template.json (JSONC, tracked) using 1Password CLI
+# and saves to settings.json (gitignored, symlinked by stow).
 #
 set -e
 
 DOTFILES="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ZED_DIR="$DOTFILES/stow/zed/.config/zed"
-BASE="$ZED_DIR/settings.base.json"
-SECRETS="$ZED_DIR/settings.secrets.json"
+TEMPLATE="$ZED_DIR/settings.template.json"
 OUT="$ZED_DIR/settings.json"
 
-strip_comments() {
-    sed -E 's|^[[:space:]]*//.*$||' "$1"
-}
-
-if [ ! -f "$BASE" ]; then
-    echo "Error: $BASE not found"
+if [ ! -f "$TEMPLATE" ]; then
+    echo "Error: $TEMPLATE not found"
     exit 1
 fi
 
-if [ ! -f "$SECRETS" ]; then
-    strip_comments "$BASE" | jq '.' > "$OUT"
-    echo "Warning: No secrets file found at $SECRETS"
-    echo "  Using base config only. Create it to add API keys."
+if command -v op >/dev/null 2>&1; then
+    echo "Injecting secrets using 1Password CLI..."
+    # op inject replaces op:// references and outputs to settings.json
+    op inject -f -i "$TEMPLATE" -o "$OUT"
 else
-    # Deep merge: base + secrets overlay (secrets wins on conflicts)
-    strip_comments "$BASE" | jq -s '.[0] * .[1]' - "$SECRETS" > "$OUT"
+    echo "Warning: 1Password CLI (op) is not installed."
+    echo "  Copying template config directly. op:// references will not be resolved."
+    cp "$TEMPLATE" "$OUT"
 fi
+
+# Replace ${HOME} placeholder with the actual home directory path
+sed "s|\${HOME}|${HOME}|g" "$OUT" > "${OUT}.tmp" && mv "${OUT}.tmp" "$OUT"
+
+echo "Successfully built Zed config: $OUT"
