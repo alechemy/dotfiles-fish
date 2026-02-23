@@ -59,7 +59,6 @@ success "Generated configs built"
 if command -v stow &> /dev/null; then
     info "Stowing dotfiles..."
 
-    info "Scaffolding XDG directories..."
     mkdir -p "$HOME/.config" "$HOME/.local/bin" "$HOME/.local/share"
 
     # Back up any existing files or directories that would conflict with stow.
@@ -69,7 +68,7 @@ if command -v stow &> /dev/null; then
     for package in *; do
         if [ -d "$package" ]; then
             # Dry-run to detect conflicts, then back up the targets
-            conflicts=$(stow --no --ignore='.DS_Store' --target="$HOME" "$package" 2>&1 || true)
+            conflicts=$(stow --no --no-folding --ignore='.DS_Store' --target="$HOME" "$package" 2>&1 || true)
             if echo "$conflicts" | grep -q 'cannot stow'; then
                 echo "$conflicts" | grep 'existing target' | while read -r line; do
                     # Extract the target path from: "over existing target .gitconfig since..."
@@ -86,7 +85,7 @@ if command -v stow &> /dev/null; then
 
     for package in *; do
         if [ -d "$package" ]; then
-            stow --restow --ignore='.DS_Store' --target="$HOME" "$package"
+            stow --restow --no-folding --ignore='.DS_Store' --target="$HOME" "$package"
         fi
     done
     cd "$DOTFILES"
