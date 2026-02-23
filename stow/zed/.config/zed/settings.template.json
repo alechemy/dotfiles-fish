@@ -1,5 +1,4 @@
 {
-  // Editor
   "session": {
     "trust_all_worktrees": true
   },
@@ -27,16 +26,11 @@
       }
     }
   ],
-  // "git": {
-  //   "git_gutter": "hide"
-  // },
   "linked_edits": true,
   "show_whitespaces": "boundary",
   "soft_wrap": "editor_width",
   "wrap_guides": [80],
   "restore_on_startup": "launchpad",
-
-  // AI
   "agent": {
     "tool_permissions": {
       "default": "allow"
@@ -91,7 +85,8 @@
         "mode": "bypassPermissions"
       },
       "env": {
-        "CLAUDE_CODE_EXECUTABLE": "~/.local/bin/claude"
+        "CLAUDE_CODE_EXECUTABLE": "${HOME}/.local/bin/claude",
+        "GIT_PAGER": "cat"
       }
     }
   },
@@ -105,7 +100,9 @@
       ]
     },
     "mcp-server-context7": {
-      "settings": {}
+      "settings": {
+        "context7_api_key": "op://Private/25nqmf6ljgb6ry5aowcegxabpa/credential"
+      }
     },
     "angular-cli": {
       "command": "npx",
@@ -116,8 +113,6 @@
   "edit_predictions": {
     "mode": "subtle"
   },
-
-  // Appearance
   "icon_theme": "VSCode Icons for Zed (Dark Angular)",
   "minimap": {
     "max_width_columns": 80,
@@ -306,7 +301,10 @@
   "terminal": {
     "font_size": 14.0,
     "font_family": "Operator Mono SSm Lig",
-    "cursor_shape": "bar"
+    "cursor_shape": "bar",
+    "env": {
+      "GIT_PAGER": "cat"
+    }
   },
 
   // System

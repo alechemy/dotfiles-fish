@@ -1,3 +1,2 @@
 \.stow-local-ignore
-.*\.base\.json
-.*\.secrets\.json
+.*\.template\.json

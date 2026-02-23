@@ -14,7 +14,7 @@ cd ~/.dotfiles
 
 1. Install Homebrew (if needed)
 2. Install all dependencies from `Brewfile`
-3. Build generated configs (e.g. merge secret overlays into Zed settings)
+3. Build generated configs (e.g. inject secrets into Zed settings via 1Password)
 4. Symlink all stow packages in `stow/` to `$HOME`
 5. Optionally apply macOS defaults (`scripts/macos.sh`)
 6. Set Fish as the default shell
@@ -23,28 +23,28 @@ cd ~/.dotfiles
 
 ```
 .dotfiles/
-├── Brewfile              # Homebrew dependencies (CLI tools + casks)
+├── Brewfile                # Homebrew dependencies (CLI tools + casks)
 ├── scripts/
-│   ├── setup.sh          # Main bootstrap script
-│   ├── build-zed-config.sh # Merge Zed base config + secrets
-│   ├── setup-vscode.sh   # VSCodium settings + extensions
-│   └── macos.sh          # macOS system defaults
-├── stow/                 # Stow packages (auto-linked by setup.sh)
-│   ├── bin/              # ~/.local/bin scripts
-│   ├── editorconfig/     # ~/.editorconfig
-│   ├── fish/             # Fish shell config, functions, plugins
-│   ├── git/              # Git config (.gitconfig, .gitignore)
-│   ├── hammerspoon/      # Window management + hotkeys
-│   ├── karabiner/        # Keyboard remapping
-│   ├── keychain/         # Keychain helper scripts
-│   ├── ghostty/          # Terminal emulator config
-│   ├── mise/             # Runtime version manager (node, python, java)
-│   ├── starship/         # Shell prompt theme
-│   ├── swiftbar/         # Menu bar plugins
-│   └── zed/              # Zed editor (uses base+secrets merge)
-├── stow-work/            # Opt-in stow packages (not auto-linked)
-│   └── work/             # Work-specific fish abbreviations
-└── vscode/               # VSCodium settings (linked via setup-vscode.sh)
+│   ├── setup.sh            # Main bootstrap script
+│   ├── build-zed-config.sh # Inject secrets into Zed template config via 1Password
+│   ├── setup-vscode.sh     # VSCodium settings + extensions
+│   └── macos.sh            # macOS system defaults
+├── stow/                   # Stow packages (auto-linked by setup.sh)
+│   ├── bin/                # ~/.local/bin scripts
+│   ├── editorconfig/       # ~/.editorconfig
+│   ├── fish/               # Fish shell config, functions, plugins
+│   ├── git/                # Git config (.gitconfig, .gitignore)
+│   ├── hammerspoon/        # Window management + hotkeys
+│   ├── karabiner/          # Keyboard remapping
+│   ├── keychain/           # Keychain helper scripts
+│   ├── ghostty/            # Terminal emulator config
+│   ├── mise/               # Runtime version manager (node, python, java)
+│   ├── starship/           # Shell prompt theme
+│   ├── swiftbar/           # Menu bar plugins
+│   └── zed/                # Zed editor (uses 1Password op inject)
+├── stow-work/              # Opt-in stow packages (not auto-linked)
+│   └── work/               # Work-specific fish abbreviations
+└── vscode/                 # VSCodium settings (linked via setup-vscode.sh)
 ```
 
 ## Stow Packages
@@ -184,7 +184,7 @@ Open `~/.dotfiles/Brewfile` and delete the relevant line (e.g. `brew "lazygit"`)
 
 - Remove the build script (e.g. `scripts/build-lazygit-config.sh`)
 - Remove the build script call from `setup.sh`
-- Remove the gitignore entries for the generated config and secrets file
+- Remove the gitignore entries for the generated config
 
 ## Updating Dependencies
 
@@ -206,97 +206,70 @@ This does a dry run by default — it lists what would be removed. Add `--force`
 
 ## Handling Secrets in Config Files
 
-Some tools store API keys or credentials in their main config file (e.g. Zed's `settings.json`). Since these files are stowed and tracked in git, we use a **base + secrets merge** pattern to keep secrets out of version control.
+Some tools store API keys or credentials in their main config file (e.g. Zed's `settings.json`). Since these files are stowed and tracked in git, we use the **1Password CLI (`op`)** to keep secrets out of version control and off the disk entirely.
 
 ### How it works
 
 Instead of tracking the config file directly:
 
-1. **`config.base.json`** (tracked) — the full config with secret values left empty
-2. **`config.secrets.json`** (gitignored) — a small overlay containing only the secret keys
-3. **A build script** merges them with `jq` deep merge into the final config file (also gitignored)
-4. **Stow** symlinks only the merged output, not the base or secrets files
+1. **`config.template.json`** (tracked) — the full config with 1Password CLI references (`op://Vault/Item/Field`) instead of raw secrets
+2. **A build script** injects the secrets using `op inject -i config.template.json -o config.json` into the final config file (gitignored)
+3. **Stow** symlinks only the merged output, not the template file
 
-The build scripts run automatically during `setup.sh` (before stowing), so on a fresh machine you just need to create the secrets file and run setup.
+The build scripts run automatically during `setup.sh` (before stowing), so on a fresh machine you just need to be signed into 1Password CLI and run setup.
 
 ### Existing: Zed (`stow/zed/`)
 
 ```
 stow/zed/.config/zed/
-├── settings.base.json      # Tracked — full config, empty MCP settings
-├── settings.secrets.json   # Gitignored — API key overlay
-├── settings.json           # Gitignored — generated by build script
+├── settings.template.json  # Tracked — full config, with op:// references
+├── settings.json           # Gitignored — generated by build script with injected secrets
 └── keymap.json             # Tracked — no secrets, stowed normally
 ```
 
-On a fresh machine, create the secrets file:
+On a fresh machine, ensure you are logged into 1Password CLI:
 
 ```bash
-cat > stow/zed/.config/zed/settings.secrets.json << 'EOF'
-{
-  "context_servers": {
-    "mcp-server-context7": {
-      "settings": {
-        "context7_api_key": "your-key-here"
-      }
-    }
-  }
-}
-EOF
+eval $(op signin)
 ```
 
 Then run `./scripts/setup.sh` (or just `./scripts/build-zed-config.sh` + restow).
 
 ### Adding secrets handling to another app
 
-**1. Rename the tracked config to a `.base` variant.**
+**1. Rename the tracked config to a `.template` variant.**
 
 ```bash
-mv stow/myapp/.config/myapp/config.json stow/myapp/.config/myapp/config.base.json
+mv stow/myapp/.config/myapp/config.json stow/myapp/.config/myapp/config.template.json
 ```
 
-Remove the secret values from the base file (leave the keys with empty/placeholder values so the structure is valid).
+Replace the secret values in the template file with `op://Vault/Item/Field` references.
 
-**2. Create a secrets overlay file** with just the secret keys:
-
-```bash
-cat > stow/myapp/.config/myapp/config.secrets.json << 'EOF'
-{
-  "some_nested": {
-    "api_key": "your-secret"
-  }
-}
-EOF
-```
-
-**3. Gitignore both the generated config and the secrets file.**
+**2. Gitignore the generated config.**
 
 ```gitignore
 stow/myapp/.config/myapp/config.json
-stow/myapp/.config/myapp/config.secrets.json
 ```
 
-**4. Create a `.stow-local-ignore`** in the package root (`stow/myapp/.stow-local-ignore`) so stow skips the source files:
+**3. Create a `.stow-local-ignore`** in the package root (`stow/myapp/.stow-local-ignore`) so stow skips the template files:
 
 ```
-.*\.base\.json
-.*\.secrets\.json
+.*\.template\.json
 ```
 
-**5. Create a build script** (see `scripts/build-zed-config.sh` as a template). The core logic is:
+**4. Create a build script** (see `scripts/build-zed-config.sh` as a template). The core logic is:
 
 ```bash
-# Strip JSONC comments, then deep merge base + secrets
-sed 's|//.*$||' "$BASE" | jq -s '.[0] * .[1]' - "$SECRETS" > "$OUT"
+op inject -f -i "$TEMPLATE" -o "$OUT"
 ```
 
-If your config is plain JSON (no comments), you can skip the `sed` and use `jq -s '.[0] * .[1]' "$BASE" "$SECRETS"` directly.
-
-**6. Add the build script call to `setup.sh`** (in the "Build generated configs" section, before stowing).
+**5. Add the build script call to `setup.sh`** (in the "Build generated configs" section, before stowing).
 
 ## Restoring on a Fresh Machine
 
 **1. Clone and run setup.**
+
+Ensure you have 1Password CLI installed and are signed in (`eval $(op signin)`).
 
 ```bash
 git clone https://github.com/alechemy/dotfiles-fish.git ~/.dotfiles
@@ -304,27 +277,11 @@ cd ~/.dotfiles
 ./scripts/setup.sh
 ```
 
-This handles Homebrew, stow packages, Fish shell, mise runtimes, and VSCodium automatically.
+This handles Homebrew, stow packages, Fish shell, mise runtimes, VSCodium, and secret injection automatically.
 
-**2. Create secrets files before or after setup.**
+**2. Rebuilding configs.**
 
-Any package that uses the base + secrets merge pattern needs its secrets file created manually (these are gitignored and won't be in the clone). Currently this is just Zed:
-
-```bash
-cat > ~/.dotfiles/stow/zed/.config/zed/settings.secrets.json << 'EOF'
-{
-  "context_servers": {
-    "mcp-server-context7": {
-      "settings": {
-        "context7_api_key": "your-key-here"
-      }
-    }
-  }
-}
-EOF
-```
-
-If you create the secrets file after running setup, rebuild and restow:
+If you update a secret in 1Password, or add a new `op://` reference to a template config, rebuild and restow:
 
 ```bash
 ./scripts/build-zed-config.sh

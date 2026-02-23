@@ -10,4 +10,3 @@ stow-work/*
 stow/git/.gitconfig.work
 stow/fish/.config/fish/fish_variables
 stow/zed/.config/zed/settings.json
-stow/zed/.config/zed/settings.secrets.json
