@@ -111,6 +111,14 @@ shyper_bindings = {
     ["name"] = "chromium",
     ["newWindowMenuItem"] = {"File", "New Window"}
   },
+  ["E"] = {
+    ["name"] = "ears",
+    ["newWindowMenuItem"] = {"Window", "Main Window"}
+  },
+  ["F"] = {
+    ["name"] = "finder",
+    ["newWindowMenuItem"] = {"File", "New Finder Window"}
+  },
   ["M"] = {
     ["name"] = "messages",
     ["newWindowMenuItem"] = {"Window", "Messages"}
@@ -211,12 +219,6 @@ end
 -- Shyper-D => Dropzone KM Macro
 hs.urlevent.bind("dropzone", function(eventName, params)
     local kmUrl = "kmtrigger://macro=2574A57C-F186-4256-BFBD-D770BA189E33"
-    hs.urlevent.openURL(kmUrl)
-end)
-
--- Shyper-F => Bloom KM Macro
-hs.urlevent.bind("bloom", function(eventName, params)
-    local kmUrl = "kmtrigger://macro=13627711-EE85-4DF9-8E6F-BD5C8E4B8EF2"
     hs.urlevent.openURL(kmUrl)
 end)
 
