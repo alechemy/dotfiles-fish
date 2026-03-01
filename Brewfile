@@ -1,3 +1,5 @@
+tap "yqrashawn/goku"
+
 # Binaries
 brew "bat"
 brew "coreutils"
@@ -17,6 +19,7 @@ brew "mise"
 brew "ripgrep"
 brew "starship"
 brew "stow"
+brew "yqrashawn/goku/goku", restart_service: true
 brew "yt-dlp"
 brew "zoxide"
 

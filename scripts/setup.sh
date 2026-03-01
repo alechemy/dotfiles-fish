@@ -62,8 +62,7 @@ if command -v stow &> /dev/null; then
     mkdir -p "$HOME/.config" "$HOME/.local/bin" "$HOME/.local/share"
 
     # Back up any existing files or directories that would conflict with stow.
-    # This commonly happens with ~/.gitconfig (created by git on first use)
-    # and ~/.config/karabiner/karabiner.json (overwritten by Karabiner-Elements).
+    # This commonly happens with ~/.gitconfig (created by git on first use).
     cd "$STOW_DIR"
     for package in *; do
         if [ -d "$package" ]; then

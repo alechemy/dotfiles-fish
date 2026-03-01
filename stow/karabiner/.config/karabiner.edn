@@ -1,0 +1,21 @@
+;; Goku configuration for Karabiner-Elements
+{:profiles {:Default {:default true
+                      :sim 50
+                      :delay 500
+                      :alone 1000
+                      :held 500}}
+ :main [{:des "HYPER KEY! Change caps_lock to right command + right control + right option + right shift."
+         :rules [[:##caps_lock :!QWEright_shift nil {:alone :escape}]]}
+
+        {:des "SUPER-HYPER (a.k.a. 'SHYPER') KEY! Remap Hyper-left_command-KEY to Hammerspoon URL events"
+         :rules [[:!CQWERc "open -g hammerspoon://chromium"]
+                 [:!CQWERe "open -g hammerspoon://ears"]
+                 [:!CQWERf "open -g hammerspoon://finder"]
+                 [:!CQWERl "open -g hammerspoon://lock"]
+                 [:!CQWERm "open -g hammerspoon://messages"]
+                 [:!CQWERo "open -g hammerspoon://outlook"]
+                 [:!CQWERt :!QWER5]
+                 [:!CQWERv "open -g hammerspoon://fnv"]]}
+
+        {:des "Remap Hyper-tab to Rectangle tiling shortcut"
+         :rules [[:!QWERtab :!QWER9]]}]}
