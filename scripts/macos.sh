@@ -57,22 +57,22 @@ echo "Applying Third Party App settings..."
 defaults write com.corecode.MacUpdater HiddenOptionQuitAppsForAutoUpdate -bool YES
 defaults write com.corecode.MacUpdater HiddenOptionAutoUpdateAfterManualScan -bool YES
 
+# Disable dark-mode PDF rendering in DEVONthink
+defaults write com.devon-technologies.think DisablePDFDarkMode true
+
 ###############################################################################
 # File Operations                                                             #
 ###############################################################################
 
-# Clear all preference files, to ensure that the above command takes effect
-# echo "Clearing .DS_Store files..."
-# sudo find "$HOME" -name ".DS_Store" -exec rm {} \;
-
 # Create symlink from Chromium bookmarks to Chrome, primarily so that Alfred can see it
-if [ -d "$HOME/Library/Application Support/Chromium" ] && [ -d "$HOME/Library/Application Support/Google/Chrome" ]; then
+APP_SUPPORT="$HOME/Library/Application Support"
+CHROME_HOME="$APP_SUPPORT/Google/Chrome/Default"
+CHROMIUM_HOMIUM="$APP_SUPPORT/Chromium/Default"
+if [ -d "$CHROME_HOME/Bookmarks" ] && [ -d "$CHROMIUM_HOMIUM/Bookmarks" ]; then
     echo "Linking Chromium bookmarks to Chrome..."
-    mv "$HOME/Library/Application Support/Google/Chrome/Default/Bookmarks" "$HOME/Library/Application Support/Google/Chrome/Default/Bookmarks.bak" 2>/dev/null
-    ln -sf "$HOME/Library/Application Support/Chromium/Default/Bookmarks" "$HOME/Library/Application Support/Google/Chrome/Default/Bookmarks"
+    mv "$CHROME_HOME/Bookmarks" "$CHROME_HOME/Bookmarks.bak" 2>/dev/null
+    ln -sf "$CHROMIUM_HOMIUM/Bookmarks" "$CHROME_HOME/Bookmarks"
 fi
-
-
 
 ###############################################################################
 # Kill affected applications                                                  #

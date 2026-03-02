@@ -162,5 +162,13 @@ if [ -f "$DOTFILES/scripts/setup-vscode.sh" ]; then
     success "VSCodium setup complete"
 fi
 
+# 9. Espanso Setup
+if command -v espanso &> /dev/null; then
+    info "Setting up Espanso..."
+    espanso service register || true
+    espanso start || true
+    success "Espanso registered and started"
+fi
+
 echo ""
 echo "All done! Please restart your terminal."
