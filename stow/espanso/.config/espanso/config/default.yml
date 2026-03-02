@@ -1,0 +1,4 @@
+# espanso configuration file
+
+# Automatically start espanso on login
+auto_start: true
