@@ -36,6 +36,10 @@ end)
 hyper_bindings = {
   ["A"] = {
     ["name"] = "Anki"
+    },
+  ["B"] = {
+    ["name"] = "chromium",
+    ["newWindowMenuItem"] = {"File", "New Window"}
   },
   ["C"] = {
     ["name"] = "VSCodium",
@@ -60,19 +64,9 @@ hyper_bindings = {
     ["bundleID"] = "com.culturedcode.ThingsMac",
     ["newWindowMenuItem"] = {"File", "New Things Window"}
   },
-  ["K"] = {
+  ["T"] = {
     ["name"] = "Ghostty",
     ["newWindowMenuItem"] = {"File", "New Window"}
-  },
-  ["L"] = {
-    ["name"] = "LocalSend",
-    ["bundleID"] = "org.localsend.localsendApp",
-  },
-  ["M"] = {
-    ["name"] = "Music",
-    ["bundleID"] = "com.apple.Music",
-    ["triggerOnRelease"] = true,
-    ["newWindowMenuItem"] = {"Window", "Music"}
   },
   ["N"] = {
     ["name"] = "Feishin",
@@ -86,7 +80,7 @@ hyper_bindings = {
     ["name"] = "Safari",
     ["newWindowMenuItem"] = {"File", "New Window"}
   },
-  ["T"] = {
+  ["W"] = {
     ["name"] = "Microsoft Teams"
   },
 --[[
@@ -105,12 +99,8 @@ hyper_bindings = {
 }
 
 -- Note: These bindings work by registering Karabiner Elements events
--- Therefore, a new shyper binding requires a corresponding addition to karabiner.json!
+-- Therefore, a new shyper binding requires a corresponding addition to karabiner.edn!
 shyper_bindings = {
-  ["C"] = {
-    ["name"] = "chromium",
-    ["newWindowMenuItem"] = {"File", "New Window"}
-  },
   ["E"] = {
     ["name"] = "ears",
     ["newWindowMenuItem"] = {"Window", "Main Window"}
@@ -125,7 +115,7 @@ shyper_bindings = {
   },
   ["O"] = {
     ["name"] = "outlook",
-    ["bundleID"] = "com.microsoft.Outlook",
+    ["bundleID"] = "com.apple.Safari.WebApp.5353ED03-6BF4-40DB-A16D-2146FB4CD7A3",
     ["newWindowMenuItem"] = {"File", "New", "Main Window"}
   },
 }
@@ -160,57 +150,12 @@ for key, app in pairs(shyper_bindings) do
   end
 end
 
--- Rectangle "Fill" macro:
--- Checks whether a window is on the left or right side of the screen. If the former,
--- sends "fill left" to Rectangle, and "fill right" for the latter.
--- hs.hotkey.bind(hyper, 'space', function()
---   local win = hs.window.frontmostWindow() ; if not win then return end
---   local scr = win:screen():frame()
---   local cx  = win:frame().x + win:frame().w / 2
---   local mid = scr.x + scr.w / 2
-
---   if cx < mid then
---       hs.execute('open -g "rectangle-pro://execute-action?name=fill-left"')
---   else
---       hs.execute('open -g "rectangle-pro://execute-action?name=fill-right"')
---   end
--- end)
-
-local function sendVscode(mods, key)
-  hs.eventtap.keyStroke(mods, key)
+-- AeroSpace resize with key repeat (hyper+minus / hyper+equal)
+local function aerospaceResize(delta)
+  return function() hs.execute("/opt/homebrew/bin/aerospace resize smart " .. delta) end
 end
-
-local function withVSCode(fn)
-  return function()
-    local front = hs.application.frontmostApplication()
-    if not front or front:name() ~= "VSCodium" then return end
-    fn()
-  end
-end
-
-
--- VSCodium editor manipulation
--- If app occupies >50% screen width, alt+return splits horizontally
--- Otherwise, splits vertically. Add shift key to move to previous split
--- hs.hotkey.bind({"alt"}, "return", withVSCode(function()
---   local win = hs.window.frontmostWindow()
---   local sf, wf = win:screen():frame(), win:frame()
---   if wf.w < sf.w/2 then
---     sendVscode({"ctrl","alt","cmd"}, "down")
---   else
---     sendVscode({"ctrl","alt","cmd"}, "right")
---   end
--- end))
-
--- hs.hotkey.bind({"alt","shift"}, "return", withVSCode(function()
---   local win = hs.window.frontmostWindow()
---   local sf, wf = win:screen():frame(), win:frame()
---   if wf.w < sf.w/2 then
---     sendVscode({"ctrl","alt","cmd"}, "up")
---   else
---     sendVscode({"ctrl","alt","cmd"}, "left")
---   end
--- end))
+hs.hotkey.bind(hyper, "-", aerospaceResize("-50"), nil, aerospaceResize("-50"))
+hs.hotkey.bind(hyper, "=", aerospaceResize("+50"), nil, aerospaceResize("+50"))
 
 --[[------------------------
 ---- URL EVENT BINDINGS ----

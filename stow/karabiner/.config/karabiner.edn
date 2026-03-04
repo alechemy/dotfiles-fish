@@ -14,8 +14,15 @@
                  [:!CQWERl "open -g hammerspoon://lock"]
                  [:!CQWERm "open -g hammerspoon://messages"]
                  [:!CQWERo "open -g hammerspoon://outlook"]
-                 [:!CQWERt :!QWER5]
                  [:!CQWERv "open -g hammerspoon://fnv"]]}
 
-        {:des "Remap Hyper-tab to Rectangle tiling shortcut"
-         :rules [[:!QWERtab :!QWER9]]}]}
+        {:des "AeroSpace: Shyper+number => move focused window to workspace N"
+         :rules [[:!CQWER1 :!WER1]
+                 [:!CQWER2 :!WER2]
+                 [:!CQWER3 :!WER3]
+                 [:!CQWER4 :!WER4]
+                 [:!CQWER5 :!WER5]
+                 [:!CQWER6 :!WER6]
+                 [:!CQWER7 :!WER7]
+                 [:!CQWER8 :!WER8]
+                 [:!CQWER9 :!WER9]]}]}
