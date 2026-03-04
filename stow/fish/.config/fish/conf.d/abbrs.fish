@@ -1,7 +1,6 @@
 #!/usr/bin/env fish
 
 abbr -a -- glog 'git log -n10 --oneline'
-abbr -a -- rm 'rm -I'
 abbr -a -- unpop 'git reset --merge'
 
 # Kill a process running on a given port

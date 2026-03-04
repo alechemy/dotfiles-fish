@@ -17,9 +17,18 @@ matches:
         params:
           format: "%H:%M"
 
-  # console.log(<cursor>)
+  # console.log(<cursor>);
   - trigger: :log
-    replace: console.log($|$)
+    replace: console.log($|$);
+
+  # mail
+  - trigger: :mail
+    replace: alcuster@icloud.com
+
+  # teh -> the
+  - trigger: teh
+    replace: the
+    word: true
 
   # Example of a shell command
   # - trigger: ":shell"
