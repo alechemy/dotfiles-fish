@@ -86,6 +86,14 @@
         "CLAUDE_CODE_EXECUTABLE": "${HOME}/.local/bin/claude",
         "GIT_PAGER": "cat"
       }
+    },
+    "Claude Code by Rohan Patra": {
+      "type": "custom",
+      "command": "node",
+      "args": ["/Users/alec/Developer/claude-agent-acp/dist/index.js"],
+      "default_config_options": {
+        "mode": "bypassPermissions"
+      }
     }
   },
   "agent_buffer_font_size": 12.0,

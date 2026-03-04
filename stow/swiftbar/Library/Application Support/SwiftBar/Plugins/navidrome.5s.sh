@@ -109,6 +109,8 @@ format_for_menubar() {
   fi
 }
 
+LAST_SONG_FILE="$HOME/.cache/navidrome-last-song"
+
 # Main execution
 AUTH_INFO=$(get_subsonic_auth)
 
@@ -125,12 +127,15 @@ if [ -n "$CURRENT_SONG" ] && [ "$CURRENT_SONG" != "null" ]; then
   SONG_INFO=$(format_song_info "$CURRENT_SONG")
 
   if [ -n "$SONG_INFO" ] && [ "$SONG_INFO" != "null - null" ]; then
+    # Persist last known song
+    echo "$SONG_INFO" > "$LAST_SONG_FILE"
+
     # Format for menu bar display
     FORMATTED_INFO=$(format_for_menubar "$SONG_INFO")
     echo "$FORMATTED_INFO | md=true"
     echo "---"
     echo "Now Playing: $SONG_INFO"
-    echo "Open Navidrome | href=$NAVIDROME_URL/app/"
+    echo "Open Feishin | shell=open param1=-a param2=Feishin terminal=false"
     echo "---"
     echo "Refresh | refresh=true"
   else
@@ -139,10 +144,22 @@ if [ -n "$CURRENT_SONG" ] && [ "$CURRENT_SONG" != "null" ]; then
     echo "Getting track info..."
   fi
 else
-  echo "🎵 Not playing"
-  echo "---"
-  echo "No music playing"
-  echo "Open Navidrome | href=$NAVIDROME_URL/app/"
+  LAST_SONG=""
+  if [ -f "$LAST_SONG_FILE" ]; then
+    LAST_SONG=$(cat "$LAST_SONG_FILE")
+  fi
+
+  if [ -n "$LAST_SONG" ]; then
+    FORMATTED_INFO=$(format_for_menubar "$LAST_SONG")
+    echo "⏸ $FORMATTED_INFO | md=true"
+    echo "---"
+    echo "Last played: $LAST_SONG"
+  else
+    echo "⏸ Not playing"
+    echo "---"
+    echo "No music playing"
+  fi
+  echo "Open Feishin | shell=open param1=-a param2=Feishin terminal=false"
   echo "---"
   echo "Refresh | refresh=true"
 fi

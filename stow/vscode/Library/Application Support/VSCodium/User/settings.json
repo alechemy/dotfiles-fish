@@ -117,12 +117,12 @@
 
   // WORKBENCH
   // ----------------------------------------
+  "workbench.colorTheme": "Night Owl",
   "workbench.colorCustomizations": {
     "[Night Owl]": {
       "editor.wordHighlightBackground": "#FFFFFF08"
     }
   },
-  "workbench.colorTheme": "Night Owl",
   "workbench.editor.closeOnFileDelete": true,
   "workbench.editor.alwaysShowEditorActions": true,
   "workbench.editor.empty.hint": "hidden",
@@ -214,6 +214,7 @@
   },
   "terminal.integrated.fontSize": 14,
   "terminal.integrated.defaultProfile.osx": "fish (homebrew)",
+  "terminal.integrated.initialHint": false,
 
   // TERRAFORM
   // ----------------------------------------
@@ -442,7 +443,5 @@
     "*.w": "$(capture).*.w, I$(capture).w",
     "*.wat": "$(capture).wasm",
     "*.xaml": "$(capture).xaml.cs"
-  },
-  "diffEditor.maxComputationTime": 0,
-  "terminal.integrated.initialHint": false
+  }
 }
