@@ -6,10 +6,12 @@
 #   - `brew list --cask` (apps)
 #   - `mas list` (Mac App Store apps)
 
+tap "felixkratz/formulae"
 tap "yqrashawn/goku"
 
 # Binaries
 brew "bat"
+brew "borders"
 brew "coreutils"
 brew "git-delta"
 brew "eza"
@@ -26,6 +28,7 @@ brew "markdownlint-cli"
 brew "mas"
 brew "mise"
 brew "ripgrep"
+brew "sketchybar"
 brew "starship"
 brew "stow"
 brew "yqrashawn/goku/goku", restart_service: true
@@ -44,12 +47,10 @@ cask "espanso"
 cask "ghostty"
 cask "hammerspoon"
 cask "hazel"
-cask "jordanbaird-ice"
 cask "karabiner-elements"
 cask "keyboard-maestro"
 cask "localsend"
 cask "maestral"
-cask "swiftbar"
 cask "ungoogled-chromium"
 cask "vscodium"
 cask "xld"
@@ -62,7 +63,6 @@ mas "Fantastical", id: 975937182
 mas "Find Any File", id: 402569179
 mas "Folder Peek", id: 1615988943
 mas "GrandPerspective", id: 1111570163
-mas "Menu Drop", id: 6754022187
 mas "Name Mangler 3", id: 603637384
 mas "Peek", id: 1554235898
 mas "Refined GitHub", id: 1519867270
