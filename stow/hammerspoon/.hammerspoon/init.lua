@@ -39,7 +39,9 @@ hyper_bindings = {
     },
   ["B"] = {
     ["name"] = "chromium",
-    ["newWindowMenuItem"] = {"File", "New Window"}
+    ["bundleID"] = "org.chromium.Chromium",
+    ["newWindowMenuItem"] = {"File", "New Window"},
+    -- ["summonHere"] = true
   },
   ["C"] = {
     ["name"] = "VSCodium",
@@ -66,7 +68,9 @@ hyper_bindings = {
   },
   ["T"] = {
     ["name"] = "Ghostty",
-    ["newWindowMenuItem"] = {"File", "New Window"}
+    ["bundleID"] = "com.mitchellh.ghostty",
+    ["newWindowMenuItem"] = {"File", "New Window"},
+    ["summonHere"] = true
   },
   ["N"] = {
     ["name"] = "Feishin",
