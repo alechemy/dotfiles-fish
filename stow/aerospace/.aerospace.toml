@@ -7,7 +7,10 @@ config-version = 2
 
 # You can use it to add commands that run after AeroSpace startup.
 # Available commands : https://nikitabobko.github.io/AeroSpace/commands
-after-startup-command = []
+after-startup-command = [
+    'exec-and-forget sketchybar',
+    'exec-and-forget borders',
+]
 
 # Start AeroSpace at login
 start-at-login = true
@@ -35,6 +38,11 @@ default-root-container-orientation = 'auto'
 # See https://nikitabobko.github.io/AeroSpace/commands#move-mouse
 # Fallback value (if you omit the key): on-focused-monitor-changed = []
 on-focused-monitor-changed = ['move-mouse monitor-lazy-center']
+
+# Notify SketchyBar about workspace changes
+exec-on-workspace-change = ['/bin/bash', '-c',
+    'sketchybar --trigger aerospace_workspace_change FOCUSED_WORKSPACE=$AEROSPACE_FOCUSED_WORKSPACE'
+]
 
 # You can effectively turn off macOS "Hide application" (cmd-h) feature by toggling this flag
 # Useful if you don't use this macOS feature, but accidentally hit cmd-h or cmd-alt-h key
@@ -70,7 +78,7 @@ on-mode-changed = []
     inner.vertical =   8
     outer.left =       300
     outer.bottom =     8
-    outer.top =        8
+    outer.top =        48
     outer.right =      300
 
 # 'main' binding mode declaration
@@ -148,6 +156,7 @@ on-mode-changed = []
 # Workspace Assignments
 [[on-window-detected]]
 if.app-id = 'com.mitchellh.ghostty'
+if.during-aerospace-startup = true
 run = 'move-node-to-workspace 1'
 
 [[on-window-detected]]
@@ -186,10 +195,9 @@ run = 'move-node-to-workspace 3'
 if.app-id = 'com.devon-technologies.think'
 run = 'move-node-to-workspace 4'
 
-# [[on-window-detected]]
-# if.app-id = 'org.chromium.Chromium'
-# if.during-aerospace-startup = true
-# run = 'move-node-to-workspace 4'
+[[on-window-detected]]
+if.app-id = 'org.chromium.Chromium'
+run = 'move-node-to-workspace 4'
 
 [[on-window-detected]]
 if.app-name-regex-substring = 'Qobuz'
@@ -203,7 +211,7 @@ run = 'move-node-to-workspace 5'
 if.app-id = 'org.apple.Music'
 run = 'move-node-to-workspace 5'
 
-# Common Floating Windows
+# Floating Windows
 [[on-window-detected]]
 if.app-id = 'com.apple.systempreferences'
 run = 'layout floating'
@@ -214,6 +222,10 @@ run = 'layout floating'
 
 [[on-window-detected]]
 if.app-id = 'com.apple.finder'
+run = 'layout floating'
+
+[[on-window-detected]]
+if.app-id = 'com.aone.keka'
 run = 'layout floating'
 
 [[on-window-detected]]

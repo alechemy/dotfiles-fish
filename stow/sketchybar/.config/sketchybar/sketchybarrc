@@ -1,0 +1,72 @@
+# SketchyBar config — Aerospace integration
+# https://felixkratz.github.io/SketchyBar/config/bar
+
+PLUGIN_DIR="$CONFIG_DIR/plugins"
+
+##### Bar Appearance #####
+sketchybar --bar position=top height=40 blur_radius=30 color=0x40000000 topmost=window_level
+
+##### Changing Defaults #####
+default=(
+  padding_left=5
+  padding_right=5
+  icon.font="Helvetica Neue:Bold:17.0"
+  label.font="Helvetica Neue:Regular:14.0"
+  icon.color=0xffffffff
+  label.color=0xffffffff
+  icon.padding_left=4
+  icon.padding_right=4
+  label.padding_left=4
+  label.padding_right=4
+)
+sketchybar --default "${default[@]}"
+
+##### Right Items (added right-to-left: first = rightmost) #####
+
+# Clock — furthest right
+sketchybar --add item clock right \
+  --set clock update_freq=10 icon= script="$PLUGIN_DIR/clock.sh"
+
+# Volume
+sketchybar --add item volume right \
+  --set volume script="$PLUGIN_DIR/volume.sh" \
+  --subscribe volume volume_change
+
+# Aerospace Workspace Indicators (reversed so 1 2 3 ... reads left-to-right)
+sketchybar --add event aerospace_workspace_change
+
+for sid in $(aerospace list-workspaces --all | sort -rn); do
+  if [ "$sid" = "H" ]; then continue; fi
+  sketchybar --add item space."$sid" right \
+    --subscribe space."$sid" aerospace_workspace_change \
+    --set space."$sid" \
+    background.color=0x44ffffff \
+    background.corner_radius=5 \
+    background.height=25 \
+    background.drawing=off \
+    label="$sid" \
+    label.padding_left=7 \
+    label.padding_right=7 \
+    click_script="aerospace workspace $sid" \
+    script="$PLUGIN_DIR/aerospace.sh $sid"
+done
+
+# Front App
+sketchybar --add item front_app left \
+  --set front_app icon.drawing=off script="$PLUGIN_DIR/front_app.sh" \
+  label.font="Helvetica Neue:Bold:14.0" \
+  --subscribe front_app front_app_switched
+
+# Navidrome Now Playing — leftmost
+sketchybar --add item navidrome right \
+  --set navidrome update_freq=5 \
+  icon.font="Helvetica Neue:Regular:14.0" \
+  icon=" Not playing" \
+  label.font="Helvetica Neue:Bold:14.0" \
+  label="" \
+  label.padding_right=8 \
+  click_script="open -a Feishin" \
+  script="$PLUGIN_DIR/navidrome.sh"
+
+##### Force all scripts to run the first time (never do this in a script) #####
+sketchybar --update
