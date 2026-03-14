@@ -12,4 +12,6 @@ shell-integration-features = no-cursor
 macos-window-shadow = false
 macos-titlebar-style = tabs
 keybind = shift+enter=text:\x1b\r
+keybind = cmd+t=new_split:auto
+keybind = cmd+shift+t=new_tab
 clipboard-paste-protection = false

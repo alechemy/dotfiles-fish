@@ -47,6 +47,20 @@ defaults write com.apple.TextEdit NSShowAppCentricOpenPanelInsteadOfUntitledFile
 defaults write com.apple.dock autohide-delay -float 0.1
 defaults write com.apple.dock autohide-time-modifier -float 0.5
 
+# Disable window opening animations
+defaults write -g NSAutomaticWindowAnimationsEnabled -bool false
+
+# Auto-hide the menu bar (SketchyBar replaces it)
+# 0 = Always, 1 = On Desktop Only, 2 = In Full Screen Only
+defaults write com.apple.controlcenter AutoHideMenuBarOption -int 0
+
+# Disable "Displays have separate Spaces"
+# https://nikitabobko.github.io/AeroSpace/guide#a-note-on-displays-have-separate-spaces
+defaults write com.apple.spaces spans-displays -bool true
+
+# Move windows by dragging any part of the window (while holding ctr+cmd)
+defaults write -g NSWindowShouldDragOnGesture -bool true
+
 ###############################################################################
 # Third Party Apps                                                            #
 ###############################################################################

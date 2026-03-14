@@ -1,6 +1,23 @@
 #!/bin/sh
 
 # NAS Location: /share/CACHEDEV1_DATA/python-apps/rip-and-tag.sh
+# After updating, copy to NAS:
+#   bash -c "USER=$(whoami); scp /Users/$USER/.dotfiles/stow/bin/.local/bin/rip-and-tag.sh admin@192.168.50.54:/share/CACHEDEV1_DATA/python-apps/rip-and-tag.sh"
+#
+# --- SSH SETUP (NAS -> Mac mini) ---
+# Step 6 SSHes into the Mac mini to nudge Music.app. For passwordless auth:
+#   1. SSH into the NAS as admin:  ssh admin@192.168.50.54
+#   2. Note: on QNAP, $HOME is /root and ~/.ssh is a symlink to /etc/config/ssh/
+#   3. Generate a key:  ssh-keygen -t ed25519 -f /root/.ssh/id_ed25519
+#   4. Copy it to the Mac mini:
+#        cat ~/.ssh/id_ed25519.pub | ssh alec@192.168.50.251 "cat >> ~/.ssh/authorized_keys"
+#   5. Test:  ssh alec@192.168.50.251 "echo ok"
+#   6. On the Mac mini, Remote Login must be enabled:
+#        System Settings > General > Sharing > Remote Login
+#
+# To upgrade streamrip:
+#   sudo /share/CACHEDEV1_DATA/python-apps/streamrip_env/bin/pip install --upgrade https://github.com/nathom/streamrip/archive/refs/tags/v2.2.0.tar.gz
+
 
 # --- CONFIGURATION ---
 INBOX_DIR="/share/Media/Music/Inbox"
@@ -9,6 +26,7 @@ RIP_CONFIG="/share/CACHEDEV1_DATA/streamrip/config.toml"
 SEARCH_RESULTS_FILE="/tmp/rip-search-results.json"
 RIP_LOG_FILE="/tmp/rip-download.log"
 RIP_EXIT_FILE="/tmp/rip-exit-status.txt"
+MAC_MINI="alec@192.168.50.251"
 
 # --- COMMANDS ---
 PYTHON_CMD="/share/CACHEDEV1_DATA/python-apps/streamrip_env/bin/python"
@@ -77,28 +95,28 @@ if [ -z "$GENRE" ]; then
     IFS= read -r choice
 
     case "$choice" in
-      0)
-        echo "Cancelled."
-        exit 1
-        ;;
-      ''|*[!0-9]*)
-        echo "Invalid selection. Enter a number."
-        ;;
-      *)
-        if [ "$choice" -ge 1 ] 2>/dev/null && [ "$choice" -le "$max" ] 2>/dev/null; then
-          idx=1
-          for allowed_genre in $ALLOWED_GENRES; do
-            if [ "$idx" -eq "$choice" ]; then
-              GENRE="$allowed_genre"
-              break
-            fi
-            idx=$((idx + 1))
-          done
-          break
-        else
-          echo "Invalid selection. Choose 1-$max or 0 to cancel."
-        fi
-        ;;
+    0)
+      echo "Cancelled."
+      exit 1
+      ;;
+    '' | *[!0-9]*)
+      echo "Invalid selection. Enter a number."
+      ;;
+    *)
+      if [ "$choice" -ge 1 ] 2>/dev/null && [ "$choice" -le "$max" ] 2>/dev/null; then
+        idx=1
+        for allowed_genre in $ALLOWED_GENRES; do
+          if [ "$idx" -eq "$choice" ]; then
+            GENRE="$allowed_genre"
+            break
+          fi
+          idx=$((idx + 1))
+        done
+        break
+      else
+        echo "Invalid selection. Choose 1-$max or 0 to cancel."
+      fi
+      ;;
     esac
   done
 
@@ -224,7 +242,10 @@ esac
 
 # --- STEP 1: DOWNLOAD ---
 echo "--> Step 1: Downloading album from URL..."
-{ "$RIP_CMD" --config-path "$RIP_CONFIG" url "$URL" 2>&1; echo $? > "$RIP_EXIT_FILE"; } | tee "$RIP_LOG_FILE"
+{
+  "$RIP_CMD" --config-path "$RIP_CONFIG" url "$URL" 2>&1
+  echo $? >"$RIP_EXIT_FILE"
+} | tee "$RIP_LOG_FILE"
 RIP_EXIT=$(cat "$RIP_EXIT_FILE")
 rm -f "$RIP_EXIT_FILE"
 
@@ -289,9 +310,14 @@ rsync -av --remove-source-files "$ALBUM_PATH/" "$AUTO_ADD_DIR/$ALBUM_NAME/"
 echo "--> Step 5: Setting final permissions..."
 chmod -R 775 "$AUTO_ADD_DIR/$ALBUM_NAME"
 
-# --- STEP 6: TRIGGER THE IMPORT ---
-echo "--> Step 6: Touching files to ensure import..."
-find "$AUTO_ADD_DIR/$ALBUM_NAME" -type f -exec touch {} +
+# --- STEP 6: NUDGE MUSIC.APP ON MAC MINI ---
+echo "--> Step 6: Triggering Music.app import on Mac mini..."
+ssh "$MAC_MINI" "open -j -a Music && open -g '/Volumes/Media/Music/Music/Media.localized/Automatically Add to Music.localized'" 2>/dev/null
+if [ $? -eq 0 ]; then
+  echo "    Nudged Music.app successfully."
+else
+  echo "    ⚠️  Could not reach Mac mini — you may need to trigger import manually."
+fi
 
 echo ""
 echo "Workflow complete! Album should now be importing into Music.app."

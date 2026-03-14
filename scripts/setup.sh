@@ -66,6 +66,9 @@ if command -v stow &> /dev/null; then
     cd "$STOW_DIR"
     for package in *; do
         if [ -d "$package" ]; then
+            # DEVONthink is opt-in (handled separately below)
+            [[ "$package" == "devonthink" ]] && continue
+
             # Dry-run to detect conflicts, then back up the targets
             conflicts=$(stow --no --no-folding --ignore='.DS_Store' --target="$HOME" "$package" 2>&1 || true)
             if echo "$conflicts" | grep -q 'cannot stow'; then
@@ -84,11 +87,44 @@ if command -v stow &> /dev/null; then
 
     for package in *; do
         if [ -d "$package" ]; then
+            [[ "$package" == "devonthink" ]] && continue
             stow --restow --no-folding --ignore='.DS_Store' --target="$HOME" "$package"
         fi
     done
     cd "$DOTFILES"
     success "Dotfiles stowed"
+
+    # 4b. DEVONthink Pipeline (opt-in, single-machine only)
+    read -p "  ? Install DEVONthink pipeline (smart rules + launchd agents)? [y/N] " -n 1 -r
+    echo
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        info "Stowing DEVONthink pipeline..."
+        cd "$STOW_DIR"
+
+        # Back up any existing files that would conflict
+        conflicts=$(stow --no --no-folding --ignore='.DS_Store' --target="$HOME" devonthink 2>&1 || true)
+        if echo "$conflicts" | grep -q 'cannot stow'; then
+            echo "$conflicts" | grep 'existing target' | while read -r line; do
+                target=$(echo "$line" | sed 's/.*existing target //' | sed 's/ since.*//')
+                target_path="$HOME/$target"
+                if [ -e "$target_path" ] && [ ! -L "$target_path" ]; then
+                    info "Backing up conflicting $target..."
+                    mv "$target_path" "$target_path.backup.$(date +%s)"
+                fi
+            done
+        fi
+
+        stow --restow --no-folding --ignore='.DS_Store' --target="$HOME" devonthink
+        cd "$DOTFILES"
+        success "DEVONthink pipeline stowed"
+
+        info "Loading launchd agents..."
+        launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/com.user.dt-daily-note.plist" 2>/dev/null || true
+        launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/com.user.dt-watchdog.plist" 2>/dev/null || true
+        success "DEVONthink pipeline installed"
+    else
+        info "Skipping DEVONthink pipeline."
+    fi
 
     # Warn if Ghostty has a config in Application Support that would shadow the stowed one
     GHOSTTY_APPSUPPORT="$HOME/Library/Application Support/com.mitchellh.ghostty/config"
