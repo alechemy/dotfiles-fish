@@ -1,5 +1,11 @@
 #!/usr/bin/env bash
 
+# If Feishin is not running, show "nothing playing"
+if ! pgrep -xq "Feishin"; then
+  sketchybar --set "$NAME" icon="" label=" Nothing playing"
+  exit 0
+fi
+
 NAVIDROME_ENV="$HOME/.config/navidrome/env"
 if [ ! -f "$NAVIDROME_ENV" ]; then
   sketchybar --set "$NAME" icon=" No config" label=""
@@ -15,23 +21,37 @@ if [ -z "$PASSWORD" ]; then
 fi
 
 LAST_SONG_FILE="$HOME/.cache/navidrome-last-song"
+AUTH_CACHE="$HOME/.cache/navidrome-auth"
+AUTH_MAX_AGE=300 # re-auth every 5 minutes
 
-# Authenticate and get subsonic token
-AUTH_INFO=$(curl -s --max-time 3 "$NAVIDROME_URL/auth/login" \
-  -H "Content-Type: application/json" \
-  -d "{\"username\":\"$USERNAME\",\"password\":\"$PASSWORD\"}" 2>/dev/null)
-
-if [ -z "$AUTH_INFO" ] || [ "$AUTH_INFO" = "null" ]; then
-  sketchybar --set "$NAME" icon=" Offline" label=""
-  exit 0
+# Load cached auth if fresh enough
+if [ -f "$AUTH_CACHE" ]; then
+  AUTH_AGE=$(( $(date +%s) - $(stat -f %m "$AUTH_CACHE") ))
+  if [ "$AUTH_AGE" -lt "$AUTH_MAX_AGE" ]; then
+    source "$AUTH_CACHE"
+  fi
 fi
 
-SUBSONIC_TOKEN=$(echo "$AUTH_INFO" | jq -r '.subsonicToken // empty' 2>/dev/null)
-SUBSONIC_SALT=$(echo "$AUTH_INFO" | jq -r '.subsonicSalt // empty' 2>/dev/null)
+# Authenticate if no cached token
+if [ -z "$SUBSONIC_TOKEN" ] || [ -z "$SUBSONIC_SALT" ]; then
+  AUTH_INFO=$(curl -s --max-time 3 "$NAVIDROME_URL/auth/login" \
+    -H "Content-Type: application/json" \
+    -d "{\"username\":\"$USERNAME\",\"password\":\"$PASSWORD\"}" 2>/dev/null)
 
-if [ -z "$SUBSONIC_TOKEN" ]; then
-  sketchybar --set "$NAME" icon=" Auth failed" label=""
-  exit 0
+  if [ -z "$AUTH_INFO" ] || [ "$AUTH_INFO" = "null" ]; then
+    sketchybar --set "$NAME" icon=" Offline" label=""
+    exit 0
+  fi
+
+  SUBSONIC_TOKEN=$(echo "$AUTH_INFO" | jq -r '.subsonicToken // empty' 2>/dev/null)
+  SUBSONIC_SALT=$(echo "$AUTH_INFO" | jq -r '.subsonicSalt // empty' 2>/dev/null)
+
+  if [ -z "$SUBSONIC_TOKEN" ]; then
+    sketchybar --set "$NAME" icon=" Auth failed" label=""
+    exit 0
+  fi
+
+  printf 'SUBSONIC_TOKEN=%s\nSUBSONIC_SALT=%s\n' "$SUBSONIC_TOKEN" "$SUBSONIC_SALT" > "$AUTH_CACHE"
 fi
 
 # Get now playing

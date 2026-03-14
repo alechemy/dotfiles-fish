@@ -8,15 +8,11 @@
          :rules [[:##caps_lock :!QWEright_shift nil {:alone :escape}]]}
 
         {:des "SUPER-HYPER (a.k.a. 'SHYPER') KEY! Remap Hyper-left_command-KEY to Hammerspoon URL events"
-         :rules [[:!CQWERc "open -g hammerspoon://chromium"]
-                 [:!CQWERe "open -g hammerspoon://ears"]
+         :rules [[:!CQWERe "open -g hammerspoon://ears"]
                  [:!CQWERf "open -g hammerspoon://finder"]
-                 [:!CQWERl "open -g hammerspoon://lock"]
-                 [:!CQWERm "open -g hammerspoon://messages"]
-                 [:!CQWERo "open -g hammerspoon://outlook"]
                  [:!CQWERv "open -g hammerspoon://fnv"]]}
 
-        {:des "AeroSpace: Shyper+number => move focused window to workspace N"
+        {:des "SUPER-HYPER (a.k.a. 'SHYPER') KEY! AeroSpace: Shyper => move focused window to workspace"
          :rules [[:!CQWER1 :!WER1]
                  [:!CQWER2 :!WER2]
                  [:!CQWER3 :!WER3]
@@ -25,4 +21,6 @@
                  [:!CQWER6 :!WER6]
                  [:!CQWER7 :!WER7]
                  [:!CQWER8 :!WER8]
-                 [:!CQWER9 :!WER9]]}]}
+                 [:!CQWER9 :!WER9]
+                 [:!CQWERgrave_accent_and_tilde :!WERgrave_accent_and_tilde]
+                 [:!CQWERtab :!WERtab]]}]}

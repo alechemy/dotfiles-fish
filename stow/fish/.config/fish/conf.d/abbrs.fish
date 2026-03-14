@@ -9,3 +9,4 @@ function kill_port
     kill -9 (lsof -ti tcp:$argv)
 end
 abbr -a killport --function kill_port
+abbr -a -- rwm reload_wm
