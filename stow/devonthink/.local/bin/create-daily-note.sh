@@ -111,7 +111,7 @@ on run argv
         set plain text of newRecord to noteContent
 
         -- Tag the record for smart group filtering
-        set tags of newRecord to {"type/daily"}
+        set tags of newRecord to {"Daily Note"}
 
         -- Trigger cloud sync so the note is available on other devices
         try

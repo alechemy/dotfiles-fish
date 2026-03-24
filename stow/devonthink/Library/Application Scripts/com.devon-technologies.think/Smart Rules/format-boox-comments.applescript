@@ -24,6 +24,7 @@ on performSmartRule(theRecords)
             "- Replace curly braces or brackets used to group items with nested lists." & linefeed & ¬
             "- Preserve line breaks between distinct thoughts." & linefeed & ¬
             "- Use **bold** for emphasized text." & linefeed & ¬
+            "- Replace circled numbers (①, ②, ③, etc.) or other enclosed Unicode number forms with standard Markdown ordered list items (1., 2., 3.)." & linefeed & ¬
             "- Output ONLY the reformatted Markdown."
 
         repeat with theRecord in theRecords
@@ -70,6 +71,15 @@ on performSmartRule(theRecords)
                             write formatted to fileRef as «class utf8»
                             close access fileRef
                             do shell script "/opt/homebrew/bin/markdownlint " & quoted form of tmpFile & " --quiet --fix || true"
+                            -- Safety net: replace any Unicode circled numbers the LLM missed
+                            set pyFixCircled to "import sys" & linefeed & ¬
+                                "f = sys.argv[1]" & linefeed & ¬
+                                "t = open(f).read()" & linefeed & ¬
+                                "circled = '①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳'" & linefeed & ¬
+                                "for i, c in enumerate(circled):" & linefeed & ¬
+                                "    t = t.replace(c, str(i + 1) + '.')" & linefeed & ¬
+                                "open(f, 'w').write(t)"
+                            do shell script "/usr/bin/python3 -c " & quoted form of pyFixCircled & " " & quoted form of tmpFile
                             set formatted to do shell script "cat " & quoted form of tmpFile
                             do shell script "rm -f " & quoted form of tmpFile
                         on error lintErr

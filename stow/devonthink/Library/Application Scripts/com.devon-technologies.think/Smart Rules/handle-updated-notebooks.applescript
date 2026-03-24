@@ -55,7 +55,7 @@ on performSmartRule(theRecords)
 
 					set needsRmse to false
 
-					-- Layer 2: Fast OCR Text Similarity (More robust to layout shifts and sparseness)
+					-- Layer 2: OCR Text Containment (only exercised for Notebook-X; custom names bypass via fallback below)
 					if not isCollision then
 						set pyScript to "import sys, subprocess, difflib, tempfile, os" & linefeed & ¬
 							"def get_text(path):" & linefeed & ¬
@@ -78,7 +78,13 @@ on performSmartRule(theRecords)
 							"if len(t1) < 15 and len(t2) < 15:" & linefeed & ¬
 							"    print('USE_RMSE')" & linefeed & ¬
 							"else:" & linefeed & ¬
-							"    print(difflib.SequenceMatcher(None, t1, t2).ratio())"
+							"    shorter = min(len(t1), len(t2))" & linefeed & ¬
+							"    if shorter == 0:" & linefeed & ¬
+							"        print(0)" & linefeed & ¬
+							"    else:" & linefeed & ¬
+							"        m = difflib.SequenceMatcher(None, t1, t2, autojunk=False)" & linefeed & ¬
+							"        containment = sum(b.size for b in m.get_matching_blocks() if b.size >= 3) / shorter" & linefeed & ¬
+							"        print(containment)"
 
 						set ocrCmd to "/usr/bin/python3 -c " & quoted form of pyScript & " " & quoted form of existingPath & " " & quoted form of newPath
 						try
@@ -90,7 +96,6 @@ on performSmartRule(theRecords)
 								if textSim < 0.3 then
 									set isCollision to true
 								end if
-								log message "OCR similarity for " & recordKey & ": " & textSim info "Threshold: < 0.3"
 							end if
 						on error errMsg
 							log message "OCR text diff failed for " & recordKey & ": " & errMsg
@@ -105,7 +110,6 @@ on performSmartRule(theRecords)
 							set newSize to do shell script "stat -f%z " & quoted form of newPath
 							set oldDims to do shell script "export PATH=/opt/homebrew/bin:/usr/local/bin:$PATH; magick identify -format '%wx%h' " & quoted form of (existingPath & "[0]")
 							set newDims to do shell script "export PATH=/opt/homebrew/bin:/usr/local/bin:$PATH; magick identify -format '%wx%h' " & quoted form of (newPath & "[0]")
-							log message "Comparison metadata for " & recordKey info "Old file: " & oldSize & " bytes, " & oldDims & "px. New file: " & newSize & " bytes, " & newDims & "px."
 						on error metaErr
 							log message "Failed to fetch metadata for " & recordKey info metaErr
 						end try
@@ -113,7 +117,6 @@ on performSmartRule(theRecords)
 						-- Run magick compare with -verbose and log raw output before parsing
 						set rawRmseCmd to "export PATH=/opt/homebrew/bin:/usr/local/bin:$PATH; magick compare -verbose -metric RMSE " & quoted form of (existingPath & "[0]") & " " & quoted form of (newPath & "[0]") & " null: 2>&1 || true"
 						set rawOutput to do shell script rawRmseCmd
-						log message "Raw magick output for " & recordKey info rawOutput
 
 						-- Parse the raw output to get the metric (ImageMagick outputs distance: 0 = identical)
 						set parseCmd to "echo " & quoted form of rawOutput & " | /usr/bin/tr '\\r' '\\n' | /usr/bin/awk '/[Aa]ll: / {print $NF}' | /usr/bin/tr -d '()' | /usr/bin/tail -n 1"
@@ -129,6 +132,14 @@ on performSmartRule(theRecords)
 							log message "RMSE parse failed for " & recordKey & ": " & errMsg
 							set isCollision to true
 						end try
+					end if
+				end if
+
+				-- Fallback: If it's intentionally named, assume it's an update, ignoring collision metrics
+				if isCollision then
+					set isDefaultName to do shell script "echo " & quoted form of recordKey & " | grep -cE '^Notebook-[0-9]+(-[0-9]+)?$' || true"
+					if isDefaultName is "0" then
+						set isCollision to false
 					end if
 				end if
 
@@ -168,12 +179,6 @@ on performSmartRule(theRecords)
 
 					-- New document: set source key, let the normal pipeline continue
 					add custom meta data recordKey for "SourceFile" to currentRecord
-
-					-- If the name doesn't match the default Boox pattern, the user named it intentionally — lock the name so 02c won't overwrite it
-					set isDefaultName to do shell script "echo " & quoted form of recordKey & " | grep -cE '^Notebook-[0-9]+(-[0-9]+)?$' || true"
-					if isDefaultName is "0" then
-						add custom meta data 1 for "NameLocked" to currentRecord
-					end if
 
 					set survivingRecord to currentRecord
 				end if

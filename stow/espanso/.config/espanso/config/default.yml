@@ -2,3 +2,6 @@
 
 # Automatically start espanso on login
 auto_start: true
+
+# Disable search bar shortcut
+search_shortcut: off

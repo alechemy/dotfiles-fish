@@ -178,7 +178,7 @@ if.app-name-regex-substring = 'Teams'
 run = 'move-node-to-workspace 2'
 
 [[on-window-detected]]
-if.app-id = 'com.microsoft.Outlook'
+if.app-id = 'com.apple.Safari.WebApp.5353ED03-6BF4-40DB-A16D-2146FB4CD7A3'
 run = 'move-node-to-workspace 2'
 
 [[on-window-detected]]
@@ -240,6 +240,14 @@ run = 'layout floating'
 
 [[on-window-detected]]
 if.app-id = 'com.clickontyler.Ears'
+run = 'layout floating'
+
+[[on-window-detected]]
+if.app-id = 'com.firecore.infuse'
+run = 'layout floating'
+
+[[on-window-detected]]
+if.app-id = 'com.runningwithcrayons.Alfred-Preferences'
 run = 'layout floating'
 
 [[on-window-detected]]
