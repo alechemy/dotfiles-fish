@@ -27,6 +27,12 @@ sketchybar --default "${default[@]}"
 sketchybar --add item clock right \
   --set clock update_freq=10 icon= script="$PLUGIN_DIR/clock.sh"
 
+# VPN status
+sketchybar --add item vpn right \
+  --set vpn update_freq=10 \
+  click_script="open -a 'NordVPN'" \
+  script="$PLUGIN_DIR/vpn.sh"
+
 # Volume
 sketchybar --add item volume right \
   --set volume script="$PLUGIN_DIR/volume.sh" \
@@ -133,7 +139,7 @@ sketchybar --add item navidrome right \
   label.font="Helvetica Neue:Bold:14.0" \
   label="" \
   label.padding_right=8 \
-  click_script="$PLUGIN_DIR/navidrome_click.sh" \
+  click_script="open -a 'Feishin'" \
   script="$PLUGIN_DIR/navidrome.sh"
 
 ##### Force all scripts to run the first time (never do this in a script) #####

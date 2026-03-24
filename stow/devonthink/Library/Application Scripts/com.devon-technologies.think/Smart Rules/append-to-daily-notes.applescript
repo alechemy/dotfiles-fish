@@ -130,28 +130,36 @@ on performSmartRule(theRecords)
             end if
 
             -- =========================================================
-            -- 2. Append Wikilink if EventDate is valid (All documents)
+            -- 2. Append Wikilink to daily note (All documents)
             -- =========================================================
-            if hasValidEventDate then
-                set isLinked to (get custom meta data for "DailyNoteLinked" from theRecord)
-                if isLinked is not 1 then
+            set isLinked to (get custom meta data for "DailyNoteLinked" from theRecord)
+            if isLinked is not 1 then
+                if hasValidEventDate then
                     set targetFilename to eventDate & ".md"
+                else
+                    -- Fall back to the document's creation date so a note
+                    -- taken on Tuesday still links to Tuesday even if the
+                    -- smart rule doesn't run until Thursday.
+                    set cDate to creation date of theRecord
+                    set cYear to year of cDate as text
+                    set cMonth to text -2 thru -1 of ("0" & ((month of cDate) as integer))
+                    set cDay to text -2 thru -1 of ("0" & (day of cDate))
+                    set targetFilename to cYear & "-" & cMonth & "-" & cDay & ".md"
+                end if
 
-                    set targetNote to get record at (groupPath & "/" & targetFilename) in targetDB
+                set targetNote to get record at (groupPath & "/" & targetFilename) in targetDB
 
-                    if targetNote is not missing value then
-                        set linkText to "- [[" & docBaseName & "]]"
+                if targetNote is not missing value then
+                    set linkText to "- [[" & docBaseName & "]]"
 
-                        -- Only append if the link isn't already in the note
-                        if (plain text of targetNote) does not contain linkText then
-                            my appendToSection(targetNote, sectionHeader, linkText & return)
-                        end if
-
-                        add custom meta data 1 for "DailyNoteLinked" to theRecord
-                    else
-                        -- Not creating note if it doesn't exist, as per requirements
-                        log message "Process Daily Notes: Target daily note (" & targetFilename & ") not found, skipping wikilink for " & docName
+                    -- Only append if the link isn't already in the note
+                    if (plain text of targetNote) does not contain linkText then
+                        my appendToSection(targetNote, sectionHeader, linkText & return)
                     end if
+
+                    add custom meta data 1 for "DailyNoteLinked" to theRecord
+                else
+                    log message "Process Daily Notes: Target daily note (" & targetFilename & ") not found, skipping wikilink for " & docName
                 end if
             end if
 
@@ -180,19 +188,26 @@ on appendToSection(theNote, sectionHeader, contentBlock)
             "    if line.strip() == header:" & linefeed & ¬
             "        header_idx = i" & linefeed & ¬
             "        break" & linefeed & ¬
+            "block_lines = block.rstrip('\\n').split('\\n')" & linefeed & ¬
             "if header_idx is None:" & linefeed & ¬
             "    lines.append('')" & linefeed & ¬
             "    lines.append(header)" & linefeed & ¬
             "    lines.append('')" & linefeed & ¬
-            "    lines.append(block)" & linefeed & ¬
+            "    lines += block_lines" & linefeed & ¬
             "else:" & linefeed & ¬
             "    insert_idx = len(lines)" & linefeed & ¬
             "    for i in range(header_idx + 1, len(lines)):" & linefeed & ¬
             "        if re.match(r'^#{1,2}\\s', lines[i]):" & linefeed & ¬
             "            insert_idx = i" & linefeed & ¬
             "            break" & linefeed & ¬
-            "    lines.insert(insert_idx, '')" & linefeed & ¬
-            "    lines.insert(insert_idx + 1, block)" & linefeed & ¬
+            "    first_is_list = block_lines[0].lstrip().startswith('- ')" & linefeed & ¬
+            "    prev_is_list = insert_idx > 0 and lines[insert_idx - 1].lstrip().startswith('- ')" & linefeed & ¬
+            "    if not (prev_is_list and first_is_list):" & linefeed & ¬
+            "        lines.insert(insert_idx, '')" & linefeed & ¬
+            "        insert_idx += 1" & linefeed & ¬
+            "    for bl in block_lines:" & linefeed & ¬
+            "        lines.insert(insert_idx, bl)" & linefeed & ¬
+            "        insert_idx += 1" & linefeed & ¬
             "print('\\n'.join(lines), end='')"
 
         set tmpPath to do shell script "mktemp /tmp/dt-daily.XXXXXX"

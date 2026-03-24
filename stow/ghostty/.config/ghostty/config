@@ -15,3 +15,6 @@ keybind = shift+enter=text:\x1b\r
 keybind = cmd+t=new_split:auto
 keybind = cmd+shift+t=new_tab
 clipboard-paste-protection = false
+notify-on-command-finish = unfocused
+notify-on-command-finish-action = notify
+notify-on-command-finish-after = 10s

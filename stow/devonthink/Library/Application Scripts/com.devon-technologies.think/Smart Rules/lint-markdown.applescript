@@ -17,7 +17,14 @@ on performSmartRule(theRecords)
                     try
                         do shell script ¬
                             "sed -i '' 's/\\t/  /g' " & quoted form of thePath & ¬
-                            " && /opt/homebrew/bin/markdownlint " & quoted form of thePath & " --quiet --fix || true"
+                            " && /opt/homebrew/bin/markdownlint " & quoted form of thePath & " --quiet --fix || true" & ¬
+                            "; sed -i '' " & ¬
+                            "-e 's/~~/%%DT%%/g' " & ¬
+                            "-e 's/\\\\~/%%ET%%/g' " & ¬
+                            "-e 's/~/\\\\~/g' " & ¬
+                            "-e 's/%%DT%%/~~/g' " & ¬
+                            "-e 's/%%ET%%/\\\\~/g' " & ¬
+                            quoted form of thePath
                         synchronize record theRecord
                     on error errMsg
                         log message "Lint Markdown: failed for " & (name of theRecord) & ": " & errMsg

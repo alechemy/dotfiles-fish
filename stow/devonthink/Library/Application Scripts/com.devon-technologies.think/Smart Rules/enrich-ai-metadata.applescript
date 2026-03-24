@@ -3,12 +3,31 @@ on performSmartRule(theRecords)
     set maxWaitSeconds to 300 -- 5 minutes
     set theRole to "You are a document cataloguing assistant that responds only in JSON."
     set theInstructions to "Based on this document, respond with ONLY a JSON object containing the following keys:" & linefeed & linefeed & ¬
-      "- \"title\": A concise, descriptive document title in English. Do NOT include a date prefix or suffix (e.g. do not append '2/20/26' or '2026-02-20' to the title) — dates are handled separately via the \"documentDate\" field below. If the document already has a clear, descriptive title — whether from its filename (e.g. \"Sony A95K Television User Manual.pdf\") or from a heading/title within its content (e.g. an article headline or a title page) — preserve that title as-is rather than rephrasing or summarizing it. Only generate a new title when the existing name is generic or non-descriptive (e.g. \"Untitled\", \"IMG_0042\", \"Document 1\", \"Notebook-7\")." & linefeed & ¬
-      "- \"documentDate\": A date string in strict yyyy-mm-dd format (e.g. \"2025-03-14\"), or an empty string. Set this if and only if the document is anchored to a single specific calendar date — e.g. a receipt, a restaurant bill, a meeting, a phone call, a journal entry, an appointment, a bank statement for a specific day. Do NOT set it if the document spans a period or has no specific date — e.g. a W-2 (covers a full tax year), an annual report, a manual, a lease, a bookmark, a contract with a term. Do NOT construct or infer a date from a referenced period (e.g. do not return 2024-01-01 or 2024-12-31 for a document covering tax year 2024). The date may come from the document's content or, if not stated there, from the file creation or modification date. When a date appears without an explicit year and the previous year would be more plausible given the document's creation date, assume the previous year. Return \"\" as your fallback whenever the document is not anchored to a single date, or no date is inferred whatsoever." & linefeed & ¬
+      "- \"title\": A concise, descriptive document title in English. Do NOT include a date prefix or suffix (e.g. do not append '2/20/26' or '2026-02-20' to the title) — dates are handled separately via the \"eventDate\" field below. If the filename or heading contains a date (e.g. \"March 17 Round Table\", \"2/20/26 Meeting Notes\"), strip the date portion and use only the descriptive remainder as the title (e.g. \"Round Table\", \"Meeting Notes\") — capture the date in eventDate instead. If the document already has a clear, descriptive title — whether from its filename (e.g. \"Sony A95K Television User Manual.pdf\") or from a heading/title within its content (e.g. an article headline or a title page) — preserve that title as-is (after removing any date portion) rather than rephrasing or summarizing it. Only generate a new title when the existing name is generic or non-descriptive (e.g. \"Untitled\", \"IMG_0042\", \"Document 1\", \"Notebook-7\")." & linefeed & ¬
+      "- \"eventDate\": A date string in strict yyyy-mm-dd format (e.g. \"2025-03-14\"), or an empty string. Set this ONLY for documents where a specific date is intrinsic to their meaning — i.e. knowing WHEN matters for understanding or filing the document. Examples: a receipt, a restaurant bill, meeting notes, a phone call log, a journal entry, an appointment, a bank statement for a specific day, a conversation log. The date may come from a date in the document's filename or title (e.g. \"March 17 Round Table\" → \"2026-03-17\"), OR from an explicit date in the document's content, OR from relative time references like 'today' or 'this week' resolved against the file dates provided below, OR — for inherently event-tied document types only (e.g. receipts, journal entries, meeting notes) when the content contains no date — from the file creation date. When a date appears without an explicit year and the previous year would be more plausible given the document's creation date, assume the previous year. Do NOT set it for documents that span a period, are reference material, or are not event-anchored — e.g. a W-2 (covers a full tax year), an annual report, a manual, a lease, a bookmark, a contract with a term, a reference document, a technical note, a study note, a how-to guide, notes explaining a system or process, a brainstorm or design document. A note is NOT event-anchored merely because it was written on a specific day — the content itself must be about a specific dated event or occurrence. Do NOT fall back to file creation date for reference-style documents (technical notes, study notes, explainers, etc.). Do NOT construct or infer a date from a referenced period (e.g. do not return 2024-01-01 or 2024-12-31 for a document covering tax year 2024). Return \"\" when the document is not anchored to a single specific event or date." & linefeed & ¬
       "- \"type\": A single Title-Cased label for the document type (e.g. \"Receipt\", \"Invoice\", \"Meeting Notes\", \"Article\", \"Letter\", \"Manual\", \"Handwritten Note\", \"Contract\")." & linefeed & ¬
-      "- \"tags\": An array of 1–3 concise, Title-Cased organizational tags that describe the theme or primary topic of the document (e.g. \"Artificial Intelligence\", \"Finance\", \"Health\"). Do not duplicate the \"type\" value here." & linefeed & ¬
+      "- \"tags\": An array of 1–3 concise, singular, Title-Cased organizational tags that describe the theme or primary topic of the document. Prefer selecting from the existing database tags listed at the end of this prompt when an applicable tag exists; only create a new tag when no existing tag is a reasonable fit. Do not duplicate the \"type\" value here." & linefeed & ¬
       "- \"summary\": A 1–2 sentence plain-English summary of the document's content." & linefeed & ¬
       "- \"lowConfidence\": A boolean (true or false). Set to true only if the document content is too unclear, ambiguous, or incomplete to produce a reliable title and summary. Otherwise false."
+
+    -- Collect existing tags from the database so the LLM prefers reuse over creating near-duplicates
+    if (count of theRecords) > 0 then
+      try
+        set db to database of (item 1 of theRecords)
+        set tagGroups to tag groups of db
+        set tagNames to {}
+        repeat with tg in tagGroups
+          set end of tagNames to name of tg
+        end repeat
+        if (count of tagNames) > 0 then
+          set tid2 to AppleScript's text item delimiters
+          set AppleScript's text item delimiters to ", "
+          set existingTagString to tagNames as text
+          set AppleScript's text item delimiters to tid2
+          set theInstructions to theInstructions & linefeed & linefeed & "Existing tags in this database (prefer these over creating new tags): " & existingTagString
+        end if
+      end try
+    end if
 
     repeat with theRecord in theRecords
       set recName to name of theRecord
@@ -98,7 +117,11 @@ on performSmartRule(theRecords)
 
       try
         if useFilteredText is true then
-          set finalPrompt to theInstructions & linefeed & linefeed & "Document Content:" & linefeed & filteredText
+          -- Include file dates so the model can use them for eventDate
+          set recCreated to creation date of theRecord
+          set recModified to modification date of theRecord
+          set dateMetadata to "File created: " & (recCreated as «class isot» as string) & linefeed & "File modified: " & (recModified as «class isot» as string)
+          set finalPrompt to theInstructions & linefeed & linefeed & "Record name: " & recName & linefeed & dateMetadata & linefeed & linefeed & "Document Content:" & linefeed & filteredText
           set jsonResult to get chat response for message finalPrompt ¬
             role theRole ¬
             mode theMode ¬
@@ -140,13 +163,13 @@ on performSmartRule(theRecords)
               "print(t.strip(), end='')"
             set theTitle to do shell script "export THE_TITLE=" & quoted form of theTitle & " && /usr/bin/python3 -c " & quoted form of pyScript
           end if
-        on error
+        on error errCleanup
           -- Fallback to the original title if regex cleanup fails
         end try
 
         set theDate to ""
         try
-          set theDate to |documentDate| of jsonResult
+          set theDate to |eventDate| of jsonResult
           -- AI may return "null" as a string or missing value
           if theDate is missing value then set theDate to ""
           if theDate is "null" then set theDate to ""
@@ -155,7 +178,6 @@ on performSmartRule(theRecords)
             if (count of theDate) is not 10 ¬
               or character 5 of theDate is not "-" ¬
               or character 8 of theDate is not "-" then
-              log message "Enrich: rejected invalid documentDate = " & theDate info recName
               set theDate to ""
             end if
           end if
@@ -254,7 +276,7 @@ on performSmartRule(theRecords)
 
         -- Apply tags (deduplicate against existing tags)
         if (count of tagList) > 0 then
-          set existingTags to tags of theRecord
+          set existingTags to (get tags of theRecord)
           set newTags to {}
           repeat with aTag in tagList
             set tagAlreadyExists to false
@@ -297,6 +319,16 @@ on performSmartRule(theRecords)
 
         -- Success — advance the record
         add custom meta data 1 for "AIEnriched" to theRecord
+
+        -- Strip import-automation tags so they don't pollute the tag pool
+        try
+          set currentTags to (get tags of theRecord)
+          set cleanedTags to {}
+          repeat with i from 1 to count of currentTags
+            if (item i of currentTags) is not "Hazel-to-DT" then set end of cleanedTags to (item i of currentTags)
+          end repeat
+          set tags of theRecord to cleanedTags
+        end try
 
         -- Propagate summary and tags to linked web clip records (bookmark + HTML snapshot).
         -- Web clip markdown records have WebClipSource pointing to the original bookmark,
