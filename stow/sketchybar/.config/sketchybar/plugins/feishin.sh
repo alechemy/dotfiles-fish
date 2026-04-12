@@ -64,9 +64,18 @@ CURRENT_SONG=$(curl -s --max-time 3 "$NAVIDROME_URL/rest/getNowPlaying" \
   -d "f=json" 2>/dev/null |
   jq -r '.["subsonic-response"].nowPlaying.entry[0] // empty' 2>/dev/null)
 
+PLAYBACK_RATE=$(/opt/homebrew/bin/nowplaying-cli get playbackRate 2>/dev/null)
+if [ "$PLAYBACK_RATE" = "0" ]; then
+  TEXT_COLOR="0x80ffffff"
+else
+  TEXT_COLOR="0xffffffff"
+fi
+
 set_track() {
   local icon_prefix="$1" artist="$2" title="$3"
-  sketchybar --set "$NAME" icon="$icon_prefix $artist –" label=" $title"
+  sketchybar --set "$NAME" \
+    icon="$icon_prefix $artist –" label=" $title" \
+    icon.color="$TEXT_COLOR" label.color="$TEXT_COLOR"
 }
 
 if [ -n "$CURRENT_SONG" ] && [ "$CURRENT_SONG" != "null" ]; then

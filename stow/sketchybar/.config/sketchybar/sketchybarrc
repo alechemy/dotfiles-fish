@@ -27,15 +27,18 @@ sketchybar --default "${default[@]}"
 sketchybar --add item clock right \
   --set clock update_freq=10 icon= script="$PLUGIN_DIR/clock.sh"
 
-# VPN status
+# VPN / Work Proxy status
+sketchybar --add event proxy_toggle
 sketchybar --add item vpn right \
   --set vpn update_freq=10 \
-  click_script="open -a 'NordVPN'" \
-  script="$PLUGIN_DIR/vpn.sh"
+  click_script="$PLUGIN_DIR/vpn_click.sh" \
+  script="$PLUGIN_DIR/vpn.sh" \
+  --subscribe vpn proxy_toggle
 
 # Volume
 sketchybar --add item volume right \
   --set volume script="$PLUGIN_DIR/volume.sh" \
+  click_script="$PLUGIN_DIR/volume_click.sh" \
   --subscribe volume volume_change
 
 # Aerospace Workspace Indicators (explicit 1-6; added right-to-left so they render 1..6)
@@ -131,16 +134,16 @@ sketchybar --add item front_app left \
   label.font="Helvetica Neue:Bold:14.0" \
   --subscribe front_app front_app_switched
 
-# Navidrome Now Playing — leftmost
-sketchybar --add item navidrome right \
-  --set navidrome update_freq=5 \
+# Feishin Now Playing — leftmost
+sketchybar --add item feishin right \
+  --set feishin update_freq=5 \
   icon.font="Helvetica Neue:Regular:14.0" \
   icon=" Not playing" \
   label.font="Helvetica Neue:Bold:14.0" \
   label="" \
   label.padding_right=8 \
-  click_script="open -a 'Feishin'" \
-  script="$PLUGIN_DIR/navidrome.sh"
+  click_script="if pgrep -xq Feishin; then /opt/homebrew/bin/nowplaying-cli togglePlayPause; else open -a Feishin; fi" \
+  script="$PLUGIN_DIR/feishin.sh"
 
 ##### Force all scripts to run the first time (never do this in a script) #####
 sketchybar --update
