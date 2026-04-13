@@ -7,7 +7,7 @@ set -e
 
 DOTFILES="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ZED_DIR="$DOTFILES/stow/zed/.config/zed"
-TEMPLATE="$ZED_DIR/settings.template.json"
+TEMPLATE="$ZED_DIR/settings.template.jsonc"
 OUT="$ZED_DIR/settings.json"
 
 if [ ! -f "$TEMPLATE" ]; then
