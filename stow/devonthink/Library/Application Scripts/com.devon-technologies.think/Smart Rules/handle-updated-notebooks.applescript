@@ -57,36 +57,7 @@ on performSmartRule(theRecords)
 
 					-- Layer 2: OCR Text Containment (only exercised for Notebook-X; custom names bypass via fallback below)
 					if not isCollision then
-						set pyScript to "import sys, subprocess, difflib, tempfile, os" & linefeed & ¬
-							"def get_text(path):" & linefeed & ¬
-							"    tmp = ''" & linefeed & ¬
-							"    try:" & linefeed & ¬
-							"        tmp_file = tempfile.NamedTemporaryFile(suffix='.tiff', delete=False)" & linefeed & ¬
-							"        tmp = tmp_file.name" & linefeed & ¬
-							"        tmp_file.close()" & linefeed & ¬
-							"        subprocess.run(['/opt/homebrew/bin/magick', path + '[0]', tmp], stderr=subprocess.DEVNULL, check=True)" & linefeed & ¬
-							"        out = subprocess.check_output(['/opt/homebrew/bin/tesseract', tmp, 'stdout', '-l', 'eng', '--psm', '3'], stderr=subprocess.DEVNULL)" & linefeed & ¬
-							"        return out.decode('utf-8').strip()" & linefeed & ¬
-							"    except:" & linefeed & ¬
-							"        return ''" & linefeed & ¬
-							"    finally:" & linefeed & ¬
-							"        if tmp:" & linefeed & ¬
-							"            try: os.unlink(tmp)" & linefeed & ¬
-							"            except: pass" & linefeed & ¬
-							"t1 = get_text(sys.argv[1])" & linefeed & ¬
-							"t2 = get_text(sys.argv[2])" & linefeed & ¬
-							"if len(t1) < 15 and len(t2) < 15:" & linefeed & ¬
-							"    print('USE_RMSE')" & linefeed & ¬
-							"else:" & linefeed & ¬
-							"    shorter = min(len(t1), len(t2))" & linefeed & ¬
-							"    if shorter == 0:" & linefeed & ¬
-							"        print(0)" & linefeed & ¬
-							"    else:" & linefeed & ¬
-							"        m = difflib.SequenceMatcher(None, t1, t2, autojunk=False)" & linefeed & ¬
-							"        containment = sum(b.size for b in m.get_matching_blocks() if b.size >= 3) / shorter" & linefeed & ¬
-							"        print(containment)"
-
-						set ocrCmd to "/usr/bin/python3 -c " & quoted form of pyScript & " " & quoted form of existingPath & " " & quoted form of newPath
+						set ocrCmd to "/usr/bin/python3 ~/.local/bin/compare-tiff-pages.py " & quoted form of existingPath & " " & quoted form of newPath
 						try
 							set ocrResult to do shell script ocrCmd
 							if ocrResult is "USE_RMSE" then
@@ -154,8 +125,6 @@ on performSmartRule(theRecords)
 					add custom meta data 0 for "AIEnriched" to existingMatch
 					add custom meta data 1 for "NameLocked" to existingMatch
 					add custom meta data 1 for "NeedsProcessing" to existingMatch
-					add custom meta data 0 for "TasksExtracted" to existingMatch
-					add custom meta data 0 for "DailyNotesProcessed" to existingMatch
 
 					-- Move back to 00_INBOX so the Extract and Format processing rules can see it
 					set inboxGroup to get record at "/00_INBOX" in targetDatabase
