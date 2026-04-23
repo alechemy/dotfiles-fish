@@ -22,5 +22,6 @@
   autoSetupRemote = true
 [include]
   path = ~/.gitconfig.local
+  path = ~/.gitconfig.proxy
 [includeIf "gitdir:~/Work/"]
   path = ~/.gitconfig.work
