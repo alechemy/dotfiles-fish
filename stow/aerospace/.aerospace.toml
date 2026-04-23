@@ -78,8 +78,8 @@ on-mode-changed = [
 [gaps]
     inner.horizontal = 8
     inner.vertical =   8
-    outer.left = [{ monitor.main = 300 }, 8]
-    outer.right = [{ monitor.main = 300 }, 8]
+    outer.left = [{ monitor.main = 600 }, 8]
+    outer.right = [{ monitor.main = 600 }, 8]
     outer.bottom =     8
     outer.top =        48
 
@@ -111,6 +111,9 @@ on-mode-changed = [
     # See: https://nikitabobko.github.io/AeroSpace/commands#resize
     # cmd-alt-ctrl-shift-minus = 'resize smart -50'
     # cmd-alt-ctrl-shift-equal = 'resize smart +50'
+
+    # Cycle outer gap presets (full → medium → narrow) on ultrawide
+    cmd-alt-ctrl-shift-g = 'exec-and-forget bash $HOME/.dotfiles/scripts/aerospace-cycle-gaps.sh'
 
     # See: https://nikitabobko.github.io/AeroSpace/commands#workspace
     # Hyper (CapsLock) + number = switch workspace
@@ -161,6 +164,10 @@ on-mode-changed = [
     semicolon = 'mode main'
 
 # Workspace Assignments
+[[on-window-detected]]
+if.app-id = 'com.mitchellh.ghostty'
+run = 'move-node-to-workspace 1'
+
 [[on-window-detected]]
 if.app-id = 'com.vscodium'
 run = 'move-node-to-workspace 1'
@@ -228,6 +235,10 @@ run = 'layout floating'
 
 [[on-window-detected]]
 if.app-id = 'com.1password.1password'
+run = 'layout floating'
+
+[[on-window-detected]]
+if.app-id = 'com.agiletortoise.Drafts-OSX'
 run = 'layout floating'
 
 [[on-window-detected]]
