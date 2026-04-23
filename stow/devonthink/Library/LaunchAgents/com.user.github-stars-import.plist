@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Disabled</key>
+	<false/>
+	<key>Label</key>
+	<string>com.user.github-stars-import</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/usr/bin/python3</string>
+		<string>/Users/alec/.local/bin/import-github-stars.py</string>
+	</array>
+	<key>RunAtLoad</key>
+	<false/>
+	<key>StandardErrorPath</key>
+	<string>/tmp/github-stars-import.log</string>
+	<key>StandardOutPath</key>
+	<string>/tmp/github-stars-import.log</string>
+	<key>StartInterval</key>
+	<integer>1800</integer>
+</dict>
+</plist>

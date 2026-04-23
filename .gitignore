@@ -2,6 +2,7 @@
 *.log
 .DS_Store
 .env
+__pycache__/
 dist
 projects.json
 stow-work/*

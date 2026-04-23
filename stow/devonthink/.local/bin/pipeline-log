@@ -1,0 +1,43 @@
+#!/bin/bash
+# Append a structured line to the central DEVONthink pipeline log.
+# Called by AppleScript smart rules, shell wrappers, and anything else
+# that can't easily link the Python logger module.
+#
+# Usage:
+#   pipeline-log <component> <level> <message> [<record-name> [<record-uuid>]]
+#
+# Example:
+#   pipeline-log "Extract: Web Content" INFO "archived bookmark" "Some Title" "A1B2-…"
+#
+# Format:
+#   2026-04-24T14:32:15 INFO [Extract: Web Content] archived bookmark (record="Some Title"|uuid=A1B2-…)
+#
+# Writes to ~/Library/Logs/devonthink-pipeline.log. Uses append-mode echo,
+# which on macOS is atomic for writes up to PIPE_BUF (~4KB) so concurrent
+# rules don't interleave line fragments.
+
+set -euo pipefail
+
+if [[ $# -lt 3 ]]; then
+    echo "Usage: pipeline-log <component> <level> <message> [<record-name> [<record-uuid>]]" >&2
+    exit 2
+fi
+
+component=$1
+level=$2
+message=$3
+rec_name=${4:-}
+rec_uuid=${5:-}
+
+log_dir="$HOME/Library/Logs"
+log_path="$log_dir/devonthink-pipeline.log"
+mkdir -p "$log_dir"
+
+ts=$(date '+%Y-%m-%dT%H:%M:%S')
+
+line="$ts $level [$component] $message"
+if [[ -n "$rec_name" || -n "$rec_uuid" ]]; then
+    line="$line (record=\"$rec_name\"|uuid=$rec_uuid)"
+fi
+
+printf '%s\n' "$line" >> "$log_path"

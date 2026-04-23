@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# Wrapper around `markdownlint --fix` that reads from stdin and writes to stdout.
+# markdownlint-cli's --fix only operates on files in place, but Zed's external
+# formatters use stdin/stdout, so we shuttle the buffer through a temp file.
+
+set -euo pipefail
+
+tmp=$(mktemp -t markdownlint-stdin-fix.XXXXXX.md)
+trap 'rm -f "$tmp"' EXIT
+
+cat >"$tmp"
+/opt/homebrew/bin/markdownlint --quiet --fix "$tmp" >/dev/null 2>&1 || true
+cat "$tmp"

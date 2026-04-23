@@ -1,0 +1,26 @@
+#!/bin/sh
+# Open the active DEVONthink document in Marked 2
+
+path=$(osascript -e '
+tell application id "DNtp"
+    try
+        set theWindow to think window 1
+        set theRecord to content record of theWindow
+        if theRecord is missing value then
+            set sel to selected records of theWindow
+            if (count of sel) > 0 then set theRecord to item 1 of sel
+        end if
+        if theRecord is missing value then return ""
+        return path of theRecord
+    on error
+        return ""
+    end try
+end tell
+')
+
+if [ -z "$path" ]; then
+    echo "dt-open-in-marked: no document open in DEVONthink" >&2
+    exit 1
+fi
+
+open -a "Marked 2" "$path"

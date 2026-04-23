@@ -1,0 +1,48 @@
+#!/bin/bash
+# Lint-fix a markdown file in place.
+#
+# Runs the same sed-plus-markdownlint-plus-tilde-escape sequence that
+# Extract: Native Text Bypass → lint-markdown.applescript applies to
+# freshly-arrived markdown. Programmatic record creators (the SingleFile
+# ingester, summarize skill, Granola importer, etc.) call this BEFORE
+# handing the file to DT so the resulting record arrives fully lint-fixed
+# and can be pre-flagged with Recognized=1, Commented=1 — which keeps
+# Extract: Native Text Bypass from matching the new record and firing a
+# mutation storm on it while DT's UI is still rendering the new arrival.
+#
+# Usage:
+#   lint-markdown-file <path-to-markdown>
+#
+# Exit code is always 0 so callers can use `|| :` without masking real
+# errors; markdownlint's own failures are tolerated (|| true in the
+# pipeline) because any unfixable rule violation shouldn't block the
+# document from entering DT.
+
+set -eu
+
+if [[ $# -lt 1 ]]; then
+    echo "Usage: lint-markdown-file <path-to-markdown>" >&2
+    exit 2
+fi
+
+path=$1
+if [[ ! -f "$path" ]]; then
+    echo "lint-markdown-file: not a file: $path" >&2
+    exit 2
+fi
+
+# Step 1: tabs → two spaces
+sed -i '' 's/\t/  /g' "$path"
+
+# Step 2: markdownlint --fix, non-fatal
+/opt/homebrew/bin/markdownlint "$path" --quiet --fix || true
+
+# Step 3: preserve ~~ and \~, escape bare ~ (DT renders bare ~ as
+# strikethrough unless escaped)
+sed -i '' \
+    -e 's/~~/%%DT%%/g' \
+    -e 's/\\~/%%ET%%/g' \
+    -e 's/~/\\~/g' \
+    -e 's/%%DT%%/~~/g' \
+    -e 's/%%ET%%/\\~/g' \
+    "$path"
