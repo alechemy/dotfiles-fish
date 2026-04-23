@@ -142,7 +142,7 @@ sketchybar --add item feishin right \
   label.font="Helvetica Neue:Bold:14.0" \
   label="" \
   label.padding_right=8 \
-  click_script="if pgrep -xq Feishin; then /opt/homebrew/bin/nowplaying-cli togglePlayPause; else open -a Feishin; fi" \
+  click_script="$PLUGIN_DIR/feishin_click.sh" \
   script="$PLUGIN_DIR/feishin.sh"
 
 ##### Force all scripts to run the first time (never do this in a script) #####
