@@ -1,7 +1,6 @@
 *~
 *.log
 .DS_Store
-.claude
 .env
 dist
 projects.json
@@ -11,3 +10,6 @@ stow/git/.gitconfig.work
 stow/fish/.config/fish/fish_variables
 stow/zed/.config/zed/settings.json
 stow/streamrip/Library/Application Support/streamrip/config.toml
+batch-rip-work
+stow/devonthink/.local/share/devonthink-capture/node_modules
+stow/devonthink/.local/share/devonthink-capture/package-lock.json
