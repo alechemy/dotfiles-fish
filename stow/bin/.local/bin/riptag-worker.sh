@@ -69,7 +69,7 @@ done
 # --- LOCAL MODE OVERRIDES ---
 if [ $LOCAL_MODE -eq 1 ]; then
   INBOX_DIR="${STREAMRIP_DOWNLOADS:-$HOME/StreamripDownloads}"
-  PYTHON_CMD="python3"
+  PYTHON_CMD="${LOCAL_PYTHON:-python3}"
   RIP_CMD="${LOCAL_RIP:-rip}"
   : "${TAGGER_SCRIPT:=$HOME/.local/bin/tagger.py}"
   RIP_CONFIG=""
