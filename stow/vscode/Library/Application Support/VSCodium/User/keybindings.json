@@ -113,5 +113,30 @@
   {
     "key": "ctrl+alt+c",
     "command": "workbench.action.toggleCenteredLayout"
+  },
+  {
+    "key": "cmd+shift+/",
+    "command": "claude-vscode.sidebar.open"
+  },
+  {
+    "key": "cmd+shift+.",
+    "command": "claude-vscode.insertAtMention",
+    "when": "editorTextFocus && editorHasSelection"
+  },
+  {
+    "key": "cmd+escape",
+    "command": "-claude-vscode.focus"
+  },
+  {
+    "key": "cmd+escape",
+    "command": "-claude-vscode.blur"
+  },
+  {
+    "key": "cmd+escape",
+    "command": "-claude-vscode.terminal.open.keyboard"
+  },
+  {
+    "key": "cmd+shift+escape",
+    "command": "-claude-vscode.editor.open"
   }
 ]
