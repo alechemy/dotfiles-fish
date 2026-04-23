@@ -48,6 +48,12 @@
     }
   },
   {
+    "context": "Editor && extension == md",
+    "bindings": {
+      "cmd-shift-v": ["task::Spawn", { "task_name": "Open in Marked 2" }]
+    }
+  },
+  {
     "context": "Editor && edit_prediction",
     "bindings": {
       "alt-tab": "editor::AcceptEditPrediction"
