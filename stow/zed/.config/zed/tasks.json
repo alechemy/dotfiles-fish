@@ -1,0 +1,14 @@
+[
+  {
+    "label": "Open in Marked 2",
+    "command": "marked",
+    "args": ["$ZED_FILE"],
+    "tags": ["markdown"]
+  },
+  {
+    "label": "Markdownlint Fix",
+    "command": "/opt/homebrew/bin/markdownlint",
+    "args": ["--fix", "--quiet", "$ZED_FILE"],
+    "tags": ["markdown"]
+  }
+]
