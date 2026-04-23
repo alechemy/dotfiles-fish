@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(sw_vers)",
+      "Bash(defaults find \"HideMenuBar\")",
+      "Bash(defaults find \"AutoHideMenuBar\")",
+      "Bash(defaults find \"menubar\")",
+      "Bash(stow:*)",
+      "Bash(~/.cache/navidrome-last-song:*)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:nikitabobko.github.io)"
+    ]
+  }
+}
