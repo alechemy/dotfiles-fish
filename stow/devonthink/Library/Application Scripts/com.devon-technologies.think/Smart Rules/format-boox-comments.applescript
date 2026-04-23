@@ -18,7 +18,7 @@ on performSmartRule(theRecords)
         set theInstructions to "Reformat the following OCR transcription of a handwritten note as clean Markdown. Preserve ALL original content exactly — do not add, remove, or rephrase anything." & linefeed & linefeed & ¬
             "Rules:" & linefeed & ¬
             "- Use #/##/### headers for titles and section breaks (replace underlines or horizontal rules)." & linefeed & ¬
-            "- Use standard Markdown list bullets (-) for all list items, preserving nesting via indentation." & linefeed & ¬
+            "- Replace middle dots (·), bullet characters (•), and any other non-standard list markers with standard Markdown list bullets (-), preserving nesting via indentation." & linefeed & ¬
             "- Replace drawn arrows (→, ↓, etc.) and connectors with nested lists or blockquotes to show relationships." & linefeed & ¬
             "- When text appears to wrap across multiple lines as a single thought or sentence, join it into one line rather than treating each line as a separate list item." & linefeed & ¬
             "- Replace curly braces or brackets used to group items with nested lists." & linefeed & ¬
@@ -80,6 +80,13 @@ on performSmartRule(theRecords)
                                 "    t = t.replace(c, str(i + 1) + '.')" & linefeed & ¬
                                 "open(f, 'w').write(t)"
                             do shell script "/usr/bin/python3 -c " & quoted form of pyFixCircled & " " & quoted form of tmpFile
+                            -- Safety net: replace non-standard bullet markers the LLM missed
+                            set pyFixBullets to "import sys, re" & linefeed & ¬
+                                "f = sys.argv[1]" & linefeed & ¬
+                                "t = open(f).read()" & linefeed & ¬
+                                "t = re.sub(r'^(\\s*)[·•‣⁃◦▪▸](\\s*)', r'\\1-\\2', t, flags=re.MULTILINE)" & linefeed & ¬
+                                "open(f, 'w').write(t)"
+                            do shell script "/usr/bin/python3 -c " & quoted form of pyFixBullets & " " & quoted form of tmpFile
                             set formatted to do shell script "cat " & quoted form of tmpFile
                             do shell script "rm -f " & quoted form of tmpFile
                         on error lintErr

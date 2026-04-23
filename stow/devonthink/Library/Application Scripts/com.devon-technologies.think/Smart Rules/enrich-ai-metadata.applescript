@@ -31,6 +31,7 @@ on performSmartRule(theRecords)
 
     repeat with theRecord in theRecords
       set recName to name of theRecord
+      set recUUID to uuid of theRecord
 
       -- Safeguard: pull from pipeline if too many consecutive errors
       set _skipRecord to false
@@ -38,6 +39,7 @@ on performSmartRule(theRecords)
         set currentErrors to (get custom meta data for "ErrorCount" from theRecord)
         if currentErrors is not missing value and currentErrors is not "" and currentErrors ≥ 10 then
           log message "Enrich AI Metadata: ErrorCount=" & currentErrors & " exceeds limit, removing from pipeline" info recName
+          my pipelineLog("Enrich: AI Metadata", "ERROR", "ErrorCount=" & currentErrors & " exceeds limit, removed from pipeline", recName, recUUID)
           add custom meta data 1 for "AIEnriched" to theRecord
           add custom meta data 0 for "NeedsProcessing" to theRecord
           set _skipRecord to true
@@ -52,27 +54,27 @@ on performSmartRule(theRecords)
         add custom meta data (current date) for "EnrichStartedAt" to theRecord
       end if
 
-      -- Determine if we should filter text before passing to AI
+      -- Unified text extraction. Handwritten records store their LLM-readable
+      -- text in comment (the formatted OCR output); everything else uses
+      -- plain text. This lets the filter+truncate step below cover PDFs,
+      -- HTMLs, etc. — previously those went through a record-based LLM call
+      -- that couldn't be truncated or cached.
       set isHandwritten to (get custom meta data for "Handwritten" from theRecord)
-      set recType to (type of theRecord) as string
-
-      set useFilteredText to false
-      set docText to ""
-
       if isHandwritten is 1 then
         set docText to comment of theRecord
-        set useFilteredText to true
-        set theMode to "text"
-      else if recType is "markdown" or recType is "txt" or recType is "rtf" then
-        set docText to plain text of theRecord
-        set useFilteredText to true
-        set theMode to "text"
       else
-        set theMode to "auto"
+        set docText to plain text of theRecord
       end if
+      if docText is missing value then set docText to ""
+      set theMode to "text"
 
+      -- Filter out daily-notes/action-items sections (those are extracted
+      -- separately by Post-Enrich & Archive and shouldn't steer the
+      -- title/summary), then cap very long documents at a head+tail window
+      -- to keep token usage bounded. Fallback to original text if the
+      -- filter strips everything (document consists entirely of tasks/etc.).
       set filteredText to ""
-      if useFilteredText is true then
+      if docText is not "" then
         set pyScript to "import sys, re" & linefeed & ¬
             "text = sys.stdin.read()" & linefeed & ¬
             "lines = text.splitlines()" & linefeed & ¬
@@ -90,53 +92,74 @@ on performSmartRule(theRecords)
             "        else:" & linefeed & ¬
             "            continue" & linefeed & ¬
             "    output_lines.append(line)" & linefeed & ¬
-            "print('\\n'.join(output_lines), end='')"
+            "filtered = '\\n'.join(output_lines).strip()" & linefeed & ¬
+            "if not filtered:" & linefeed & ¬
+            "    filtered = text" & linefeed & ¬
+            "words = filtered.split()" & linefeed & ¬
+            "MAX_WORDS = 8000" & linefeed & ¬
+            "HEAD = 6000" & linefeed & ¬
+            "TAIL = 2000" & linefeed & ¬
+            "if len(words) > MAX_WORDS:" & linefeed & ¬
+            "    head = ' '.join(words[:HEAD])" & linefeed & ¬
+            "    tail = ' '.join(words[-TAIL:])" & linefeed & ¬
+            "    omitted = len(words) - HEAD - TAIL" & linefeed & ¬
+            "    filtered = head + '\\n\\n[... content truncated: ' + str(omitted) + ' words omitted ...]\\n\\n' + tail" & linefeed & ¬
+            "print(filtered, end='')"
 
         set tmpPath to do shell script "mktemp /tmp/dt-enrich.XXXXXX"
         set fileRef to open for access (POSIX file tmpPath) with write permission
+        set eof of fileRef to 0
         write docText to fileRef as «class utf8»
         close access fileRef
-        set filteredText to do shell script "/usr/bin/python3 -c " & quoted form of pyScript & " < " & quoted form of tmpPath
+        set filteredText to do shell script "/usr/bin/python3 -c " & quoted form of pyScript & " < " & quoted form of tmpPath without altering line endings
         do shell script "rm -f " & quoted form of tmpPath
-
-        -- Fallback: if filtering removed all content (note contains ONLY tasks/journal entries),
-        -- use the full text so enrichment can still produce a meaningful title and summary.
-        if filteredText is "" then
-          set filteredText to docText
-        else
-          set tmpCheck to do shell script "mktemp /tmp/dt-enrich.XXXXXX"
-          set chkRef to open for access (POSIX file tmpCheck) with write permission
-          write filteredText to chkRef as «class utf8»
-          close access chkRef
-          set filteredStripped to do shell script "/usr/bin/python3 -c 'import sys; print(sys.stdin.read().strip())' < " & quoted form of tmpCheck
-          do shell script "rm -f " & quoted form of tmpCheck
-          if filteredStripped is "" then set filteredText to docText
-        end if
       end if
 
+      -- Compute a content-input hash so we can short-circuit the LLM call
+      -- on re-enrichment of the same content (e.g., user manually cleared
+      -- AIEnriched=0, or ErrorCount was reset). Hash on recName + the
+      -- filtered text — the exact inputs that drive the LLM's response.
+      -- A re-run with unchanged inputs would produce effectively the same
+      -- output; skipping the call saves the tokens entirely.
+      set currentHash to ""
+      try
+        set tmpHashPath to do shell script "mktemp /tmp/dt-enrich-hash.XXXXXX"
+        set hashRef to open for access (POSIX file tmpHashPath) with write permission
+        set eof of hashRef to 0
+        write (recName & linefeed & filteredText) to hashRef as «class utf8»
+        close access hashRef
+        set currentHash to do shell script "shasum -a 256 " & quoted form of tmpHashPath & " | cut -d' ' -f1"
+        do shell script "rm -f " & quoted form of tmpHashPath
+      end try
+
+      set storedHash to ""
+      try
+        set storedHash to (get custom meta data for "EnrichInputHash" from theRecord) as text
+        if storedHash is "missing value" then set storedHash to ""
+      end try
+
+      if currentHash is not "" and currentHash is storedHash then
+        log message "Enrich AI Metadata: cache hit (input hash unchanged), skipping LLM" info recName
+        my pipelineLog("Enrich: AI Metadata", "INFO", "cache hit (input hash unchanged), skipping LLM", recName, recUUID)
+        add custom meta data 1 for "AIEnriched" to theRecord
+      else if filteredText is "" then
+        log message "Enrich AI Metadata: no text content, advancing without enrichment" info recName
+        my pipelineLog("Enrich: AI Metadata", "WARN", "no text content, advancing without enrichment", recName, recUUID)
+        add custom meta data 1 for "AIEnriched" to theRecord
+      else
 
       try
-        if useFilteredText is true then
-          -- Include file dates so the model can use them for eventDate
-          set recCreated to creation date of theRecord
-          set recModified to modification date of theRecord
-          set dateMetadata to "File created: " & (recCreated as «class isot» as string) & linefeed & "File modified: " & (recModified as «class isot» as string)
-          set finalPrompt to theInstructions & linefeed & linefeed & "Record name: " & recName & linefeed & dateMetadata & linefeed & linefeed & "Document Content:" & linefeed & filteredText
-          set jsonResult to get chat response for message finalPrompt ¬
-            role theRole ¬
-            mode theMode ¬
-            thinking false ¬
-            tool calls false ¬
-            as "JSON"
-        else
-          set jsonResult to get chat response for message theInstructions ¬
-            record theRecord ¬
-            role theRole ¬
-            mode theMode ¬
-            thinking false ¬
-            tool calls false ¬
-            as "JSON"
-        end if
+        -- Include file dates so the model can use them for eventDate
+        set recCreated to creation date of theRecord
+        set recModified to modification date of theRecord
+        set dateMetadata to "File created: " & (recCreated as «class isot» as string) & linefeed & "File modified: " & (recModified as «class isot» as string)
+        set finalPrompt to theInstructions & linefeed & linefeed & "Record name: " & recName & linefeed & dateMetadata & linefeed & linefeed & "Document Content:" & linefeed & filteredText
+        set jsonResult to get chat response for message finalPrompt ¬
+          role theRole ¬
+          mode theMode ¬
+          thinking false ¬
+          tool calls false ¬
+          as "JSON"
 
         -- `as "JSON"` normally returns an AppleScript record, but some models
         -- wrap the response in an array ([{…}]).  Unwrap if needed.
@@ -212,56 +235,24 @@ on performSmartRule(theRecords)
         if theTitle is not "" then
           set nameLocked to (get custom meta data for "NameLocked" from theRecord)
           if nameLocked is not 1 then
-            -- Sanitize title: strip characters illegal in HFS+/APFS filenames
-            set sanitized to theTitle
-            set tid3 to AppleScript's text item delimiters
-            repeat with badChar in {"/", ":"}
-              set AppleScript's text item delimiters to badChar
-              set sanitized to text items of sanitized
-              set AppleScript's text item delimiters to " - "
-              set sanitized to sanitized as text
-            end repeat
-            set AppleScript's text item delimiters to tid3
-            -- Collapse duplicate " - " runs left by adjacent : or / replacements
-            set tid4 to AppleScript's text item delimiters
-            repeat
-              if sanitized contains " -  - " then
-                set AppleScript's text item delimiters to " -  - "
-                set sanitized to text items of sanitized
-                set AppleScript's text item delimiters to " - "
-                set sanitized to sanitized as text
-              else if sanitized contains " - - " then
-                set AppleScript's text item delimiters to " - - "
-                set sanitized to text items of sanitized
-                set AppleScript's text item delimiters to " - "
-                set sanitized to sanitized as text
-              else
-                exit repeat
-              end if
-            end repeat
-            set AppleScript's text item delimiters to tid4
-            -- Trim leading/trailing whitespace
-            repeat while sanitized starts with " "
-              set sanitized to text 2 thru -1 of sanitized
-            end repeat
-            repeat while sanitized ends with " "
-              set sanitized to text 1 thru -2 of sanitized
-            end repeat
+            -- Sanitize title: strip characters illegal in HFS+/APFS filenames,
+            -- collapse duplicate separators, trim whitespace
+            set sanitized to do shell script "export THE_TITLE=" & quoted form of theTitle & " && /usr/bin/python3 -c \"import os,re; t=os.environ['THE_TITLE']; t=re.sub(r'[/:]',' - ',t); t=re.sub(r'( - ){2,}',' - ',t); print(t.strip(),end='')\""
 
             if sanitized is not "" then
               -- Set NameLocked BEFORE renaming so the on-rename guard rule
               -- (whose criteria require NameLocked is Off) won't match this rename.
               add custom meta data 1 for "NameLocked" to theRecord
               try
-                -- Extract extension from the record's name (using recName instead of
-                -- filename, which can return a non-text type after OCR transforms)
-                set oldTID to AppleScript's text item delimiters
-                set AppleScript's text item delimiters to "."
-                set fnParts to text items of recName
-                set AppleScript's text item delimiters to oldTID
+                -- Preserve filename extension only when the last `.`-segment looks
+                -- like a real extension (alpha-only, 2–5 chars). Otherwise a name
+                -- like "New Note 5.05.47PM" would wrongly yield "<title>.47PM".
+                -- Uses recName instead of filename, which can return a non-text
+                -- type after OCR transforms.
+                set extCheck to do shell script "export REC_NAME=" & quoted form of recName & " && /usr/bin/python3 -c \"import os,re; n=os.environ['REC_NAME']; m=re.search(r'\\.([A-Za-z]{2,5})$', n); print(m.group(1) if m else '', end='')\""
                 set newName to sanitized
-                if (count of fnParts) > 1 then
-                  set newName to sanitized & "." & (last item of fnParts)
+                if extCheck is not "" then
+                  set newName to sanitized & "." & extCheck
                 end if
                 -- Snapshot current name so the user can revert if needed
                 add custom meta data recName for "PreviousName" to theRecord
@@ -317,8 +308,15 @@ on performSmartRule(theRecords)
           add custom meta data 1 for "LowConfidence" to theRecord
         end if
 
+        -- Success — cache the input hash so a future re-enrichment of
+        -- unchanged content short-circuits the LLM call.
+        if currentHash is not "" then
+          add custom meta data currentHash for "EnrichInputHash" to theRecord
+        end if
+
         -- Success — advance the record
         add custom meta data 1 for "AIEnriched" to theRecord
+        my pipelineLog("Enrich: AI Metadata", "INFO", "enriched (type=" & theType & ")", recName, recUUID)
 
         -- Strip import-automation tags so they don't pollute the tag pool
         try
@@ -362,6 +360,7 @@ on performSmartRule(theRecords)
           set elapsed to (current date) - enrichStart
           if elapsed > maxWaitSeconds then
             log message "Enrich AI Metadata: timed out after " & elapsed & "s, advancing without enrichment" info recName
+            my pipelineLog("Enrich: AI Metadata", "ERROR", "timed out after " & elapsed & "s, advancing without enrichment", recName, recUUID)
             add custom meta data 1 for "AIEnriched" to theRecord
             try
               set currentErrors to (get custom meta data for "ErrorCount" from theRecord)
@@ -370,12 +369,29 @@ on performSmartRule(theRecords)
             end try
           else
             log message "Enrich AI Metadata: enrichment failed (" & elapsed & "s elapsed), will retry next poll: " & errMsg info recName
+            my pipelineLog("Enrich: AI Metadata", "WARN", "enrichment failed (" & elapsed & "s), retry next poll: " & errMsg, recName, recUUID)
           end if
         else
           log message "Enrich AI Metadata: enrichment failed, will retry next poll: " & errMsg info recName
+          my pipelineLog("Enrich: AI Metadata", "WARN", "enrichment failed, retry next poll: " & errMsg, recName, recUUID)
         end if
       end try
-      end if
+      end if -- cache hit / empty / LLM branch
+      end if -- _skipRecord guard
     end repeat
   end tell
 end performSmartRule
+
+-- Forward an event to the centralized pipeline log. Fails silently if
+-- the helper isn't present, so scripts remain functional before the
+-- stow/setup step that puts it in place.
+on pipelineLog(component, level, msg, recName, recUUID)
+  try
+    do shell script "$HOME/.local/bin/pipeline-log " & ¬
+      quoted form of component & " " & ¬
+      quoted form of level & " " & ¬
+      quoted form of msg & " " & ¬
+      quoted form of (recName as string) & " " & ¬
+      quoted form of (recUUID as string)
+  end try
+end pipelineLog

@@ -1,0 +1,926 @@
+/*
+---------------------------------------------------------------
+Title: Readable (Universal)
+Description: A readability-focused markdown theme compatible with
+             both Marked 2 and DEVONthink (desktop + iOS).
+             Constrained measure, generous leading, strong
+             hierarchy, treated inline code, proper GFM
+             extensions. Responsive mobile layout included.
+             Optional manual theme toggle via data-theme attr
+             (paired with theme-toggle.js in DEVONthink).
+Non-standard fonts used: Inter, JetBrains Mono
+Compatibility notes:
+  - Marked 2: uses #wrapper container and .inverted body class
+  - DEVONthink: styles body directly, uses prefers-color-scheme
+  - DEVONthink To Go and iOS markdown apps: same CSS, mobile
+    breakpoints handle narrow viewports
+  - Manual theme override via [data-theme="light"|"dark"] on
+    <html> (set by companion JS, overrides system preference)
+Install:
+  - Marked 2: Settings > Style > Custom CSS > point to this file
+  - DEVONthink: Settings > Files > Markdown > Style Sheet
+  - DEVONthink To Go: Settings > Markdown > Style Sheet
+  - Theme toggle JS: Settings > Files > Markdown > JavaScript
+---
+*/
+
+/* If you'd rather load from Google Fonts than install locally,
+   uncomment this. Local install is faster and works offline. */
+/*
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap');
+*/
+
+/* ============================================================
+   DESIGN TOKENS (light mode defaults)
+   ============================================================ */
+:root {
+  /* ********** */
+  /* Typography */
+  /* ********** */
+
+  /* Default pairing: Inter + JetBrains Mono */
+  /* --font-prose:
+    "Inter Variable", "Inter var", "Inter", -apple-system, BlinkMacSystemFont,
+    "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace; */
+
+  /* Alternate pairing: IBM Plex */
+  --font-prose:
+    "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", "SF Mono", Menlo, Consolas, monospace;
+
+  /* Serif pairing: Source Serif 4 + JetBrains Mono */
+  /*--font-prose: "Source Serif 4", "Source Serif Pro", Charter, Georgia, serif;
+  --font-mono: "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;*/
+
+  /* Prose-optimized pairing: iA Writer Quattro + iA Writer Mono */
+  /* --font-prose: "iA Writer Quattro S", "iA Writer Quattro V", Charter, Georgia, serif;
+  --font-mono:  "iA Writer Mono S",    "iA Writer Mono V",    "SF Mono", Menlo, monospace; */
+
+  /* Alternate prose-optimized pairing: Tiempos Text + Berkeley Mono */
+  /* --font-prose: "Tiempos Text", "Source Serif Pro", Charter, Georgia, serif;
+  --font-mono: "Berkeley Mono", "SF Mono", Menlo, Consolas, monospace; */
+
+  /* Söhne pairing */
+  /*--font-prose: "Söhne", "Source Serif Pro", Charter, Georgia, serif;
+  --font-mono: "Söhne Mono", "SF Mono", Menlo, Consolas, monospace;*/
+
+  --font-size-base: 17px;
+  --line-height-body: 1.65;
+  --line-height-heading: 1.25;
+  --measure: 72ch;
+
+  /* Light mode palette */
+  --color-bg: #fbfaf7;
+  --color-text: #1f2328;
+  --color-muted: #5a6270;
+  --color-heading: #0b0c0e;
+  --color-link: #0969da;
+  --color-link-hover: #0550ae;
+  --color-rule: #e3e1dc;
+  --color-code-bg: #f1efea;
+  --color-code-text: #8b1a3a;
+  --color-block-bg: #f6f4ef;
+  --color-block-border: #d9d6cf;
+  --color-quote-border: #c9a227;
+  --color-table-header-bg: #ebe8e2;
+  --color-table-row-alt: #f4f1eb;
+
+  /* Alert block accents (GFM) */
+  --color-alert-note: #0969da;
+  --color-alert-tip: #1a7f37;
+  --color-alert-important: #8250df;
+  --color-alert-warning: #9a6700;
+  --color-alert-caution: #cf222e;
+}
+
+/* Dark mode tokens: scoped to both mechanisms.
+   DEVONthink uses prefers-color-scheme; Marked uses body.inverted.
+   The inverted rules later override these when Marked is active. */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-bg: #1c1e22;
+    --color-text: #d8d4cc;
+    --color-muted: #9a9287;
+    --color-heading: #f2ede3;
+    --color-link: #7cc4ff;
+    --color-link-hover: #a7d7ff;
+    --color-rule: #30343a;
+    --color-code-bg: #2a2d33;
+    --color-code-text: #f4a6b8;
+    --color-block-bg: #23262b;
+    --color-block-border: #383c44;
+    --color-quote-border: #c9a227;
+    --color-table-header-bg: #2a2d33;
+    --color-table-row-alt: #24272c;
+
+    --color-alert-note: #7cc4ff;
+    --color-alert-tip: #3fb950;
+    --color-alert-important: #ab7df8;
+    --color-alert-warning: #d29922;
+    --color-alert-caution: #f85149;
+  }
+}
+
+/* ============================================================
+   BASE
+   Applied to body directly (DEVONthink has no wrapper).
+   Marked's #wrapper inherits these, then layers its own padding.
+   ============================================================ */
+html {
+  font-size: var(--font-size-base);
+}
+
+body {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  font-family: var(--font-prose);
+  font-size: 1rem;
+  line-height: var(--line-height-body);
+  color: var(--color-text);
+  background: var(--color-bg);
+  margin: 0 auto;
+  max-width: var(--measure);
+  padding: 3rem 2rem 6rem;
+  font-feature-settings: "kern", "liga", "calt", "cv11", "ss01";
+  text-rendering: optimizeLegibility;
+  word-wrap: break-word;
+}
+
+/* Marked 2 wrapper: override body constraints since #wrapper handles them.
+   This keeps DEVONthink (no wrapper) and Marked (has wrapper) both clean. */
+body:has(#wrapper) {
+  max-width: none;
+  padding: 0;
+}
+
+#wrapper {
+  max-width: var(--measure);
+  margin: 0 auto;
+  padding: 3rem 2rem 6rem;
+  background: transparent;
+}
+
+/* ============================================================
+   PROSE
+   ============================================================ */
+p {
+  margin: 0 0 1.15em;
+  overflow-wrap: break-word;
+  hyphens: auto;
+}
+
+h1 + p,
+h2 + p,
+h3 + p,
+h4 + p,
+h5 + p,
+h6 + p {
+  margin-top: 0;
+}
+
+strong,
+b {
+  font-weight: 600;
+  color: var(--color-heading);
+}
+em,
+i {
+  font-style: italic;
+}
+
+a {
+  color: var(--color-link);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.15em;
+  transition: color 0.15s ease-in-out;
+  background-color: transparent;
+}
+a:hover {
+  color: var(--color-link-hover);
+}
+
+hr {
+  border: 0;
+  border-top: 1px solid var(--color-rule);
+  height: 0;
+  margin: 2.5em 0;
+  background: transparent;
+  padding: 0;
+}
+
+/* ============================================================
+   HEADINGS
+   ============================================================ */
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  font-family: var(--font-prose);
+  font-weight: 700;
+  color: var(--color-heading);
+  line-height: var(--line-height-heading);
+  letter-spacing: -0.01em;
+}
+
+h1 {
+  font-size: 2.25rem;
+  margin: 0 0 0.6em;
+  letter-spacing: -0.02em;
+  padding-bottom: 0.3em;
+  border-bottom: 1px solid var(--color-rule);
+}
+h2 {
+  font-size: 1.6rem;
+  margin: 2em 0 0.6em;
+  padding-bottom: 0.25em;
+  border-bottom: 1px solid var(--color-rule);
+}
+h3 {
+  font-size: 1.25rem;
+  margin: 1.8em 0 0.5em;
+}
+h4 {
+  font-size: 1.05rem;
+  margin: 1.6em 0 0.4em;
+}
+h5 {
+  font-size: 1rem;
+  margin: 1.5em 0 0.3em;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-muted);
+}
+h6 {
+  font-size: 0.9rem;
+  margin: 1.5em 0 0.3em;
+  color: var(--color-muted);
+}
+
+/* First heading in document shouldn't have a big top margin */
+body > h1:first-child,
+body > h2:first-child,
+#wrapper > h1:first-child,
+#wrapper > h2:first-child {
+  margin-top: 0;
+}
+
+/* ============================================================
+   LISTS
+   ============================================================ */
+ul,
+ol {
+  margin: 0 0 1.2em;
+  padding-left: 1.5em;
+}
+
+li {
+  margin: 0.35em 0;
+  font-size: 1rem;
+  line-height: var(--line-height-body);
+}
+
+li > p {
+  margin: 0.5em 0;
+}
+li > p:first-child {
+  margin-top: 0;
+}
+li > p:last-child {
+  margin-bottom: 0;
+}
+
+li ul,
+li ol {
+  margin: 0.35em 0 0.5em;
+}
+
+ul {
+  list-style-type: disc;
+}
+ul ul {
+  list-style-type: circle;
+}
+ul ul ul {
+  list-style-type: square;
+}
+
+/* Task lists (GFM, supported in both apps) */
+.task-list-item {
+  list-style-type: none;
+}
+.contains-task-list {
+  padding-left: 1em;
+}
+.task-list-item-checkbox {
+  margin: 0 0.4em 0.2em -1.4em;
+  vertical-align: middle;
+}
+
+/* ============================================================
+   CODE
+   ============================================================ */
+code,
+kbd,
+samp,
+pre {
+  font-family: var(--font-mono);
+  font-variant-ligatures: contextual;
+}
+
+/* Inline code */
+p code,
+li code,
+td code,
+th code,
+a code,
+h1 code,
+h2 code,
+h3 code,
+h4 code,
+h5 code,
+h6 code,
+blockquote code {
+  background: var(--color-code-bg);
+  color: var(--color-code-text);
+  padding: 0.12em 0.4em;
+  border-radius: 4px;
+  font-size: 0.88em;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+/* Code blocks */
+pre {
+  background: var(--color-block-bg);
+  border: 1px solid var(--color-block-border);
+  border-radius: 6px;
+  padding: 1em 1.15em;
+  overflow-x: auto;
+  line-height: 1.55;
+  font-size: 0.88em;
+  margin: 1.3em 0;
+  max-width: 100%;
+  word-wrap: normal;
+}
+
+pre code {
+  background: transparent;
+  color: inherit;
+  padding: 0;
+  border-radius: 0;
+  font-size: 1em;
+  font-weight: 400;
+  white-space: pre;
+  border: 0;
+}
+
+kbd {
+  background: var(--color-code-bg);
+  border: 1px solid var(--color-block-border);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  padding: 0.1em 0.45em;
+  font-size: 0.85em;
+  font-family: var(--font-mono);
+  display: inline-block;
+  line-height: 1;
+  vertical-align: middle;
+}
+
+/* ============================================================
+   BLOCKQUOTES
+   ============================================================ */
+blockquote {
+  margin: 1.5em 0;
+  padding: 0.2em 1.2em;
+  border-left: 3px solid var(--color-quote-border);
+  color: var(--color-muted);
+  font-style: normal;
+}
+blockquote p {
+  font-size: 1rem;
+  line-height: var(--line-height-body);
+}
+blockquote p:last-child {
+  margin-bottom: 0;
+}
+
+/* ============================================================
+   TABLES
+   ============================================================ */
+table {
+  width: 100%;
+  border-collapse: collapse;
+  border: 1px solid var(--color-block-border);
+  margin: 1.5em 0;
+  font-size: 0.95rem;
+  display: table;
+  table-layout: auto;
+  border-spacing: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+caption {
+  font-weight: 600;
+  text-align: left;
+  padding: 0.5em 0;
+  color: var(--color-muted);
+}
+
+thead {
+  background: var(--color-table-header-bg);
+  border-bottom: 2px solid var(--color-block-border);
+}
+
+th,
+td {
+  text-align: left;
+  padding: 0.55em 0.85em;
+  border-bottom: 1px solid var(--color-rule);
+  line-height: 1.5;
+}
+
+th {
+  font-weight: 600;
+  color: var(--color-heading);
+}
+
+tbody tr:nth-child(even) {
+  background: var(--color-table-row-alt);
+}
+
+/* ============================================================
+   FIGURES & IMAGES
+   ============================================================ */
+body img,
+#wrapper img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 4px;
+  box-sizing: content-box;
+}
+
+figure {
+  margin: 1.8em 0;
+  text-align: center;
+  display: block;
+}
+figcaption {
+  font-size: 0.88rem;
+  color: var(--color-muted);
+  font-style: italic;
+  margin-top: 0.5em;
+  display: block;
+}
+
+/* ============================================================
+   GFM ALERT BLOCKS
+   (rendered by both apps for > [!NOTE] syntax)
+   ============================================================ */
+.markdown-alert {
+  padding: 0.5em 1em;
+  margin: 1.3em 0;
+  border-left: 4px solid var(--color-rule);
+  background: var(--color-block-bg);
+  border-radius: 0 4px 4px 0;
+}
+.markdown-alert > :first-child {
+  margin-top: 0;
+}
+.markdown-alert > :last-child {
+  margin-bottom: 0;
+}
+.markdown-alert .markdown-alert-title {
+  display: flex;
+  align-items: center;
+  font-weight: 600;
+  line-height: 1.2;
+  margin-bottom: 0.4em;
+}
+
+.markdown-alert-note {
+  border-left-color: var(--color-alert-note);
+}
+.markdown-alert-note .markdown-alert-title {
+  color: var(--color-alert-note);
+}
+.markdown-alert-tip {
+  border-left-color: var(--color-alert-tip);
+}
+.markdown-alert-tip .markdown-alert-title {
+  color: var(--color-alert-tip);
+}
+.markdown-alert-important {
+  border-left-color: var(--color-alert-important);
+}
+.markdown-alert-important .markdown-alert-title {
+  color: var(--color-alert-important);
+}
+.markdown-alert-warning {
+  border-left-color: var(--color-alert-warning);
+}
+.markdown-alert-warning .markdown-alert-title {
+  color: var(--color-alert-warning);
+}
+.markdown-alert-caution {
+  border-left-color: var(--color-alert-caution);
+}
+.markdown-alert-caution .markdown-alert-title {
+  color: var(--color-alert-caution);
+}
+
+/* ============================================================
+   FOOTNOTES
+   ============================================================ */
+sup,
+sub {
+  font-size: 1.4ex;
+  height: 0;
+  line-height: 1;
+  vertical-align: super;
+  position: relative;
+}
+sub {
+  vertical-align: sub;
+  top: -1px;
+}
+
+a.footnote {
+  color: var(--color-link);
+  font-weight: 500;
+  padding: 0 0.15em;
+  text-decoration: none;
+  font-size: 1.4ex;
+  vertical-align: super;
+  line-height: 1;
+}
+
+.footnotes {
+  font-size: 0.92rem;
+  color: var(--color-muted);
+  border-top: 1px solid var(--color-rule);
+  margin-top: 3em;
+  padding-top: 1em;
+}
+.footnotes p {
+  display: inline;
+}
+
+/* ============================================================
+   MARKED 2 SPECIFIC
+   (harmless in DEVONthink since selectors don't match)
+   ============================================================ */
+
+/* Poetry body class (Marked only) */
+.poetry pre {
+  font-family: Georgia, Garamond, serif;
+  font-style: italic;
+  font-size: 1.05rem;
+  line-height: 1.6;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  margin-left: 1em;
+}
+.poetry pre code {
+  font-family: Georgia, Garamond, serif;
+}
+
+/* Table of contents via <!--toc--> (Marked only) */
+#wrapper #mkreplaced-toc {
+  background: var(--color-block-bg);
+  border: 1px solid var(--color-block-border);
+  border-radius: 6px;
+  padding: 1em 1.5em;
+  margin: 1.5em 0 2em;
+  font-size: 0.95rem;
+}
+#wrapper #mkreplaced-toc ul {
+  margin: 0.3em 0;
+}
+#wrapper #mkreplaced-toc li {
+  margin: 0.2em 0;
+}
+
+/* ============================================================
+   MARKED 2 INVERTED (dark mode via body class)
+   Scoped to @media screen so print output stays light.
+   This duplicates the prefers-color-scheme rules above to cover
+   Marked's class-based dark mode which doesn't trigger media queries.
+   ============================================================ */
+@media screen {
+  .inverted {
+    --color-bg: #1c1e22;
+    --color-text: #d8d4cc;
+    --color-muted: #9a9287;
+    --color-heading: #f2ede3;
+    --color-link: #7cc4ff;
+    --color-link-hover: #a7d7ff;
+    --color-rule: #30343a;
+    --color-code-bg: #2a2d33;
+    --color-code-text: #f4a6b8;
+    --color-block-bg: #23262b;
+    --color-block-border: #383c44;
+    --color-quote-border: #c9a227;
+    --color-table-header-bg: #2a2d33;
+    --color-table-row-alt: #24272c;
+
+    --color-alert-note: #7cc4ff;
+    --color-alert-tip: #3fb950;
+    --color-alert-important: #ab7df8;
+    --color-alert-warning: #d29922;
+    --color-alert-caution: #f85149;
+  }
+
+  .inverted,
+  .inverted #wrapper {
+    background: var(--color-bg);
+    color: var(--color-text);
+  }
+
+  /* Disable the skeleton's default nth-child stripes in inverted mode */
+  .inverted table tr:nth-child(odd),
+  .inverted table th:nth-child(odd),
+  .inverted table td:nth-child(odd) {
+    background: none;
+  }
+
+  ::selection {
+    background: rgba(124, 196, 255, 0.28);
+  }
+  .inverted ::selection {
+    background: rgba(124, 196, 255, 0.35);
+  }
+}
+
+/* ============================================================
+   MANUAL THEME OVERRIDE (via data-theme attribute)
+   Set by the companion theme-toggle JS in DEVONthink. The
+   [data-theme] selectors take precedence over prefers-color-
+   scheme because they are higher specificity (attribute selector
+   beats pseudo-class in the cascade when both apply).
+   ============================================================ */
+[data-theme="dark"] {
+  --color-bg: #1c1e22;
+  --color-text: #d8d4cc;
+  --color-muted: #9a9287;
+  --color-heading: #f2ede3;
+  --color-link: #7cc4ff;
+  --color-link-hover: #a7d7ff;
+  --color-rule: #30343a;
+  --color-code-bg: #2a2d33;
+  --color-code-text: #f4a6b8;
+  --color-block-bg: #23262b;
+  --color-block-border: #383c44;
+  --color-quote-border: #c9a227;
+  --color-table-header-bg: #2a2d33;
+  --color-table-row-alt: #24272c;
+
+  --color-alert-note: #7cc4ff;
+  --color-alert-tip: #3fb950;
+  --color-alert-important: #ab7df8;
+  --color-alert-warning: #d29922;
+  --color-alert-caution: #f85149;
+}
+
+[data-theme="light"] {
+  --color-bg: #fbfaf7;
+  --color-text: #1f2328;
+  --color-muted: #5a6270;
+  --color-heading: #0b0c0e;
+  --color-link: #0969da;
+  --color-link-hover: #0550ae;
+  --color-rule: #e3e1dc;
+  --color-code-bg: #f1efea;
+  --color-code-text: #8b1a3a;
+  --color-block-bg: #f6f4ef;
+  --color-block-border: #d9d6cf;
+  --color-quote-border: #c9a227;
+  --color-table-header-bg: #ebe8e2;
+  --color-table-row-alt: #f4f1eb;
+
+  --color-alert-note: #0969da;
+  --color-alert-tip: #1a7f37;
+  --color-alert-important: #8250df;
+  --color-alert-warning: #9a6700;
+  --color-alert-caution: #cf222e;
+}
+
+/* Theme toggle button (injected by companion JS) */
+.theme-toggle {
+  position: fixed;
+  top: 1rem;
+  right: 1rem;
+  width: 2.25rem;
+  height: 2.25rem;
+  border: 1px solid var(--color-rule);
+  border-radius: 50%;
+  background: var(--color-block-bg);
+  color: var(--color-text);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  z-index: 1000;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease,
+    transform 0.1s ease;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+.theme-toggle:hover {
+  background: var(--color-code-bg);
+  border-color: var(--color-muted);
+}
+.theme-toggle:active {
+  transform: scale(0.95);
+}
+.theme-toggle svg {
+  display: block;
+}
+
+/* Hide the toggle in print output */
+@media print {
+  .theme-toggle {
+    display: none !important;
+  }
+}
+
+/* ============================================================
+   MOBILE
+   Tuned for phones and small tablets. Applies to DEVONthink To
+   Go, iOS markdown previewers (Taio, 1Writer, iA Writer), and
+   any narrow-viewport rendering.
+   ============================================================ */
+@media (max-width: 640px) {
+  :root {
+    --line-height-body: 1.55;
+    --measure: 100%;
+  }
+
+  body,
+  #wrapper {
+    padding: 1.5rem 1.1rem 3rem;
+    max-width: 100%;
+  }
+
+  h1 {
+    font-size: 1.75rem;
+  }
+  h2 {
+    font-size: 1.4rem;
+    margin-top: 1.6em;
+  }
+  h3 {
+    font-size: 1.15rem;
+  }
+  h4 {
+    font-size: 1rem;
+  }
+
+  /* Code blocks: wrap instead of horizontal scroll on mobile.
+       Reading code on a phone is already compromised; wrapping is
+       less bad than nested horizontal scroll. */
+  pre {
+    padding: 0.9em 1em;
+    font-size: 0.82em;
+    border-radius: 4px;
+  }
+  pre code {
+    white-space: pre-wrap;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+  }
+
+  /* Inline code: allow wrapping so long identifiers don't
+       push the paragraph off-screen. */
+  p code,
+  li code,
+  td code {
+    white-space: normal;
+    word-break: break-word;
+  }
+
+  /* Tables: wrap in a horizontally-scrollable container.
+       display:block + overflow-x:auto lets the table scroll
+       independently of the page. */
+  table {
+    display: block;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    font-size: 0.88rem;
+    white-space: nowrap;
+  }
+
+  /* Blockquotes: tighter horizontal padding */
+  blockquote {
+    padding: 0.2em 1em;
+    margin: 1.2em 0;
+  }
+
+  /* Alert blocks: tighter on mobile */
+  .markdown-alert {
+    padding: 0.5em 0.85em;
+  }
+
+  /* Lists: less indent since horizontal space is scarce */
+  ul,
+  ol {
+    padding-left: 1.2em;
+  }
+
+  /* Images: edge-to-edge, no border radius */
+  body img,
+  #wrapper img {
+    border-radius: 0;
+  }
+
+  /* Theme toggle: larger tap target on mobile (iOS HIG minimum 44pt) */
+  .theme-toggle {
+    width: 2.75rem;
+    height: 2.75rem;
+    top: 0.75rem;
+    right: 0.75rem;
+  }
+  .theme-toggle svg {
+    width: 20px;
+    height: 20px;
+  }
+}
+
+/* Narrower phones (iPhone SE, older models in portrait) */
+@media (max-width: 380px) {
+  h1 {
+    font-size: 1.55rem;
+  }
+  h2 {
+    font-size: 1.25rem;
+  }
+
+  body,
+  #wrapper {
+    padding: 1.25rem 0.9rem 2.5rem;
+  }
+}
+
+/* ============================================================
+   PRINT
+   ============================================================ */
+@media print {
+  body {
+    background: #fff;
+    color: #000;
+    overflow: auto;
+    max-width: none;
+    padding: 0;
+  }
+  #wrapper {
+    max-width: none;
+    padding: 0;
+    font-size: 11pt;
+  }
+  a {
+    color: #000;
+    text-decoration: underline;
+  }
+  pre,
+  blockquote,
+  table,
+  figure,
+  p,
+  li,
+  img {
+    page-break-inside: avoid;
+  }
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    page-break-after: avoid;
+  }
+  pre {
+    background: #f6f6f6 !important;
+    border: 1px solid #ccc !important;
+    color: #000 !important;
+  }
+  p code,
+  li code,
+  td code {
+    background: #f0f0f0 !important;
+    color: #000 !important;
+  }
+  .markdown-alert {
+    background: transparent !important;
+  }
+}
