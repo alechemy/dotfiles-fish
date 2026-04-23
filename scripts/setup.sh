@@ -53,6 +53,8 @@ fi
 info "Building generated configs..."
 chmod +x "$DOTFILES/scripts/build-zed-config.sh"
 "$DOTFILES/scripts/build-zed-config.sh"
+chmod +x "$DOTFILES/scripts/build-streamrip-config.sh"
+"$DOTFILES/scripts/build-streamrip-config.sh"
 success "Generated configs built"
 
 # 4. Stow dotfiles
@@ -122,6 +124,14 @@ if command -v stow &> /dev/null; then
         launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/com.user.dt-daily-note.plist" 2>/dev/null || true
         launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/com.user.dt-watchdog.plist" 2>/dev/null || true
         success "DEVONthink pipeline installed"
+
+        # Wiki integration (optional)
+        read -p "  ? Initialize LLM Wiki directory at ~/Wiki? [y/N] " -n 1 -r
+        echo
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            chmod +x "$DOTFILES/scripts/init-wiki.sh"
+            "$DOTFILES/scripts/init-wiki.sh"
+        fi
     else
         info "Skipping DEVONthink pipeline."
     fi
