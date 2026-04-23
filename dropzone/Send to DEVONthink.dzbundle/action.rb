@@ -1,6 +1,6 @@
 # Dropzone Action Info
 # Name: Send to DEVONthink
-# Description: Import dragged files into a specific DEVONthink 3 group.
+# Description: Import dragged files into a specific DEVONthink group.
 # Handles: Files
 # Creator: Alec Custer
 # URL: https://www.devontechnologies.com

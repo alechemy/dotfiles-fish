@@ -1,0 +1,15 @@
+#!/bin/sh
+# Open files in Marked 2
+
+if [ $# -eq 0 ]; then
+    open -a "Marked 2"
+    exit
+fi
+
+for file in "$@"; do
+    path=$(cd "$(dirname "$file")" 2>/dev/null && printf '%s/%s' "$(pwd)" "$(basename "$file")") || {
+        echo "marked: $file: No such file" >&2
+        continue
+    }
+    open -a "Marked 2" "$path"
+done

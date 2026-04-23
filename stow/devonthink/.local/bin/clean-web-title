@@ -1,0 +1,23 @@
+#!/usr/bin/env python3
+"""Normalize a web-page title read from stdin.
+
+Fixes junk introduced by browsers and SingleFile when they transliterate
+filename-forbidden ASCII punctuation to Unicode lookalikes (e.g. the
+colon in "Best New Music: ..." becomes U+FF1A "Best New Music： ...").
+Also collapses Unicode whitespace to single ASCII spaces and strips a
+trailing " | Site Name" brand suffix, which is almost always noise.
+
+Dash-separated suffixes are left alone: they are too often legitimate
+subtitles to strip heuristically.
+
+Usage: clean-web-title < title.txt
+"""
+import re
+import sys
+import unicodedata
+
+s = sys.stdin.read()
+s = unicodedata.normalize("NFKC", s)
+s = re.sub(r"\s+", " ", s).strip()
+s = re.sub(r"\s*\|\s*[^|]+$", "", s).strip()
+sys.stdout.write(s)

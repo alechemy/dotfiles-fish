@@ -1,0 +1,130 @@
+#!/usr/bin/osascript -l JavaScript
+
+// dt-jot "some quick thought"
+//   Appends a timestamped bullet to today's DEVONthink daily note.
+//   Silent on success; macOS notification on error (non-zero exit).
+//   Does not steal focus from the frontmost app.
+//
+// Mirrors the macOS branch of drafts/drafts-quick-jot.js.
+
+ObjC.import("stdlib");
+
+function run(argv) {
+  const text = argv.join(" ").trim();
+  if (!text) {
+    errorExit("Empty jot");
+  }
+
+  const now = new Date();
+  let h = now.getHours();
+  const mm = String(now.getMinutes()).padStart(2, "0");
+  const ampm = h >= 12 ? "pm" : "am";
+  h = h % 12 || 12;
+  const line = `- ${h}:${mm}${ampm}: ${text}`;
+
+  const dateStr = [
+    now.getFullYear(),
+    String(now.getMonth() + 1).padStart(2, "0"),
+    String(now.getDate()).padStart(2, "0"),
+  ].join("-");
+
+  const dt = Application("DEVONthink");
+
+  let db;
+  try {
+    db = dt.databases["Lorebook"];
+    if (!db.exists()) throw new Error("Lorebook not open");
+  } catch (e) {
+    errorExit(`Lorebook database not available: ${e.message}`);
+  }
+
+  let dailyGroup;
+  try {
+    dailyGroup = dt.getRecordAt("/10_DAILY", { in: db });
+  } catch (e) {
+    errorExit(`Can't find /10_DAILY: ${e.message}`);
+  }
+
+  const hits = dt.search(`name:"${dateStr}" kind:markdown`, { in: dailyGroup });
+
+  if (!hits || hits.length === 0) {
+    try {
+      const r = dt.createRecordWith(
+        { name: `Jot ${dateStr}`, type: "markdown", plainText: line },
+        { in: dt.incomingGroup() },
+      );
+      dt.addCustomMetaData(1, { for: "IsJot", to: r });
+    } catch (e) {
+      errorExit(`Fallback create failed: ${e.message}`);
+    }
+    return;
+  }
+
+  const rec = hits[0];
+  const body = String(rec.plainText()).replace(/\r\n?/g, "\n");
+  const newBody = insertBeforeTodaysNotes(body, line);
+
+  try {
+    rec.plainText = newBody;
+  } catch (e) {
+    errorExit(`Write failed: ${e.message}`);
+  }
+}
+
+function insertBeforeTodaysNotes(body, jotLine) {
+  const lines = body.split("\n");
+  const marker = "## Today's Notes";
+  const emptyBullet = /^\s*[-*]\s*$/;
+  const contentBullet = /^\s*[-*]\s+\S/;
+
+  let h2 = -1;
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].trim() === marker) {
+      h2 = i;
+      break;
+    }
+  }
+
+  if (h2 === -1) {
+    lines.push("", jotLine);
+    return lines.join("\n");
+  }
+
+  let lastContent = -1;
+  for (let i = h2 - 1; i >= 0; i--) {
+    if (contentBullet.test(lines[i])) {
+      lastContent = i;
+      break;
+    }
+  }
+
+  if (lastContent !== -1) {
+    let insertAt = lastContent + 1;
+    while (insertAt < h2 && /^[ \t]/.test(lines[insertAt])) {
+      insertAt++;
+    }
+    lines.splice(insertAt, 0, jotLine);
+    return lines.join("\n");
+  }
+
+  for (let i = h2 - 1; i >= 0; i--) {
+    if (emptyBullet.test(lines[i])) {
+      lines[i] = jotLine;
+      return lines.join("\n");
+    }
+  }
+
+  let ins = h2;
+  while (ins > 0 && lines[ins - 1].trim() === "") ins--;
+  lines.splice(ins, h2 - ins, "", jotLine, "");
+  return lines.join("\n");
+}
+
+function errorExit(msg) {
+  const app = Application.currentApplication();
+  app.includeStandardAdditions = true;
+  try {
+    app.displayNotification(msg, { withTitle: "dt-jot" });
+  } catch (_) {}
+  $.exit(1);
+}

@@ -1,0 +1,123 @@
+#!/bin/bash
+#
+# capture-with-singlefile
+#
+# Opens URLs in the running Chromium browser and triggers the SingleFile
+# extension to save each page. Prints the output file path for each
+# successful capture, or "FAIL\tURL\tReason" on failure.
+#
+# Usage:
+#   capture-with-singlefile --url <url>
+#   capture-with-singlefile --url <url1> --url <url2> ...
+#   capture-with-singlefile --url-file <path>   (one URL per line)
+#
+# Uses AppleScript to drive the user's running Chromium instance.
+# No CDP, no Playwright, no profile modification.
+
+set -euo pipefail
+
+CHROMIUM_APP="Chromium"
+OUTPUT_DIR="$HOME/Downloads/SingleFile"
+SETTLE_SECONDS=5
+DEFAULT_TIMEOUT=90
+
+# --- Parse args ---
+
+urls=()
+timeout=$DEFAULT_TIMEOUT
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --url)
+            urls+=("$2"); shift 2 ;;
+        --url-file)
+            while IFS= read -r line; do
+                line="${line%%#*}"
+                line="$(echo "$line" | xargs)"
+                [[ -n "$line" ]] && urls+=("$line")
+            done < "$2"
+            shift 2 ;;
+        --timeout)
+            timeout="$2"; shift 2 ;;
+        *)
+            echo "Unknown argument: $1" >&2; exit 1 ;;
+    esac
+done
+
+if [[ ${#urls[@]} -eq 0 ]]; then
+    echo "Usage: capture-with-singlefile --url <url> [--url <url2> ...] [--url-file <path>]" >&2
+    exit 1
+fi
+
+# --- Helpers ---
+
+wait_for_new_file() {
+    local marker="$1"
+    local end=$((SECONDS + timeout))
+
+    while [[ $SECONDS -lt $end ]]; do
+        new_file=$(find -L "$OUTPUT_DIR" -maxdepth 1 -name "*.html" -newer "$marker" -print -quit 2>/dev/null || true)
+        if [[ -n "$new_file" ]]; then
+            echo "$new_file"
+            return 0
+        fi
+        sleep 1
+    done
+    return 1
+}
+
+# --- Main ---
+
+# Ensure Chromium is running
+if ! pgrep -x "$CHROMIUM_APP" > /dev/null 2>&1; then
+    open -a "$CHROMIUM_APP"
+    sleep 3
+fi
+
+for url in "${urls[@]}"; do
+    # Open URL in a new tab
+    osascript - "$url" <<'APPLESCRIPT'
+on run argv
+    set theURL to item 1 of argv
+    tell application "Chromium"
+        activate
+        if (count of windows) is 0 then make new window
+        tell window 1
+            set theTab to make new tab at end of tabs
+            set active tab index to (count of tabs)
+        end tell
+    end tell
+    delay 0.5
+    tell application "Chromium"
+        set URL of active tab of window 1 to theURL
+    end tell
+end run
+APPLESCRIPT
+
+    # Wait for page to load
+    osascript <<'APPLESCRIPT'
+tell application "Chromium"
+    repeat
+        if not (loading of active tab of window 1) then exit repeat
+        delay 0.5
+    end repeat
+end tell
+APPLESCRIPT
+
+    sleep "$SETTLE_SECONDS"
+
+    # Create a timestamp marker for detecting new files
+    marker=$(mktemp /tmp/sf-marker.XXXXXX)
+
+    # Trigger SingleFile via Cmd+D
+    osascript -e 'tell application "System Events" to keystroke "d" using command down'
+
+    # Wait for the output file
+    if new_file=$(wait_for_new_file "$marker"); then
+        echo "$new_file"
+    else
+        echo -e "FAIL\t$url\tTimed out waiting for SingleFile download after ${timeout}s" >&2
+    fi
+
+    rm -f "$marker"
+done
