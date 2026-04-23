@@ -3,6 +3,8 @@ function riptag -d "download, tag, and import an album to Apple Music"
     set -l NAS admin@192.168.50.54
     set -l NAS_RIP /share/CACHEDEV1_DATA/python-apps/streamrip_env/bin/rip
     set -l NAS_RIP_CONFIG /share/CACHEDEV1_DATA/streamrip/config.toml
+    set -l LOCAL_PYTHON $HOME/.local/share/mise/installs/python/3.14.3/bin/python3
+    set -l LOCAL_RIP $HOME/.local/share/mise/installs/python/3.14.3/bin/rip
     set -l TAGGER $HOME/.local/bin/tagger.py
     set -l WORKER $HOME/.local/bin/riptag-worker.sh
     set -l ALLOWED_GENRES Ambient Bluegrass Classical Country Electronic Experimental Folk Hip-Hop Jazz Lo-Fi Mashup Pop R&B Reggae Rock Soundtrack Unknown
@@ -134,7 +136,7 @@ function riptag -d "download, tag, and import an album to Apple Music"
         echo "   Mode: local (VPN resume)"
         echo ""
 
-        "$WORKER" --local --resume "$resume_id" $compilation_flag "$genre"
+        LOCAL_PYTHON="$LOCAL_PYTHON" LOCAL_RIP="$LOCAL_RIP" "$WORKER" --local --resume "$resume_id" $compilation_flag "$genre"
         set -l worker_status $status
 
         if test $worker_status -eq 2
@@ -169,7 +171,7 @@ function riptag -d "download, tag, and import an album to Apple Music"
         set -l results
         if test $local_mode -eq 1
             set -l tmpfile (mktemp)
-            command rip search -o "$tmpfile" -n 5 qobuz album "$url_or_query" >/dev/null 2>&1
+            command "$LOCAL_RIP" search -o "$tmpfile" -n 5 qobuz album "$url_or_query" >/dev/null 2>&1
             if test $status -ne 0
                 echo "ERROR: Search failed."
                 rm -f "$tmpfile"
@@ -245,7 +247,7 @@ for r in json.load(sys.stdin):
 
     # --- Run the worker ---
     if test $local_mode -eq 1
-        "$WORKER" --local $compilation_flag "$url" "$genre"
+        LOCAL_PYTHON="$LOCAL_PYTHON" LOCAL_RIP="$LOCAL_RIP" "$WORKER" --local $compilation_flag "$url" "$genre"
     else
         # Deploy scripts to NAS /tmp, then run via SSH
         scp -q "$TAGGER" "$WORKER" "$NAS":/tmp/

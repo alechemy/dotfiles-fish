@@ -2,8 +2,9 @@
 # Requires: pip install mutagen
 
 import argparse
-import sys
 import os
+import sys
+
 from mutagen.mp4 import MP4
 
 
