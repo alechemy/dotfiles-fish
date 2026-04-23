@@ -2,3 +2,8 @@
 node = "lts"
 python = "latest"
 java = "latest"
+
+# Global npm CLIs — mise reinstalls these against the active node version,
+# so they survive node upgrades and get reproduced on fresh machines.
+"npm:defuddle" = "latest"
+"npm:happy" = "latest"
