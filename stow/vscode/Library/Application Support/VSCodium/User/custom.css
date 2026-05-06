@@ -1,0 +1,5 @@
+/* Suppress strikethrough on diagnostics tagged Deprecated (e.g. ngtsc 6385).
+   Scoped via custom.js — only active in workspaces it tags with this class. */
+body.ws-suppress-deprecated .monaco-editor .squiggly-inline-deprecated {
+  text-decoration: none !important;
+}
