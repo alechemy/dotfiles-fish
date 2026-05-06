@@ -8,6 +8,9 @@ Description: A readability-focused markdown theme compatible with
              extensions. Responsive mobile layout included.
              Optional manual theme toggle via data-theme attr
              (paired with theme-toggle.js in DEVONthink).
+             Supports extended markdown: definition lists,
+             abbreviations, citations, CriticMarkup, display
+             math, callouts, nested task lists.
 Non-standard fonts used: Inter, JetBrains Mono
 Compatibility notes:
   - Marked 2: uses #wrapper container and .inverted body class
@@ -132,8 +135,6 @@ html {
 }
 
 body {
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
   -webkit-text-size-adjust: 100%;
   text-size-adjust: 100%;
   font-family: var(--font-prose);
@@ -144,9 +145,10 @@ body {
   margin: 0 auto;
   max-width: var(--measure);
   padding: 3rem 2rem 6rem;
-  font-feature-settings: "kern", "liga", "calt", "cv11", "ss01";
+  font-kerning: normal;
+  font-variant-ligatures: common-ligatures contextual;
   text-rendering: optimizeLegibility;
-  word-wrap: break-word;
+  overflow-wrap: break-word;
 }
 
 /* Marked 2 wrapper: override body constraints since #wrapper handles them.
@@ -170,6 +172,7 @@ p {
   margin: 0 0 1.15em;
   overflow-wrap: break-word;
   hyphens: auto;
+  text-wrap: pretty;
 }
 
 h1 + p,
@@ -226,6 +229,7 @@ h6 {
   color: var(--color-heading);
   line-height: var(--line-height-heading);
   letter-spacing: -0.01em;
+  text-wrap: balance;
 }
 
 h1 {
@@ -366,7 +370,7 @@ pre {
   font-size: 0.88em;
   margin: 1.3em 0;
   max-width: 100%;
-  word-wrap: normal;
+  overflow-wrap: normal;
 }
 
 pre code {
@@ -570,6 +574,111 @@ a.footnote {
 }
 .footnotes p {
   display: inline;
+}
+
+/* ============================================================
+   EXTENDED MARKDOWN ELEMENTS
+   Supported by DEVONthink To Go's new renderer (post-MMD6) and
+   by MultiMarkdown / extended pipelines generally. These rules
+   degrade gracefully in renderers that don't emit the markup.
+   ============================================================ */
+
+/* Definition lists */
+dl {
+  margin: 1.2em 0;
+}
+dt {
+  font-weight: 600;
+  color: var(--color-heading);
+  margin-top: 0.8em;
+}
+dt:first-child {
+  margin-top: 0;
+}
+dd {
+  margin: 0.3em 0 0.8em 1.5em;
+  color: var(--color-text);
+}
+dd > p:first-child {
+  margin-top: 0;
+}
+dd > p:last-child {
+  margin-bottom: 0;
+}
+
+/* Abbreviations: dotted underline, help cursor, no bold */
+abbr,
+abbr[title] {
+  text-decoration: underline dotted;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.15em;
+  cursor: help;
+  border-bottom: 0;
+}
+
+/* Citations: rendered as <cite> by MMD-style pipelines */
+cite {
+  font-style: italic;
+  color: var(--color-muted);
+}
+
+/* CriticMarkup
+   Insertions {++ ... ++}, deletions {-- ... --}, comments
+   {>> ... <<}, highlights {== ... ==}, substitutions
+   {~~ ... ~> ... ~~}. Different renderers use different
+   markup; covering both <ins>/<del>/<mark> (semantic HTML)
+   and class-based variants (.critic-*). */
+ins,
+.critic-add {
+  background: rgba(63, 185, 80, 0.18);
+  text-decoration: none;
+  padding: 0 0.15em;
+  border-radius: 2px;
+}
+del,
+.critic-delete {
+  background: rgba(248, 81, 73, 0.18);
+  text-decoration: line-through;
+  text-decoration-color: var(--color-alert-caution);
+  padding: 0 0.15em;
+  border-radius: 2px;
+}
+mark,
+.critic-highlight {
+  background: rgba(210, 153, 34, 0.28);
+  color: inherit;
+  padding: 0 0.15em;
+  border-radius: 2px;
+}
+.critic-comment {
+  background: rgba(124, 196, 255, 0.15);
+  color: var(--color-muted);
+  font-style: italic;
+  padding: 0 0.15em;
+  border-radius: 2px;
+}
+
+/* Display math
+   DT's new renderer supports $$...$$ blocks. The exact DOM
+   varies by pipeline: some emit MathML, some emit a wrapper
+   div with class "math" or "katex-display", some use a
+   dedicated tag. Cover the common cases. */
+.math.display,
+.math-display,
+.katex-display,
+math[display="block"] {
+  display: block;
+  overflow-x: auto;
+  margin: 1.4em 0;
+  padding: 0.4em 0;
+  text-align: center;
+  font-size: 1.05em;
+}
+
+.math.inline,
+.math-inline,
+math {
+  font-size: 1em;
 }
 
 /* ============================================================
@@ -787,6 +896,18 @@ a.footnote {
     font-size: 1rem;
   }
 
+  p {
+    text-wrap: auto;
+  }
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    text-wrap: auto;
+  }
+
   /* Code blocks: wrap instead of horizontal scroll on mobile.
        Reading code on a phone is already compromised; wrapping is
        less bad than nested horizontal scroll. */
@@ -816,7 +937,6 @@ a.footnote {
   table {
     display: block;
     overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
     font-size: 0.88rem;
     white-space: nowrap;
   }
