@@ -3,8 +3,8 @@ function riptag -d "download, tag, and import an album to Apple Music"
     set -l NAS admin@192.168.50.54
     set -l NAS_RIP /share/CACHEDEV1_DATA/python-apps/streamrip_env/bin/rip
     set -l NAS_RIP_CONFIG /share/CACHEDEV1_DATA/streamrip/config.toml
-    set -l LOCAL_PYTHON $HOME/.local/share/mise/installs/python/3.14.3/bin/python3
-    set -l LOCAL_RIP $HOME/.local/share/mise/installs/python/3.14.3/bin/rip
+    set -l LOCAL_PYTHON $HOME/Developer/streamrip/.venv/bin/python3
+    set -l LOCAL_RIP $HOME/Developer/streamrip/.venv/bin/rip
     set -l TAGGER $HOME/.local/bin/tagger.py
     set -l WORKER $HOME/.local/bin/riptag-worker.sh
     set -l ALLOWED_GENRES Ambient Bluegrass Classical Country Electronic Experimental Folk Hip-Hop Jazz Lo-Fi Mashup Pop R&B Reggae Rock Soundtrack Unknown
@@ -12,6 +12,9 @@ function riptag -d "download, tag, and import an album to Apple Music"
     # --- Argument parsing ---
     set -l compilation_flag
     set -l compilation_explicit 0
+    set -l playlist_flag
+    set -l year
+    set -l year_explicit 0
     set -l local_mode 0
     set -l resume_id
     set -l url_or_query
@@ -25,6 +28,9 @@ function riptag -d "download, tag, and import an album to Apple Music"
             case '--compilation=false'
                 set compilation_flag
                 set compilation_explicit 1
+            case '--year=*'
+                set year (string replace -- '--year=' '' $arg)
+                set year_explicit 1
             case --local
                 set local_mode 1
             case '--resume=*'
@@ -65,6 +71,12 @@ function riptag -d "download, tag, and import an album to Apple Music"
             end
             if test $compilation_explicit -eq 0 -a (count $meta_lines) -ge 2 -a -n "$meta_lines[2]"
                 set compilation_flag "$meta_lines[2]"
+            end
+            if test (count $meta_lines) -ge 3 -a -n "$meta_lines[3]"
+                set playlist_flag "$meta_lines[3]"
+            end
+            if test $year_explicit -eq 0 -a (count $meta_lines) -ge 4 -a -n "$meta_lines[4]"
+                set year "$meta_lines[4]"
             end
         else
             # No meta file — treat positional arg as genre
@@ -126,6 +138,26 @@ function riptag -d "download, tag, and import an album to Apple Music"
         echo "ℹ️  Auto-setting compilation flag for Soundtrack genre"
     end
 
+    # --- Auto-detect playlist URLs ---
+    if string match -q '*/playlist/*' "$url_or_query"
+        set playlist_flag --playlist-mode
+        if test $compilation_explicit -eq 0
+            set compilation_flag --compilation
+        end
+        if test -z "$year"
+            set year (date +%Y)
+            echo "ℹ️  Playlist URL detected: forcing compilation + Various Artists + unified cover + year=$year"
+        else
+            echo "ℹ️  Playlist URL detected: forcing compilation + Various Artists + unified cover (year=$year)"
+        end
+    end
+
+    # --- Build year args (passed to worker if set) ---
+    set -l year_args
+    if test -n "$year"
+        set year_args --year $year
+    end
+
     # --- Resume mode: skip URL resolution, go straight to worker ---
     if test -n "$resume_id"
         echo "🔄 Resuming session $resume_id"
@@ -133,10 +165,16 @@ function riptag -d "download, tag, and import an album to Apple Music"
         if test -n "$compilation_flag"
             echo "   Compilation: yes"
         end
+        if test -n "$playlist_flag"
+            echo "   Playlist mode: yes"
+        end
+        if test -n "$year"
+            echo "   Year: $year"
+        end
         echo "   Mode: local (VPN resume)"
         echo ""
 
-        LOCAL_PYTHON="$LOCAL_PYTHON" LOCAL_RIP="$LOCAL_RIP" "$WORKER" --local --resume "$resume_id" $compilation_flag "$genre"
+        LOCAL_PYTHON="$LOCAL_PYTHON" LOCAL_RIP="$LOCAL_RIP" "$WORKER" --local --resume "$resume_id" $compilation_flag $playlist_flag $year_args "$genre"
         set -l worker_status $status
 
         if test $worker_status -eq 2
@@ -238,6 +276,12 @@ for r in json.load(sys.stdin):
     if test -n "$compilation_flag"
         echo "   Compilation: yes"
     end
+    if test -n "$playlist_flag"
+        echo "   Playlist mode: yes (Various Artists + unified cover)"
+    end
+    if test -n "$year"
+        echo "   Year: $year"
+    end
     if test $local_mode -eq 1
         echo "   Mode: local (will upload to NAS after download)"
     else
@@ -247,7 +291,7 @@ for r in json.load(sys.stdin):
 
     # --- Run the worker ---
     if test $local_mode -eq 1
-        LOCAL_PYTHON="$LOCAL_PYTHON" LOCAL_RIP="$LOCAL_RIP" "$WORKER" --local $compilation_flag "$url" "$genre"
+        LOCAL_PYTHON="$LOCAL_PYTHON" LOCAL_RIP="$LOCAL_RIP" "$WORKER" --local $compilation_flag $playlist_flag $year_args "$url" "$genre"
     else
         # Deploy scripts to NAS /tmp, then run via SSH
         scp -q "$TAGGER" "$WORKER" "$NAS":/tmp/
@@ -255,7 +299,7 @@ for r in json.load(sys.stdin):
             echo "ERROR: Failed to deploy scripts to NAS."
             return 1
         end
-        ssh -t "$NAS" ". ~/.profile 2>/dev/null; TAGGER_SCRIPT=/tmp/tagger.py bash /tmp/riptag-worker.sh $compilation_flag '$url' '$genre'"
+        ssh -t "$NAS" ". ~/.profile 2>/dev/null; TAGGER_SCRIPT=/tmp/tagger.py bash /tmp/riptag-worker.sh $compilation_flag $playlist_flag $year_args '$url' '$genre'"
     end
     set -l worker_status $status
 
@@ -288,18 +332,26 @@ function __riptag_nudge_music
 end
 
 function __riptag_usage
-    echo "Usage: riptag [--compilation|--compilation=false] [--local] <url|search_query> [genre]"
-    echo "       riptag --resume=<session-id> [--compilation|--compilation=false] [genre]"
+    echo "Usage: riptag [--compilation|--compilation=false] [--year=YYYY] [--local] <url|search_query> [genre]"
+    echo "       riptag --resume=<session-id> [--compilation|--compilation=false] [--year=YYYY] [genre]"
     echo ""
     echo "Options:"
     echo "  --compilation          Mark as compilation album"
     echo "  --compilation=false    Explicitly not a compilation"
+    echo "  --year=YYYY            Set the same year on every track"
+    echo "                         (auto-defaults to current year for playlist URLs)"
     echo "  --local                Download locally instead of on NAS"
-    echo "  --resume=<id>         Resume a failed session (implies --local)"
+    echo "  --resume=<id>          Resume a failed session (implies --local)"
+    echo ""
+    echo "Playlist URLs (containing /playlist/) are auto-detected and unified:"
+    echo "  forces --compilation, sets albumartist=Various Artists, embeds the"
+    echo "  first track's cover into every track, and sets year=current year."
     echo ""
     echo "Examples:"
     echo "  riptag 'https://play.qobuz.com/album/xyz123' Rock"
     echo "  riptag --compilation 'https://play.qobuz.com/album/xyz123' Soundtrack"
+    echo "  riptag 'https://open.qobuz.com/playlist/12345' Soundtrack"
+    echo "  riptag --year=2024 'https://open.qobuz.com/playlist/12345' Soundtrack"
     echo "  riptag 'Tame Impala Currents' Electronic"
     echo "  riptag 'Lonerism'  # interactive genre selection"
     echo "  riptag --resume=a3f1b02c  # retry failed tracks (genre remembered)"

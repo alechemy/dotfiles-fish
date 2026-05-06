@@ -7,8 +7,14 @@
 # this script to /tmp via scp and runs it — no permanent copy on the NAS.
 #
 # Usage:
-#   riptag-worker.sh [--compilation] [--local] <url> <genre>
-#   riptag-worker.sh [--compilation] [--local] --resume <session-id> <genre>
+#   riptag-worker.sh [--compilation] [--playlist-mode] [--year YYYY] [--local] <url> <genre>
+#   riptag-worker.sh [--compilation] [--playlist-mode] [--year YYYY] [--local] --resume <session-id> <genre>
+#
+# --playlist-mode unifies metadata across the downloaded folder so Apple Music
+# treats the tracks as one album: forces albumartist="Various Artists" and
+# embeds the first track's cover art into every track.
+# --year sets the same year on every track (Music.app uses year as part of
+# album identity, so unifying it stops compilations from being split).
 #
 # Exit codes:
 #   0  All tracks downloaded successfully; album tagged and copied.
@@ -39,14 +45,19 @@ RIP_CMD="/share/CACHEDEV1_DATA/python-apps/streamrip_env/bin/rip"
 
 # --- ARGUMENT PARSING ---
 COMPILATION_FLAG=""
+PLAYLIST_MODE=0
 LOCAL_MODE=0
 RESUME_ID=""
 URL=""
 GENRE=""
 
+YEAR=""
+
 while [ $# -gt 0 ]; do
   case $1 in
     --compilation) COMPILATION_FLAG="--compilation"; shift ;;
+    --playlist-mode) PLAYLIST_MODE=1; shift ;;
+    --year) YEAR="$2"; shift 2 ;;
     --local) LOCAL_MODE=1; shift ;;
     --resume) RESUME_ID="$2"; shift 2 ;;
     *)
@@ -134,8 +145,10 @@ if [ -n "$SESSION_ID" ]; then
 
   # Keep partial download for resume — don't delete it
   printf "%s" "$SESSION_ID" > "$RESUME_FILE"
-  # Save genre + compilation so resume doesn't need them re-specified
-  printf "%s\n%s\n" "$GENRE" "$COMPILATION_FLAG" > "/tmp/riptag-$SESSION_ID.meta"
+  # Save genre + compilation + playlist-mode + year so resume doesn't need them re-specified
+  PLAYLIST_FLAG_SAVED=""
+  if [ $PLAYLIST_MODE -eq 1 ]; then PLAYLIST_FLAG_SAVED="--playlist-mode"; fi
+  printf "%s\n%s\n%s\n%s\n" "$GENRE" "$COMPILATION_FLAG" "$PLAYLIST_FLAG_SAVED" "$YEAR" > "/tmp/riptag-$SESSION_ID.meta"
   rm -f "$RIP_LOG_FILE"
   exit 2
 fi
@@ -163,7 +176,19 @@ printf "%s\n" "--> Step 3: Tagging with genre '$GENRE'..."
 if [ -n "$COMPILATION_FLAG" ]; then
   printf "%s\n" "    Also marking as compilation..."
 fi
-"$PYTHON_CMD" "$TAGGER_SCRIPT" --genre "$GENRE" $COMPILATION_FLAG "$ALBUM_PATH"
+YEAR_ARGS=""
+if [ -n "$YEAR" ]; then
+  YEAR_ARGS="--year $YEAR"
+  printf "%s\n" "    Setting year to $YEAR..."
+fi
+# shellcheck disable=SC2086
+if [ $PLAYLIST_MODE -eq 1 ]; then
+  printf "%s\n" "    Playlist mode: unifying albumartist + cover art..."
+  "$PYTHON_CMD" "$TAGGER_SCRIPT" --genre "$GENRE" $COMPILATION_FLAG $YEAR_ARGS \
+    --album-artist "Various Artists" --unify-cover "$ALBUM_PATH"
+else
+  "$PYTHON_CMD" "$TAGGER_SCRIPT" --genre "$GENRE" $COMPILATION_FLAG $YEAR_ARGS "$ALBUM_PATH"
+fi
 
 # --- STEP 4: MOVE TO AUTO-ADD FOLDER ---
 printf "%s\n" "--> Step 4: Moving album to Apple Music folder..."
