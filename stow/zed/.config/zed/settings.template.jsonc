@@ -247,7 +247,7 @@
     "Angular": {
       "formatter": [
         { "code_action": "source.fixAll.eslint" },
-        { "code_action": "source.organizeImports" },
+        // { "code_action": "source.organizeImports" },
         {
           "external": {
             "command": "npx",
@@ -264,7 +264,7 @@
     "JavaScript": {
       "formatter": [
         { "code_action": "source.fixAll.eslint" },
-        { "code_action": "source.organizeImports" },
+        // { "code_action": "source.organizeImports" },
         {
           "external": {
             "command": "npx",
@@ -281,7 +281,7 @@
     "TypeScript": {
       "formatter": [
         { "code_action": "source.fixAll.eslint" },
-        { "code_action": "source.organizeImports" },
+        // { "code_action": "source.organizeImports" },
         {
           "external": {
             "command": "npx",
