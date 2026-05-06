@@ -30,4 +30,9 @@ sed -i '' "s/outer\.right = \[{ monitor\.main = [0-9]* }/outer.right = [{ monito
 
 aerospace reload-config
 
+# Mark this workspace as manually overridden so auto-gaps backs off until
+# you leave the workspace. Honored only when SUPPRESSION_ENABLED=true in
+# aerospace-auto-gaps.sh.
+aerospace list-workspaces --focused > /tmp/aerospace-gaps-suppressed-workspace
+
 # osascript -e "display notification \"$label (${gap}px)\" with title \"AeroSpace Gaps\""

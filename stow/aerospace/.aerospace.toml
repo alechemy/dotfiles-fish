@@ -10,6 +10,7 @@ config-version = 2
 after-startup-command = [
     'exec-and-forget sketchybar',
     'exec-and-forget borders',
+    'exec-and-forget rm -f /tmp/aerospace-gaps-suppressed-workspace',
 ]
 
 # Start AeroSpace at login
@@ -41,7 +42,7 @@ on-focused-monitor-changed = ['move-mouse monitor-lazy-center']
 
 # Notify SketchyBar about workspace changes
 exec-on-workspace-change = ['/bin/bash', '-c',
-    'sketchybar --trigger aerospace_workspace_change FOCUSED_WORKSPACE=$AEROSPACE_FOCUSED_WORKSPACE'
+    'sketchybar --trigger aerospace_workspace_change FOCUSED_WORKSPACE=$AEROSPACE_FOCUSED_WORKSPACE; "$HOME/.dotfiles/scripts/aerospace-auto-gaps.sh" &'
 ]
 
 # You can effectively turn off macOS "Hide application" (cmd-h) feature by toggling this flag
@@ -59,7 +60,7 @@ persistent-workspaces = ["1", "2", "3", "4", "5", "6"]
 # See: https://nikitabobko.github.io/AeroSpace/guide#binding-modes
 # See: https://nikitabobko.github.io/AeroSpace/commands#mode
 on-mode-changed = [
-    "exec-and-forget bash -c 'if [ \"$(aerospace list-modes --current)\" = \"service\" ]; then borders active_color=0xffff4444 inactive_color=0xffff4444; else borders active_color=0xffe2e2e3 inactive_color=0xff414550; fi'"
+    "exec-and-forget bash -c 'if [ \"$(aerospace list-modes --current)\" = \"service\" ]; then borders active_color=0xffff4444 inactive_color=0xff7a2222; else borders active_color=0xffe2e2e3 inactive_color=0xff414550; fi'"
 ]
 
 # Possible values: (qwerty|dvorak|colemak)
@@ -93,13 +94,12 @@ on-mode-changed = [
     cmd-alt-ctrl-shift-rightSquareBracket = 'layout accordion horizontal vertical'
 
     # See: https://nikitabobko.github.io/AeroSpace/commands#focus
-    cmd-alt-ctrl-shift-h = 'focus left'
-    cmd-alt-ctrl-shift-j = 'focus down'
-    cmd-alt-ctrl-shift-k = 'focus up'
-    cmd-alt-ctrl-shift-l = 'focus right'
+    cmd-alt-ctrl-shift-h = 'focus --ignore-floating left'
+    cmd-alt-ctrl-shift-j = 'focus --ignore-floating down'
+    cmd-alt-ctrl-shift-k = 'focus --ignore-floating up'
+    cmd-alt-ctrl-shift-l = 'focus --ignore-floating right'
     cmd-alt-ctrl-shift-w = 'close'
     cmd-alt-ctrl-shift-backtick = 'exec-and-forget bash -c "$HOME/.dotfiles/scripts/aerospace-cycle-window.sh next"'
-    ctrl-alt-shift-backtick = 'exec-and-forget bash -c "$HOME/.dotfiles/scripts/aerospace-cycle-window.sh prev"'
 
     # See: https://nikitabobko.github.io/AeroSpace/commands#move
     cmd-alt-ctrl-shift-left  = 'move left'
@@ -127,23 +127,8 @@ on-mode-changed = [
     # cmd-alt-ctrl-shift-8 = 'workspace 8'
     # cmd-alt-ctrl-shift-9 = 'workspace 9'
 
-    # See: https://nikitabobko.github.io/AeroSpace/commands#move-node-to-workspace
-    # Shyper (CapsLock + left cmd) + number = move window to workspace (via Karabiner remap)
-    ctrl-alt-shift-1 = 'move-node-to-workspace 1'
-    ctrl-alt-shift-2 = 'move-node-to-workspace 2'
-    ctrl-alt-shift-3 = 'move-node-to-workspace 3'
-    ctrl-alt-shift-4 = 'move-node-to-workspace 4'
-    ctrl-alt-shift-5 = 'move-node-to-workspace 5'
-    ctrl-alt-shift-6 = 'move-node-to-workspace 6'
-    # ctrl-alt-shift-7 = 'move-node-to-workspace 7'
-    # ctrl-alt-shift-8 = 'move-node-to-workspace 8'
-    # ctrl-alt-shift-9 = 'move-node-to-workspace 9'
-
     # See: https://nikitabobko.github.io/AeroSpace/commands#workspace-back-and-forth
     cmd-alt-ctrl-shift-tab = 'workspace-back-and-forth'
-
-    # Shyper+tab = move focused window to the last workspace (and follow it)
-    ctrl-alt-shift-tab = 'exec-and-forget bash -c "aerospace workspace-back-and-forth && prev=\$(aerospace list-workspaces --focused) && aerospace workspace-back-and-forth && aerospace move-node-to-workspace --focus-follows-window \$prev"'
 
     # See: https://nikitabobko.github.io/AeroSpace/commands#mode
     cmd-alt-ctrl-shift-semicolon = 'mode service'
@@ -162,6 +147,17 @@ on-mode-changed = [
     backspace = ['close-all-windows-but-current', 'mode main']
     esc       = 'mode main'
     semicolon = 'mode main'
+    cmd-alt-ctrl-shift-semicolon = 'mode main'
+
+    # Move focused window to a workspace, then exit.
+    1 = ['move-node-to-workspace 1', 'mode main']
+    2 = ['move-node-to-workspace 2', 'mode main']
+    3 = ['move-node-to-workspace 3', 'mode main']
+    4 = ['move-node-to-workspace 4', 'mode main']
+    5 = ['move-node-to-workspace 5', 'mode main']
+    6 = ['move-node-to-workspace 6', 'mode main']
+    tab = ['exec-and-forget bash -c "aerospace workspace-back-and-forth && prev=\$(aerospace list-workspaces --focused) && aerospace workspace-back-and-forth && aerospace move-node-to-workspace --focus-follows-window \$prev"', 'mode main']
+    backtick = ['exec-and-forget bash -c "$HOME/.dotfiles/scripts/aerospace-cycle-window.sh prev"', 'mode main']
 
 # Workspace Assignments
 [[on-window-detected]]

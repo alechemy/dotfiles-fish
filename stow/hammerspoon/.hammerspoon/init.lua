@@ -24,8 +24,20 @@ local function aerospaceResize(delta)
     hs.task.new("/opt/homebrew/bin/aerospace", function() end, {"resize", "smart", delta}):start()
   end
 end
-hs.hotkey.bind(hyper, "-", aerospaceResize("-50"), nil, aerospaceResize("-50"))
-hs.hotkey.bind(hyper, "=", aerospaceResize("+50"), nil, aerospaceResize("+50"))
+hs.hotkey.bind(hyper, "-", aerospaceResize("-100"), nil, aerospaceResize("-100"))
+hs.hotkey.bind(hyper, "=", aerospaceResize("+100"), nil, aerospaceResize("+100"))
+
+-- AeroSpace auto-gaps: trigger gap-preset script on window create/destroy.
+-- Debounced so bursts of events fire one script run.
+local autoGapsScript = os.getenv("HOME") .. "/.dotfiles/scripts/aerospace-auto-gaps.sh"
+local autoGapsTimer = hs.timer.delayed.new(0.25, function()
+  hs.task.new(autoGapsScript, function() end):start()
+end)
+autoGapsFilter = hs.window.filter.default
+autoGapsFilter:subscribe(
+  {hs.window.filter.windowCreated, hs.window.filter.windowDestroyed},
+  function() autoGapsTimer:start() end
+)
 
 --[[------------------------
 ---- URL EVENT BINDINGS ----
