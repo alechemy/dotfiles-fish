@@ -34,6 +34,23 @@ on performSmartRule(theRecords)
 			set recName to name of theRecord as string
 			set recUUID to uuid of theRecord
 			try
+				-- Dedup: if another bookmark with the same URL exists outside
+				-- 00_INBOX (i.e. already processed + archived), this arrival
+				-- is a duplicate. Delete it and move on. Concurrent arrivals
+				-- (both still in 00_INBOX) intentionally fall through so we
+				-- don't race-delete a sibling.
+				set recURL to URL of theRecord
+				if recURL is not "" and recURL is not missing value then
+					set dupeUUID to my findArchivedDuplicate(recURL, recUUID)
+					if dupeUUID is not "" then
+						my pipelineLog("Extract: Web Content", "INFO", "deleting duplicate bookmark (existing=" & dupeUUID & ")", recName, recUUID)
+						delete record theRecord
+						-- raise a sentinel so the outer try skips the remaining
+						-- per-record work and the outer loop moves to the next record
+						error "__DUPE_SKIPPED__"
+					end if
+				end if
+
 				-- Clean up fullwidth-char substitutions (：→: ｜→|) and
 				-- trailing "| Site Name" brand suffix. Bookmarks skip AI
 				-- enrichment so this is the only chance to fix the name.
@@ -45,10 +62,20 @@ on performSmartRule(theRecords)
 					end if
 				end try
 
-				-- Flag for batch SingleFile capture if a URL exists.
+				-- Flag for batch SingleFile capture if a URL exists, unless
+				-- the domain is on the skip list (youtube, spotify, etc. —
+				-- see ~/.config/devonthink-pipeline/singlefile-skip-domains.txt).
+				-- Skipped bookmarks get SkipSingleFile=1 for visibility; flip
+				-- it off + set NeedsSingleFile=1 by hand to force a capture.
 				set recURL to URL of theRecord
 				if recURL is not "" and recURL is not missing value then
-					add custom meta data 1 for "NeedsSingleFile" to theRecord
+					set skipHelper to (POSIX path of (path to home folder)) & ".local/bin/should-skip-singlefile"
+					set skipStatus to do shell script quoted form of skipHelper & " " & quoted form of recURL & "; echo $?"
+					if skipStatus is "0" then
+						add custom meta data 1 for "SkipSingleFile" to theRecord
+					else
+						add custom meta data 1 for "NeedsSingleFile" to theRecord
+					end if
 				end if
 
 				-- Append wikilink to today's daily note.
@@ -60,12 +87,39 @@ on performSmartRule(theRecords)
 				add custom meta data 0 for "NeedsProcessing" to theRecord
 				my pipelineLog("Extract: Web Content", "INFO", "archived bookmark", recName, recUUID)
 			on error errMsg
-				log message "Extract: Web Content failed: " & errMsg info recName
-				my pipelineLog("Extract: Web Content", "ERROR", "failed: " & errMsg, recName, recUUID)
+				if errMsg is "__DUPE_SKIPPED__" then
+					-- already logged + deleted; fall through to next record
+				else
+					log message "Extract: Web Content failed: " & errMsg info recName
+					my pipelineLog("Extract: Web Content", "ERROR", "failed: " & errMsg, recName, recUUID)
+				end if
 			end try
 		end repeat
 	end tell
 end performSmartRule
+
+-- Return the UUID of another bookmark in Lorebook with the same URL that
+-- lives outside 00_INBOX (already archived / processed), or "" if none.
+-- Used by the dedup guard at the top of performSmartRule — matches on URL
+-- only, excludes the incoming record itself, and intentionally ignores
+-- other 00_INBOX residents so concurrent arrivals don't race-delete each
+-- other.
+on findArchivedDuplicate(recURL, recUUID)
+	tell application id "DNtp"
+		try
+			set candidates to lookup records with URL recURL in database "Lorebook"
+			repeat with candidate in candidates
+				if (uuid of candidate) is not recUUID and (type of candidate) is bookmark then
+					set candLocation to location of candidate as text
+					if candLocation does not start with "/00_INBOX" then
+						return uuid of candidate
+					end if
+				end if
+			end repeat
+		end try
+		return ""
+	end tell
+end findArchivedDuplicate
 
 -- Append a wikilink to today's daily note under "## Today's Notes".
 -- Idempotent via DailyNoteLinked and a UUID-in-note check. Non-fatal —

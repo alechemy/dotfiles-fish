@@ -29,7 +29,9 @@ The following custom metadata fields must be created in DEVONthink before the pi
 | PreviousTasks       | Multi-line Text | Stores a newline-separated list of tasks already sent to Things 3 to prevent duplicates on notebook updates                                                                                                                                                                                  |
 | DailyNoteLinked     | Boolean         | Tracks whether a document has been linked to its respective EventDate's daily note                                                                                                                                                                                                           |
 | PreviousDailyNotes  | Multi-line Text | Stores a newline-separated list of extracted daily notes to prevent duplicates on notebook updates                                                                                                                                                                                           |
-| NeedsSingleFile     | Boolean         | Set on bookmarks by Extract: Web Content. Signals to `capture-bookmarks-batch.py` that the bookmark still needs a browser-driven HTML snapshot. Cleared by `ingest-singlefile-html.py` once the bookmark has been captured                                                                    |
+| NeedsSingleFile     | Boolean         | Set on bookmarks by Extract: Web Content when the URL's hostname is NOT on the skip list. Signals to `capture-bookmarks-batch.py` that the bookmark still needs a browser-driven HTML snapshot. Cleared by `ingest-singlefile-html.py` once the bookmark has been captured                   |
+| SkipSingleFile      | Boolean         | Set on bookmarks by Extract: Web Content when the URL's hostname matches `~/.config/devonthink-pipeline/singlefile-skip-domains.txt` (e.g. youtube, spotify), or manually by the user to opt a single bookmark out. The queue-drain path of `capture-bookmarks-batch.py` filters these out; the selection path (--uuid) bypasses the check so explicit user selection always captures. **Skip wins:** the hourly `Util: Metadata Cleanup` rule clears `NeedsSingleFile` whenever `SkipSingleFile` is also set, so the two flags are never simultaneously true |
+| SingleFileTooLarge  | Boolean         | Set on a bookmark by `ingest-singlefile-html.py` when the captured HTML exceeds `MAX_INGEST_BYTES` (25 MB post-compression). The ingester clears `NeedsSingleFile`, deletes the staging HTML, and flags the bookmark so the user can review / re-capture manually instead of the pipeline retrying indefinitely |
 | WebClipSource       | Item Link       | Points back to the source bookmark from a derived record. Set on the HTML and markdown by `ingest-singlefile-html.py` during a single atomic AppleScript pass                                                                                                                                |
 | WebClipMarkdown     | Item Link       | Set on the bookmark and HTML by `ingest-singlefile-html.py`; points to the readable markdown record                                                                                                                                                                                          |
 | WebClipSnapshot     | Item Link       | Set on the bookmark by `ingest-singlefile-html.py`; points to the HTML snapshot record                                                                                                                                                                                                       |
@@ -37,6 +39,7 @@ The following custom metadata fields must be created in DEVONthink before the pi
 | GranolaParticipants | Multi-line Text | Comma-separated meeting attendee names from Granola. Set by `import-granola.py` on import                                                                                                                                                                                                    |
 | SummarySource       | Item Link       | Set on summary records created by the Summarize skill; item link pointing back to the source record (bookmark, PDF, etc.) that was summarized                                                                                                                                                |
 | IsJot               | Boolean         | Set by the Drafts Quick Jot action on iOS. Gates the Process: Jots smart rule, which inserts the jot into the matching daily note                                                                                                                                                            |
+| AIChatTranscript    | Boolean         | Set on markdown records that came from an AI chat snapshot (claude.ai, gemini.google.com). The defuddle output is rewritten as a topic-organized writeup by `ingest-singlefile-html.py` before import (see [SingleFile Ingestion Pipeline](#singlefile-ingestion-pipeline) → "AI chat transcript rewrite"). Useful for filtering / re-running the rewrite if the prompt is tweaked |
 
 > **Migration Note — `AI-Renamed` retired.** The earlier `AI-Renamed` boolean flag has been replaced by `NameLocked`. If any existing records still carry `AI-Renamed` metadata, you can safely ignore or batch-clear it; it is no longer referenced by any rule or script.
 
@@ -120,6 +123,7 @@ The embedded condition filters already-primed records out of the scripts's worki
   - NeedsProcessing is empty
 - Trigger
   - On Import
+  - Every Minute (catches records that arrived via a path that didn't fire On Import, or that otherwise got stuck without `NeedsProcessing` set)
 - Actions
   - Run AppleScript (external) — see [`mark-inbox-needs-processing.applescript`](../stow/devonthink/Library/Application%20Scripts/com.devon-technologies.think/Smart%20Rules/mark-inbox-needs-processing.applescript)
 
@@ -202,6 +206,8 @@ The bookmark title is cleaned via [`clean-web-title`](../stow/devonthink/.local/
 
 Bookmarks with no URL are archived the same way, just without the `NeedsSingleFile` flag.
 
+**Dedup on arrival.** Before doing anything else, the rule calls `lookup records with URL` against Lorebook. If another bookmark with the same URL already exists outside `00_INBOX` (i.e. has been processed and archived), the incoming record is logged and deleted — no title clean, no flag-setting, no daily-note entry, no archive. This prevents the downstream capture queue from re-fetching already-captured URLs when a user re-saves a bookmark they already have. Concurrent `00_INBOX` arrivals (two records with the same URL, both still in the inbox) intentionally fall through so the rule doesn't race-delete a sibling.
+
 This rule owns the bookmark's entire journey — it does not rely on `Post-Enrich & Archive` to finish the job. Previous versions set fast-track flags (`Recognized`/`Commented`/`AIEnriched`) purely to match `Post-Enrich & Archive`'s criteria, which meant the bookmark sat in `00_INBOX` across two rule firings with ~6 metadata writes, each triggering a DT re-index + DTTG sync event. Phone-synced bookmarks were the worst case — DT's UI can transiently double-render records mid-mutation, and the effect compounded across several sync cycles. Consolidating to one rule cuts the writes to ~3 and keeps them all inside a single AppleScript `tell` block.
 
 - Search in
@@ -246,6 +252,17 @@ Both scenarios converge on the same three-record set:
 
 Cross-links are always set: `WebClipSource` on HTML and markdown point back to the bookmark; `WebClipSnapshot` and `WebClipMarkdown` on the bookmark point forward to the HTML and markdown respectively.
 
+### Untitled-page fallback
+
+The `%if-empty<{page-title}|No title>` pattern in SingleFile's filename template means pages without a `<title>` tag land as `No title.html`. Without intervention, all three records (bookmark, HTML, markdown) inherit `"No title"` as their name and get `NameLocked=1`, so AI enrichment never replaces it.
+
+`ingest-singlefile-html.py` detects the placeholder (`No title`, `Untitled`) at import time and:
+
+1. Augments the displayed name with a URL-derived suffix (e.g. `"No title — courses.mooc.fi/.../chapter-2"`) so the three records remain visually distinguishable in DT before enrichment runs.
+2. Leaves `NameLocked` unset on all three records.
+
+`Enrich: AI Metadata` then renames the markdown using its content (the prompt explicitly recognizes `"No title"`-style names as generic). [Post-Enrich & Archive](#post-enrich--archive) walks `WebClipSource` → bookmark → `WebClipSnapshot` → HTML and propagates the AI-derived name to both siblings via `replaceIfPlaceholder`, which only replaces names still beginning with `"No title"` so any manually-edited title is preserved.
+
 ### SingleFile extension setup
 
 1. Install Chromium and the SingleFile extension.
@@ -270,7 +287,28 @@ Scenario 2 can be triggered from inside DEVONthink via an on-demand smart rule, 
 - Actions:
   - Run AppleScript (external) — see [`capture-bookmarks-on-demand.applescript`](../stow/devonthink/Library/Application%20Scripts/com.devon-technologies.think/Smart%20Rules/capture-bookmarks-on-demand.applescript)
 
-Fire it from Tools → Apply Rules → the rule. The rule ignores its input records and fires `capture-bookmarks-batch.py` once in the background; a macOS notification confirms the launch. Progress lands in `~/Library/Logs/devonthink-pipeline.log`.
+Fire it from Tools → Apply Rules → the rule. Two invocation modes:
+
+- **Nothing selected (or Apply Rules from a group view):** the batch drains the full `NeedsSingleFile=1` queue.
+- **One or more records selected:** the rule passes those UUIDs through and the batch captures only those. Non-bookmark or URL-less records are silently skipped; the `NeedsSingleFile` flag is not consulted in this mode, so you can force a re-capture of any bookmark on demand.
+
+Either way, `capture-bookmarks-batch.py` launches in the background, a macOS notification confirms the launch, and progress lands in `~/Library/Logs/devonthink-pipeline.log`. Pathological pages (post-compression HTML over 25 MB) are skipped and flagged with `SingleFileTooLarge=1` on the bookmark rather than stalling the batch.
+
+### AI chat transcript rewrite
+
+When the SingleFile capture's source URL is hosted on `claude.ai` or `gemini.google.com`, the defuddle output is a raw turn-by-turn transcript that reads poorly as a reference document. Before import, `ingest-singlefile-html.py` calls DEVONthink's `get chat response` with a curated rewrite prompt that reorganizes the transcript by topic, drops conversational framing (greetings, "great question", model signatures, the user's questions restated), and applies the prose style rules from `~/.claude/CLAUDE.md`. The result is a topic-organized writeup, not a summary — every fact, recommendation, and caveat the assistant produced is preserved.
+
+A provenance line is prepended to the markdown body inside the import AppleScript: `*Generated from a conversation with Claude on YYYY-MM-DD. Original capture: [title](x-devonthink-item://...).*` The link points at the HTML snapshot record so the original conversation is one click away.
+
+The markdown record is flagged `AIChatTranscript=1`. The HTML snapshot is unchanged. If the LLM call fails or times out (240 s budget), the ingest falls through to the raw defuddle transcript and logs a warning — the pipeline does not block on the rewrite. Hosts to detect are listed in `AI_CHAT_HOSTS` at the top of `ingest-singlefile-html.py`.
+
+### Skipping domains that don't benefit from SingleFile
+
+Some pages either won't produce a useful SingleFile snapshot (YouTube, Spotify) or already get a clean defuddle extract without one (most static-content sites). To stop those from entering the capture queue in the first place, Extract: Web Content consults `~/.config/devonthink-pipeline/singlefile-skip-domains.txt` via `~/.local/bin/should-skip-singlefile` at ingest time. Bookmarks whose hostname matches a listed domain (suffix match, so `youtube.com` covers `m.youtube.com`) get `SkipSingleFile=1` instead of `NeedsSingleFile=1`.
+
+The queue-drain path of `capture-bookmarks-batch.py` filters out any bookmark with `SkipSingleFile=1`, so editing the skip list retroactively stops future batch runs from touching already-flagged-for-capture records. The selection path (`--uuid`, used by the on-demand rule when invoked against a selection) bypasses the check — selecting a bookmark and running the rule is treated as explicit intent to capture, overriding the skip.
+
+Default blocklist is `youtube.com`, `youtu.be`, `spotify.com`. Edit the file to add more.
 
 ### Logs
 
@@ -378,12 +416,13 @@ The script reads each field from the record and applies it:
 
 ### Post-Enrich & Archive
 
-Runs after AI enrichment completes. Performs four steps in a single pass:
+Runs after AI enrichment completes. Performs five steps in a single pass:
 
 1. **Action Items** — Parses the document for sections titled "Action Items", "Todos", or similar, and sends any bulleted tasks to Things 3 via AppleScript. Deduplication is handled via `PreviousTasks`. Skipped for web clip records (those with `WebClipSource` set).
 2. **Daily Notes** — Extracts "Daily Notes", "Today", "Journal", or "Log" sections from handwritten documents and appends them to today's daily note. Also appends a wikilink for any document with an `EventDate` to the respective date's daily note. Deduplication is handled via `PreviousDailyNotes` and `DailyNoteLinked`. Skipped for web clip records.
 3. **Sync H1** — For markdown documents, ensures the first `# Heading` matches the record's filename (minus extension). If the H1 differs it's replaced; if absent it's injected after any YAML frontmatter. This guarantees the AI-enriched title is reflected in the document body.
-4. **Archive** — Moves the record to `99_ARCHIVE` and clears `NeedsProcessing`. The move happens first; the flag is only cleared on success to prevent silent data loss.
+4. **Web clip name propagation** — For markdown web clips (records with `WebClipSource` set), if the linked bookmark or HTML snapshot still carries a `"No title"` placeholder name, propagate the markdown's (post-enrichment) name to it. See [Untitled-page fallback](#untitled-page-fallback). `NameLocked` is set on the sibling _before_ the rename so `Util: Lock Name on Rename` doesn't double-fire.
+5. **Archive** — Moves the record to `99_ARCHIVE` and clears `NeedsProcessing`. The move happens first; the flag is only cleared on success to prevent silent data loss.
 
 This consolidates the previous Extract: Action Items, Process: Daily Notes, and Archive: Processed Items rules into one script, eliminating two "Every Minute" polling rules.
 
@@ -433,6 +472,27 @@ AI-initiated renames from Enrich: AI Metadata's own AppleScript are **not** caug
   - Change NameLocked to 1
 
 > **Scope Note.** This rule searches the entire Lorebook database, not just `00_INBOX`. That means renaming a document in `99_ARCHIVE` (or any other group) will also lock its name — which is the desired behaviour, since it protects the name if the document is ever re-processed.
+
+### Util: Metadata Cleanup
+
+Hourly catch-all for trivial metadata inconsistencies that accumulate over time (manual edits, cross-device sync, retired flags, etc.). Each cleanup is a self-contained script handler that re-checks its own preconditions; the DT-level criteria are the explicit union of currently-handled cases, so DT pre-filters to just the records that need work and yields zero in normal state.
+
+Current cleanups:
+
+- **`SkipSingleFile` vs `NeedsSingleFile`** — if both are 1, clears `NeedsSingleFile`. Skip is the user's "off switch" and wins by design. To force-capture a previously-skipped bookmark, clear `SkipSingleFile` first, or select the record and run the on-demand rule (selection mode bypasses both flags).
+
+- Search in
+  - Lorebook (entire database)
+- Criteria
+  - Kind is Bookmark
+  - SkipSingleFile is On
+  - NeedsSingleFile is On
+- Trigger
+  - Hourly
+- Actions
+  - Execute Script (AppleScript, external) — see [`util-metadata-cleanup.applescript`](../stow/devonthink/Library/Application%20Scripts/com.devon-technologies.think/Smart%20Rules/util-metadata-cleanup.applescript)
+
+> **Adding a new cleanup case.** Add an `OR` group to the DT criteria covering the new case's preconditions (DT 4 supports nested AND/OR groups), then add a new `my cleanupX(theRecord)` call inside `performSmartRule` plus the corresponding handler in the script. The handler should re-check preconditions defensively so it's safe even if DT yields a record that matches a different case's criteria.
 
 ### Util: Restore Previous Name
 

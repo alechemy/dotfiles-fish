@@ -1,0 +1,22 @@
+# Domains whose bookmarks skip the SingleFile capture + defuddle step.
+#
+# Matching is suffix-based on the URL's hostname — entering `youtube.com`
+# here also covers `m.youtube.com`, `music.youtube.com`, etc. Lines
+# starting with `#` are comments. Blank lines ignored.
+#
+# Consulted by:
+#   - extract-web-content.applescript (via ~/.local/bin/should-skip-singlefile)
+#     → bookmarks on matching domains get SkipSingleFile=1 instead of
+#        NeedsSingleFile=1 at the moment Extract: Web Content fires.
+#   - capture-bookmarks-batch.py → the queue-drain path filters out any
+#     bookmark with SkipSingleFile=1, so a retroactive edit here still
+#     stops captures the next time the batch runs.
+#
+# The flag is per-bookmark and manually togglable — if you want to
+# force-capture a record on a skipped domain, clear SkipSingleFile and
+# set NeedsSingleFile=1 by hand, then run the on-demand rule on the
+# selected record (selection mode bypasses the domain check).
+
+youtube.com
+youtu.be
+spotify.com

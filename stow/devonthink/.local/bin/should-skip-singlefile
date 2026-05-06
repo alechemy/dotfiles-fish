@@ -1,0 +1,52 @@
+#!/usr/bin/env python3
+"""Exit 0 if the given URL's hostname matches the SingleFile skip list, else 1.
+
+The config lives at ~/.config/devonthink-pipeline/singlefile-skip-domains.txt
+(one domain per line, `#` comments). Matching is suffix-based on the hostname:
+entering `youtube.com` covers `m.youtube.com`, `music.youtube.com`, etc.
+
+Shared between `extract-web-content.applescript` (which flips SkipSingleFile=1
+on matching bookmarks at ingest time) and `capture-bookmarks-batch.py` (which
+could consult this directly; currently it just honors the flag). Kept as a
+one-file shell-friendly helper so the AppleScript doesn't need to know where
+the config lives or how to parse it.
+
+Usage: should-skip-singlefile <url>
+"""
+
+import sys
+from pathlib import Path
+from urllib.parse import urlparse
+
+CONFIG_PATH = Path.home() / ".config" / "devonthink-pipeline" / "singlefile-skip-domains.txt"
+
+
+def load_domains() -> set[str]:
+    if not CONFIG_PATH.exists():
+        return set()
+    domains: set[str] = set()
+    for line in CONFIG_PATH.read_text().splitlines():
+        line = line.split("#", 1)[0].strip().lower()
+        if line:
+            domains.add(line)
+    return domains
+
+
+def should_skip(url: str) -> bool:
+    try:
+        host = (urlparse(url).hostname or "").lower()
+    except Exception:
+        return False
+    if not host:
+        return False
+    for domain in load_domains():
+        if host == domain or host.endswith("." + domain):
+            return True
+    return False
+
+
+if __name__ == "__main__":
+    if len(sys.argv) != 2:
+        print("usage: should-skip-singlefile <url>", file=sys.stderr)
+        sys.exit(2)
+    sys.exit(0 if should_skip(sys.argv[1]) else 1)

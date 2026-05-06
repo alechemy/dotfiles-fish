@@ -327,6 +327,46 @@ on performSmartRule(theRecords)
 			end if
 
 			-- =============================================
+			-- Step 3.5: Propagate name to web clip siblings
+			-- =============================================
+			-- When a SingleFile-ingested markdown has been renamed by AI
+			-- enrichment (typically because the source page had no <title>
+			-- and the ingester intentionally left NameLocked unset on the
+			-- triad), push the new name to the linked bookmark and HTML
+			-- snapshot so all three records share the same title. Only
+			-- replaces names that still look like the ingester's "No title"
+			-- placeholder, so a manually-edited bookmark name is never
+			-- overwritten.
+			if isWebClip and (type of theRecord is markdown) and clipSource is not "" then
+				try
+					set bmUUID to my uuidFromItemLink(clipSource)
+					if bmUUID is not "" then
+						set bmRecord to get record with uuid bmUUID
+						if bmRecord is not missing value then
+							my replaceIfPlaceholder(bmRecord, recName)
+
+							set htmlRef to ""
+							try
+								set htmlRef to (get custom meta data for "WebClipSnapshot" from bmRecord) as text
+								if htmlRef is "missing value" then set htmlRef to ""
+							end try
+							if htmlRef is not "" then
+								set htmlUUID to my uuidFromItemLink(htmlRef)
+								if htmlUUID is not "" then
+									set htmlRecord to get record with uuid htmlUUID
+									if htmlRecord is not missing value then
+										my replaceIfPlaceholder(htmlRecord, recName)
+									end if
+								end if
+							end if
+						end if
+					end if
+				on error errMsg
+					log message "Post-Enrich & Archive: web clip name propagation failed: " & errMsg info recName
+				end try
+			end if
+
+			-- =============================================
 			-- Step 4: Archive
 			-- =============================================
 			try
@@ -354,6 +394,38 @@ on pipelineLog(component, level, msg, recName, recUUID)
 			quoted form of (recUUID as string)
 	end try
 end pipelineLog
+
+-- Strip the "x-devonthink-item://" prefix off an item link, returning
+-- just the UUID. Used by the web clip name propagation step.
+on uuidFromItemLink(s)
+	set s to s as text
+	set prefixStr to "x-devonthink-item://"
+	set prefixLen to length of prefixStr
+	if (length of s) > prefixLen and (text 1 thru prefixLen of s) is prefixStr then
+		return text (prefixLen + 1) thru -1 of s
+	end if
+	return s
+end uuidFromItemLink
+
+-- Replace a record's name only if it currently matches the ingester's
+-- "No title" placeholder. Sets NameLocked=1 before the rename so
+-- Util: Lock Name on Rename (which matches NameLocked is Off) doesn't
+-- race against this propagation; the sibling ends up in the same
+-- protected state Enrich: AI Metadata gives the markdown.
+on replaceIfPlaceholder(theRecord, newName)
+	tell application id "DNtp"
+		set currentName to name of theRecord as text
+		if currentName is newName then
+			add custom meta data 1 for "NameLocked" to theRecord
+			return
+		end if
+		set lowerName to do shell script "printf '%s' " & quoted form of currentName & " | tr '[:upper:]' '[:lower:]'"
+		if lowerName starts with "no title" or lowerName is "untitled" then
+			add custom meta data 1 for "NameLocked" to theRecord
+			set name of theRecord to newName
+		end if
+	end tell
+end replaceIfPlaceholder
 
 -- Appends contentBlock under the given section header in a daily note.
 -- Creates the section at the end of the note if it doesn't exist yet.

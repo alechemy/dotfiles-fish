@@ -15,11 +15,11 @@ GitHub API (/user/starred)
   (Bookmark record, NeedsProcessing=1)
          │
          ▼
-  Extract: Web Content → sets NeedsSingleFile=1, fast-tracks
+  Extract: Web Content → sets NeedsSingleFile=1, archives to 99_ARCHIVE
          │
          ▼
-  Capture: SingleFile Batch → browser-based HTML capture
-         │
+  capture-bookmarks-batch.py (on-demand) → ingest-singlefile-html.py
+         │                                  (browser capture + defuddle + import)
          ▼
   Standard pipeline: AI Enrichment → Post-Enrich & Archive → Wiki Export
 ```
@@ -28,7 +28,7 @@ For each newly starred repo, the script:
 
 1. **Polls** the GitHub API via `gh` CLI, fetching stars newest-first with `starred_at` timestamps. In normal mode, stops at the first already-imported repo. On first run (no state file), only imports stars from the last 24 hours to avoid flooding the inbox — use `--backfill` to import the full history.
 2. **Creates a bookmark** record in DEVONthink with the repo URL and `owner/repo` as the name.
-3. Sets `NeedsProcessing=1` so the bookmark enters the standard pipeline. Extract: Web Content sets `NeedsSingleFile=1` and fast-tracks it. Capture: SingleFile Batch captures the page via browser, then Process: SingleFile Import extracts readable content for AI enrichment.
+3. Sets `NeedsProcessing=1` so the bookmark enters the standard pipeline. Extract: Web Content sets `NeedsSingleFile=1` and archives the bookmark. The SingleFile capture + ingestion happens later when the `capture-bookmarks-batch.py` runner is invoked (manually, via hotkey, or via the on-demand smart rule) — it drives the browser to capture each queued bookmark and produces the cross-linked HTML snapshot + markdown extract via `ingest-singlefile-html.py`.
 
 ## Running
 

@@ -27,7 +27,7 @@ Boox device → Dropbox (via Boox export)
   → Extract: Boox Handwritten (OCR) → sets Recognized=1
   → Format: Boox Comments (LLM markdown formatting → Finder Comment) → sets Commented=1
   → Extract: Scans & Images (standard OCR for non-handwritten images/PDFs) → sets Recognized=1, Commented=1
-  → Extract: Web Content (bookmarks → clean title + NeedsSingleFile=1 + daily-note wikilink + archive directly to 99_ARCHIVE in one pass — does NOT flow through Post-Enrich & Archive)
+  → Extract: Web Content (bookmarks → clean title + NeedsSingleFile=1 OR SkipSingleFile=1 depending on domain (~/.config/devonthink-pipeline/singlefile-skip-domains.txt) + daily-note wikilink + archive directly to 99_ARCHIVE in one pass — does NOT flow through Post-Enrich & Archive)
 
 SingleFile ingestion is OUT of smart rules — it's Python scripts + an fswatch launchd agent. See devonthink/README.md → "SingleFile Ingestion Pipeline".
   Scenario 1 (desktop save): Chrome SingleFile ext → ~/Downloads/SingleFile/*.html → fswatch → ingest-singlefile-html.py → creates bookmark + HTML snapshot + markdown in DT in one atomic AppleScript pass
@@ -75,4 +75,4 @@ Smart rule scripts live in `../stow/devonthink/Library/Application Scripts/com.d
 
 ## Custom metadata fields
 
-See the table in `README.md` → "Custom Metadata Setup" for the full list. The pipeline-critical boolean flags are: `NeedsProcessing`, `Handwritten`, `Recognized`, `Commented`, `AIEnriched`, `NameLocked`, `WikiExported`, `NeedsSingleFile`. Granola imports also use `GranolaID` (Text) and `GranolaParticipants` (Multi-line Text).
+See the table in `README.md` → "Custom Metadata Setup" for the full list. The pipeline-critical boolean flags are: `NeedsProcessing`, `Handwritten`, `Recognized`, `Commented`, `AIEnriched`, `NameLocked`, `WikiExported`, `NeedsSingleFile`, `SkipSingleFile`, `SingleFileTooLarge`, `AIChatTranscript`. Granola imports also use `GranolaID` (Text) and `GranolaParticipants` (Multi-line Text).

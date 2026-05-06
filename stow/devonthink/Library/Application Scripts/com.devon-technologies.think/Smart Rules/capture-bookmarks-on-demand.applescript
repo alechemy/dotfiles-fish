@@ -1,19 +1,18 @@
 -- Capture Bookmarks Batch (On Demand)
 --
--- Thin wrapper around ~/.local/bin/capture-bookmarks-batch.py. The batch
--- script queries DT itself for bookmarks with NeedsSingleFile=1 and drives
--- Chromium + SingleFile to capture each, then invokes
--- ~/.local/bin/ingest-singlefile-html.py to create the cross-linked
--- bookmark / HTML snapshot / markdown records.
+-- Thin wrapper around ~/.local/bin/capture-bookmarks-batch.py.
 --
--- theRecords is intentionally ignored: the script does its own lookup, so
--- triggering this rule on any selection (or from Tools → Apply Rules with
--- nothing specific selected) fires the full queue drain. No arguments need
--- to be passed in.
+-- If invoked with records selected (e.g. from the smart rule's record list
+-- or Tools → Apply Rules on a selection), passes those UUIDs to the batch
+-- script which captures only those bookmarks (dedup against existing
+-- WebClipSnapshots still applies).
 --
--- Runs in the background — the batch takes a while (per-URL browser
--- navigation, SingleFile save, defuddle, DT import). All progress is
--- written to ~/Library/Logs/singlefile-ingest.log.
+-- If invoked with nothing selected, the batch script drains the full queue
+-- of bookmarks with NeedsSingleFile=1.
+--
+-- Runs in the background — per-URL navigation + SingleFile save + defuddle
+-- + DT import takes a while. Progress is written to
+-- ~/Library/Logs/singlefile-ingest.log.
 
 on performSmartRule(theRecords)
 	set batchPath to "/Users/alec/.local/bin/capture-bookmarks-batch.py"
@@ -21,7 +20,21 @@ on performSmartRule(theRecords)
 	-- PATH must include mise shims (defuddle), Homebrew (fswatch, magick),
 	-- and ~/.local/bin (capture-with-singlefile, ingester).
 	set envSetup to "export PATH=/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin:$HOME/.local/share/mise/bin:$HOME/.local/share/mise/shims:$PATH; "
-	set cmd to envSetup & "nohup " & quoted form of batchPath & " >> " & quoted form of logPath & " 2>&1 &"
+
+	set uuidArgs to ""
+	try
+		tell application id "DNtp"
+			repeat with r in theRecords
+				set uuidArgs to uuidArgs & " --uuid " & (uuid of r)
+			end repeat
+		end tell
+	end try
+
+	set cmd to envSetup & "nohup " & quoted form of batchPath & uuidArgs & " >> " & quoted form of logPath & " 2>&1 &"
 	do shell script cmd
-	display notification "Capturing queued bookmarks in the background" with title "SingleFile Batch"
+	if uuidArgs is "" then
+		display notification "Draining NeedsSingleFile queue in the background" with title "SingleFile Batch"
+	else
+		display notification "Capturing selected bookmark(s) in the background" with title "SingleFile Batch"
+	end if
 end performSmartRule

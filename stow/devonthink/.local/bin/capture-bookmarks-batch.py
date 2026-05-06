@@ -1,12 +1,18 @@
 #!/usr/bin/env python3
-"""Batch-capture all DEVONthink bookmarks with NeedsSingleFile=1.
+"""Batch-capture DEVONthink bookmarks via SingleFile.
 
-Replaces the Capture: SingleFile Batch smart rule. Invoked manually by the
-user (e.g. Keyboard Maestro hotkey or shell) whenever they want to drain
-the queue of pending bookmarks, typically at a time when the browser can
-be hijacked.
+Two modes:
+  - Queue mode (default): drain all bookmarks where NeedsSingleFile=1 AND
+    SkipSingleFile≠1. The Skip flag is set either by Extract: Web Content
+    when the URL's hostname matches ~/.config/devonthink-pipeline/
+    singlefile-skip-domains.txt, or manually by the user.
+  - Selection mode (--uuid <U> [--uuid <U> ...]): capture only the given
+    bookmark UUIDs. Non-bookmark or URL-less records in the list are
+    silently skipped. SkipSingleFile is NOT consulted here — explicit
+    user selection is treated as intent to capture. Intended for the
+    on-demand smart rule, which passes the user's selection through.
 
-For each pending bookmark:
+For each bookmark:
   1. Drive the running Chromium via `capture-with-singlefile --url <url>`
      (single-URL at a time, so we never race ourselves between bookmarks).
   2. Hand the resulting HTML file to `ingest-singlefile-html.py
@@ -17,8 +23,9 @@ For each pending bookmark:
 Logs to ~/Library/Logs/devonthink-pipeline.log alongside the ingester.
 
 Usage:
-    capture-bookmarks-batch.py          # capture all pending bookmarks
-    capture-bookmarks-batch.py --dry-run  # list pending, don't capture
+    capture-bookmarks-batch.py                 # drain NeedsSingleFile queue
+    capture-bookmarks-batch.py --dry-run       # list targets, don't capture
+    capture-bookmarks-batch.py --uuid U1 --uuid U2  # capture specific records
 """
 
 import argparse
@@ -35,26 +42,28 @@ INGEST_SINGLEFILE = Path.home() / ".local" / "bin" / "ingest-singlefile-html.py"
 log = setup_log("capture-bookmarks-batch")
 
 LIST_PENDING_APPLESCRIPT = r"""
+set tabChar to ASCII character 9
 tell application id "DNtp"
-    set pending to {}
-    try
-        set results to search "kind:bookmark" in database "Lorebook"
-        repeat with r in results
-            try
-                set needs to (get custom meta data for "NeedsSingleFile" from r)
-                if needs is 1 then
+    set pendingList to {}
+    set foundItems to search "kind:bookmark" in (root of database "Lorebook")
+    repeat with r in foundItems
+        try
+            set needsValue to (get custom meta data for "NeedsSingleFile" from r)
+            if needsValue is 1 then
+                set skipValue to (get custom meta data for "SkipSingleFile" from r)
+                if skipValue is not 1 then
                     set recURL to URL of r
                     if recURL is not "" and recURL is not missing value then
-                        set end of pending to (uuid of r) & tab & recURL
+                        set end of pendingList to (uuid of r) & tabChar & recURL
                     end if
                 end if
-            end try
-        end repeat
-    end try
+            end if
+        end try
+    end repeat
     set AppleScript's text item delimiters to linefeed
-    set output to pending as text
+    set outputText to pendingList as text
     set AppleScript's text item delimiters to ""
-    return output
+    return outputText
 end tell
 """
 
@@ -127,6 +136,39 @@ def clear_needs_singlefile(bookmark_uuid: str) -> None:
     )
 
 
+FETCH_BY_UUID_APPLESCRIPT = r"""
+on run argv
+    set tabChar to ASCII character 9
+    tell application id "DNtp"
+        set pairList to {}
+        repeat with i from 1 to count of argv
+            try
+                set r to get record with uuid (item i of argv)
+                if (type of r) is bookmark then
+                    set recURL to URL of r
+                    if recURL is not "" and recURL is not missing value then
+                        set end of pairList to (uuid of r) & tabChar & recURL
+                    end if
+                end if
+            end try
+        end repeat
+        set AppleScript's text item delimiters to linefeed
+        set outputText to pairList as text
+        set AppleScript's text item delimiters to ""
+        return outputText
+    end tell
+end run
+"""
+
+
+def _parse_pairs(out: str) -> list[tuple[str, str]]:
+    pairs = []
+    for line in out.splitlines():
+        if "\t" not in line:
+            continue
+        uuid, url = line.split("\t", 1)
+        pairs.append((uuid.strip(), url.strip()))
+    return pairs
 
 
 def list_pending() -> list[tuple[str, str]]:
@@ -136,16 +178,20 @@ def list_pending() -> list[tuple[str, str]]:
         text=True,
         check=True,
     )
-    out = result.stdout.strip()
-    if not out:
+    return _parse_pairs(result.stdout.strip())
+
+
+def fetch_by_uuid(uuids: list[str]) -> list[tuple[str, str]]:
+    if not uuids:
         return []
-    pairs = []
-    for line in out.splitlines():
-        if "\t" not in line:
-            continue
-        uuid, url = line.split("\t", 1)
-        pairs.append((uuid.strip(), url.strip()))
-    return pairs
+    result = subprocess.run(
+        ["osascript", "-", *uuids],
+        input=FETCH_BY_UUID_APPLESCRIPT,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return _parse_pairs(result.stdout.strip())
 
 
 def capture_one(url: str) -> Path | None:
@@ -188,16 +234,32 @@ def main() -> int:
         action="store_true",
         help="capture even if another bookmark with the same URL is already captured",
     )
+    parser.add_argument(
+        "--uuid",
+        action="append",
+        default=[],
+        help="capture only these bookmark UUIDs instead of draining the NeedsSingleFile queue (repeatable)",
+    )
     args = parser.parse_args()
 
     try:
-        pending = list_pending()
+        if args.uuid:
+            pending = fetch_by_uuid(args.uuid)
+            mode = "selection"
+        else:
+            pending = list_pending()
+            mode = "queue"
     except subprocess.CalledProcessError as e:
         log.error("failed to query DEVONthink: %s", e.stderr)
         return 1
 
     if not pending:
-        log.info("no bookmarks with NeedsSingleFile=1; nothing to do")
+        if mode == "selection":
+            log.info(
+                "no usable bookmarks in selection (need type=bookmark with URL); nothing to do"
+            )
+        else:
+            log.info("no bookmarks with NeedsSingleFile=1; nothing to do")
         return 0
 
     log.info("%d pending bookmark(s):", len(pending))
