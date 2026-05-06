@@ -620,10 +620,13 @@ def main():
 
     local_tz = detect_timezone()
     imported_ids = load_imported_ids()
-    auth_token = ensure_valid_token()
     log(f"Found {len(documents)} meetings, {len(imported_ids)} already imported")
-    if not auth_token:
-        log("Warning: no auth token — will fall back to cache notes_markdown only")
+
+    # Defer token acquisition until we actually need it. ensure_valid_token()
+    # launches Granola when the token is expired, and we don't want to do that
+    # on every 30-min poll when there's nothing to import.
+    auth_token = None
+    token_acquired = False
 
     # Write the AppleScript once, reuse for all meetings
     script_content = IMPORT_APPLESCRIPT.replace("%%DATABASE%%", DATABASE_NAME).replace(
@@ -650,6 +653,13 @@ def main():
 
             # Try fetching enhanced notes from the API first
             notes_md = ""
+            if not token_acquired:
+                auth_token = ensure_valid_token()
+                token_acquired = True
+                if not auth_token:
+                    log(
+                        "Warning: no auth token — will fall back to cache notes_markdown only"
+                    )
             panels = fetch_enhanced_notes(doc_id, auth_token)
             if panels:
                 panel_sections = []
