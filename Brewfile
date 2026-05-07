@@ -32,6 +32,7 @@ brew "ripgrep"
 brew "sketchybar"
 brew "starship"
 brew "stow"
+brew "uv"
 brew "yqrashawn/goku/goku", restart_service: true
 brew "yt-dlp"
 brew "zoxide"
