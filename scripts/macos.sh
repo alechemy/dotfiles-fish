@@ -91,9 +91,8 @@ defaults write com.apple.finder NewWindowTargetPath -string "file:///"
 # Finder search defaults to the current folder, not "This Mac".
 defaults write com.apple.finder FXDefaultSearchScope -string "SCev"
 
-# Dock on the right edge, smaller tile size, and auto-hide.
+# Dock on the right edge and auto-hide.
 defaults write com.apple.dock orientation -string "right"
-defaults write com.apple.dock tilesize -int 59
 defaults write com.apple.dock autohide -bool true
 
 # Save screenshots to ~/Screenshots instead of the Desktop.
