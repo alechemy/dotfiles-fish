@@ -55,7 +55,18 @@ chmod +x "$DOTFILES/scripts/build-zed-config.sh"
 "$DOTFILES/scripts/build-zed-config.sh"
 chmod +x "$DOTFILES/scripts/build-streamrip-config.sh"
 "$DOTFILES/scripts/build-streamrip-config.sh"
+chmod +x "$DOTFILES/scripts/build-launchd-plists.sh"
+"$DOTFILES/scripts/build-launchd-plists.sh"
 success "Generated configs built"
+
+# 3b. Lint launchd plist templates: catch ProgramArguments[0] regressions and
+#     sub-scripts whose interpreter would resolve through the launchd PATH
+#     (which puts mise's shim dir first and re-prompts for Automation
+#     permission on every Python rotation). See CLAUDE.md for the rule.
+info "Linting launchd plist templates..."
+chmod +x "$DOTFILES/scripts/lint-launchd-plists.sh"
+"$DOTFILES/scripts/lint-launchd-plists.sh"
+success "Launchd plist templates pass TCC stability checks"
 
 # 4. Stow dotfiles
 if command -v stow &> /dev/null; then
