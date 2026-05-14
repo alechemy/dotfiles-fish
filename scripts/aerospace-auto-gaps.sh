@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Auto-select outer gap preset based on tiled window count on focused workspace.
 # Triggered from Hammerspoon (window create/destroy) and Aerospace's
 # exec-on-workspace-change callback.

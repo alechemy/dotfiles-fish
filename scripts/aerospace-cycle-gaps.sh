@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Cycle outer gap presets on the main (ultrawide) monitor.
 #
 # Source of truth: the dotfiles file. Runtime: a regenerated copy at

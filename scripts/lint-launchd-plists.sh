@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # scripts/lint-launchd-plists.sh
 #
 # Verify that launch agents which drive AppleEvents to TCC-protected apps stay
