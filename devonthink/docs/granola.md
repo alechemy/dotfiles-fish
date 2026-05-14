@@ -1,87 +1,172 @@
 # Granola Integration
 
-[Granola](https://granola.ai) records and transcribes virtual meetings, generating AI-powered meeting notes. The `import-granola.py` script fetches enhanced notes from Granola's API, reads meeting metadata from the local cache, and imports the result into DEVONthink's pipeline — flowing through the same enrichment, action-item extraction, and daily-note linking as every other document.
+[Granola](https://granola.ai) is a meeting transcription and notes app. `import-granola.py` runs under launchd every 30 minutes, reads Granola's local store directly, converts each new meeting's notes to markdown, and imports it into DEVONthink with pre-set metadata so the document drops into the standard pipeline.
+
+The implementation is **local-only**. It decrypts Granola's on-disk SQLCipher store rather than calling `api.granola.ai`. Granola's documented public surface is its companion CLI, which is gated behind a server-side feature flag we don't currently have access to. The local-store path is the only viable option without a maintenance-liability dependency on undocumented HTTP endpoints.
+
+The encryption recipe, schema, and debug procedures live in `~/.local/share/granola-import/NOTES.md` (gitignored, kept out of this repo so the recipe isn't published). Read that file before modifying the import code.
 
 ## How It Works
 
 ```
-Granola app → local cache (meeting metadata, transcripts)
-                │
-                │    Granola API (enhanced AI-generated notes)
-                │        │
-                ▼        ▼
-         import-granola.py (launchd, every 30 min)
+Granola app
+  ├─ ~/Library/Application Support/Granola/IndexedDB/.../app_ui_0.indexeddb.leveldb
+  │    (KEK + wrapped DEK)
+  └─ ~/Library/Application Support/Granola/granola.db
+       (SQLCipher v4: documents, document_panels)
                     │
                     ▼
-          DEVONthink Lorebook / 00_INBOX
-         (NeedsProcessing=1, NameLocked=1,
-          EventDate + GranolaID pre-set)
+        import-granola-parse.py     (uv + PEP 723 deps:
+        decrypt, query, render       cryptography,
+                    │                sqlcipher3-wheels,
+                    │                ccl-chromium-reader)
+                    │
+                    │  JSON over stdin/stdout
+                    ▼
+        import-granola.py           (/usr/bin/python3, stdlib only:
+        osascript → DEVONthink       owns state, logging,
+                    │                AppleEvents, deferral)
+                    ▼
+        DEVONthink Lorebook / 00_INBOX
+        (NeedsProcessing=1, NameLocked=1,
+         EventDate + GranolaID + GranolaParticipants pre-set)
                     │
                     ▼
-          Standard pipeline: Native Text Bypass → AI Enrichment
-          → Post-Enrich & Archive → Wiki Export
+        Standard pipeline: Native Text Bypass → AI Enrichment
+        → Post-Enrich & Archive → Wiki Export
 ```
 
-For each meeting in the Granola cache that hasn't been imported yet, the script:
+For each meeting in the local store that hasn't been imported yet, the parser:
 
-1. **Fetches enhanced notes** from the Granola API (`get-document-panels`), which returns ProseMirror JSON. The script converts this to clean markdown. Falls back to the cache's `notes_markdown` field, then to a speaker-attributed transcript if neither is available.
-2. **Imports** the document into DEVONthink via AppleScript with pre-set metadata:
-   - **GranolaID** — the Granola meeting UUID (idempotency key)
-   - **EventDate** — from the Google Calendar event start time
-   - **DocumentType** — "Meeting Notes"
-   - **NameLocked=1** — preserves Granola's title through AI enrichment
-   - **GranolaParticipants** — comma-separated attendee names
-3. Sets `NeedsProcessing=1` so the document enters the standard pipeline. AI enrichment still runs to generate tags and a summary.
+1. Snapshots the IndexedDB folder and SQLCipher database files to a temp dir. Granola holds the originals open at runtime, so working from copies avoids fighting the live writer.
+2. Recovers the SQLCipher key from IndexedDB and opens `granola.db` read-only.
+3. Pulls the meeting row plus its `document_panels` (AI-enhanced note panels stored as ProseMirror JSON).
+4. Renders ProseMirror to markdown, falling back to the raw `notes_markdown` field if no enhanced panels exist.
+5. Emits one JSON object per meeting (id, title, event_date, participants, markdown, source) on stdout.
 
-## Authentication
+The sender then imports each meeting via osascript with these custom metadata fields:
 
-The script reads Granola's WorkOS access token from `~/Library/Application Support/Granola/supabase.json`. If the token has expired (checked via the JWT `exp` claim), the script launches Granola automatically and waits up to 30 seconds for it to refresh the token. If the token can't be obtained, the script falls back to the local cache's `notes_markdown` field (which may be empty in newer Granola versions that store notes server-side).
+| Field                 | Value                                                          |
+|-----------------------|----------------------------------------------------------------|
+| `GranolaID`           | Meeting UUID. Idempotency key.                                 |
+| `EventDate`           | `yyyy-mm-dd` from the linked Google Calendar event start time. |
+| `DocumentType`        | `Meeting Notes`.                                               |
+| `GranolaParticipants` | Comma-separated attendee names.                                |
+| `NeedsProcessing`     | `1`. Enters the pipeline.                                      |
+| `NameLocked`          | `1`. Preserves Granola's title through AI enrichment.          |
+| `Recognized`          | `1`. Skips OCR — markdown is already text.                     |
+| `Commented`           | `1`. Skips comment mirroring for the same reason.              |
+
+The record's name is `{event_date} {title}`. AI enrichment still runs to generate tags and a summary.
+
+## Two-script architecture (TCC stability)
+
+The pipeline is split across two scripts so the AppleEvent-sending process is Apple-signed:
+
+- **`~/.local/bin/import-granola.py`** — entry point. Shebang `#!/usr/bin/env python3`. Stdlib only. Owns logging, state file, Granola version detection, AppleScript blocks, all `osascript` calls, deferral logic, and failure reporting. The launchd plist invokes this directly.
+- **`~/.local/bin/import-granola-parse.py`** — internal helper. Shebang `#!/usr/bin/env -S uv run --script` with PEP 723 inline deps (`cryptography`, `sqlcipher3-wheels`, `ccl-chromium-reader`). The sender invokes it as a subprocess and exchanges JSON over stdin/stdout. The parser never sends AppleEvents.
+
+The launchd plist's `ProgramArguments[0]` must be `/usr/bin/python3`, never uv. macOS TCC keys AppleEvents grants to the sending process's code identity. Apple-signed binaries like `/usr/bin/python3` get a stable Designated Requirement that survives version updates. Adhoc-signed binaries (uv, Homebrew Python, mise Python) fall back to path + CDHash, both of which rotate on every upgrade. Before this split, `brew upgrade uv` (weekly) re-prompted "uv wants to control data in other apps" via launchd, blocking the pipeline whenever the user wasn't there to click through. With the split, uv is invisible to TCC because the parser doesn't drive AppleEvents. The entry binary stays Apple-signed and TCC stays quiet.
+
+The same pattern applies to any future launchd-driven script that needs to send AppleEvents. See the project memory `feedback_launchd_appleevents_split.md`.
+
+## Deferral Logic
+
+Granola generates AI-enhanced panel notes after a meeting ends. This usually finishes within a few minutes, occasionally longer. The script handles three cases per meeting:
+
+- **Has notes (>50 chars in `notes_markdown` or any panel):** import normally.
+- **No notes, created <60 minutes ago:** defer. The next 30-minute tick will retry.
+- **No notes, created ≥60 minutes ago:** mark as imported with no DT record. Granola may have abandoned panel generation for that meeting (e.g., the user dismissed it before content arrived). We won't try again.
+
+`--force <id>` overrides the imported-IDs check but **not** the no-notes deferral. An empty meeting can't be made non-empty by re-running.
 
 ## Meeting ↔ Handwritten Note Linking
 
-This happens automatically through the existing daily notes mechanism. When a Granola meeting and a handwritten Boox note share the same `EventDate`, both get wikilinked on the same daily note in `10_DAILY`. No additional configuration is needed.
+When a Granola meeting and a handwritten Boox note share the same `EventDate`, both get wikilinked on the same daily note in `10_DAILY`. This happens automatically through Post-Enrich & Archive's daily-note linking. No Granola-specific configuration is needed.
 
 ## Running
 
 ```bash
-# Manual import
-python3 ~/.local/bin/import-granola.py
+# Manual run (real import)
+~/.local/bin/import-granola.py
 
 # Preview without importing
-python3 ~/.local/bin/import-granola.py --dry-run
+~/.local/bin/import-granola.py --dry-run
 
-# Re-import a specific meeting (by Granola UUID)
-python3 ~/.local/bin/import-granola.py --force <granola-id>
+# Re-import a specific meeting (Granola UUID)
+~/.local/bin/import-granola.py --force <granola-id>
+
+# Run the parser standalone — useful when isolating a parse failure
+# from a DEVONthink/AppleScript failure
+echo '{"imported_ids": [], "force_id": null}' \
+  | ~/.local/bin/import-granola-parse.py | jq '.meetings | length'
 ```
 
 ## Installation
 
-```bash
-# 1. Create GranolaID (Text) and GranolaParticipants (Multi-line Text)
-#    in DEVONthink → Settings → Data → Custom Metadata
+Both scripts and the launchd plist template live in the dotfiles repo at:
 
-# 2. Restow to install the script and launchd plist
+- `stow/devonthink/.local/bin/import-granola.py`
+- `stow/devonthink/.local/bin/import-granola-parse.py`
+- `stow/devonthink/Library/LaunchAgents/com.user.granola-import.plist.template`
+
+All three are gitignored (the parser's PEP 723 metadata pins a specific commit of `ccl-chromium-reader`, and the broader machinery documents enough of Granola's encryption to be worth keeping out of a public repo). On a fresh machine they need to be copied in from a trusted source. See `~/.local/share/granola-import/NOTES.md` for the bootstrap checklist.
+
+```bash
+# 1. Create the GranolaID (Text) and GranolaParticipants (Multi-line Text)
+#    custom metadata fields in DEVONthink → Settings → Data → Custom Metadata.
+
+# 2. Drop the three files into the locations above and chmod +x both scripts.
+
+# 3. Render the plist template (substitutes __HOME__).
+~/.dotfiles/scripts/build-launchd-plists.sh
+
+# 4. Stow the package so symlinks land in $HOME.
 cd ~/.dotfiles/stow && stow --restow --no-folding --ignore='.DS_Store' --target="$HOME" devonthink
 
-# 3. Load the launchd job (runs every 30 minutes)
-launchctl load ~/Library/LaunchAgents/com.user.granola-import.plist
+# 5. Load the launchd job.
+launchctl bootstrap "gui/$(id -u)" ~/Library/LaunchAgents/com.user.granola-import.plist
 
-# 4. (Optional) Run immediately
-python3 ~/.local/bin/import-granola.py
+# 6. Confirm with a dry-run before letting the schedule handle it.
+~/.local/bin/import-granola.py --dry-run
+
+# 7. (Optional) Trigger immediately instead of waiting for the next 30-minute tick.
+launchctl kickstart -k "gui/$(id -u)/com.user.granola-import"
 ```
 
-To unload: `launchctl unload ~/Library/LaunchAgents/com.user.granola-import.plist`
+To unload: `launchctl bootout "gui/$(id -u)/com.user.granola-import"`.
 
-## State
+To reload after editing the plist template: re-render with the build script, then `bootout` followed by `bootstrap`.
 
-- **Imported IDs:** `~/.local/state/devonthink/granola-imported.json` — tracks which Granola meeting UUIDs have been imported. Delete this file to re-import all meetings. (Auto-migrated from the old `~/.granola-dt-imported.json` location on first run.)
-- **Logs:** `~/Library/Logs/granola-import.log` (script) and `/tmp/granola-import.log` (launchd stdout/stderr).
+## State and Logs
+
+State files live in `~/.local/state/devonthink/`:
+
+- `granola-imported.json` — sorted list of UUIDs already imported (or marked as no-content). Delete to re-import every meeting from scratch (creates duplicate DT records — usually not what you want; use `--force <id>` for selective re-imports instead).
+- `granola-version.json` — last-seen Granola app version. The script logs a one-liner whenever this transitions, useful for correlating regressions with specific releases.
+- `granola-failure.json` — signature of the last reported failure, used to dedupe (see Failure Reporting below). Cleared automatically on the next successful run.
+
+Logs:
+
+- `~/Library/Logs/granola-import.log` — script's own log calls.
+- `/tmp/granola-import.log` — launchd stdout/stderr.
+
+## Failure Reporting
+
+Unhandled exceptions post a record to DEVONthink's `00_INBOX` with the traceback so silent breakage surfaces in the same place imports normally land. The record is dedup'd by `(exception class, last frame)` signature: a persistent failure spawns one record on the first occurrence and stays quiet until either the failure mode changes or the run succeeds. Records are flagged `DocumentType=Pipeline Error` and pre-flagged `NameLocked=Recognized=Commented=1` so the AI pipeline doesn't touch them.
+
+This means a broken Granola version (schema drift, key-derivation regression, etc.) becomes one inbox-visible report rather than a steady drip of duplicates every 30 minutes.
 
 ## Notes
 
-- **Granola must be installed** — the script reads from Granola's local cache at `~/Library/Application Support/Granola/` and authenticates to `api.granola.ai` using the locally stored token.
-- **DEVONthink must be running** — the script uses AppleScript to create records.
-- **Token refresh** — if the auth token is expired, the script launches Granola to refresh it. Granola does not need to be running otherwise.
-- **Cache format** — auto-detects v3 through v6 cache formats for meeting metadata and transcripts.
-- **Idempotency** — meetings are tracked by UUID in the state file. Running the script multiple times is safe.
-- **No external dependencies** — uses only Python 3 standard library.
+- **No API calls.** The pipeline reads `~/Library/Application Support/Granola/IndexedDB/...` and `granola.db` directly. Granola does not need to be running.
+- **DEVONthink must be running.** The sender uses `osascript` to create records. If DT is quit, the call fails and gets reported as a pipeline error per the dedup logic above.
+- **uv must be installed.** The parser shebang is `#!/usr/bin/env -S uv run --script`. uv resolves and caches the PEP 723 deps on first run. uv is in `Brewfile`.
+- **Idempotency.** Meetings are tracked by UUID in the state file. Running the script multiple times is safe, as is kickstarting the LaunchAgent.
+- **Brittle points** (in approximate order of likelihood to break): Granola's IndexedDB origin path, SQLCipher schema, IDB key entry names, cipher params. `~/.local/share/granola-import/NOTES.md` enumerates each case and how to debug it.
+
+## See Also
+
+- `~/.local/share/granola-import/NOTES.md` (gitignored) — encryption key chain, SQLCipher schema reference, ProseMirror conversion details, debug recipes (manual decryption, IDB inspection, SQLCipher CLI), brittle points, and instructions for bumping the `ccl-chromium-reader` git pin. Read this before modifying the import code.
+- Project memory `feedback_launchd_appleevents_split.md` — the parse/send split pattern; apply to any new launchd-driven script that drives AppleEvents.
+- Project memory `project_granola_local_only.md` — the rationale for local-store decryption over the API or the companion CLI.
