@@ -30,10 +30,14 @@ This installs Homebrew + all dependencies from `Brewfile`, builds generated conf
 .dotfiles/
 ├── Brewfile                 # Homebrew dependencies
 ├── scripts/
-│   ├── setup.sh             # Main bootstrap script
-│   ├── build-zed-config.sh  # Inject 1Password secrets into Zed config
-│   ├── setup-vscode.sh      # VSCodium settings + extensions
-│   └── macos.sh             # macOS system defaults
+│   ├── setup.sh                  # Main bootstrap script
+│   ├── build-zed-config.sh       # Inject 1Password secrets into Zed config
+│   ├── build-streamrip-config.sh # Inject 1Password secrets into streamrip config
+│   ├── build-vscode-config.sh    # Expand ${HOME} in VSCodium settings.json
+│   ├── build-launchd-plists.sh   # Expand __HOME__ in launch-agent plist templates
+│   ├── lint-launchd-plists.sh    # Enforce TCC-stable interpreters in plist templates
+│   ├── setup-vscode.sh           # VSCodium extension install
+│   └── macos.sh                  # macOS system defaults
 ├── stow/                    # Stow packages (auto-linked by setup.sh)
 │   ├── aerospace/           # Tiling window manager
 │   ├── bin/                 # ~/.local/bin scripts
@@ -50,9 +54,9 @@ This installs Homebrew + all dependencies from `Brewfile`, builds generated conf
 │   ├── navidrome/           # Music server scripts
 │   ├── sketchybar/          # Menu bar
 │   ├── starship/            # Shell prompt theme
-│   ├── streamrip/           # Music downloader config
-│   ├── vscode/              # VSCodium settings
-│   └── zed/                 # Zed editor (uses 1Password op inject)
+│   ├── streamrip/           # Music downloader config (1Password op inject)
+│   ├── vscode/              # VSCodium settings (${HOME} expansion)
+│   └── zed/                 # Zed editor (1Password op inject)
 └── stow-work/               # Opt-in work config (not auto-linked)
     └── work/                # Work-specific fish abbreviations
 ```
@@ -65,7 +69,7 @@ Language runtimes and globally-installed CLIs are declared in `stow/mise/.config
 
 ```bash
 mise use -g node@lts             # add/pin a runtime globally
-mise use -g npm:happy-coder      # add a global npm CLI (survives node upgrades)
+mise use -g npm:defuddle         # add a global npm CLI (survives node upgrades)
 mise up                          # update all tools to latest matching versions
 mise up npm:defuddle             # update a single tool
 mise ls                          # list everything mise manages
@@ -75,9 +79,14 @@ mise unuse -g <tool>             # remove the declaration from config.toml
 
 `mise use`/`mise unuse` edit `config.toml` in place, so the dotfiles repo stays in sync. Prefer the `npm:<pkg>` backend over raw `npm install -g` so globals get reinstalled against whichever node version is active.
 
-## Secrets
+## Generated configs (template → build → stow)
 
-Configs with secrets use the 1Password CLI (`op inject`) pattern: a tracked `.template.json` with `op://` references is injected into the real config (gitignored) at setup time. Currently only `stow/zed/` uses this. See `scripts/build-zed-config.sh`.
+Some configs are generated from a tracked template at install time. Two flavors:
+
+- **1Password secret injection** (`stow/zed/`, `stow/streamrip/`): the template has `op://Vault/Item/Field` references which `op inject` resolves into the real config (gitignored). Both also do `${HOME}` expansion.
+- **Path expansion only** (`stow/vscode/`): the template has `${HOME}` placeholders that get expanded into absolute paths. Used where the target tool requires absolute paths and doesn't honor its own variable substitution (e.g., `be5invis.vscode-custom-css` reads `file://` URIs literally).
+
+Each follows the same pattern: tracked `*.template.{json,toml}`, generated output gitignored, build script run before stow, and a `.stow-local-ignore` entry that excludes the template from being symlinked. See `scripts/build-zed-config.sh` as the canonical example.
 
 ## Work Config
 

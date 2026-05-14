@@ -52,15 +52,22 @@ Each directory under `stow/` must mirror the path relative to `$HOME`. For examp
 
 `setup.sh` runs `stow --restow --no-folding` for every directory in `stow/` automatically. The `--no-folding` flag prevents Stow from symlinking entire directories (it creates individual file symlinks instead), which avoids conflicts with tools that write new files into their config directories.
 
-### Secrets Handling (1Password CLI)
+### Generated configs (template → build → stow)
 
-For configs containing secrets, the pattern is:
-1. `config.template.json` (tracked) — full config with `op://Vault/Item/Field` references
-2. A build script runs `op inject -f -i config.template.json -o config.json` to produce the real config (gitignored)
-3. A `.stow-local-ignore` in the package root excludes `*.template.*` files from stowing
-4. The build script is called from `setup.sh` before stowing
+Some package configs are generated at install time from a tracked template. The pattern:
+1. `config.template.{json,toml}` (tracked) — full config with placeholders
+2. A build script in `scripts/` produces the real config (gitignored). Two flavors:
+   - **`op inject`**: resolves `op://Vault/Item/Field` references via 1Password CLI. Requires an authenticated `op` session; build scripts fail loudly if the output still contains `op://`.
+   - **`${HOME}` expansion**: pure sed substitution. Used where the target tool needs absolute paths and doesn't honor its own variable substitution.
+3. A `.stow-local-ignore` in the package root excludes `*.template.*` from stowing.
+4. The build script is called from `setup.sh` before stowing.
 
-Currently only `stow/zed/` uses this pattern. See `scripts/build-zed-config.sh` as the reference implementation.
+Current consumers:
+- `stow/zed/` — op inject + `${HOME}` (`scripts/build-zed-config.sh`)
+- `stow/streamrip/` — op inject + `${HOME}` (`scripts/build-streamrip-config.sh`)
+- `stow/vscode/` — `${HOME}` only (`scripts/build-vscode-config.sh`)
+
+A separate `__HOME__` expansion pattern exists for launch-agent plist templates under `stow/*/Library/LaunchAgents/*.plist.template`, handled by `scripts/build-launchd-plists.sh`.
 
 ### Adding a New Package
 
