@@ -149,7 +149,7 @@ if command -v stow &> /dev/null; then
                     ;;
             esac
         }
-        for plist in com.user.dt-daily-note com.user.dt-watchdog com.user.apptamer-watchdog; do
+        for plist in com.user.dt-daily-note com.user.dt-watchdog; do
             load_plist "$HOME/Library/LaunchAgents/${plist}.plist"
         done
         success "DEVONthink pipeline installed"
