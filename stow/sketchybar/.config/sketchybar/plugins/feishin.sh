@@ -20,6 +20,7 @@ if [ -z "$PASSWORD" ]; then
   exit 0
 fi
 
+mkdir -p "$HOME/.cache"
 LAST_SONG_FILE="$HOME/.cache/navidrome-last-song"
 AUTH_CACHE="$HOME/.cache/navidrome-auth"
 AUTH_MAX_AGE=300 # re-auth every 5 minutes
