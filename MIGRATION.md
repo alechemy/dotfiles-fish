@@ -27,11 +27,11 @@ If `setup.sh` halts early, fix the reported issue and re-run — it's idempotent
 
 ## 3. Manual app installs (not in Brewfile)
 
-- [ ] **DEVONthink 3** — paid download from devontechnologies.com. Open the app once and let it create its database before the launchd agents fire.
+- [ ] **DEVONthink 4** — paid download from devontechnologies.com. Open the app once and let it create its database before the launchd agents fire.
 - [ ] **Operator Mono SSm Lig** — paid font from typography.com. Used by Ghostty and Zed. Drop the `.otf` files into `~/Library/Fonts/`. Without this, both apps fall back to a system monospace.
 - [ ] **SingleFile browser extension** — install in Chromium (`ungoogled-chromium`, installed via Brewfile):
   - From the Chrome Web Store (or load unpacked from the SingleFile repo).
-  - In the extension's settings, set the auto-save directory to `~/Downloads/singlefile/` (the DT watcher reads from there).
+  - In the extension's settings, set the auto-save directory to `~/Downloads/SingleFile/` (the DT watcher reads from there — note the casing, it's what `stow/devonthink/.local/bin/singlefile-watcher.sh` watches).
   - Pin the toolbar icon if you want one-click capture.
 - [ ] Any paid Setapp / direct-download apps not listed in `Brewfile` that you actively use.
 
@@ -75,10 +75,10 @@ macOS will prompt the first time each app tries to do something privileged. Pre-
 - [ ] Karabiner-Elements (also needs its kernel extension approved at first launch)
 
 **Automation** (System Settings → Privacy & Security → Automation) — needed for the DEVONthink launchd agents. macOS will prompt on first fire, but the agents run headless and the prompts block silently:
-- [ ] `/usr/bin/python3` → DEVONthink 3 (the entry script for several pipelines runs under stdlib python)
-- [ ] `/bin/bash` → DEVONthink 3
-- [ ] `/usr/bin/osascript` → DEVONthink 3
-- [ ] Granola → DEVONthink 3 (for the granola-import pipeline)
+- [ ] `/usr/bin/python3` → DEVONthink 4 (the entry script for several pipelines runs under stdlib python)
+- [ ] `/bin/bash` → DEVONthink 4
+- [ ] `/usr/bin/osascript` → DEVONthink 4
+- [ ] Granola → DEVONthink 4 (for the granola-import pipeline)
 
 Easiest way to surface the prompts: open DEVONthink, then manually run each script once from Terminal (`/usr/bin/python3 ~/.local/bin/import-granola.py`, etc.) so the system prompts while you're at the keyboard.
 
