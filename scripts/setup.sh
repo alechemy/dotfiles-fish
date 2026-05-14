@@ -96,6 +96,14 @@ if command -v stow &> /dev/null; then
     cd "$DOTFILES"
     success "Dotfiles stowed"
 
+    # Aerospace runtime config is not stowed (scripts/aerospace-*-gaps.sh
+    # rewrites it). Seed it from source on fresh installs so aerospace doesn't
+    # start with empty defaults until the first window event fires.
+    if [ ! -e "$HOME/.aerospace.toml" ]; then
+        cp "$STOW_DIR/aerospace/.aerospace.toml" "$HOME/.aerospace.toml"
+        success "Seeded ~/.aerospace.toml from source"
+    fi
+
     # 4b. DEVONthink Pipeline (opt-in, single-machine only)
     read -p "  ? Install DEVONthink pipeline (smart rules + launchd agents)? [y/N] " -n 1 -r
     echo

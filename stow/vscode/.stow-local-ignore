@@ -1,1 +1,23 @@
+# Files in this package that stow should NOT symlink into $HOME.
+# The package only owns user-editable config (User/*.{json,css,js}, product.json);
+# everything else under Library/Application Support/VSCodium/ is VSCodium runtime
+# state and must stay out of the dotfiles tree.
+
+# extensions.txt is read by scripts/setup-vscode.sh, not stowed.
 extensions\.txt
+
+# Defensive deny-list for VSCodium runtime state in case anything gets written
+# into the package directory in the future.
+^Library/Application Support/VSCodium/CachedData
+^Library/Application Support/VSCodium/Code Cache
+^Library/Application Support/VSCodium/Cookies
+^Library/Application Support/VSCodium/Crashpad
+^Library/Application Support/VSCodium/GPUCache
+^Library/Application Support/VSCodium/Local Storage
+^Library/Application Support/VSCodium/Session Storage
+^Library/Application Support/VSCodium/logs
+^Library/Application Support/VSCodium/User/globalStorage
+^Library/Application Support/VSCodium/User/workspaceStorage
+^Library/Application Support/VSCodium/User/History
+^Library/Application Support/VSCodium/User/sync
+\.sock$

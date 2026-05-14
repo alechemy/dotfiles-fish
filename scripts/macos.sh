@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 
+set -euo pipefail
+
 # Close any open System Settings panes, to prevent them from overriding
 # settings we’re about to change
-osascript -e 'tell application "System Settings" to quit'
+osascript -e 'tell application "System Settings" to quit' || true
 
 # Ask for the administrator password upfront
 sudo -v
@@ -68,24 +70,38 @@ defaults write -g NSWindowShouldDragOnGesture -bool true
 echo "Applying Third Party App settings..."
 
 # Quit running apps when auto-updating via MacUpdater
-defaults write com.corecode.MacUpdater HiddenOptionQuitAppsForAutoUpdate -bool YES
-defaults write com.corecode.MacUpdater HiddenOptionAutoUpdateAfterManualScan -bool YES
+if [ -d "/Applications/MacUpdater.app" ]; then
+    defaults write com.corecode.MacUpdater HiddenOptionQuitAppsForAutoUpdate -bool YES
+    defaults write com.corecode.MacUpdater HiddenOptionAutoUpdateAfterManualScan -bool YES
+fi
 
 # Disable dark-mode PDF rendering in DEVONthink
-defaults write com.devon-technologies.think DisablePDFDarkMode true
+if [ -d "/Applications/DEVONthink.app" ]; then
+    defaults write com.devon-technologies.think DisablePDFDarkMode true
+fi
+
+# Opt App Tamer out of macOS automatic termination. As a UIElement (menubar)
+# app it's otherwise a candidate for being silently killed under memory
+# pressure, which defeats the purpose of running it.
+if [ -d "/Applications/App Tamer.app" ]; then
+    defaults write com.stclairsoft.apptamer NSSupportsAutomaticTermination -bool NO
+fi
 
 ###############################################################################
 # File Operations                                                             #
 ###############################################################################
 
-# Create symlink from Chromium bookmarks to Chrome, primarily so that Alfred can see it
+# Create symlink from Chromium bookmarks to Chrome so Alfred can see them.
+# Bookmarks is a regular file (Chromium's JSON bookmark store), not a directory.
 APP_SUPPORT="$HOME/Library/Application Support"
 CHROME_HOME="$APP_SUPPORT/Google/Chrome/Default"
-CHROMIUM_HOMIUM="$APP_SUPPORT/Chromium/Default"
-if [ -d "$CHROME_HOME/Bookmarks" ] && [ -d "$CHROMIUM_HOMIUM/Bookmarks" ]; then
+CHROMIUM_HOME="$APP_SUPPORT/Chromium/Default"
+if [ -f "$CHROMIUM_HOME/Bookmarks" ] && [ -d "$CHROME_HOME" ]; then
     echo "Linking Chromium bookmarks to Chrome..."
-    mv "$CHROME_HOME/Bookmarks" "$CHROME_HOME/Bookmarks.bak" 2>/dev/null
-    ln -sf "$CHROMIUM_HOMIUM/Bookmarks" "$CHROME_HOME/Bookmarks"
+    if [ -e "$CHROME_HOME/Bookmarks" ] && [ ! -L "$CHROME_HOME/Bookmarks" ]; then
+        mv "$CHROME_HOME/Bookmarks" "$CHROME_HOME/Bookmarks.bak.$(date +%s)"
+    fi
+    ln -sf "$CHROMIUM_HOME/Bookmarks" "$CHROME_HOME/Bookmarks"
 fi
 
 ###############################################################################
@@ -94,7 +110,7 @@ fi
 
 echo "Restarting apps..."
 for app in "Dock" "Finder" "SystemUIServer"; do
-	killall "${app}" > /dev/null 2>&1
+	killall "${app}" > /dev/null 2>&1 || true
 done
 
 echo "macOS setup complete!"
