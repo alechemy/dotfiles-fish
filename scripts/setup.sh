@@ -19,6 +19,26 @@ fail() {
     exit 1
 }
 
+# Dry-run stow for a package and back up any non-symlink files that would
+# conflict, preserving them as <target>.backup.<epoch>. Called immediately
+# before the actual `stow --restow` so first-run machines with pre-existing
+# ~/.gitconfig (or similar) don't break the install.
+backup_stow_conflicts() {
+    local package=$1 conflicts
+    conflicts=$(stow --no --no-folding --ignore='.DS_Store' --target="$HOME" "$package" 2>&1 || true)
+    if echo "$conflicts" | grep -q 'cannot stow'; then
+        echo "$conflicts" | grep 'existing target' | while read -r line; do
+            local target target_path
+            target=$(echo "$line" | sed 's/.*existing target //' | sed 's/ since.*//')
+            target_path="$HOME/$target"
+            if [ -e "$target_path" ] && [ ! -L "$target_path" ]; then
+                info "Backing up conflicting $target..."
+                mv "$target_path" "$target_path.backup.$(date +%s)"
+            fi
+        done
+    fi
+}
+
 sudo -v
 
 # Keep-alive: update existing `sudo` time stamp until script has finished
@@ -76,33 +96,14 @@ if command -v stow &> /dev/null; then
 
     mkdir -p "$HOME/.config" "$HOME/.local/bin" "$HOME/.local/share"
 
-    # Back up any existing files or directories that would conflict with stow.
-    # This commonly happens with ~/.gitconfig (created by git on first use).
+    # For each package, back up any non-symlink conflicts (e.g. ~/.gitconfig
+    # created by git on first use), then stow.
     cd "$STOW_DIR"
     for package in *; do
         if [ -d "$package" ]; then
             # DEVONthink is opt-in (handled separately below)
             [[ "$package" == "devonthink" ]] && continue
-
-            # Dry-run to detect conflicts, then back up the targets
-            conflicts=$(stow --no --no-folding --ignore='.DS_Store' --target="$HOME" "$package" 2>&1 || true)
-            if echo "$conflicts" | grep -q 'cannot stow'; then
-                echo "$conflicts" | grep 'existing target' | while read -r line; do
-                    # Extract the target path from: "over existing target .gitconfig since..."
-                    target=$(echo "$line" | sed 's/.*existing target //' | sed 's/ since.*//')
-                    target_path="$HOME/$target"
-                    if [ -e "$target_path" ] && [ ! -L "$target_path" ]; then
-                        info "Backing up conflicting $target..."
-                        mv "$target_path" "$target_path.backup.$(date +%s)"
-                    fi
-                done
-            fi
-        fi
-    done
-
-    for package in *; do
-        if [ -d "$package" ]; then
-            [[ "$package" == "devonthink" ]] && continue
+            backup_stow_conflicts "$package"
             stow --restow --no-folding --ignore='.DS_Store' --target="$HOME" "$package"
         fi
     done
@@ -123,20 +124,7 @@ if command -v stow &> /dev/null; then
     if [[ $REPLY =~ ^[Yy]$ ]]; then
         info "Stowing DEVONthink pipeline..."
         cd "$STOW_DIR"
-
-        # Back up any existing files that would conflict
-        conflicts=$(stow --no --no-folding --ignore='.DS_Store' --target="$HOME" devonthink 2>&1 || true)
-        if echo "$conflicts" | grep -q 'cannot stow'; then
-            echo "$conflicts" | grep 'existing target' | while read -r line; do
-                target=$(echo "$line" | sed 's/.*existing target //' | sed 's/ since.*//')
-                target_path="$HOME/$target"
-                if [ -e "$target_path" ] && [ ! -L "$target_path" ]; then
-                    info "Backing up conflicting $target..."
-                    mv "$target_path" "$target_path.backup.$(date +%s)"
-                fi
-            done
-        fi
-
+        backup_stow_conflicts devonthink
         stow --restow --no-folding --ignore='.DS_Store' --target="$HOME" devonthink
         cd "$DOTFILES"
         success "DEVONthink pipeline stowed"
@@ -208,7 +196,7 @@ if [[ "$(uname)" == "Darwin" ]]; then
 fi
 
 # 6. Fish Shell Setup (Add to /etc/shells and chsh)
-FISH_PATH="$(which fish)"
+FISH_PATH="$(command -v fish)"
 if [ -n "$FISH_PATH" ]; then
     if ! grep -q "$FISH_PATH" /etc/shells; then
         info "Adding fish to /etc/shells..."
