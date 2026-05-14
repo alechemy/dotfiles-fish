@@ -25,6 +25,7 @@ on performSmartRule(theRecords)
             "- Preserve line breaks between distinct thoughts." & linefeed & ¬
             "- Use **bold** for emphasized text." & linefeed & ¬
             "- Replace circled numbers (①, ②, ③, etc.) or other enclosed Unicode number forms with standard Markdown ordered list items (1., 2., 3.)." & linefeed & ¬
+            "- If a heading ends with \"(cont.)\" (e.g. \"Foo (cont.)\"), it marks a page-break continuation of an earlier section. Drop the duplicate heading entirely and append its content to the most recent section whose title matches (ignoring the \"(cont.)\" suffix). This is the one exception to the preserve-all-content rule: the \"(cont.)\" heading itself is a self-reminder and should not appear in the output." & linefeed & ¬
             "- Output ONLY the reformatted Markdown."
 
         repeat with theRecord in theRecords
@@ -35,7 +36,17 @@ on performSmartRule(theRecords)
                 -- Check if we've been waiting too long
                 set stampDate to (get custom meta data for "RecognizedAt" from theRecord)
                 if stampDate is not missing value and stampDate is not "" then
-                    set elapsed to (current date) - stampDate
+                    -- stampDate may be a date object or coerced to text by DT;
+                    -- wrap arithmetic in try so a coercion failure triggers timeout.
+                    set elapsed to maxWaitSeconds + 1 -- default: assume timed out
+                    try
+                        set elapsed to (current date) - stampDate
+                    end try
+                    try
+                        -- If stored as epoch integer (future-proofing)
+                        set nowEpoch to (do shell script "date +%s") as integer
+                        set elapsed to nowEpoch - (stampDate as integer)
+                    end try
                     if elapsed > maxWaitSeconds then
                         log message "Format Boox Comments: timed out waiting for plain text after " & elapsed & "s, advancing with empty comment" info recName
                         set comment of theRecord to ""

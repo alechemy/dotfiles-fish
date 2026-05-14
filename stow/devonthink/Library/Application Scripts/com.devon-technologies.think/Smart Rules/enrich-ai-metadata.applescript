@@ -48,10 +48,12 @@ on performSmartRule(theRecords)
 
       if not _skipRecord then
 
-      -- Stamp first-attempt time so we can enforce a timeout
+      -- Stamp first-attempt time as Unix epoch (integer) so timeout arithmetic
+      -- works even if DT round-trips custom metadata as text.
       set enrichStart to (get custom meta data for "EnrichStartedAt" from theRecord)
       if enrichStart is missing value or enrichStart is "" then
-        add custom meta data (current date) for "EnrichStartedAt" to theRecord
+        set nowEpoch to do shell script "date +%s"
+        add custom meta data (nowEpoch as integer) for "EnrichStartedAt" to theRecord
       end if
 
       -- Unified text extraction. Handwritten records store their LLM-readable
@@ -357,7 +359,15 @@ on performSmartRule(theRecords)
         -- Check if we've been retrying too long
         set enrichStart to (get custom meta data for "EnrichStartedAt" from theRecord)
         if enrichStart is not missing value and enrichStart is not "" then
-          set elapsed to (current date) - enrichStart
+          -- Handle both legacy date objects and new epoch integers gracefully.
+          set elapsed to maxWaitSeconds + 1 -- default: assume timed out
+          try
+            set elapsed to (current date) - enrichStart
+          end try
+          try
+            set nowEpoch to (do shell script "date +%s") as integer
+            set elapsed to nowEpoch - (enrichStart as integer)
+          end try
           if elapsed > maxWaitSeconds then
             log message "Enrich AI Metadata: timed out after " & elapsed & "s, advancing without enrichment" info recName
             my pipelineLog("Enrich: AI Metadata", "ERROR", "timed out after " & elapsed & "s, advancing without enrichment", recName, recUUID)
