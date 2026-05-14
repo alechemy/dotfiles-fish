@@ -129,8 +129,28 @@ if command -v stow &> /dev/null; then
         success "DEVONthink pipeline stowed"
 
         info "Loading launchd agents..."
-        launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/com.user.dt-daily-note.plist" 2>/dev/null || true
-        launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/com.user.dt-watchdog.plist" 2>/dev/null || true
+        # Bootstrap each plist, surfacing real failures while tolerating the
+        # "already loaded" case (launchctl exits 37 / Bootstrap failed: 17).
+        load_plist() {
+            local path=$1 name err
+            name=$(basename "$path" .plist)
+            if [ ! -f "$path" ]; then
+                info "  $name plist not found at $path, skipping"
+                return 0
+            fi
+            err=$(launchctl bootstrap "gui/$(id -u)" "$path" 2>&1) && return 0
+            case "$err" in
+                *"Bootstrap failed: 17"*|*"already loaded"*)
+                    info "  $name already loaded"
+                    ;;
+                *)
+                    fail "Failed to load $name: $err"
+                    ;;
+            esac
+        }
+        for plist in com.user.dt-daily-note com.user.dt-watchdog com.user.apptamer-watchdog; do
+            load_plist "$HOME/Library/LaunchAgents/${plist}.plist"
+        done
         success "DEVONthink pipeline installed"
 
         # Wiki integration (optional)

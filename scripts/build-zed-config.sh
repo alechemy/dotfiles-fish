@@ -15,14 +15,28 @@ if [ ! -f "$TEMPLATE" ]; then
   exit 1
 fi
 
-if command -v op >/dev/null 2>&1; then
-  echo "Injecting secrets using 1Password CLI..."
-  # op inject replaces op:// references and outputs to settings.json
-  op inject -f -i "$TEMPLATE" -o "$OUT"
-else
-  echo "Warning: 1Password CLI (op) is not installed."
-  echo "  Copying template config directly. op:// references will not be resolved."
-  cp "$TEMPLATE" "$OUT"
+if ! command -v op >/dev/null 2>&1; then
+  echo "Error: 1Password CLI (op) is not installed." >&2
+  echo "  Install with: brew install --cask 1password-cli" >&2
+  exit 1
+fi
+if ! op whoami >/dev/null 2>&1; then
+  echo "Error: 1Password CLI is not signed in." >&2
+  echo "  Sign in with: eval \$(op signin)" >&2
+  echo "  Or enable Touch ID/SSH agent in 1Password's Developer settings." >&2
+  exit 1
+fi
+
+echo "Injecting secrets using 1Password CLI..."
+op inject -f -i "$TEMPLATE" -o "$OUT"
+
+# Fail loudly if any op:// reference remains unresolved. Silent fallthrough
+# here previously left Zed reading literal "op://Vault/Item/Field" strings.
+if grep -q 'op://' "$OUT"; then
+  echo "Error: unresolved op:// references remain in $OUT" >&2
+  grep -n 'op://' "$OUT" >&2
+  rm -f "$OUT"
+  exit 1
 fi
 
 # Replace ${HOME} placeholder with the actual home directory path
