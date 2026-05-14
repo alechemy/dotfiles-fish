@@ -63,6 +63,43 @@ defaults write com.apple.spaces spans-displays -bool true
 # Move windows by dragging any part of the window (while holding ctr+cmd)
 defaults write -g NSWindowShouldDragOnGesture -bool true
 
+# Dark mode
+defaults write -g AppleInterfaceStyle Dark
+
+# Fastest key repeat. InitialKeyRepeat is the delay before repeat begins
+# (lower = faster start). KeyRepeat is the interval between repeats (2 is the
+# fastest the slider in System Settings exposes).
+defaults write -g InitialKeyRepeat -int 15
+defaults write -g KeyRepeat -int 2
+
+# Traditional (non-natural) scrolling — scroll content moves the same direction
+# as the fingers, opposite of the macOS default.
+defaults write -g com.apple.swipescrolldirection -bool false
+
+# Disable text "autocorrect" features that misbehave in code and shell prompts.
+defaults write -g NSAutomaticCapitalizationEnabled -bool false
+defaults write -g NSAutomaticPeriodSubstitutionEnabled -bool false
+
+# Show the path bar and status bar in Finder windows.
+defaults write com.apple.finder ShowPathbar -bool true
+defaults write com.apple.finder ShowStatusBar -bool true
+
+# New Finder windows open the home folder (PfHm = Home).
+defaults write com.apple.finder NewWindowTarget -string "PfHm"
+defaults write com.apple.finder NewWindowTargetPath -string "file:///"
+
+# Finder search defaults to the current folder, not "This Mac".
+defaults write com.apple.finder FXDefaultSearchScope -string "SCev"
+
+# Dock on the right edge, smaller tile size, and auto-hide.
+defaults write com.apple.dock orientation -string "right"
+defaults write com.apple.dock tilesize -int 59
+defaults write com.apple.dock autohide -bool true
+
+# Save screenshots to ~/Screenshots instead of the Desktop.
+mkdir -p "$HOME/Screenshots"
+defaults write com.apple.screencapture location "$HOME/Screenshots"
+
 ###############################################################################
 # Third Party Apps                                                            #
 ###############################################################################
