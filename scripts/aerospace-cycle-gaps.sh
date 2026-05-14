@@ -13,19 +13,12 @@ export PATH="/opt/homebrew/bin:$PATH"
 SOURCE_FILE="$HOME/.dotfiles/stow/aerospace/.aerospace.toml"
 RUNTIME_FILE="$HOME/.aerospace.toml"
 
-# Skip when the focused monitor is the laptop's built-in display, or when more
-# than one monitor is connected. See aerospace-auto-gaps.sh for the rationale.
-# Notifies briefly so the user knows the Hyper+G didn't do nothing for free.
+# Skip when more than one monitor is connected. See aerospace-auto-gaps.sh
+# for the rationale; the TOML's named-monitor rule keeps the built-in panel
+# on the 8 px fallback regardless.
 mons_json=$(aerospace list-monitors --json 2>/dev/null || echo '[]')
-should_skip=false
 if [ "$(jq 'length' <<<"$mons_json" 2>/dev/null || echo 1)" -gt 1 ]; then
-    should_skip=true
-fi
-case "$(jq -r '.[0]["monitor-name"] // ""' <<<"$mons_json" 2>/dev/null)" in
-    *Built-in*|*"Built In"*|*MacBook*) should_skip=true ;;
-esac
-if [ "$should_skip" = true ]; then
-    osascript -e 'display notification "Gap cycling is disabled on the built-in display." with title "AeroSpace"' >/dev/null 2>&1 || true
+    osascript -e 'display notification "Gap cycling is disabled while multiple monitors are connected." with title "AeroSpace"' >/dev/null 2>&1 || true
     exit 0
 fi
 
@@ -39,7 +32,8 @@ LABELS=("full" "split" "centered")
 
 # Read current gap from runtime if present, else from source.
 read_gap() {
-    grep -m1 'outer\.left' "$1" 2>/dev/null | grep -o 'monitor\.main = [0-9]*' | grep -o '[0-9]*'
+    # See aerospace-auto-gaps.sh for rationale.
+    sed -nE 's/.*outer\.left = \[\{ monitor\."DELL U4025QW" = ([0-9]+).*/\1/p' "$1" 2>/dev/null | head -n1 || true
 }
 current_gap=$(read_gap "$RUNTIME_FILE")
 [ -z "$current_gap" ] && current_gap=$(read_gap "$SOURCE_FILE")
@@ -63,8 +57,8 @@ label=${LABELS[$next_idx]}
 TMP=$(mktemp "$RUNTIME_FILE.XXXXXX")
 trap 'rm -f "$TMP"' EXIT
 cp "$SOURCE_FILE" "$TMP"
-sed -i '' "s/outer\.left = \[{ monitor\.main = [0-9]* }/outer.left = [{ monitor.main = $gap }/" "$TMP"
-sed -i '' "s/outer\.right = \[{ monitor\.main = [0-9]* }/outer.right = [{ monitor.main = $gap }/" "$TMP"
+sed -i '' "s/outer\.left = \[{ monitor\.\"DELL U4025QW\" = [0-9]* }/outer.left = [{ monitor.\"DELL U4025QW\" = $gap }/" "$TMP"
+sed -i '' "s/outer\.right = \[{ monitor\.\"DELL U4025QW\" = [0-9]* }/outer.right = [{ monitor.\"DELL U4025QW\" = $gap }/" "$TMP"
 chmod 0644 "$TMP"
 mv "$TMP" "$RUNTIME_FILE"
 

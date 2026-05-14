@@ -79,8 +79,11 @@ on-mode-changed = [
 [gaps]
     inner.horizontal = 8
     inner.vertical =   8
-    outer.left = [{ monitor.main = 600 }, 8]
-    outer.right = [{ monitor.main = 600 }, 8]
+    # Target the external monitor by name so the laptop's built-in display
+    # always falls through to the 8 px fallback, even if main briefly shifts
+    # during dock/undock or while running lid-open without the external.
+    outer.left = [{ monitor."DELL U4025QW" = 600 }, 8]
+    outer.right = [{ monitor."DELL U4025QW" = 600 }, 8]
     outer.bottom =     8
     outer.top =        48
 

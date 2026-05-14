@@ -22,17 +22,14 @@ SOURCE_FILE="$HOME/.dotfiles/stow/aerospace/.aerospace.toml"
 RUNTIME_FILE="$HOME/.aerospace.toml"
 SUPPRESS_FILE="/tmp/aerospace-gaps-suppressed-workspace"
 
-# Skip when the focused monitor is the laptop's built-in display, or when more
-# than one monitor is connected (e.g. clamshell + lid open). The presets are
-# tuned for an external ultrawide; slamming 600–1000 px gaps onto a 13" panel
-# looks broken. Manual cycling via Hyper+G applies the same guard.
+# Skip when more than one monitor is connected (e.g. clamshell + lid open) so
+# the manual + automatic gap states don't fight during transient configs.
+# The TOML's named-monitor gap rule already keeps the laptop's built-in panel
+# on the 8 px fallback regardless of what's written here.
 mons_json=$(aerospace list-monitors --json 2>/dev/null || echo '[]')
 if [ "$(jq 'length' <<<"$mons_json" 2>/dev/null || echo 1)" -gt 1 ]; then
     exit 0
 fi
-case "$(jq -r '.[0]["monitor-name"] // ""' <<<"$mons_json" 2>/dev/null)" in
-    *Built-in*|*"Built In"*|*MacBook*) exit 0 ;;
-esac
 
 # Serialize concurrent runs (Hammerspoon window events + Aerospace workspace
 # changes can fire this script in rapid succession). Non-blocking: if another
@@ -64,9 +61,13 @@ case "$count" in
 esac
 
 read_gap() {
-    grep -m1 'outer\.left' "$1" 2>/dev/null \
-        | grep -oE 'monitor\.main = [0-9]+' \
-        | grep -oE '[0-9]+'
+    # Extracts the gap integer assigned to the named monitor on outer.left,
+    # ignoring the digits embedded in the monitor name itself ("U4025QW").
+    # Always exits 0 so set -e doesn't kill the script when the pattern is
+    # absent (e.g. during a TOML format migration). Caller treats empty as
+    # "fall back to source".
+    sed -nE 's/.*outer\.left = \[\{ monitor\."DELL U4025QW" = ([0-9]+).*/\1/p' "$1" 2>/dev/null \
+        | head -n1 || true
 }
 
 # Decide whether the runtime needs rebuilding from source.
@@ -88,8 +89,8 @@ fi
 TMP=$(mktemp "$RUNTIME_FILE.XXXXXX")
 trap 'rm -f "$TMP"' EXIT
 cp "$SOURCE_FILE" "$TMP"
-sed -i '' "s/outer\.left = \[{ monitor\.main = [0-9]* }/outer.left = [{ monitor.main = $target }/" "$TMP"
-sed -i '' "s/outer\.right = \[{ monitor\.main = [0-9]* }/outer.right = [{ monitor.main = $target }/" "$TMP"
+sed -i '' "s/outer\.left = \[{ monitor\.\"DELL U4025QW\" = [0-9]* }/outer.left = [{ monitor.\"DELL U4025QW\" = $target }/" "$TMP"
+sed -i '' "s/outer\.right = \[{ monitor\.\"DELL U4025QW\" = [0-9]* }/outer.right = [{ monitor.\"DELL U4025QW\" = $target }/" "$TMP"
 chmod 0644 "$TMP"
 mv "$TMP" "$RUNTIME_FILE"
 
