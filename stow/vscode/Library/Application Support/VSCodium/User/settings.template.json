@@ -342,8 +342,8 @@
   "vsicons.presets.angular": true,
   // be5invis.vscode-custom-css — must run "Enable Custom CSS and JS" + restart
   "vscode_custom_css.imports": [
-    "file:///Users/alec/Library/Application Support/VSCodium/User/custom.css",
-    "file:///Users/alec/Library/Application Support/VSCodium/User/custom.js",
+    "file://${HOME}/Library/Application Support/VSCodium/User/custom.css",
+    "file://${HOME}/Library/Application Support/VSCodium/User/custom.js",
   ],
   "multiCommand.commands": [
     {
