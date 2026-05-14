@@ -15,7 +15,7 @@
 -- ~/Library/Logs/singlefile-ingest.log.
 
 on performSmartRule(theRecords)
-	set batchPath to "/Users/alec/.local/bin/capture-bookmarks-batch.py"
+	set batchPath to (POSIX path of (path to home folder)) & ".local/bin/capture-bookmarks-batch.py"
 	set logPath to (POSIX path of (path to home folder)) & "Library/Logs/singlefile-ingest.log"
 	-- PATH must include mise shims (defuddle), Homebrew (fswatch, magick),
 	-- and ~/.local/bin (capture-with-singlefile, ingester).

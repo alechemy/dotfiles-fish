@@ -18,7 +18,7 @@ on performSmartRule(theRecords)
             -- is for cleaning up your own writing, not rewriting third-party
             -- web or PDF content. For those, invoke /prose-check directly.
             if recType is "markdown" or recType is "txt" or recType is "rtf" or recType is "rtfd" or recType is "formatted note" then
-                set claudePath to "/Users/alec/.local/bin/claude"
+                set claudePath to (POSIX path of (path to home folder)) & ".local/bin/claude"
                 set logPath to (POSIX path of (path to home folder)) & "Library/Logs/prose-check.log"
                 set thePrompt to "/prose-check --dt-source " & recUUID
                 -- Auth via setup-token from 1Password; PATH for tools.

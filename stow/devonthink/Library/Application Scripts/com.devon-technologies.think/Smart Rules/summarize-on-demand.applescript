@@ -32,7 +32,7 @@ on performSmartRule(theRecords)
             else
                 -- Pass the source record UUID so the skill can set SummarySource
                 -- as an item link back to this record.
-                set claudePath to "/Users/alec/.local/bin/claude"
+                set claudePath to (POSIX path of (path to home folder)) & ".local/bin/claude"
                 set logPath to (POSIX path of (path to home folder)) & "Library/Logs/summarize.log"
                 set thePrompt to "/summarize " & srcInput & " --dt-source " & recUUID
                 -- Auth via setup-token from 1Password; PATH for tools (pdftotext, defuddle, etc.)
