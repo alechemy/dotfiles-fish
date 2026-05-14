@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/python3
 """Ingest a SingleFile HTML capture into DEVONthink.
 
 Creates (up to) three cross-linked records in a single AppleScript pass:
@@ -21,12 +21,19 @@ path (Scenario 1) and the ingester will create a bookmark in 99_ARCHIVE.
 On success the staging HTML file is deleted.
 """
 
+# Pinned to /usr/bin/python3 (3.9) for TCC stability — see CLAUDE.md.
+from __future__ import annotations
+
 import argparse
+import json
 import re
 import shutil
 import subprocess
 import sys
 import tempfile
+import unicodedata
+import urllib.error
+import urllib.request
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -61,6 +68,32 @@ AI_CHAT_HOSTS = {
 # HTML snapshot.
 GENERIC_TITLE_STEMS = {"no title", "untitled"}
 
+# Reddit serves a generic <title> on post pages ("From the X community on
+# Reddit") rather than the actual post title, so the SingleFile filename and
+# any DT bookmark created from the page are useless as descriptors. We hit
+# Reddit's public .json endpoint to recover the verbatim user-authored title;
+# on failure, we treat the boilerplate as generic and let AI enrichment fill
+# it in from the body text.
+REDDIT_HOSTS = {
+    "reddit.com",
+    "www.reddit.com",
+    "old.reddit.com",
+    "new.reddit.com",
+    "np.reddit.com",
+}
+REDDIT_POST_PATH_RE = re.compile(
+    r"^/r/[^/]+/comments/[a-z0-9]+(?:/[^/]*)?/?$", re.IGNORECASE
+)
+REDDIT_BOILERPLATE_RE = re.compile(
+    r"^(From the .+ community on Reddit|Reddit|Reddit - .+)$", re.IGNORECASE
+)
+REDDIT_FETCH_TIMEOUT_SECS = 8
+
+# Title length cap. Hit at the word boundary nearest (but ≤) this many chars,
+# with an ellipsis appended when truncation occurred. Reddit post titles in
+# particular blow well past this; older byte-truncation produced mid-word cuts.
+TITLE_MAX_LEN = 120
+
 log = setup_log("singlefile-ingest")
 
 APPLESCRIPT = r"""
@@ -72,6 +105,7 @@ on run argv
     set safeTitle to item 5 of argv
     set aiChatPlatform to item 6 of argv
     set isGenericTitle to ((item 7 of argv) is "1")
+    set overrideExistingName to ((item 8 of argv) is "1")
 
     tell application id "DNtp"
         set archiveGroup to get record at "/99_ARCHIVE" in database "Lorebook"
@@ -94,6 +128,17 @@ on run argv
         else
             set bmRecord to get record with uuid bookmarkUUID
             add custom meta data 0 for "NeedsSingleFile" to bmRecord
+            -- Reddit carve-out: existing bookmark was created by the
+            -- clipper with a "From the X community on Reddit" boilerplate
+            -- name. derive_title got the verbatim post title from the
+            -- .json API; force the rename and lock it so AI enrichment
+            -- doesn't overwrite the user-authored title.
+            if overrideExistingName then
+                if (name of bmRecord) is not safeTitle then
+                    set name of bmRecord to safeTitle
+                end if
+                add custom meta data 1 for "NameLocked" to bmRecord
+            end if
         end if
 
         -- Import the HTML snapshot directly into 99_ARCHIVE. The Python
@@ -253,8 +298,87 @@ def parse_source_url(html_path: Path) -> str | None:
     return m.group(1) if m else None
 
 
-def derive_title(html_path: Path, source_url: str) -> tuple[str, bool]:
-    """Return (title, is_generic).
+def truncate_at_word(s: str, limit: int = TITLE_MAX_LEN) -> str:
+    """Truncate `s` to ≤ `limit` characters at a word boundary, appending an
+    ellipsis when truncation actually occurred. Falls back to a hard cut when
+    the string has no whitespace (or all whitespace appears too early to give
+    a useful split)."""
+    if len(s) <= limit:
+        return s
+    head = s[: limit - 1]
+    last_space = head.rfind(" ")
+    if last_space > limit // 2:
+        cut = head[:last_space].rstrip()
+    else:
+        cut = head.rstrip()
+    cut = cut.rstrip(",;:.!?-—")
+    return f"{cut}…"
+
+
+def normalize_title(s: str) -> str:
+    """NFKC-normalize and collapse internal whitespace. Lighter than
+    clean-web-title because it skips the brand-suffix strip — used on titles
+    that come from a trusted authored source (Reddit's API) rather than a
+    page <title> tag."""
+    s = unicodedata.normalize("NFKC", s)
+    return re.sub(r"\s+", " ", s).strip()
+
+
+def is_reddit_url(url: str) -> bool:
+    try:
+        parsed = urlparse(url)
+    except ValueError:
+        return False
+    return (parsed.netloc or "").lower() in REDDIT_HOSTS
+
+
+def fetch_reddit_post_title(url: str) -> str | None:
+    """Return the verbatim post title for a Reddit post permalink, or None.
+
+    Returns None for non-Reddit URLs, non-post Reddit URLs (subreddit/user
+    pages), and any network/parsing failure. Callers fall back to treating
+    the page's <title> as generic so AI enrichment can supply one.
+    """
+    try:
+        parsed = urlparse(url)
+    except ValueError:
+        return None
+    host = (parsed.netloc or "").lower()
+    if host not in REDDIT_HOSTS:
+        return None
+    path = parsed.path or ""
+    if not REDDIT_POST_PATH_RE.match(path):
+        return None
+
+    # old.reddit avoids the SPA shell that occasionally serves HTML for the
+    # .json path on www.reddit. Strip the trailing slash before appending so
+    # we don't end up with `/.json`.
+    json_url = f"https://old.reddit.com{path.rstrip('/')}.json"
+    req = urllib.request.Request(
+        json_url,
+        headers={"User-Agent": "dt-singlefile-ingest/1.0"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=REDDIT_FETCH_TIMEOUT_SECS) as resp:
+            payload = json.load(resp)
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, OSError) as e:
+        log.warning("Reddit title fetch failed for %s: %s", url, e)
+        return None
+
+    try:
+        title = payload[0]["data"]["children"][0]["data"]["title"]
+    except (KeyError, IndexError, TypeError):
+        log.warning("Reddit JSON shape unexpected for %s", url)
+        return None
+
+    if not isinstance(title, str):
+        return None
+    title = normalize_title(title)
+    return title or None
+
+
+def derive_title(html_path: Path, source_url: str) -> tuple[str, bool, bool]:
+    """Return (title, is_generic, override_existing_name).
 
     Strips SingleFile's date-time suffix and normalizes. When the filename
     stem is one of the SingleFile placeholders (`No title`, `Untitled` —
@@ -262,7 +386,22 @@ def derive_title(html_path: Path, source_url: str) -> tuple[str, bool]:
     returned and the title is augmented with a URL-derived suffix so the
     three records produced by the ingester remain identifiable in DT until
     AI enrichment supplies a real title.
+
+    Reddit carve-out: when the source URL is a Reddit post permalink, hit
+    Reddit's .json API for the verbatim post title and use that. The
+    `override_existing_name` return is True only in that case, signalling
+    to the AppleScript that any pre-existing bookmark passed via --bookmark
+    should also be renamed (its current name is the page's "From the X
+    community on Reddit" boilerplate, not a real title). When the API call
+    fails on a Reddit URL whose page <title> matches the boilerplate, we
+    flag the title as generic so AI enrichment fills it in from the body.
     """
+    reddit_title = fetch_reddit_post_title(source_url)
+    if reddit_title:
+        title = re.sub(r"[\\/:]", "-", reddit_title)
+        title = re.sub(r"-{2,}", "-", title)
+        return (truncate_at_word(title) or "Web Clip", False, True)
+
     stem = html_path.stem
     stem = re.sub(r" \([0-9].*$", "", stem)
     cleaned = subprocess.run(
@@ -270,11 +409,21 @@ def derive_title(html_path: Path, source_url: str) -> tuple[str, bool]:
     ).stdout.strip()
     title = cleaned or stem
     is_generic = (not title) or title.strip().lower() in GENERIC_TITLE_STEMS
+
+    # Reddit fallback: API failed but the title is the known boilerplate.
+    # Treat as generic so AI enrichment supplies a real title from the body.
+    if (
+        not is_generic
+        and is_reddit_url(source_url)
+        and REDDIT_BOILERPLATE_RE.match(title.strip())
+    ):
+        is_generic = True
+
     if is_generic:
         title = augment_generic_title(title.strip() or "No title", source_url)
     title = re.sub(r"[\\/:]", "-", title)
-    title = re.sub(r"-{2,}", "-", title)[:120]
-    return (title or "Web Clip", is_generic)
+    title = re.sub(r"-{2,}", "-", title)
+    return (truncate_at_word(title) or "Web Clip", is_generic, False)
 
 
 def augment_generic_title(base: str, source_url: str) -> str:
@@ -700,6 +849,7 @@ def import_to_devonthink(
     safe_title: str,
     ai_chat_platform: str = "",
     is_generic_title: bool = False,
+    override_existing_name: bool = False,
 ) -> str:
     """Run the single-pass AppleScript. Returns the pipe-joined UUIDs.
 
@@ -712,6 +862,12 @@ def import_to_devonthink(
     had no usable <title>). The AppleScript leaves NameLocked unset on all
     three records so AI enrichment can supply a real title and Post-Enrich
     & Archive can propagate it back to the bookmark and HTML snapshot.
+
+    `override_existing_name` tells the AppleScript that the bookmark passed
+    via `bookmark_uuid` was created with a known-bad name (currently only
+    the Reddit "From the X community on Reddit" boilerplate) and should be
+    renamed to `safe_title` with NameLocked=1. Ignored when bookmark_uuid
+    is empty.
     """
     argv = [
         str(html_path),
@@ -721,6 +877,7 @@ def import_to_devonthink(
         safe_title,
         ai_chat_platform,
         "1" if is_generic_title else "0",
+        "1" if override_existing_name else "0",
     ]
     result = subprocess.run(
         ["osascript", "-", *argv],
@@ -775,7 +932,9 @@ def main() -> int:
                 pass
             return 0
 
-    safe_title, is_generic_title = derive_title(html_path, source_url)
+    safe_title, is_generic_title, override_existing_name = derive_title(
+        html_path, source_url
+    )
 
     compress_images(html_path)
 
@@ -828,6 +987,7 @@ def main() -> int:
                 safe_title=safe_title,
                 ai_chat_platform=ai_chat_platform if has_md else "",
                 is_generic_title=is_generic_title,
+                override_existing_name=override_existing_name,
             )
         except subprocess.CalledProcessError as e:
             log.error("AppleScript import failed: %s", e.stderr)

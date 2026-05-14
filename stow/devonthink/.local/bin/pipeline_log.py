@@ -20,6 +20,10 @@ present, it becomes a `(record="…"|uuid=…)` suffix on the log line.
 Omitting it (most common) produces a plain message line.
 """
 
+# Imported by scripts pinned to /usr/bin/python3 (3.9); future annotations
+# keep PEP 604 union syntax parseable. See CLAUDE.md.
+from __future__ import annotations
+
 import logging
 import sys
 from pathlib import Path
