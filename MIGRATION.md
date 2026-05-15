@@ -63,6 +63,13 @@ These live outside the dotfiles repo. Copy via Time Machine, AirDrop, or `scp`.
 - [ ] **Maestral** (Dropbox client) — first launch will prompt for OAuth.
 - [ ] **Granola** — sign in to your account.
 - [ ] **Marked 2**, **CleanShot X**, **Things**, etc. — first-launch logins where applicable.
+- [ ] **Navidrome env file.** `stow/navidrome/.config/navidrome/env` is gitignored to keep the LAN URL out of the public repo's working tree. On the new Mac, copy the template into place and fill in real values:
+  ```bash
+  cp ~/.dotfiles/stow/navidrome/.config/navidrome/env.template \
+     ~/.dotfiles/stow/navidrome/.config/navidrome/env
+  $EDITOR ~/.dotfiles/stow/navidrome/.config/navidrome/env  # set NAVIDROME_URL + NAVIDROME_USERNAME
+  cd ~/.dotfiles/stow && stow --restow --no-folding --ignore='.DS_Store' --target="$HOME" navidrome
+  ```
 - [ ] **Navidrome Keychain entry.** Both the `feishin` sketchybar plugin and `play-random-album.sh` look up the Navidrome password via macOS Keychain. Run: `security add-generic-password -s 'Navidrome' -a 'alec' -w '<password>' -U`. Without this, the sketchybar plugin shows "No keychain" and the play-random-album hotkey fails silently.
 - [ ] If you commit-sign via SSH (recommended given the 1Password agent): `git config --global user.signingkey "<your ssh pubkey>"` and `git config --global commit.gpgsign true` (the global gitconfig in `stow/git/` may already handle this — check).
 

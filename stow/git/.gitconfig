@@ -1,3 +1,6 @@
+[user]
+  name = Alec Custer
+  email = alcuster@icloud.com
 [core]
   excludesfile = ~/.gitignore
   editor = nano
@@ -21,7 +24,6 @@
 [push]
   autoSetupRemote = true
 [include]
-  path = ~/.gitconfig.local
   path = ~/.gitconfig.proxy
 [includeIf "gitdir:~/Work/"]
   path = ~/.gitconfig.work
