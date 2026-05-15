@@ -92,6 +92,18 @@ When the work needs Python ≥ 3.10 or third-party packages, use the split-archi
 
 `scripts/lint-launchd-plists.sh` enforces both rules across every plist template in the repo and runs as part of `setup.sh`. It will halt the bootstrap on any violation.
 
+### Python script shebangs
+
+Python interpreter management is split between mise and uv on purpose. mise (`stow/mise/.config/mise/config.toml`) provides the day-to-day `python3` on `$PATH`. uv (Brewfile) is reserved for scripts that declare third-party deps via PEP 723. There is no repo-wide `pyproject.toml` / `uv.lock` — each script stands alone.
+
+Pick a script's shebang from this three-tier rule:
+
+1. **TCC-sensitive** (script sends AppleEvents AND is invoked by a launch agent, either directly via the plist or transitively through a launchd-driven shell script that calls `"$SCRIPT" args`) → `#!/usr/bin/python3`. Apple-signed, stable TCC identity, stdlib only. If the work needs third-party deps, use the split-architecture pattern from the section above (sender stays `/usr/bin/python3`, parser is a `uv run --script` subprocess).
+2. **Has third-party deps, not TCC-sensitive** → `#!/usr/bin/env -S uv run --script` with a PEP 723 inline `# /// script` block declaring `requires-python` and `dependencies`. Reference: `stow/devonthink/.local/bin/import-granola-parse.py`, `stow/bin/.local/bin/tagger.py`.
+3. **Pure stdlib, not TCC-sensitive** → `#!/usr/bin/env python3`. Resolves through PATH to mise's Python.
+
+For tier 1 scripts, even when the launchd plist provides the interpreter explicitly (`/usr/bin/python3 /path/to/script.py`), still write the shebang as `#!/usr/bin/python3` so direct invocation during testing uses the same interpreter as production rather than mise's.
+
 ## External design notes (gitignored, outside the repo)
 
 Some pipelines have design docs kept outside the public repo because they document sensitive recipes (e.g. local-store decryption). **Read the relevant file before modifying its pipeline** — the docs cover schema, breakage modes, and debug recipes that aren't reconstructable from the code alone.
