@@ -27,14 +27,17 @@ defaults write com.apple.LaunchServices LSQuarantine -bool false
 # Always open everything in Finder's list view
 defaults write com.apple.Finder FXPreferredViewStyle Nlsv
 
-# Don't create .DS_Store files on network shares
+# Don't create .DS_Store files on network shares or USB drives
 defaults write com.apple.desktopservices DSDontWriteNetworkStores -bool true
+defaults write com.apple.desktopservices DSDontWriteUSBStores -bool true
 
 # Disable the warning when changing a file extension
 defaults write com.apple.Finder FXEnableExtensionChangeWarning -bool false
 
-# Expand save panel by default
+# Expand save and print panels by default. The "2" key is what newer apps read.
 defaults write NSGlobalDomain NSNavPanelExpandedStateForSaveMode -bool true
+defaults write NSGlobalDomain NSNavPanelExpandedStateForSaveMode2 -bool true
+defaults write NSGlobalDomain PMPrintingExpandedStateForPrint -bool true
 
 # Always show all files in Finder
 defaults write com.apple.Finder AppleShowAllFiles -bool true
@@ -42,12 +45,19 @@ defaults write com.apple.Finder AppleShowAllFiles -bool true
 # Always show all files elsewhere
 defaults write -g AppleShowAllFiles -bool true
 
+# Always show file extensions, even for filetypes macOS hides them on by default.
+defaults write -g AppleShowAllExtensions -bool true
+
+# Sort folders before files in Finder list views, including on the Desktop.
+defaults write com.apple.finder _FXSortFoldersFirst -bool true
+defaults write com.apple.finder _FXSortFoldersFirstOnDesktop -bool true
+
 # Open new blank file in TextEdit
 defaults write com.apple.TextEdit NSShowAppCentricOpenPanelInsteadOfUntitledFile -bool false
 
 # Speed up the dock hide/show animation
-defaults write com.apple.dock autohide-delay -float 0.1
-defaults write com.apple.dock autohide-time-modifier -float 0.5
+defaults write com.apple.dock autohide-delay -float 0
+defaults write com.apple.dock autohide-time-modifier -float 0.15
 
 # Disable window opening animations
 defaults write -g NSAutomaticWindowAnimationsEnabled -bool false
@@ -72,6 +82,10 @@ defaults write -g AppleInterfaceStyle Dark
 defaults write -g InitialKeyRepeat -int 15
 defaults write -g KeyRepeat -int 2
 
+# Full keyboard access in dialogs — Tab cycles through all controls, not just
+# text fields and lists.
+defaults write -g AppleKeyboardUIMode -int 3
+
 # Traditional (non-natural) scrolling — scroll content moves the same direction
 # as the fingers, opposite of the macOS default.
 defaults write -g com.apple.swipescrolldirection -bool false
@@ -89,15 +103,40 @@ defaults write com.apple.finder NewWindowTarget -string "PfHm"
 defaults write com.apple.finder NewWindowTargetPath -string "file:///"
 
 # Finder search defaults to the current folder, not "This Mac".
-defaults write com.apple.finder FXDefaultSearchScope -string "SCev"
+defaults write com.apple.finder FXDefaultSearchScope -string "SCcf"
 
 # Dock on the right edge and auto-hide.
 defaults write com.apple.dock orientation -string "right"
 defaults write com.apple.dock autohide -bool true
 
+# Hide the recent-apps section in the Dock.
+defaults write com.apple.dock show-recents -bool false
+
+# Don't reorder Spaces by most-recent-use. AeroSpace assumes positional Spaces
+# and gets confused if macOS shuffles them.
+defaults write com.apple.dock mru-spaces -bool false
+
+# Skip the launch-bouncing animation and shorten Mission Control's animation.
+defaults write com.apple.dock launchanim -bool false
+defaults write com.apple.dock expose-animation-duration -float 0.12
+
+# Lock the dock at its current size to prevent accidental drag-resizing.
+defaults write com.apple.dock size-immutable -bool true
+
 # Save screenshots to ~/Screenshots instead of the Desktop.
 mkdir -p "$HOME/Screenshots"
 defaults write com.apple.screencapture location "$HOME/Screenshots"
+
+# Drop the window-screenshot shadow and skip the floating thumbnail preview.
+defaults write com.apple.screencapture disable-shadow -bool true
+defaults write com.apple.screencapture show-thumbnail -bool false
+
+# Tap-to-click on the trackpad.
+defaults write com.apple.driver.AppleBluetoothMultitouch.trackpad Clicking -bool true
+defaults write -g com.apple.mouse.tapBehavior -int 1
+
+# Save new documents to local disk by default, not iCloud Drive.
+defaults write -g NSDocumentSaveNewDocumentsToCloud -bool false
 
 ###############################################################################
 # Third Party Apps                                                            #
