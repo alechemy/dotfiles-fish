@@ -20,7 +20,7 @@ Everything that `setup.sh` *can't* do for you on a new Mac. Work through it in o
   cd ~/.dotfiles
   ./scripts/setup.sh
   ```
-- [ ] When prompted, accept the **DEVONthink pipeline** install if this machine should run the launchd agents (daily note, watchdog, etc.). Skip on a laptop you don't want noisy background jobs on.
+- [ ] On a fresh Mac, `setup.sh` will detect that DEVONthink is not yet installed and **skip the pipeline prompt** with a "re-run after installing DEVONthink" message. Don't worry about it — install DEVONthink in step 3, then re-run `./scripts/setup.sh` to enable the launchd agents.
 - [ ] When prompted, accept **macOS defaults** to apply `scripts/macos.sh`.
 
 If `setup.sh` halts early, fix the reported issue and re-run — it's idempotent.
@@ -51,7 +51,7 @@ These live outside the dotfiles repo. Copy via Time Machine, AirDrop, or `scp`.
   - `~/.local/share/granola-import/` — design notes (`NOTES.md`) + any cached state.
 - [ ] `~/.gnupg/` — only if you sign commits with GPG. If you're using 1Password SSH agent + git's commit signing via SSH, skip this.
 - [ ] `~/.config/op/` — 1Password CLI local state. Optional; 1Password rebuilds on first auth.
-- [ ] **Hazel rules**, **Keyboard Maestro macros**, **Alfred workflows**, **Espanso matches**, **Drafts actions** — none of these tools store their state in `~/.config`. Export from the old machine and import on the new one. See each app's "backup/sync" feature.
+- [ ] **Hazel rules**, **Keyboard Maestro macros**, **Alfred workflows**, **Drafts actions** — none of these tools store their state in `~/.config`. Export from the old machine and import on the new one. See each app's "backup/sync" feature. (Espanso is *not* in this list: its config and matches live in `stow/espanso/.config/espanso/`, and `setup.sh` registers + starts the service at step 9.)
 - [ ] **Karabiner-Elements** — `~/.config/karabiner/` *is* in the dotfiles (`stow/karabiner/`), so it comes along automatically. Just open the app once on the new machine and grant Input Monitoring.
 
 ## 6. Post-install authentication
@@ -79,15 +79,16 @@ macOS will prompt the first time each app tries to do something privileged. Pre-
 - [ ] Karabiner-Elements (also needs its kernel extension approved at first launch)
 
 **Automation** (System Settings → Privacy & Security → Automation) — needed for the DEVONthink launchd agents. macOS will prompt on first fire, but the agents run headless and the prompts block silently:
-- [ ] `/usr/bin/python3` → DEVONthink 4 (the entry script for several pipelines runs under stdlib python)
+- [ ] `/usr/bin/python3` → DEVONthink 4 (entry scripts run under Apple-signed stdlib python for TCC stability)
 - [ ] `/bin/bash` → DEVONthink 4
 - [ ] `/usr/bin/osascript` → DEVONthink 4
-- [ ] Granola → DEVONthink 4 (for the granola-import pipeline)
 
 Easiest way to surface the prompts: open DEVONthink, then manually run each script once from Terminal (`/usr/bin/python3 ~/.local/bin/import-granola.py`, etc.) so the system prompts while you're at the keyboard.
 
-**Files and Folders** / **Full Disk Access** — only if a script needs to read protected locations:
-- [ ] DEVONthink (Full Disk Access — needed for reading the Granola SQLCipher store)
+The Granola importer is **not** an Automation sender into Granola — it reads Granola's local files directly via the parser subprocess. No Granola → DEVONthink Automation grant is needed.
+
+**Files and Folders** / **Full Disk Access** — needed because the importer reads protected locations under `~/Library/Application Support/`:
+- [ ] `/usr/bin/python3` (or the parser subprocess) — Full Disk Access, so `import-granola-parse.py` can read `~/Library/Application Support/Granola/`.
 
 ## 8. macOS system settings
 

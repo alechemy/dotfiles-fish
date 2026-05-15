@@ -132,6 +132,11 @@ if command -v stow &> /dev/null; then
     # karabiner.edn (Goku's source format); the runtime karabiner.json is
     # generated and not stowed. Without this step a fresh machine has an
     # empty (or default) JSON and Hyper bindings don't work.
+    #
+    # Best-effort: relies on `goku` being on PATH, which it will be once
+    # Brewfile (`yqrashawn/goku/goku`, installed at step 2) has run. If goku
+    # is missing for any reason, this is a silent no-op rather than a fatal
+    # error — the user can run `goku` manually afterwards.
     if command -v goku &>/dev/null && [ -f "$HOME/.config/karabiner.edn" ]; then
         info "Regenerating Karabiner JSON via goku..."
         goku || info "WARNING: goku failed; run it manually after Karabiner is permission-granted"
@@ -265,6 +270,10 @@ fi
 #     stow/zed/.config/zed/settings.template.jsonc. Upstream gitignores dist/,
 #     so a clone alone is not enough; we also build it. node/npm come from
 #     mise, hence the `mise exec` invocations.
+#
+#     URL provenance: verified against the existing local clone at
+#     ~/Developer/claude-agent-acp via `git config --get remote.origin.url`.
+#     If upstream moves, re-confirm there before editing.
 ACP_DIR="$HOME/Developer/claude-agent-acp"
 ACP_REPO="https://github.com/rohan-patra/claude-agent-acp"
 if [ ! -d "$ACP_DIR/.git" ]; then
