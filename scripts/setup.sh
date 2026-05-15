@@ -46,6 +46,16 @@ while true; do sudo -n true; sleep 60; kill -0 "$$" || exit; done 2>/dev/null &
 
 echo "Setting up dotfiles..."
 
+# 0. Xcode Command Line Tools (Homebrew + git rely on these). If absent,
+#    the user gets a modal install dialog. Block here rather than letting
+#    later steps fail mid-flight or, worse, block silently in a launchd
+#    context after the user walks away.
+if ! xcode-select -p &>/dev/null; then
+    info "Xcode Command Line Tools not installed. Launching the installer..."
+    xcode-select --install || true
+    fail "Wait for the Xcode CLT install to finish, then re-run ./scripts/setup.sh"
+fi
+
 # 1. Install Homebrew
 if ! command -v brew &> /dev/null; then
     info "Installing Homebrew..."
@@ -118,51 +128,74 @@ if command -v stow &> /dev/null; then
         success "Seeded ~/.aerospace.toml from source"
     fi
 
+    # Regenerate Karabiner JSON from the EDN source. The repo tracks
+    # karabiner.edn (Goku's source format); the runtime karabiner.json is
+    # generated and not stowed. Without this step a fresh machine has an
+    # empty (or default) JSON and Hyper bindings don't work.
+    if command -v goku &>/dev/null && [ -f "$HOME/.config/karabiner.edn" ]; then
+        info "Regenerating Karabiner JSON via goku..."
+        goku || info "WARNING: goku failed; run it manually after Karabiner is permission-granted"
+    fi
+
     # 4b. DEVONthink Pipeline (opt-in, single-machine only)
-    read -p "  ? Install DEVONthink pipeline (smart rules + launchd agents)? [y/N] " -n 1 -r
-    echo
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
-        info "Stowing DEVONthink pipeline..."
-        cd "$STOW_DIR"
-        backup_stow_conflicts devonthink
-        stow --restow --no-folding --ignore='.DS_Store' --target="$HOME" devonthink
-        cd "$DOTFILES"
-        success "DEVONthink pipeline stowed"
-
-        info "Loading launchd agents..."
-        # Bootstrap each plist, surfacing real failures while tolerating the
-        # "already loaded" case (launchctl exits 37 / Bootstrap failed: 17).
-        load_plist() {
-            local path=$1 name err
-            name=$(basename "$path" .plist)
-            if [ ! -f "$path" ]; then
-                info "  $name plist not found at $path, skipping"
-                return 0
-            fi
-            err=$(launchctl bootstrap "gui/$(id -u)" "$path" 2>&1) && return 0
-            case "$err" in
-                *"Bootstrap failed: 17"*|*"already loaded"*)
-                    info "  $name already loaded"
-                    ;;
-                *)
-                    fail "Failed to load $name: $err"
-                    ;;
-            esac
-        }
-        for plist in com.user.dt-daily-note com.user.dt-watchdog; do
-            load_plist "$HOME/Library/LaunchAgents/${plist}.plist"
-        done
-        success "DEVONthink pipeline installed"
-
-        # Wiki integration (optional)
-        read -p "  ? Initialize LLM Wiki directory at ~/Wiki? [y/N] " -n 1 -r
-        echo
-        if [[ $REPLY =~ ^[Yy]$ ]]; then
-            chmod +x "$DOTFILES/scripts/init-wiki.sh"
-            "$DOTFILES/scripts/init-wiki.sh"
-        fi
+    #
+    # Skip the prompt if DEVONthink isn't installed yet. Loading the launchd
+    # agents before DT exists means the daily-note + watchdog scripts fire
+    # against a missing app and spam errors. Re-running setup.sh after the
+    # DT install picks the pipeline back up.
+    if [ ! -d "/Applications/DEVONthink.app" ]; then
+        info "DEVONthink.app not found. Skipping pipeline install."
+        info "Install DEVONthink, open Lorebook, then re-run setup.sh to enable the pipeline."
     else
-        info "Skipping DEVONthink pipeline."
+        read -r -p "  ? Install DEVONthink pipeline (smart rules + launchd agents)? [y/N] " REPLY
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            info "Stowing DEVONthink pipeline..."
+            cd "$STOW_DIR"
+            backup_stow_conflicts devonthink
+            stow --restow --no-folding --ignore='.DS_Store' --target="$HOME" devonthink
+            cd "$DOTFILES"
+            success "DEVONthink pipeline stowed"
+
+            info "Loading launchd agents..."
+            # Bootstrap each plist, surfacing real failures while tolerating the
+            # "already loaded" case (launchctl exits 37 / Bootstrap failed: 17).
+            load_plist() {
+                local path=$1 name err
+                name=$(basename "$path" .plist)
+                if [ ! -f "$path" ]; then
+                    info "  $name plist not found at $path, skipping"
+                    return 0
+                fi
+                err=$(launchctl bootstrap "gui/$(id -u)" "$path" 2>&1) && return 0
+                case "$err" in
+                    *"Bootstrap failed: 17"*|*"already loaded"*)
+                        info "  $name already loaded"
+                        ;;
+                    *)
+                        fail "Failed to load $name: $err"
+                        ;;
+                esac
+            }
+            # com.user.granola-import.plist is built from a gitignored
+            # template; load_plist logs and skips if it's absent.
+            for plist in com.user.dt-daily-note \
+                         com.user.dt-watchdog \
+                         com.user.singlefile-watcher \
+                         com.user.granola-import \
+                         com.user.github-stars-import; do
+                load_plist "$HOME/Library/LaunchAgents/${plist}.plist"
+            done
+            success "DEVONthink pipeline installed"
+
+            # Wiki integration (optional)
+            read -r -p "  ? Initialize LLM Wiki directory at ~/Wiki? [y/N] " REPLY
+            if [[ $REPLY =~ ^[Yy]$ ]]; then
+                chmod +x "$DOTFILES/scripts/init-wiki.sh"
+                "$DOTFILES/scripts/init-wiki.sh"
+            fi
+        else
+            info "Skipping DEVONthink pipeline."
+        fi
     fi
 
     # Warn if Ghostty has a config in Application Support that would shadow the stowed one
@@ -180,8 +213,7 @@ fi
 if [[ "$(uname)" == "Darwin" ]]; then
     info "Applying macOS defaults..."
     if [ -f "$DOTFILES/scripts/macos.sh" ]; then
-        read -p "  ? Apply macOS defaults? [y/N] " -n 1 -r
-        echo
+        read -r -p "  ? Apply macOS defaults? [y/N] " REPLY
         if [[ $REPLY =~ ^[Yy]$ ]]; then
             # Ensure it's executable
             chmod +x "$DOTFILES/scripts/macos.sh"
@@ -227,6 +259,35 @@ if command -v mise &> /dev/null; then
     info "Installing mise tool versions..."
     mise install --yes
     success "Mise tool versions installed"
+fi
+
+# 7b. claude-agent-acp — the Zed ACP bridge referenced from
+#     stow/zed/.config/zed/settings.template.jsonc. Upstream gitignores dist/,
+#     so a clone alone is not enough; we also build it. node/npm come from
+#     mise, hence the `mise exec` invocations.
+ACP_DIR="$HOME/Developer/claude-agent-acp"
+ACP_REPO="https://github.com/rohan-patra/claude-agent-acp"
+if [ ! -d "$ACP_DIR/.git" ]; then
+    info "Cloning claude-agent-acp..."
+    mkdir -p "$HOME/Developer"
+    if git clone "$ACP_REPO" "$ACP_DIR"; then
+        success "claude-agent-acp cloned"
+    else
+        info "WARNING: failed to clone claude-agent-acp; Zed agent will be broken until cloned manually"
+    fi
+fi
+
+if [ -d "$ACP_DIR" ] && [ ! -f "$ACP_DIR/dist/index.js" ]; then
+    info "Building claude-agent-acp (npm install + npm run build)..."
+    if command -v mise &>/dev/null; then
+        if (cd "$ACP_DIR" && mise exec -- npm install --no-fund --no-audit && mise exec -- npm run build); then
+            success "claude-agent-acp built"
+        else
+            info "WARNING: claude-agent-acp build failed; Zed agent will be unavailable until built manually"
+        fi
+    else
+        info "WARNING: mise not on PATH; skipping claude-agent-acp build"
+    fi
 fi
 
 # 8. VSCodium Setup

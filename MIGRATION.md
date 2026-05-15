@@ -37,14 +37,18 @@ If `setup.sh` halts early, fix the reported issue and re-run — it's idempotent
 
 ## 4. Local repos to clone
 
-- [ ] **`~/Developer/claude-agent-acp`** — the Zed ACP bridge referenced from `stow/zed/.config/zed/settings.template.jsonc`. Clone it to the same path and run its build (`npm install && npm run build` or whatever the repo's README says) so `dist/index.js` exists. Without this, the "Claude Code by Rohan Patra" agent entry in Zed won't function.
+- [ ] **`~/Developer/claude-agent-acp`** — `setup.sh` clones and builds this automatically (step 7b), so normally you don't need to do anything. If the build failed (look for a `WARNING: claude-agent-acp build failed` line), run it manually: `cd ~/Developer/claude-agent-acp && mise exec -- npm install && mise exec -- npm run build`. Without `dist/index.js`, the "Claude Code by Rohan Patra" agent entry in Zed won't function.
 - [ ] Any other `~/Developer/*` repos you actively work in.
 
 ## 5. Bring over from the old machine
 
 These live outside the dotfiles repo. Copy via Time Machine, AirDrop, or `scp`.
 
-- [ ] `~/.local/share/granola-import/` — design notes + any cached state for the Granola pipeline. Required if you enabled the DEVONthink pipeline in step 2 and want Granola import to work.
+- [ ] **Granola pipeline files** — gitignored on purpose (the importers reverse-engineer Granola's local SQLCipher store, and we'd rather not advertise that publicly). Copy from the old machine:
+  - `~/.dotfiles/stow/devonthink/.local/bin/import-granola.py` (the AppleEvents sender; stays under `/usr/bin/python3` for TCC stability)
+  - `~/.dotfiles/stow/devonthink/.local/bin/import-granola-parse.py` (the `uv run --script` parser subprocess)
+  - `~/.dotfiles/stow/devonthink/Library/LaunchAgents/com.user.granola-import.plist.template` (re-stow `devonthink` and re-run `scripts/build-launchd-plists.sh` after copying)
+  - `~/.local/share/granola-import/` — design notes (`NOTES.md`) + any cached state.
 - [ ] `~/.gnupg/` — only if you sign commits with GPG. If you're using 1Password SSH agent + git's commit signing via SSH, skip this.
 - [ ] `~/.config/op/` — 1Password CLI local state. Optional; 1Password rebuilds on first auth.
 - [ ] **Hazel rules**, **Keyboard Maestro macros**, **Alfred workflows**, **Espanso matches**, **Drafts actions** — none of these tools store their state in `~/.config`. Export from the old machine and import on the new one. See each app's "backup/sync" feature.

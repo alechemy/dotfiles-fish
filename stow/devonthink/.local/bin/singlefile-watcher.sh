@@ -24,7 +24,57 @@ warn() {
     "$PIPELINE_LOG" singlefile-watcher WARN "$*"
 }
 
+# Poll a file's size until it has stayed identical for 5 consecutive samples
+# (~2.5s of quiescence), capped at 30s total. Echoes "stable" on success or
+# "unstable:<last-size>" if the cap is reached without the file going quiet.
+wait_for_stable_size() {
+    local path=$1
+    local prev=-1 stable=0 cur
+    for _ in $(seq 1 60); do
+        cur=$(stat -f%z "$path" 2>/dev/null || echo 0)
+        if [[ "$cur" == "$prev" && "$cur" -gt 0 ]]; then
+            stable=$((stable + 1))
+            if [[ $stable -ge 5 ]]; then
+                echo "stable"
+                return 0
+            fi
+        else
+            stable=0
+        fi
+        prev=$cur
+        sleep 0.5
+    done
+    echo "unstable:$prev"
+    return 1
+}
+
+# Ingest one .html file: wait for quiescence, then hand off to the ingester.
+# Skips truncated captures so the next event (or backlog sweep) can retry.
+ingest_html() {
+    local path=$1 origin=$2 stability
+    stability=$(wait_for_stable_size "$path")
+    if [[ "$stability" != "stable" ]]; then
+        local size=${stability#unstable:}
+        warn "file size never stabilized after 30s, skipping: $path (last size=$size, origin=$origin)"
+        return 0
+    fi
+    if [[ -f "$path" ]]; then
+        log "ingesting ($origin) $path"
+        "$INGESTER" "$path" || log "ingester exited non-zero for $path ($origin)"
+    fi
+}
+
 log "starting, watching $STAGING_DIR"
+
+# One-time backlog sweep: any .html files already present when the watcher
+# starts (after a crash, re-bootstrap, or manual drop) would otherwise be
+# ignored until they're rewritten. Pick them up before subscribing to events.
+shopt -s nullglob 2>/dev/null || true
+for backlog_path in "$STAGING_DIR"/*.html; do
+    [[ -f "$backlog_path" ]] || continue
+    ingest_html "$backlog_path" backlog
+done
+shopt -u nullglob 2>/dev/null || true
 
 # --event Created: only fire on new-file events (not writes, renames, deletes)
 # --format "%p": just the path (default includes flags we don't want parsed)
@@ -32,34 +82,7 @@ log "starting, watching $STAGING_DIR"
 /opt/homebrew/bin/fswatch -0 --event Created "$STAGING_DIR" | while IFS= read -r -d '' path; do
     case "$path" in
         *.html)
-            # Wait for SingleFile to finish flushing before invoking the
-            # ingester. Poll every 0.5s for up to 30s, breaking once the
-            # file size has stayed identical for 5 consecutive samples
-            # (~2.5s of quiescence).
-            prev=-1
-            stable=0
-            for _ in $(seq 1 60); do
-                cur=$(stat -f%z "$path" 2>/dev/null || echo 0)
-                if [[ "$cur" == "$prev" && "$cur" -gt 0 ]]; then
-                    stable=$((stable + 1))
-                    [[ $stable -ge 5 ]] && break
-                else
-                    stable=0
-                fi
-                prev=$cur
-                sleep 0.5
-            done
-            if [[ $stable -lt 5 ]]; then
-                # File never went quiet within the 30s cap. Skip rather
-                # than ingest a possibly-truncated capture; the next
-                # fswatch event (or a manual backlog sweep) can retry.
-                warn "file size never stabilized after 30s, skipping: $path (last size=$prev)"
-                continue
-            fi
-            if [[ -f "$path" ]]; then
-                log "ingesting $path"
-                "$INGESTER" "$path" || log "ingester exited non-zero for $path"
-            fi
+            ingest_html "$path" fswatch
             ;;
     esac
 done
