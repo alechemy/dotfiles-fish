@@ -31,6 +31,12 @@ log() {
 }
 
 # ---------------------------------------------------------------------------
+# Record run time + alert on missed runs (helps surface multi-day gaps when
+# launchd's calendar interval is missed during sleep).
+# ---------------------------------------------------------------------------
+"$HOME/.local/bin/pipeline-record-run" dt-daily-note 86400 || true
+
+# ---------------------------------------------------------------------------
 # Temp AppleScript files — written once, cleaned up on exit
 # ---------------------------------------------------------------------------
 FIND_SCRIPT=$(mktemp /tmp/dt-daily-find.XXXXXX.scpt)

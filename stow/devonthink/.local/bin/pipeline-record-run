@@ -1,0 +1,40 @@
+#!/bin/bash
+# pipeline-record-run <job-name> <expected-interval-seconds>
+#
+# Records the current run time for a pipeline job and logs an ALERT-level
+# warning if the gap since the previous run exceeds 2x the expected interval.
+# Designed to surface missed runs on a laptop where launchd's StartInterval
+# does not fire while the machine is asleep.
+#
+# Called as the first non-trivial action by each pipeline entry point.
+# Writes timestamps to ~/.local/state/devonthink/<job>.last-run.
+
+set -euo pipefail
+
+JOB="${1:?missing job name}"
+INTERVAL="${2:?missing interval seconds}"
+
+STATE_DIR="$HOME/.local/state/devonthink"
+STATE_FILE="$STATE_DIR/${JOB}.last-run"
+PIPELINE_LOG="$HOME/.local/bin/pipeline-log"
+
+mkdir -p "$STATE_DIR"
+
+NOW=$(date +%s)
+
+if [[ -f "$STATE_FILE" ]]; then
+    LAST=$(cat "$STATE_FILE" 2>/dev/null || echo 0)
+    if [[ "$LAST" =~ ^[0-9]+$ ]] && [[ "$LAST" -gt 0 ]]; then
+        GAP=$((NOW - LAST))
+        THRESHOLD=$((INTERVAL * 2))
+        if [[ "$GAP" -gt "$THRESHOLD" ]]; then
+            GAP_MIN=$((GAP / 60))
+            EXPECTED_MIN=$((INTERVAL / 60))
+            "$PIPELINE_LOG" "$JOB" WARN \
+                "ALERT: gap of ${GAP_MIN}m since last run (interval is ${EXPECTED_MIN}m)" \
+                || true
+        fi
+    fi
+fi
+
+echo "$NOW" > "$STATE_FILE"

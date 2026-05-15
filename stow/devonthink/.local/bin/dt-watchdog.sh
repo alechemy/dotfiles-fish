@@ -22,6 +22,11 @@ log() {
     printf '%s [dt-watchdog] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >> "$LOG_FILE"
 }
 
+# ── 0. Record run time + alert on missed runs ────────────────────────────────
+# launchd's StartInterval (300s) doesn't fire during sleep; this surfaces
+# multi-hour gaps to the pipeline log so silent failures become noisy.
+"$HOME/.local/bin/pipeline-record-run" dt-watchdog 300 || true
+
 # ── 1. Ensure DEVONthink is running ──────────────────────────────────────────
 if ! pgrep -qx "$DT_APP_NAME"; then
     log "DEVONthink not running — launching '$DT_APP_NAME'"

@@ -257,6 +257,17 @@ def import_to_devonthink(star, script_path):
 
 
 def main():
+    # Surface missed runs from laptop sleep cycles. Best-effort; never block
+    # the import on the helper failing.
+    subprocess.run(
+        [
+            os.path.expanduser("~/.local/bin/pipeline-record-run"),
+            "github-stars-import",
+            "1800",
+        ],
+        check=False,
+    )
+
     # Verify gh CLI is authenticated
     try:
         auth_check = subprocess.run(

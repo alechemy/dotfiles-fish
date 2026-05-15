@@ -20,6 +20,20 @@ if [ -z "$PASSWORD" ]; then
   exit 0
 fi
 
+# Fast reachability gate: when Navidrome is unreachable (off home network or
+# NAS down), skip the curl block entirely. Without this, the plugin pays a
+# 3-second curl timeout every 5 seconds whenever Wi-Fi isn't on the home LAN,
+# which is real battery drain on a laptop.
+ND_HOSTPORT="${NAVIDROME_URL#*://}"   # strip scheme
+ND_HOSTPORT="${ND_HOSTPORT%%/*}"      # strip any path
+ND_HOST="${ND_HOSTPORT%:*}"
+ND_PORT="${ND_HOSTPORT##*:}"
+[ "$ND_HOST" = "$ND_PORT" ] && ND_PORT=80
+if ! /usr/bin/nc -zw1 "$ND_HOST" "$ND_PORT" >/dev/null 2>&1; then
+  sketchybar --set "$NAME" icon=" Offline" label=""
+  exit 0
+fi
+
 mkdir -p "$HOME/.cache"
 LAST_SONG_FILE="$HOME/.cache/navidrome-last-song"
 AUTH_CACHE="$HOME/.cache/navidrome-auth"
@@ -52,7 +66,14 @@ if [ -z "$SUBSONIC_TOKEN" ] || [ -z "$SUBSONIC_SALT" ]; then
     exit 0
   fi
 
-  printf 'SUBSONIC_TOKEN=%s\nSUBSONIC_SALT=%s\n' "$SUBSONIC_TOKEN" "$SUBSONIC_SALT" > "$AUTH_CACHE"
+  # The cache holds bearer-equivalent material (subsonic token + salt).
+  # umask 077 ensures the create call uses 0600; chmod 600 covers the case
+  # where the file already existed at a wider mode.
+  (
+    umask 077
+    printf 'SUBSONIC_TOKEN=%s\nSUBSONIC_SALT=%s\n' "$SUBSONIC_TOKEN" "$SUBSONIC_SALT" > "$AUTH_CACHE"
+  )
+  chmod 600 "$AUTH_CACHE" 2>/dev/null || true
 fi
 
 # Get now playing

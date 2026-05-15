@@ -24,6 +24,12 @@ warn() {
     "$PIPELINE_LOG" singlefile-watcher WARN "$*"
 }
 
+# Record startup time + alert if the watcher hasn't been (re)started in
+# more than 2 days. The plist is KeepAlive=true so this should normally
+# only fire on bootstrap or after a crash; long gaps indicate launchd
+# disabled the job or the laptop was offline for a long stretch.
+"$HOME/.local/bin/pipeline-record-run" singlefile-watcher 86400 || true
+
 # Poll a file's size until it has stayed identical for 5 consecutive samples
 # (~2.5s of quiescence), capped at 30s total. Echoes "stable" on success or
 # "unstable:<last-size>" if the cap is reached without the file going quiet.
