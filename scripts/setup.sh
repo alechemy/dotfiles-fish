@@ -83,12 +83,25 @@ fi
 info "Building generated configs..."
 chmod +x "$DOTFILES/scripts/build-zed-config.sh"
 "$DOTFILES/scripts/build-zed-config.sh"
-chmod +x "$DOTFILES/scripts/build-streamrip-config.sh"
-"$DOTFILES/scripts/build-streamrip-config.sh"
 chmod +x "$DOTFILES/scripts/build-vscode-config.sh"
 "$DOTFILES/scripts/build-vscode-config.sh"
 chmod +x "$DOTFILES/scripts/build-launchd-plists.sh"
 "$DOTFILES/scripts/build-launchd-plists.sh"
+
+# streamrip is opt-in (single-machine; Qobuz creds aren't useful elsewhere).
+# The build script pulls the Qobuz token from 1Password and would fail loudly
+# on a machine without that vault item, so we prompt before running it. The
+# stow loop below uses INSTALL_STREAMRIP to keep build + stow in sync.
+INSTALL_STREAMRIP=0
+read -r -p "  ? Install streamrip (Qobuz music ripping)? [y/N] " REPLY
+if [[ $REPLY =~ ^[Yy]$ ]]; then
+    INSTALL_STREAMRIP=1
+    chmod +x "$DOTFILES/scripts/build-streamrip-config.sh"
+    "$DOTFILES/scripts/build-streamrip-config.sh"
+else
+    info "Skipping streamrip."
+fi
+
 success "Generated configs built"
 
 # 3b. Lint launchd plist templates: catch ProgramArguments[0] regressions and
@@ -113,6 +126,8 @@ if command -v stow &> /dev/null; then
         if [ -d "$package" ]; then
             # DEVONthink is opt-in (handled separately below)
             [[ "$package" == "devonthink" ]] && continue
+            # streamrip is opt-in (already gated by INSTALL_STREAMRIP above)
+            [[ "$package" == "streamrip" && "$INSTALL_STREAMRIP" -ne 1 ]] && continue
             backup_stow_conflicts "$package"
             stow --restow --no-folding --ignore='.DS_Store' --target="$HOME" "$package"
         fi
