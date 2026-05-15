@@ -257,6 +257,21 @@ if [ -n "$FISH_PATH" ]; then
         "$FISH_PATH" -c 'fisher update'
         success "Fisher plugins updated"
     fi
+
+    # Persist the Catppuccin Macchiato theme as fish universal variables on
+    # first run. config.fish deliberately omits `fish_config theme choose`
+    # (~120ms/shell) on the assumption these universals are set; without this
+    # one-shot, a fresh machine would have no colors until the user ran the
+    # theme command manually.
+    if ! "$FISH_PATH" -c 'set -q fish_color_command' 2>/dev/null; then
+        info "Persisting Catppuccin Macchiato as universal fish theme..."
+        if echo y | "$FISH_PATH" -c 'fish_config theme save catppuccin-macchiato --color-theme=dark' >/dev/null 2>&1; then
+            success "Fish theme saved"
+        else
+            info "WARNING: failed to save fish theme; run manually:"
+            info "  echo y | fish -c 'fish_config theme save catppuccin-macchiato --color-theme=dark'"
+        fi
+    fi
 fi
 
 # 7. Install mise tool versions

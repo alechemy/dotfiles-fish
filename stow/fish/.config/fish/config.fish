@@ -1,5 +1,11 @@
 set -g fish_greeting
 
-fish_config theme choose catppuccin-macchiato --color-theme=dark
+# Catppuccin Macchiato is persisted as universal `fish_color_*` variables in
+# fish_variables (set once via `fish_config theme save` during bootstrap).
+# We deliberately don't call `fish_config theme choose` here: it would set
+# colors with -g (per-shell) on every startup, adding ~120 ms of redundant
+# work since the persisted universals already provide the same colors.
 
-source "$HOME/.cargo/env.fish"
+if test -f "$HOME/.cargo/env.fish"
+    source "$HOME/.cargo/env.fish"
+end
