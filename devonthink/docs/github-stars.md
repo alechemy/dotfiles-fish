@@ -1,6 +1,6 @@
 # GitHub Stars Integration
 
-Starred GitHub repositories are automatically imported into DEVONthink as bookmarks. The existing [Extract: Web Content](../README.md#extract-web-content) smart rule then downloads the README as readable markdown and archives an HTML snapshot of the repo page, and the standard pipeline handles AI enrichment (tags, summary, etc.).
+Starred GitHub repositories are automatically imported into DEVONthink as bookmark records with the repo description in the Finder comment. Stars deliberately skip the SingleFile-capture path that normal bookmarks take: most GitHub repos have a README that the bookmark itself already links to, and capturing the rendered HTML of every starred repo would be a lot of duplicate noise. AI Enrichment still runs over the description so each star gets tags, a summary, and a normalized title before landing in `99_ARCHIVE`.
 
 ## How It Works
 
@@ -12,23 +12,27 @@ GitHub API (/user/starred)
          │
          ▼
   DEVONthink Lorebook / 00_INBOX
-  (Bookmark record, NeedsProcessing=1)
+  (Bookmark record, comment = repo description,
+   NeedsProcessing=1, Recognized=1, Commented=1)
          │
          ▼
-  Extract: Web Content → sets NeedsSingleFile=1, archives to 99_ARCHIVE
+  Skips Extract: Web Content (Recognized+Commented already set)
          │
          ▼
-  capture-bookmarks-batch.py (on-demand) → ingest-singlefile-html.py
-         │                                  (browser capture + defuddle + import)
+  Enrich: AI Metadata → AIEnriched=1
+         │
          ▼
-  Standard pipeline: AI Enrichment → Post-Enrich & Archive → Wiki Export
+  Post-Enrich & Archive → moves to 99_ARCHIVE, exports to Wiki
 ```
 
 For each newly starred repo, the script:
 
 1. **Polls** the GitHub API via `gh` CLI, fetching stars newest-first with `starred_at` timestamps. In normal mode, stops at the first already-imported repo. On first run (no state file), only imports stars from the last 24 hours to avoid flooding the inbox — use `--backfill` to import the full history.
 2. **Creates a bookmark** record in DEVONthink with the repo URL and `owner/repo` as the name.
-3. Sets `NeedsProcessing=1` so the bookmark enters the standard pipeline. Extract: Web Content sets `NeedsSingleFile=1` and archives the bookmark. The SingleFile capture + ingestion happens later when the `capture-bookmarks-batch.py` runner is invoked (manually, via hotkey, or via the on-demand smart rule) — it drives the browser to capture each queued bookmark and produces the cross-linked HTML snapshot + markdown extract via `ingest-singlefile-html.py`.
+3. **Pre-flags `Recognized=1, Commented=1`** alongside `NeedsProcessing=1`. The first two flags make the bookmark skip `Extract: Web Content`, which is what would normally schedule a SingleFile capture and download the README as markdown. For stars, that's intentional churn we don't need.
+4. **Stores the repo description** in the record's Finder comment. AI Enrichment reads the comment (not `plain text`, which is empty on a bookmark) when generating tags and a summary, so even without a SingleFile capture the star still gets meaningful metadata.
+
+If you ever want to capture a specific starred repo as a full SingleFile snapshot, do it manually from the browser via the SingleFile extension — the captured HTML will land in `~/Downloads/SingleFile/` and ingest through the same path as any other web clip.
 
 ## Running
 

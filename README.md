@@ -16,6 +16,8 @@ Personal dotfiles for macOS, managed with [GNU Stow](https://www.gnu.org/softwar
 
 ## Quick Start
 
+For a fresh Mac, follow [`MIGRATION.md`](MIGRATION.md) instead of the snippet below. The build scripts require an authenticated 1Password CLI session, DEVONthink installed, and a few other prerequisites that `setup.sh` does not bootstrap on its own.
+
 ```bash
 git clone https://github.com/alechemy/dotfiles-fish.git ~/.dotfiles
 cd ~/.dotfiles

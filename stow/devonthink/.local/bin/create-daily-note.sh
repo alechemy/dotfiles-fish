@@ -1,7 +1,7 @@
 #!/bin/bash
 # create-daily-note.sh
 # Creates a daily note in DEVONthink's 10_DAILY group.
-# Designed to be run by launchd every morning on a headless Mac mini.
+# Designed to be run by launchd daily.
 #
 # Features:
 #   - Idempotent: skips creation if a note already exists for a given date

@@ -49,6 +49,8 @@ These live outside the dotfiles repo. Copy via Time Machine, AirDrop, or `scp`.
   - `~/.dotfiles/stow/devonthink/.local/bin/import-granola-parse.py` (the `uv run --script` parser subprocess)
   - `~/.dotfiles/stow/devonthink/Library/LaunchAgents/com.user.granola-import.plist.template` (re-stow `devonthink` and re-run `scripts/build-launchd-plists.sh` after copying)
   - `~/.local/share/granola-import/` — design notes (`NOTES.md`) + any cached state.
+- [ ] **Importer idempotency state.** `~/.local/state/devonthink/` holds the JSON state that prevents importers from re-importing everything on first run: `github-stars-imported.json`, `granola-imported.json`, `granola-version.json`, `granola-failure.json`. Without these, the next launchd fire re-imports your full GitHub star history and every Granola meeting, and spams duplicate failure records into DT.
+- [ ] **Dropzone action bundle.** The repo tracks `dropzone/Send to DEVONthink.dzbundle/` but it lives outside the stow tree (Dropzone reads from `~/Library/Application Support/Dropzone 4/Actions/`, not `~/.config`). Copy it over: `cp -R ~/.dotfiles/dropzone/Send\ to\ DEVONthink.dzbundle ~/Library/Application\ Support/Dropzone\ 4/Actions/`. Then open Dropzone preferences and confirm the action shows up in the grid.
 - [ ] `~/.gnupg/` — only if you sign commits with GPG. If you're using 1Password SSH agent + git's commit signing via SSH, skip this.
 - [ ] `~/.config/op/` — 1Password CLI local state. Optional; 1Password rebuilds on first auth.
 - [ ] **Hazel rules**, **Keyboard Maestro macros**, **Alfred workflows**, **Drafts actions** — none of these tools store their state in `~/.config`. Export from the old machine and import on the new one. See each app's "backup/sync" feature. (Espanso is *not* in this list: its config and matches live in `stow/espanso/.config/espanso/`, and `setup.sh` registers + starts the service at step 9.)
@@ -61,6 +63,7 @@ These live outside the dotfiles repo. Copy via Time Machine, AirDrop, or `scp`.
 - [ ] **Maestral** (Dropbox client) — first launch will prompt for OAuth.
 - [ ] **Granola** — sign in to your account.
 - [ ] **Marked 2**, **CleanShot X**, **Things**, etc. — first-launch logins where applicable.
+- [ ] **Navidrome Keychain entry.** Both the `feishin` sketchybar plugin and `play-random-album.sh` look up the Navidrome password via macOS Keychain. Run: `security add-generic-password -s 'Navidrome' -a 'alec' -w '<password>' -U`. Without this, the sketchybar plugin shows "No keychain" and the play-random-album hotkey fails silently.
 - [ ] If you commit-sign via SSH (recommended given the 1Password agent): `git config --global user.signingkey "<your ssh pubkey>"` and `git config --global commit.gpgsign true` (the global gitconfig in `stow/git/` may already handle this — check).
 
 ## 7. macOS permission grants (TCC)
@@ -104,7 +107,7 @@ The Granola importer is **not** an Automation sender into Granola — it reads G
 ## 9. Verification
 
 - [ ] `setup.sh` exited 0 and `git status` is clean.
-- [ ] `fish -c 'echo $PROJECTS'` prints `/Users/alec/Developer`.
+- [ ] `fish -c 'echo $PROJECTS'` prints the path to your Developer dir (e.g. `$HOME/Developer`).
 - [ ] `stow --no --no-folding --target="$HOME" *` from `~/.dotfiles/stow` reports no conflicts.
 - [ ] AeroSpace responds to Hyper-key bindings; gap cycling works on the external.
 - [ ] DEVONthink launches and shows your databases (after pointing it at the Lorebook).

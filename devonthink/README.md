@@ -1,6 +1,6 @@
 # DEVONthink PKM Pipeline
 
-Behold my needlessly complex, fully-automated document-processing pipeline. It's built on DEVONthink 4 smart rules, running on a headless Mac mini. Documents enter from multiple sources (handwritten Boox notebooks via Dropbox, web bookmarks, scans, manual imports) and flow through a series of gated processing steps: OCR/transcription, LLM-powered metadata enrichment (title, date, tags, summary), action item extraction to Things 3, and daily note aggregation. Each step is controlled by boolean metadata flags so that documents can be re-processed or debugged independently.
+Behold my needlessly complex, fully-automated document-processing pipeline. It's built on DEVONthink 4 smart rules. Documents enter from multiple sources (handwritten Boox notebooks via Dropbox, web bookmarks, scans, manual imports) and flow through a series of gated processing steps: OCR/transcription, LLM-powered metadata enrichment (title, date, tags, summary), action item extraction to Things 3, and daily note aggregation. Each step is controlled by boolean metadata flags so that documents can be re-processed or debugged independently.
 
 Pipeline scripts live in [`../stow/devonthink/`](../stow/devonthink/) (stowed to `$HOME` via GNU Stow). Standalone utilities and documentation live here.
 
@@ -614,7 +614,7 @@ done
 
 - **Idempotency** — The script checks for an existing note with the same filename before creating. Running it twice for the same date is harmless.
 - **Sleep/wake** — `StartCalendarInterval` does *not* fire while the Mac is asleep, and it does not catch up on wake unless `WakeFromSleep` is set (which is unreliable in clamshell/S5 standby). The 06:15 schedule is chosen so the user is typically around. If the trigger is still missed, the script's no-arg backfill path will create today's note the next time it runs (idempotent).
-- **DEVONthink must be running** — The AppleScript targets `application id "DNtp"`. DEVONthink does not need to be frontmost, but it must be launched. On the Mac mini server this is already the case since the rest of the pipeline depends on it.
+- **DEVONthink must be running** — The AppleScript targets `application id "DNtp"`. DEVONthink does not need to be frontmost, but it must be launched. The `dt-watchdog` launchd job (fires every 5 minutes) keeps DT and Maestral running, so this is generally not something to worry about.
 - **Cloud sync** — After creating a note, the script calls `synchronize database` to push it to DEVONthink's configured sync store. If sync fails for any reason (e.g., no network), the note is still created locally and will sync on the next automatic or manual sync cycle.
 - **Logging** — Check `~/Library/Logs/dt-daily-note.log` for creation results and `/tmp/dt-daily-note.log` for any launchd-level stdout/stderr.
 

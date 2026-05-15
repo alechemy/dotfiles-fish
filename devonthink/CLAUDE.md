@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Context
 
-This directory documents and stores scripts for a DEVONthink 4 document-processing pipeline. The pipeline runs on a Mac mini server. Stowable config (smart rule scripts, launchd plists, helper binaries) lives in `../stow/devonthink/`.
+This directory documents and stores scripts for a DEVONthink 4 document-processing pipeline. The pipeline runs on the user's primary Mac. Stowable config (smart rule scripts, launchd plists, helper binaries) lives in `../stow/devonthink/`.
 
 ## DEVONthink AppleScript conventions
 
