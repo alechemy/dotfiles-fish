@@ -7,6 +7,7 @@
 #   - `mas list` (Mac App Store apps)
 
 tap "felixkratz/formulae"
+tap "wontaeyang/hrm"
 tap "yqrashawn/goku"
 
 # Binaries
@@ -72,6 +73,7 @@ cask "ghostty"
 cask "granola"
 cask "hammerspoon"
 cask "hazel"
+cask "hrm"
 cask "karabiner-elements"
 cask "keyboard-maestro"
 cask "localsend"
