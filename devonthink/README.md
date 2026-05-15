@@ -540,11 +540,13 @@ See [`handle-updated-notebooks.applescript`](../stow/devonthink/Library/Applicat
 
 ## Daily Notes (Scheduled)
 
-A daily note is automatically created in the **10_DAILY** group of the Lorebook database every morning at 3:00 AM. The mechanism uses `launchd` (macOS's native scheduler) to run a shell script that talks to DEVONthink via AppleScript.
+A daily note is automatically created in the **10_DAILY** group of the Lorebook database every morning at 6:15 AM local. The mechanism uses `launchd` (macOS's native scheduler) to run a shell script that talks to DEVONthink via AppleScript.
+
+The schedule is set to a daytime wake-hour rather than the small hours: `StartCalendarInterval` does not fire while the Mac is asleep (and `WakeFromSleep` is not reliable when the lid is closed in standby), so an early-morning trigger that the user is consistently around for is more reliable than a 03:00 trigger that gets silently skipped. If the trigger is still missed (rare), the script's no-arg backfill path seeds today's note the next time it runs.
 
 ### How It Works
 
-1. `launchd` fires the job at 03:00 every day (or on next wake if the Mac was asleep).
+1. `launchd` fires the job at 06:15 every day.
 2. The shell script computes today's date, builds the markdown content from an embedded template, and calls `osascript`.
 3. The AppleScript block checks whether a note with today's filename already exists in 10_DAILY — if so it exits cleanly (idempotent). Otherwise it creates the new markdown record.
 4. If a note was created, the script triggers a DEVONthink cloud sync (`synchronize database`) so the note is available on other devices immediately.
@@ -589,7 +591,7 @@ sudo chmod +x ~/.local/bin/create-daily-note.sh
 # 2. Install the launchd plist
 cp com.user.dt-daily-note.plist ~/Library/LaunchAgents/
 
-# 3. Load the job (takes effect immediately; first run at next 03:00)
+# 3. Load the job (takes effect immediately; first run at next 06:15)
 launchctl load ~/Library/LaunchAgents/com.user.dt-daily-note.plist
 
 # 4. (Optional) Test it right now
@@ -611,7 +613,7 @@ done
 ### Notes
 
 - **Idempotency** — The script checks for an existing note with the same filename before creating. Running it twice for the same date is harmless.
-- **Sleep/wake** — `launchd` with `StartCalendarInterval` will fire the job on the next wake after a missed interval, so the note will still be created even if the Mac was asleep at 03:00.
+- **Sleep/wake** — `StartCalendarInterval` does *not* fire while the Mac is asleep, and it does not catch up on wake unless `WakeFromSleep` is set (which is unreliable in clamshell/S5 standby). The 06:15 schedule is chosen so the user is typically around. If the trigger is still missed, the script's no-arg backfill path will create today's note the next time it runs (idempotent).
 - **DEVONthink must be running** — The AppleScript targets `application id "DNtp"`. DEVONthink does not need to be frontmost, but it must be launched. On the Mac mini server this is already the case since the rest of the pipeline depends on it.
 - **Cloud sync** — After creating a note, the script calls `synchronize database` to push it to DEVONthink's configured sync store. If sync fails for any reason (e.g., no network), the note is still created locally and will sync on the next automatic or manual sync cycle.
 - **Logging** — Check `~/Library/Logs/dt-daily-note.log` for creation results and `/tmp/dt-daily-note.log` for any launchd-level stdout/stderr.

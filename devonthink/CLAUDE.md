@@ -65,7 +65,7 @@ Smart rule scripts live in `../stow/devonthink/Library/Application Scripts/com.d
 - **ImageMagick + Ghostscript** (`/opt/homebrew/bin/magick`, `gtimeout`) — PDF→TIFF conversion
 - **markdownlint** (`/opt/homebrew/bin/markdownlint --fix`) — applied to markdown before enrichment and to LLM-formatted comments
 - **Hazel** — watches the Maestral-synced Dropbox "Notebooks" folder
-- **launchd** (`~/Library/LaunchAgents/com.user.dt-daily-note.plist`) — fires `create-daily-note.sh` at 03:00 daily
+- **launchd** (`~/Library/LaunchAgents/com.user.dt-daily-note.plist`) — fires `create-daily-note.sh` at 06:15 daily
 - **Things 3** — receives action items via AppleScript from `post-enrich-and-archive.applescript`
 - **capture-with-singlefile** (`~/.local/bin/capture-with-singlefile`) — bash script that drives Chromium via AppleScript, navigates to URLs, and triggers SingleFile saves via `Cmd+D` keystroke. Called by `capture-bookmarks-batch.py` (one URL at a time)
 - **defuddle** (`~/.local/share/mise/shims/defuddle`) — extracts readable article content as markdown from local HTML files for `ingest-singlefile-html.py`
