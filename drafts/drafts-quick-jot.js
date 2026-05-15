@@ -34,7 +34,7 @@ end updateDailyNote
 
 on createFallback(dateStr, lineText)
 	tell application id "DNtp"
-		set r to create record with {name:"Jot " & dateStr, type:markdown, plain text:lineText} in incoming group
+		set r to create record with {name:"Jot " & dateStr, type:markdown, plain text:lineText} in (incoming group of database "Lorebook")
 		add custom meta data 1 for "IsJot" to r
 	end tell
 end createFallback

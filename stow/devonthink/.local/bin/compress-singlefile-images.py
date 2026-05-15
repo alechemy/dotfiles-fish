@@ -14,6 +14,10 @@ import re
 import subprocess
 import sys
 import tempfile
+import traceback
+
+
+image_failures = []
 
 
 def process_image(match):
@@ -52,7 +56,22 @@ def process_image(match):
         if len(new_str) < len(original):
             return new_str
         return original
-    except Exception:
+    except subprocess.CalledProcessError as e:
+        stderr = (e.stderr or b"").decode("utf-8", "replace").strip()
+        image_failures.append(
+            f"sips failed for {mime_type} image ({len(b64_data)} b64 chars): {stderr or e}"
+        )
+        return original
+    except subprocess.TimeoutExpired:
+        image_failures.append(
+            f"sips timed out for {mime_type} image ({len(b64_data)} b64 chars)"
+        )
+        return original
+    except Exception as e:
+        image_failures.append(
+            f"unexpected error compressing {mime_type} image "
+            f"({len(b64_data)} b64 chars): {e.__class__.__name__}: {e}"
+        )
         return original
     finally:
         if temp_path and os.path.exists(temp_path):
@@ -67,13 +86,29 @@ def main():
         with open(html_file, "r", encoding="utf-8") as f:
             content = f.read()
     except Exception:
-        sys.exit(0)
+        sys.stderr.write(f"compress-singlefile-images: failed to read {html_file}\n")
+        sys.stderr.write(traceback.format_exc())
+        sys.exit(1)
 
     pattern = re.compile(r"data:image/([^;]+);base64,([A-Za-z0-9+/=]+)")
     new_content = pattern.sub(process_image, content)
 
-    with open(html_file, "w", encoding="utf-8") as f:
-        f.write(new_content)
+    try:
+        with open(html_file, "w", encoding="utf-8") as f:
+            f.write(new_content)
+    except Exception:
+        sys.stderr.write(f"compress-singlefile-images: failed to write {html_file}\n")
+        sys.stderr.write(traceback.format_exc())
+        sys.exit(1)
+
+    if image_failures:
+        sys.stderr.write(
+            f"compress-singlefile-images: {len(image_failures)} image(s) "
+            f"failed to compress in {html_file}\n"
+        )
+        for msg in image_failures:
+            sys.stderr.write(f"  - {msg}\n")
+        sys.exit(1)
 
 
 if __name__ == "__main__":

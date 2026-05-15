@@ -113,5 +113,6 @@ case "$AS_OUTPUT" in
             exit 1
         fi
         log "WARNING: unexpected response from DT: $AS_OUTPUT"
+        exit 1
         ;;
 esac

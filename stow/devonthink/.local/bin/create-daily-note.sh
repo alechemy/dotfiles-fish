@@ -113,17 +113,21 @@ on run argv
         -- Tag the record for smart group filtering
         set tags of newRecord to {"Daily Note"}
 
-        -- Trigger cloud sync so the note is available on other devices
-        try
-            synchronize database targetDB
-        on error errMsg
-            return "ok: created " & noteFilename & " (sync failed: " & errMsg & ")"
-        end try
-
-        return "ok: created and synced " & noteFilename
+        return "ok: created " & noteFilename
     end tell
 end run
 CREATE_APPLESCRIPT
+
+# ---------------------------------------------------------------------------
+# Helper: sync the database once (called after note creation completes)
+# ---------------------------------------------------------------------------
+sync_database() {
+  if /usr/bin/osascript -e "tell application id \"DNtp\" to synchronize database \"${DATABASE_NAME}\"" >/dev/null 2>&1; then
+    log "Synchronized database ${DATABASE_NAME}"
+  else
+    log "WARNING: synchronize database failed"
+  fi
+}
 
 # ---------------------------------------------------------------------------
 # Helper: create one note for a given YYYY-MM-DD string
@@ -160,19 +164,29 @@ if [[ ${1:-} =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
   # Explicit date argument: create that single note (original behaviour)
   log "Creating note for ${1}"
   create_note_for_date "$1"
-  exit $?
+  rc=$?
+  sync_database
+  exit $rc
 fi
 
 # No argument: backfill from last existing note through today.
 log "Querying last daily note in ${GROUP_PATH}"
 LAST_DATE=$(/usr/bin/osascript "$FIND_SCRIPT" "$DATABASE_NAME" "$GROUP_PATH")
 
-if [[ "$LAST_DATE" == "none" || "$LAST_DATE" == error:* ]]; then
-  log "No prior daily note found; nothing to backfill (${LAST_DATE})"
-  exit 0
+if [[ "$LAST_DATE" == error:* ]]; then
+  log "AppleScript error from find script: ${LAST_DATE}"
+  exit 1
 fi
 
 TODAY=$(date "+%Y-%m-%d")
+
+if [[ "$LAST_DATE" == "none" ]]; then
+  log "No prior daily note found; seeding today (${TODAY})"
+  create_note_for_date "$TODAY"
+  rc=$?
+  sync_database
+  exit $rc
+fi
 
 if [[ "$LAST_DATE" == "$TODAY" ]]; then
   log "Last note is today (${TODAY}); nothing to backfill"
@@ -193,3 +207,5 @@ log "Backfilling ${#FILL_DATES[@]} note(s): ${FILL_DATES[0]} → ${TODAY}"
 for d in "${FILL_DATES[@]}"; do
   create_note_for_date "$d" || log "WARNING: failed to create note for ${d}"
 done
+
+sync_database

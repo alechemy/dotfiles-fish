@@ -20,6 +20,10 @@ log() {
     "$PIPELINE_LOG" singlefile-watcher INFO "$*"
 }
 
+warn() {
+    "$PIPELINE_LOG" singlefile-watcher WARN "$*"
+}
+
 log "starting, watching $STAGING_DIR"
 
 # --event Created: only fire on new-file events (not writes, renames, deletes)
@@ -28,10 +32,30 @@ log "starting, watching $STAGING_DIR"
 /opt/homebrew/bin/fswatch -0 --event Created "$STAGING_DIR" | while IFS= read -r -d '' path; do
     case "$path" in
         *.html)
-            # Give SingleFile a moment to finish flushing; large captures
-            # can take a second or two after the initial file creation
-            # event fires.
-            sleep 2
+            # Wait for SingleFile to finish flushing before invoking the
+            # ingester. Poll every 0.5s for up to 30s, breaking once the
+            # file size has stayed identical for 5 consecutive samples
+            # (~2.5s of quiescence).
+            prev=-1
+            stable=0
+            for _ in $(seq 1 60); do
+                cur=$(stat -f%z "$path" 2>/dev/null || echo 0)
+                if [[ "$cur" == "$prev" && "$cur" -gt 0 ]]; then
+                    stable=$((stable + 1))
+                    [[ $stable -ge 5 ]] && break
+                else
+                    stable=0
+                fi
+                prev=$cur
+                sleep 0.5
+            done
+            if [[ $stable -lt 5 ]]; then
+                # File never went quiet within the 30s cap. Skip rather
+                # than ingest a possibly-truncated capture; the next
+                # fswatch event (or a manual backlog sweep) can retry.
+                warn "file size never stabilized after 30s, skipping: $path (last size=$prev)"
+                continue
+            fi
             if [[ -f "$path" ]]; then
                 log "ingesting $path"
                 "$INGESTER" "$path" || log "ingester exited non-zero for $path"

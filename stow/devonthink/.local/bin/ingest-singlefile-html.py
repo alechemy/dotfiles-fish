@@ -812,10 +812,11 @@ def clear_needs_singlefile(bookmark_uuid: str) -> None:
 
 def compress_images(html_path: Path) -> None:
     try:
-        subprocess.run(
+        result = subprocess.run(
             ["python3", str(COMPRESS_IMAGES), str(html_path)],
             check=False,
             capture_output=True,
+            text=True,
             timeout=COMPRESS_TIMEOUT_SECS,
         )
     except subprocess.TimeoutExpired:
@@ -824,8 +825,19 @@ def compress_images(html_path: Path) -> None:
             COMPRESS_TIMEOUT_SECS,
             html_path.name,
         )
+        return
     except Exception as e:
         log.warning("image compression failed: %s", e)
+        return
+
+    if result.returncode != 0:
+        stderr = (result.stderr or "").strip()
+        log.warning(
+            "image compression exited %d on %s; continuing with original HTML%s",
+            result.returncode,
+            html_path.name,
+            f": {stderr}" if stderr else "",
+        )
 
 
 def mark_too_large(bookmark_uuid: str) -> None:

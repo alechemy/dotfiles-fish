@@ -87,8 +87,19 @@ def load_imported():
 
 def save_imported(repos):
     os.makedirs(STATE_DIR, exist_ok=True)
-    with open(STATE_FILE, "w") as f:
-        json.dump(sorted(repos), f, indent=2)
+    fd, tmp = tempfile.mkstemp(
+        dir=STATE_DIR, prefix=".github-stars-imported.", suffix=".json.tmp"
+    )
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump(sorted(repos), f, indent=2)
+        os.replace(tmp, STATE_FILE)
+    except Exception:
+        try:
+            os.unlink(tmp)
+        except FileNotFoundError:
+            pass
+        raise
 
 
 # ---------------------------------------------------------------------------
