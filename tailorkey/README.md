@@ -279,7 +279,7 @@ The same combos now chord the *number-row + top-alpha-row* keys at column N–1 
 
 #### Tweak C: Hyper combo moved to the thumb cluster
 
-`sticky_hyp_rght_v1_TKZ` `keyPositions` moved from `[43, 51]` (M + End — bottom alpha row + nav row) to `[56, 59]` (LSHFT + Space — both thumb keys). Much friendlier chord.
+`sticky_hyp_rght_v1_TKZ` `keyPositions` moved from `[43, 51]` (M + End, on the bottom alpha row and nav row) to `[56, 59]` (LSHFT + Space, both on the thumb cluster). Much friendlier chord.
 
 ---
 
