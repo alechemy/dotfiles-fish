@@ -12,6 +12,12 @@
                  [:!CQWERf "open -g hammerspoon://finder"]
                  [:!CQWERv "open -g hammerspoon://fnv"]]}
 
+        {:des "External display DDC via media keys (m1ddc). Glove80 Layer 0 sends raw F1/F2/F11/F12 (not consumer codes) for these positions, so goku can match them. Passthrough is a no-op on macOS for external-keyboard F-keys."
+         :rules [[:f1  [:f1  "/opt/homebrew/bin/m1ddc chg luminance -10"]]
+                 [:f2  [:f2  "/opt/homebrew/bin/m1ddc chg luminance +10"]]
+                 [:f11 [:f11 "/opt/homebrew/bin/m1ddc chg volume -10"]]
+                 [:f12 [:f12 "/opt/homebrew/bin/m1ddc chg volume +10"]]]}
+
         {:des "SUPER-HYPER (a.k.a. 'SHYPER') KEY! AeroSpace: Shyper => move focused window to workspace"
          :rules [[:!CQWER1 :!WER1]
                  [:!CQWER2 :!WER2]
