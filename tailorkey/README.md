@@ -246,9 +246,40 @@ The Go60's right thumb cluster has no Control or CMD key — those modifiers liv
 
 The default-layout reference (`Go60 Default TailorKey Layout.png`) shows large "SCROLL" and "MOVE" circular icons in the middle of each half. **These are not keys** — they're visual indicators for the Cirque touchpad area (in the layout editor preview) showing what the touchpad does on the Mouse layer.
 
-### No customizations yet
+### Customizations vs. upstream v4.2m⁶
 
-The Go60 JSON currently matches stock TailorKey v4.2m⁶ for macOS (no edits applied).
+Three tweaks, all in the `combos` array. Layer-key contents (positions 0–59) match stock. The unmodified reference sits at `upstream/Go60 TailorKey v4.2m⁶ macOS Bilateral.json`. Worth noting: the working file's `uuid`, `parent_uuid`, `date`, and `creator` fields still match upstream — the customizations were applied by hand-editing the JSON, not via the TailorKey web editor, so editor metadata never got rewritten.
+
+#### Tweak A: F-key combos rebound to macOS consumer codes
+
+The eight F-key chords on the number row + top alpha row now emit consumer codes directly instead of raw F-keys. This is the *opposite direction* from the Glove80 (which moved away from consumer codes to feed the m1ddc DDC pipeline; see Glove80 Tweak 2). The Go60 stays on consumer codes because the user does not dock with it, so external-display DDC via Karabiner + m1ddc is not in scope here. If that changes, migrate to F-keys to match the Glove80 pipeline.
+
+| Combo        | Upstream binding | Yours       | Net key                  |
+|--------------|------------------|-------------|--------------------------|
+| `F1_cb_v1_TKZ` | `&kp F1`       | `&kp C_BRI_DN` | Brightness down          |
+| `F2_cb_v1_TKZ` | `&kp F2`       | `&kp C_BRI_UP` | Brightness up            |
+| `F3_cb_v1_TKZ` | `&kp F3`       | `&kp C_PREV`   | Previous track           |
+| `F4_cb_v1_TKZ` | `&kp F4`       | `&kp C_PP`     | Play/pause               |
+| `F5_cb_v1_TKZ` | `&kp F5`       | `&kp C_NEXT`   | Next track               |
+| `F6_cb_v1_TKZ` | `&kp F6`       | `&kp C_MUTE`   | Mute                     |
+| `F7_cb_v1_TKZ` | `&kp F7`       | `&kp C_VOL_DN` | Volume down              |
+| `F8_cb_v1_TKZ` | `&kp F8`       | `&kp C_VOL_UP` | Volume up                |
+
+#### Tweak B: F1–F5 combo positions shifted one column left
+
+The same combos now chord the *number-row + top-alpha-row* keys at column N–1 instead of column N (so F1's chord is `=`+`Tab` instead of `1`+`Q`, F2 is `1`+`Q` instead of `2`+`W`, etc.). F6 through F12 stay where upstream has them.
+
+| Combo        | Upstream `keyPositions` | Yours        | What chord triggers it |
+|--------------|-------------------------|--------------|------------------------|
+| `F1_cb`      | `[1, 13]`               | `[0, 12]`    | `=` + `Tab`            |
+| `F2_cb`      | `[2, 14]`               | `[1, 13]`    | `1` + `Q`              |
+| `F3_cb`      | `[3, 15]`               | `[2, 14]`    | `2` + `W`              |
+| `F4_cb`      | `[4, 16]`               | `[3, 15]`    | `3` + `E`              |
+| `F5_cb`      | `[5, 17]`               | `[4, 16]`    | `4` + `R`              |
+
+#### Tweak C: Hyper combo moved to the thumb cluster
+
+`sticky_hyp_rght_v1_TKZ` `keyPositions` moved from `[43, 51]` (M + End — bottom alpha row + nav row) to `[56, 59]` (LSHFT + Space — both thumb keys). Much friendlier chord.
 
 ---
 
