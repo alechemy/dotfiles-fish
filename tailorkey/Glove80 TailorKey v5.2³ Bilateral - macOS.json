@@ -13274,36 +13274,6 @@
       ]
     },
     {
-      "name": "right_meh_ACS_v1_TKZ",
-      "description": "GE - meh_ACS_right\n",
-      "binding": {
-        "value": "&kp",
-        "params": [
-          {
-            "value": "LA",
-            "params": [
-              {
-                "value": "LC",
-                "params": [
-                  {
-                    "value": "LSHFT"
-                  }
-                ]
-              }
-            ]
-          }
-        ]
-      },
-      "keyPositions": [
-        56,
-        73
-      ],
-      "layers": [
-        0,
-        2
-      ]
-    },
-    {
       "name": "right_hyper_ACSG_v1_TKZ",
       "description": "GE - sticky hyper_ACSG_right\n",
       "binding": {
