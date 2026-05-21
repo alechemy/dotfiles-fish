@@ -8,7 +8,7 @@ on performSmartRule(theRecords)
 		end try
 
 		repeat with currentRecord in theRecords
-			-- Only process records flagged as handwritten Boox notes (set by Hazel at import)
+			-- Only process records flagged as handwritten Boox notes (set by the Boox import watcher)
 			set isHandwritten to (get custom meta data for "Handwritten" from currentRecord)
 			if isHandwritten is 1 then
 				set currentName to name of currentRecord as string
@@ -152,7 +152,7 @@ on performSmartRule(theRecords)
 					set survivingRecord to currentRecord
 				end if
 
-				-- Re-assert Handwritten flag (already set by Hazel; belt-and-suspenders)
+				-- Re-assert Handwritten flag (already set by the Boox import watcher; belt-and-suspenders)
 				add custom meta data 1 for "Handwritten" to survivingRecord
 			end if
 		end repeat

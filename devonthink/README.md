@@ -10,7 +10,7 @@ The following custom metadata fields must be created in DEVONthink before the pi
 
 | Field               | Type            | Purpose                                                                                                                                                                                                                                                                                      |
 | ------------------- | --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Handwritten         | Boolean         | Set at import by the Hazel rule for Boox handwritten notes. Gates OCR processing (Extract: Boox Handwritten) and notebook dedup (Handle Updated Notebooks)                                                                                                                                   |
+| Handwritten         | Boolean         | Set at import by the Boox import watcher for Boox handwritten notes. Gates OCR processing (Extract: Boox Handwritten) and notebook dedup (Handle Updated Notebooks)                                                                                                                          |
 | NeedsProcessing     | Boolean         | Tracks whether a record requires processing through the pipeline                                                                                                                                                                                                                             |
 | Recognized          | Boolean         | Tracks whether OCR/transcription has been run on a record                                                                                                                                                                                                                                    |
 | Commented           | Boolean         | Tracks whether text has been mirrored to comment field                                                                                                                                                                                                                                       |
@@ -49,15 +49,20 @@ The following custom metadata fields must be created in DEVONthink before the pi
 - Boox uploads PDF to Dropbox folder
 - On Mac, Dropbox folder is mapped via Maestral to a local directory, "Notebooks"
 
-## Hazel
+## Boox Import Watcher
 
-- "Notebooks" (Dropbox destination for Boox PDF exports)
-  - Rule: Convert Boox PDFs to TIFFs and Import to DEVONthink
-    - Conditions
-      - Kind is PDF
-    - Actions
-      - Run shell script — see [`utils/hazel-boox-import.sh`](utils/hazel-boox-import.sh)
-      - Note: ImageMagick requires Ghostscript to decode PDFs. If you get a "no decode delegate" error, install it via `brew install ghostscript`.
+New Boox PDF exports landing in the Maestral-synced "Notebooks" folder are imported by a `launchd` + `fswatch` watcher, consistent with the rest of the pipeline (`singlefile-watcher`, `dt-daily-note`, …). It replaces a former Hazel rule, which was GUI state that had to be re-created by hand per machine.
+
+| Component | Location | Role |
+| --- | --- | --- |
+| `boox-import-watcher.sh` | `~/.local/bin/` | `fswatch` loop on the Notebooks folder. On each new `.pdf` (`Created` or `Renamed` event, recursing into subfolders) it waits for the file size to settle, then invokes the importer. Sweeps the tree for a backlog on startup. Runs under the launchd agent. |
+| `boox-import.sh` | `~/.local/bin/` | Converts one PDF to a monochrome Group4 TIFF (`magick`, 300 DPI), imports it into Lorebook's inbox via AppleScript, and sets `Handwritten=1`. Deletes the source PDF on success. |
+| `com.user.boox-import-watcher.plist` | `~/Library/LaunchAgents/` | Keeps the watcher alive. `RunAtLoad=true`, `KeepAlive=true`. |
+
+- **Watched folder:** `~/Dropbox (Maestral)/onyx/Go103/Notebooks`, including its category subfolders. Files arrive via Maestral sync; the watcher acts on both `Created` and `Renamed` fswatch events because a sync client can finalize a downloaded file by renaming it into place — `--event Created` alone would miss those.
+- **Quarantine:** a PDF that fails conversion, or whose TIFF exceeds 50 MB, is moved to `~/Desktop/DT_Import_Errors/` (with a macOS notification) so a bad export isn't retried forever. A failed *import* (e.g. DEVONthink not running) leaves the PDF in place — the next watcher restart's backlog sweep retries it.
+- **Ghostscript:** ImageMagick needs Ghostscript to decode PDFs. If you see a "no decode delegate" error, install it via `brew install ghostscript`.
+- From here, DEVONthink smart rules take over (`Sweep: Lorebook Inbox` → `Extract: Boox Handwritten` OCR, etc.).
 
 ## DT Smart Rules
 
@@ -94,7 +99,7 @@ The following custom metadata fields must be created in DEVONthink before the pi
   - Change NeedsProcessing to 1
   - Move to 00_INBOX
 
-> See [Handle Updated Notebooks AppleScript](#handle-updated-notebooks-applescript). This script only runs in Sweep: Lorebook Inbox, where Boox TIFFs arrive with `Handwritten=1` already set by the Hazel import. If the incoming document is an update to an existing notebook, the script replaces the existing document's content, resets its pipeline state (`Recognized=0`, `Commented=0`, `AIEnriched=0`, `NeedsProcessing=1`) to generate a fresh AI summary, pins its name (`NameLocked=1`) to protect existing WikiLinks, and deletes the new import — so the remaining actions in the sweep rule are never reached. If the document is new, the script sets SourceFile metadata and allows the sweep to continue normally.
+> See [Handle Updated Notebooks AppleScript](#handle-updated-notebooks-applescript). This script only runs in Sweep: Lorebook Inbox, where Boox TIFFs arrive with `Handwritten=1` already set by the Boox import watcher. If the incoming document is an update to an existing notebook, the script replaces the existing document's content, resets its pipeline state (`Recognized=0`, `Commented=0`, `AIEnriched=0`, `NeedsProcessing=1`) to generate a fresh AI summary, pins its name (`NameLocked=1`) to protect existing WikiLinks, and deletes the new import — so the remaining actions in the sweep rule are never reached. If the document is new, the script sets SourceFile metadata and allows the sweep to continue normally.
 
 ### Sweep: Lorebook Root
 
@@ -129,7 +134,7 @@ The embedded condition filters already-primed records out of the scripts's worki
 
 ### Extract: Boox Handwritten
 
-Runs OCR on handwritten Boox notes. A small AppleScript timestamps the record (via `RecognizedAt`) before recognition begins so that the downstream formatting rule (Format: Boox Comments) can detect if OCR stalls. The `Handwritten` flag is set at import by the Hazel rule, so this rule only matches documents that originated from the Boox → Dropbox → Hazel path.
+Runs OCR on handwritten Boox notes. A small AppleScript timestamps the record (via `RecognizedAt`) before recognition begins so that the downstream formatting rule (Format: Boox Comments) can detect if OCR stalls. The `Handwritten` flag is set at import by the Boox import watcher, so this rule only matches documents that originated from the Boox → Dropbox → import-watcher path.
 
 > **Design Note — Async Recognition.** DEVONthink's "Recognize" action runs asynchronously: `plain text` may not be populated by the time subsequent actions in the same rule execute. For this reason, comment mirroring and formatting are handled by a separate rule (Format: Boox Comments) that polls for `plain text` availability on the next cycle.
 
@@ -534,7 +539,7 @@ This rule is independent of the main pipeline — it runs on already-archived do
 
 ## Handle Updated Notebooks AppleScript
 
-Runs as the first action in each sweep rule. Only processes records where `Handwritten` is already set (by the Hazel import rule), so non-Boox documents pass through untouched. Handles the "same notebook, updated content" case by matching on SourceFile metadata. If an existing document is found, its content is replaced in-place (preserving UUID, name, tags, and links). The script then resets the document's state flags (`Recognized=0`, `Commented=0`, `AIEnriched=0`, `NeedsProcessing=1`) so it runs back through the pipeline for fresh OCR, formatted comments, and a new summary. Crucially, it sets `NameLocked=1` so the AI enrichment step doesn't overwrite its filename, preserving any existing WikiLinks. Finally, the new import is deleted. If no match is found, the document is tagged with SourceFile metadata and the sweep continues into the normal pipeline.
+Runs as the first action in each sweep rule. Only processes records where `Handwritten` is already set (by the Boox import watcher), so non-Boox documents pass through untouched. Handles the "same notebook, updated content" case by matching on SourceFile metadata. If an existing document is found, its content is replaced in-place (preserving UUID, name, tags, and links). The script then resets the document's state flags (`Recognized=0`, `Commented=0`, `AIEnriched=0`, `NeedsProcessing=1`) so it runs back through the pipeline for fresh OCR, formatted comments, and a new summary. Crucially, it sets `NameLocked=1` so the AI enrichment step doesn't overwrite its filename, preserving any existing WikiLinks. Finally, the new import is deleted. If no match is found, the document is tagged with SourceFile metadata and the sweep continues into the normal pipeline.
 
 See [`handle-updated-notebooks.applescript`](../stow/devonthink/Library/Application%20Scripts/com.devon-technologies.think/Smart%20Rules/handle-updated-notebooks.applescript).
 
