@@ -4,7 +4,9 @@ Everything that `setup.sh` *can't* do for you on a new Mac. Work through it in o
 
 ## 1. Before cloning the repo
 
-- [ ] **Sign in to Apple ID** in System Settings (so `mas` can install App Store apps later).
+- [ ] **Sign in to Apple ID** in System Settings (so `mas` can install App Store apps later). Then:
+  - In **System Settings → [your name] → Media & Purchases → Free Downloads**, set **Require Password** to **Never Require**. Without this, `mas` will prompt for your Apple ID password on every install in the Brewfile's `mas` block (they're all redownloads of apps you already own, which Apple categorises as "free downloads").
+  - In **System Settings → Touch ID & Password**, enable **App Store** under "Use Touch ID for" so any remaining prompts become a fingerprint tap.
 - [ ] **Install 1Password** manually from 1password.com and sign in to your account. Wait until you see your vault before continuing.
 - [ ] In **1Password → Settings → Developer**, enable:
   - **Use the SSH agent** (replaces `~/.ssh/id_*` for git/ssh)
@@ -15,11 +17,13 @@ Everything that `setup.sh` *can't* do for you on a new Mac. Work through it in o
 ## 2. Bootstrap
 
 - [ ] Clone the dotfiles (or copy the folder from the old machine):
+
   ```bash
   git clone <repo-url> ~/.dotfiles
   cd ~/.dotfiles
   ./scripts/setup.sh
   ```
+
 - [ ] On a fresh Mac, `setup.sh` will detect that DEVONthink is not yet installed and **skip the pipeline prompt** with a "re-run after installing DEVONthink" message. Don't worry about it — install DEVONthink in step 3, then re-run `./scripts/setup.sh` to enable the launchd agents.
 - [ ] When prompted, accept **macOS defaults** to apply `scripts/macos.sh`.
 
@@ -49,7 +53,7 @@ These live outside the dotfiles repo. Copy via Time Machine, AirDrop, or `scp`.
   - `~/.dotfiles/stow/devonthink/.local/bin/import-granola-parse.py` (the `uv run --script` parser subprocess)
   - `~/.dotfiles/stow/devonthink/Library/LaunchAgents/com.user.granola-import.plist.template` (re-stow `devonthink` and re-run `scripts/build-launchd-plists.sh` after copying)
   - `~/.local/share/granola-import/` — design notes (`NOTES.md`) + any cached state.
-- [ ] **Importer idempotency state.** `~/.local/state/devonthink/` holds the JSON state that prevents importers from re-importing everything on first run: `github-stars-imported.json`, `granola-imported.json`, `granola-version.json`, `granola-failure.json`. Without these, the next launchd fire re-imports your full GitHub star history and every Granola meeting, and spams duplicate failure records into DT.
+- [ ] **Importer idempotency state.** Copy the whole `~/.local/state/devonthink/` directory. It holds two kinds of files: the JSON idempotency state that prevents importers from re-importing everything on first run (`github-stars-imported.json`, `granola-imported.json`, `granola-version.json`, optional `granola-failure.json`, plus any `.bak` siblings), and the `*.last-run` heartbeat files for every launchd-driven pipeline (`dt-daily-note`, `dt-watchdog`, `github-stars-import`, `granola-import`, `singlefile-watcher`). Without the JSONs, the next launchd fire re-imports your full GitHub star history and every Granola meeting and spams duplicate failure records into DT. Without the heartbeats, the watchdog flags pipelines as stale.
 - [ ] **Dropzone action bundle.** The repo tracks `dropzone/Send to DEVONthink.dzbundle/` but it lives outside the stow tree (Dropzone reads from `~/Library/Application Support/Dropzone 4/Actions/`, not `~/.config`). Copy it over: `cp -R ~/.dotfiles/dropzone/Send\ to\ DEVONthink.dzbundle ~/Library/Application\ Support/Dropzone\ 4/Actions/`. Then open Dropzone preferences and confirm the action shows up in the grid.
 - [ ] `~/.gnupg/` — only if you sign commits with GPG. If you're using 1Password SSH agent + git's commit signing via SSH, skip this.
 - [ ] `~/.config/op/` — 1Password CLI local state. Optional; 1Password rebuilds on first auth.
@@ -64,12 +68,14 @@ These live outside the dotfiles repo. Copy via Time Machine, AirDrop, or `scp`.
 - [ ] **Granola** — sign in to your account.
 - [ ] **Marked 2**, **CleanShot X**, **Things**, etc. — first-launch logins where applicable.
 - [ ] **Navidrome env file.** `stow/navidrome/.config/navidrome/env` is gitignored to keep the LAN URL out of the public repo's working tree. On the new Mac, copy the template into place and fill in real values:
+
   ```bash
   cp ~/.dotfiles/stow/navidrome/.config/navidrome/env.template \
      ~/.dotfiles/stow/navidrome/.config/navidrome/env
   $EDITOR ~/.dotfiles/stow/navidrome/.config/navidrome/env  # set NAVIDROME_URL + NAVIDROME_USERNAME
   cd ~/.dotfiles/stow && stow --restow --no-folding --ignore='.DS_Store' --target="$HOME" navidrome
   ```
+
 - [ ] **Navidrome Keychain entry.** Both the `feishin` sketchybar plugin and `play-random-album.sh` look up the Navidrome password via macOS Keychain. Run: `security add-generic-password -s 'Navidrome' -a 'alec' -w '<password>' -U`. Without this, the sketchybar plugin shows "No keychain" and the play-random-album hotkey fails silently.
 - [ ] If you commit-sign via SSH (recommended given the 1Password agent): `git config --global user.signingkey "<your ssh pubkey>"` and `git config --global commit.gpgsign true` (the global gitconfig in `stow/git/` may already handle this — check).
 
@@ -78,17 +84,19 @@ These live outside the dotfiles repo. Copy via Time Machine, AirDrop, or `scp`.
 macOS will prompt the first time each app tries to do something privileged. Pre-empting these saves friction:
 
 **Accessibility** (System Settings → Privacy & Security → Accessibility):
+
 - [ ] AeroSpace
-- [ ] Hammerspoon
 - [ ] Keyboard Maestro
 - [ ] Alfred
 - [ ] Hazel
 - [ ] Espanso
 
 **Input Monitoring**:
+
 - [ ] Karabiner-Elements (also needs its kernel extension approved at first launch)
 
 **Automation** (System Settings → Privacy & Security → Automation) — needed for the DEVONthink launchd agents. macOS will prompt on first fire, but the agents run headless and the prompts block silently:
+
 - [ ] `/usr/bin/python3` → DEVONthink 4 (entry scripts run under Apple-signed stdlib python for TCC stability)
 - [ ] `/bin/bash` → DEVONthink 4
 - [ ] `/usr/bin/osascript` → DEVONthink 4
@@ -98,6 +106,7 @@ Easiest way to surface the prompts: open DEVONthink, then manually run each scri
 The Granola importer is **not** an Automation sender into Granola — it reads Granola's local files directly via the parser subprocess. No Granola → DEVONthink Automation grant is needed.
 
 **Files and Folders** / **Full Disk Access** — needed because the importer reads protected locations under `~/Library/Application Support/`:
+
 - [ ] `/usr/bin/python3` (or the parser subprocess) — Full Disk Access, so `import-granola-parse.py` can read `~/Library/Application Support/Granola/`.
 
 ## 8. macOS system settings
