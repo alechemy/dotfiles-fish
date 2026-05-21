@@ -1,4 +1,4 @@
-function reload_wm -d "Reload window manager stack (Goku, AeroSpace, SketchyBar, JankyBorders, Hammerspoon)"
+function reload_wm -d "Reload window manager stack (Goku, AeroSpace, SketchyBar, JankyBorders)"
   set -l failed 0
 
   if type -q goku
@@ -32,12 +32,6 @@ function reload_wm -d "Reload window manager stack (Goku, AeroSpace, SketchyBar,
     disown
   else
     echo "✗ borders not found in PATH"
-    set failed 1
-  end
-
-  echo "→ Reloading Hammerspoon"
-  open -g "hammerspoon://reload" >/dev/null 2>&1; or begin
-    echo "✗ Could not trigger Hammerspoon reload URL"
     set failed 1
   end
 

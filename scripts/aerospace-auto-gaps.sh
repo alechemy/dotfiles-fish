@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Auto-select outer gap preset based on tiled window count on focused workspace.
-# Triggered from Hammerspoon (window create/destroy) and Aerospace's
-# exec-on-workspace-change callback.
+# Triggered from AeroSpace callbacks: on-window-detected (new windows),
+# on-focus-changed (closing the focused window shifts focus, so this catches
+# cmd-W), and exec-on-workspace-change (workspace navigation).
 #
 # Source of truth: the dotfiles file. Runtime: a regenerated copy at
 # ~/.aerospace.toml with the active gap baked in. The runtime file is rebuilt
@@ -11,7 +12,7 @@
 
 set -e
 
-# Hammerspoon-launched tasks don't inherit shell PATH on macOS.
+# AeroSpace callbacks don't inherit shell PATH on macOS.
 export PATH="/opt/homebrew/bin:$PATH"
 
 # When true, manual hyper-g cycles suppress auto-mode for the active workspace
@@ -31,9 +32,9 @@ if [ "$(jq 'length' <<<"$mons_json" 2>/dev/null || echo 1)" -gt 1 ]; then
     exit 0
 fi
 
-# Serialize concurrent runs (Hammerspoon window events + Aerospace workspace
-# changes can fire this script in rapid succession). Non-blocking: if another
-# instance holds the lock, exit — the next event will retrigger.
+# Serialize concurrent runs (AeroSpace's window/focus/workspace callbacks can
+# fire this script in rapid succession). Non-blocking: if another instance
+# holds the lock, exit and let the next event retrigger.
 exec 9>/tmp/aerospace-gaps.lock
 flock -n 9 || exit 0
 

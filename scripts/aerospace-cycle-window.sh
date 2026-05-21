@@ -12,7 +12,7 @@ case "$direction" in
 esac
 
 AEROSPACE_BIN="${AEROSPACE_BIN:-aerospace}"
-STATE_FILE="${STATE_FILE:-$HOME/.hammerspoon-hidden-scratchpads.json}"
+STATE_FILE="${STATE_FILE:-$HOME/.aerospace-hidden-scratchpads.json}"
 
 DIRECTION="$direction" AEROSPACE_BIN="$AEROSPACE_BIN" STATE_FILE="$STATE_FILE" python3 - <<'PY'
 import json

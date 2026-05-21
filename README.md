@@ -11,7 +11,7 @@ Personal dotfiles for macOS, managed with [GNU Stow](https://www.gnu.org/softwar
 | Terminal | Ghostty |
 | Prompt | Starship |
 | Editor | Zed |
-| Window management | AeroSpace + Hammerspoon |
+| Window management | AeroSpace |
 | Keyboard | Karabiner-Elements |
 
 ## Quick Start
@@ -50,7 +50,6 @@ This installs Homebrew + all dependencies from `Brewfile`, builds generated conf
 │   ├── fish/                # Fish shell config, functions, plugins
 │   ├── ghostty/             # Terminal emulator
 │   ├── git/                 # Git config + global gitignore
-│   ├── hammerspoon/         # Hotkeys + automation
 │   ├── karabiner/           # Keyboard remapping
 │   ├── mise/                # Runtime version manager
 │   ├── navidrome/           # Music server scripts
