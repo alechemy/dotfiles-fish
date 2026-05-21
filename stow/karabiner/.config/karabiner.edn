@@ -7,26 +7,50 @@
  :main [{:des "HYPER KEY! Change caps_lock to right command + right control + right option + right shift."
          :rules [[:##caps_lock :!QWEright_shift nil {:alone :escape}]]}
 
-        {:des "SUPER-HYPER (a.k.a. 'SHYPER') KEY! Remap Hyper-left_command-KEY to Hammerspoon URL events"
-         :rules [[:!CQWERe "open -g hammerspoon://ears"]
-                 [:!CQWERf "open -g hammerspoon://finder"]
-                 [:!CQWERv "open -g hammerspoon://fnv"]]}
+        ;; SHYPER chord ergonomics
+        ;;
+        ;; Two input paths exist for the SHYPER chord, and rules below need to
+        ;; cover both. The mod sets are different because the two paths come
+        ;; from different sources:
+        ;;
+        ;;   - CapsLock path (built-in keyboard): the caps_lock rule above maps
+        ;;     caps_lock to RIGHT-side Hyper (right_cmd + right_ctrl + right_opt
+        ;;     + right_shift). Adding left_command on top yields :!CQWER.
+        ;;
+        ;;   - Glove80 path: the Hyper combo on the Glove80 (Tweak 3) stamps
+        ;;     LEFT-side Hyper (left_cmd + left_ctrl + left_opt + left_shift).
+        ;;     The Shyper combo (Tweak 6) layers a sticky right_command on top.
+        ;;     Combined, the next key arrives with :!CTOSQ.
+        ;;
+        ;; Each Shyper binding therefore needs a (:!CQWER<key>, :!CTOSQ<key>)
+        ;; pair pointing at the same shell command.
+
+        {:des "SUPER-HYPER (a.k.a. 'SHYPER') KEY! Paste-by-typing for paste-restricted fields"
+         :rules [[:!CQWERv "osascript -e 'tell application \"System Events\" to keystroke (the clipboard as text)'"]
+                 [:!CTOSQv "osascript -e 'tell application \"System Events\" to keystroke (the clipboard as text)'"]]}
 
         {:des "External display DDC via media keys (m1ddc). Glove80 Layer 0 sends raw F1/F2/F11/F12 (not consumer codes) for these positions, so goku can match them. Passthrough is a no-op on macOS for external-keyboard F-keys."
          :rules [[:f1  [:f1  "/opt/homebrew/bin/m1ddc chg luminance -10"]]
                  [:f2  [:f2  "/opt/homebrew/bin/m1ddc chg luminance +10"]]
-                 [:f11 [:f11 "/opt/homebrew/bin/m1ddc chg volume -10"]]
-                 [:f12 [:f12 "/opt/homebrew/bin/m1ddc chg volume +10"]]]}
+                 [:f11 [:f11 "/opt/homebrew/bin/m1ddc chg volume -5 && /opt/homebrew/bin/sketchybar --trigger volume_change"]]
+                 [:f12 [:f12 "/opt/homebrew/bin/m1ddc chg volume +5 && /opt/homebrew/bin/sketchybar --trigger volume_change"]]]}
 
         {:des "SUPER-HYPER (a.k.a. 'SHYPER') KEY! AeroSpace: Shyper => move focused window to workspace"
-         :rules [[:!CQWER1 :!WER1]
-                 [:!CQWER2 :!WER2]
-                 [:!CQWER3 :!WER3]
-                 [:!CQWER4 :!WER4]
-                 [:!CQWER5 :!WER5]
-                 [:!CQWER6 :!WER6]
-                 [:!CQWER7 :!WER7]
-                 [:!CQWER8 :!WER8]
-                 [:!CQWER9 :!WER9]
-                 [:!CQWERgrave_accent_and_tilde :!WERgrave_accent_and_tilde]
-                 [:!CQWERtab :!WERtab]]}]}
+         :rules [[:!CQWER1 "/opt/homebrew/bin/aerospace move-node-to-workspace 1"]
+                 [:!CTOSQ1 "/opt/homebrew/bin/aerospace move-node-to-workspace 1"]
+                 [:!CQWER2 "/opt/homebrew/bin/aerospace move-node-to-workspace 2"]
+                 [:!CTOSQ2 "/opt/homebrew/bin/aerospace move-node-to-workspace 2"]
+                 [:!CQWER3 "/opt/homebrew/bin/aerospace move-node-to-workspace 3"]
+                 [:!CTOSQ3 "/opt/homebrew/bin/aerospace move-node-to-workspace 3"]
+                 [:!CQWER4 "/opt/homebrew/bin/aerospace move-node-to-workspace 4"]
+                 [:!CTOSQ4 "/opt/homebrew/bin/aerospace move-node-to-workspace 4"]
+                 [:!CQWER5 "/opt/homebrew/bin/aerospace move-node-to-workspace 5"]
+                 [:!CTOSQ5 "/opt/homebrew/bin/aerospace move-node-to-workspace 5"]
+                 [:!CQWER6 "/opt/homebrew/bin/aerospace move-node-to-workspace 6"]
+                 [:!CTOSQ6 "/opt/homebrew/bin/aerospace move-node-to-workspace 6"]
+                 [:!CQWER7 "/opt/homebrew/bin/aerospace move-node-to-workspace 7"]
+                 [:!CTOSQ7 "/opt/homebrew/bin/aerospace move-node-to-workspace 7"]
+                 [:!CQWER8 "/opt/homebrew/bin/aerospace move-node-to-workspace 8"]
+                 [:!CTOSQ8 "/opt/homebrew/bin/aerospace move-node-to-workspace 8"]
+                 [:!CQWER9 "/opt/homebrew/bin/aerospace move-node-to-workspace 9"]
+                 [:!CTOSQ9 "/opt/homebrew/bin/aerospace move-node-to-workspace 9"]]}]}

@@ -534,15 +534,15 @@
         "value": "&mkp",
         "params": [
           {
-            "value": "LCLK"
+            "value": "RCLK"
           }
         ]
       },
       {
-        "value": "&mkp",
+        "value": "&kp",
         "params": [
           {
-            "value": "RCLK"
+            "value": "RGUI"
           }
         ]
       },
@@ -668,7 +668,7 @@
         "value": "&mkp",
         "params": [
           {
-            "value": "MCLK"
+            "value": "LCLK"
           }
         ]
       },
@@ -13302,6 +13302,46 @@
       "keyPositions": [
         57,
         74
+      ],
+      "layers": [
+        0,
+        2
+      ]
+    },
+    {
+      "name": "right_shyper_RGUI_v1_TKZ",
+      "description": "GE - sticky shyper_RGUI",
+      "binding": {
+        "value": "&sk",
+        "params": [
+          {
+            "value": "RGUI"
+          }
+        ]
+      },
+      "keyPositions": [
+        56,
+        73
+      ],
+      "layers": [
+        0,
+        2
+      ]
+    },
+    {
+      "name": "middle_click_chord_v1_TKZ",
+      "description": "GE - middle click chord (LCTRL-keycap RCLK + RALT-keycap LCLK)",
+      "binding": {
+        "value": "&mkp",
+        "params": [
+          {
+            "value": "MCLK"
+          }
+        ]
+      },
+      "keyPositions": [
+        55,
+        72
       ],
       "layers": [
         0,
