@@ -76,7 +76,7 @@ Some package configs are generated at install time from a tracked template. The 
 2. A build script in `scripts/` produces the real config (gitignored). Two flavors:
    - **`op inject`**: resolves `op://Vault/Item/Field` references via 1Password CLI. Requires an authenticated `op` session; build scripts fail loudly if the output still contains `op://`.
    - **`${HOME}` expansion**: pure sed substitution. Used where the target tool needs absolute paths and doesn't honor its own variable substitution.
-3. A `.stow-local-ignore` in the package root excludes `*.template.*` from stowing.
+3. A `.stow-local-ignore` in the package root excludes the template from stowing. Stow anchors each ignore regex to the whole path segment, so the pattern must match the entire filename: use `.*\.template` (or `.*\.template\.json`), **not** `\.template$` — the latter only matches a file named exactly `.template` and silently lets `foo.plist.template` through.
 4. The build script is called from `setup.sh` before stowing.
 
 Current consumers:
