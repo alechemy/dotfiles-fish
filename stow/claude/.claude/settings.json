@@ -3,5 +3,11 @@
     "defaultMode": "bypassPermissions"
   },
   "effortLevel": "xhigh",
-  "skipDangerousModePermissionPrompt": true
+  "voice": {
+    "enabled": true,
+    "mode": "tap"
+  },
+  "skipDangerousModePermissionPrompt": true,
+  "theme": "dark",
+  "voiceEnabled": true
 }
