@@ -346,6 +346,7 @@ if command -v stow &> /dev/null; then
             for plist in com.user.dt-daily-note \
                          com.user.dt-watchdog \
                          com.user.singlefile-watcher \
+                         com.user.boox-import-watcher \
                          com.user.granola-import \
                          com.user.github-stars-import; do
                 load_plist "$HOME/Library/LaunchAgents/${plist}.plist"

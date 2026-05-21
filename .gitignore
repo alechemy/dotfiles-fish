@@ -18,6 +18,7 @@ stow/navidrome/.config/navidrome/env
 batch-rip-work
 stow/devonthink/.local/share/devonthink-capture/node_modules
 stow/devonthink/.local/share/devonthink-capture/package-lock.json
+stow/devonthink/Library/LaunchAgents/com.user.boox-import-watcher.plist
 stow/devonthink/Library/LaunchAgents/com.user.dt-daily-note.plist
 stow/devonthink/Library/LaunchAgents/com.user.dt-watchdog.plist
 stow/devonthink/Library/LaunchAgents/com.user.github-stars-import.plist
