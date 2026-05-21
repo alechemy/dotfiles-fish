@@ -19,6 +19,40 @@ fail() {
     exit 1
 }
 
+# Some macOS tools invoked during bootstrap can leave this script's process
+# group out of the tty foreground slot. The next interactive `read` then gets
+# SIGTTIN and the parent shell reports `suspended (tty input)`. Reclaim the
+# tty just before prompting so later questions still work.
+ensure_tty_foreground() {
+    [[ -t 1 ]] || return 0
+    [[ -r /dev/tty && -w /dev/tty ]] || return 0
+    [[ -x /usr/bin/python3 ]] || return 0
+
+    /usr/bin/python3 - <<'PY' 2>/dev/null || true
+import os
+import signal
+
+try:
+    fd = os.open('/dev/tty', os.O_RDWR)
+except OSError:
+    raise SystemExit(0)
+
+old_handler = signal.signal(signal.SIGTTOU, signal.SIG_IGN)
+try:
+    my_pgid = os.getpgrp()
+    if os.tcgetpgrp(fd) != my_pgid:
+        os.tcsetpgrp(fd, my_pgid)
+finally:
+    signal.signal(signal.SIGTTOU, old_handler)
+    os.close(fd)
+PY
+}
+
+prompt_read() {
+    ensure_tty_foreground
+    read "$@"
+}
+
 # Dry-run stow for a package and back up any non-symlink files that would
 # conflict, preserving them as <target>.backup.<epoch>. Called immediately
 # before the actual `stow --restow` so first-run machines with pre-existing
@@ -41,8 +75,13 @@ backup_stow_conflicts() {
 
 sudo -v
 
-# Keep-alive: update existing `sudo` time stamp until script has finished
-while true; do sudo -n true; sleep 60; kill -0 "$$" || exit; done 2>/dev/null &
+# Note: there used to be a backgrounded `sudo` keep-alive here (a loop running
+# `sudo -nv` every 60s to keep the timestamp fresh through long brew installs).
+# That loop is removed because on macOS 26 later prompts have intermittently hit
+# SIGTTIN (`zsh: suspended (tty input)`) after earlier setup steps, and the
+# keep-alive is a plausible contributor even though it has not been proven to be
+# the sole cause. With Touch ID for sudo enabled below (step 0b), any later sudo
+# prompt is just a fingerprint tap, so the keep-alive is not worth the risk.
 
 echo "Setting up dotfiles..."
 
@@ -55,6 +94,22 @@ if ! xcode-select -p &>/dev/null; then
     xcode-select --install || true
     fail "Wait for the Xcode CLT install to finish, then re-run ./scripts/setup.sh"
 fi
+
+# 0b. Touch ID for sudo. macOS ships a template at /etc/pam.d/sudo_local.template
+#     with `pam_tid.so` commented out; the active file (/etc/pam.d/sudo_local)
+#     survives OS updates, unlike edits to /etc/pam.d/sudo. This cuts down on
+#     password prompts during the rest of the bootstrap (and forever after).
+#     pam_tid.so is harmless on Macs without enrolled Touch ID — it just falls
+#     through to the password prompt.
+if [ ! -f /etc/pam.d/sudo_local ] && [ -f /etc/pam.d/sudo_local.template ]; then
+    info "Enabling Touch ID for sudo..."
+    sudo sed 's/^#auth.*pam_tid\.so/auth       sufficient     pam_tid.so/' \
+        /etc/pam.d/sudo_local.template | sudo tee /etc/pam.d/sudo_local >/dev/null
+    success "Touch ID for sudo enabled (/etc/pam.d/sudo_local)"
+fi
+
+# 0c. ~/Library/LaunchAgents must exist before brew bundle runs any cask that ships an agent.
+mkdir -p "$HOME/Library/LaunchAgents"
 
 # 1. Install Homebrew
 if ! command -v brew &> /dev/null; then
@@ -75,14 +130,59 @@ fi
 # 2. Install dependencies via Brewfile
 if [ -f "$DOTFILES/Brewfile" ]; then
     info "Installing dependencies from Brewfile..."
-    brew bundle --file="$DOTFILES/Brewfile"
-    success "Dependencies installed"
+    if brew bundle --file="$DOTFILES/Brewfile"; then
+        success "Dependencies installed"
+    else
+        info "WARNING: brew bundle reported failures. Missing entries:"
+        brew bundle check --file="$DOTFILES/Brewfile" --verbose || true
+        info "Continuing setup; resolve the above and re-run ./scripts/setup.sh when fixed."
+    fi
+fi
+
+# 2b. Schedule `brew autoupdate` (24h interval, upgrade + cleanup, run at load,
+#     prompt for sudo via pinentry-mac when a cask needs it, only when on AC
+#     power so battery isn't drained by background upgrades). Idempotent: skip
+#     if the launchd job is already loaded so re-running setup.sh doesn't
+#     restart the timer.
+if brew tap | grep -q '^domt4/autoupdate$'; then
+    if brew autoupdate status 2>&1 | grep -q 'installed and running'; then
+        info "brew autoupdate already running, leaving schedule untouched"
+    else
+        info "Starting brew autoupdate (daily, --upgrade --cleanup --immediate --sudo --ac-only)..."
+        brew autoupdate start 86400 --upgrade --cleanup --immediate --sudo --ac-only
+        success "brew autoupdate scheduled"
+    fi
 fi
 
 # 3. Build generated configs (before stowing so the files exist)
 info "Building generated configs..."
-chmod +x "$DOTFILES/scripts/build-zed-config.sh"
-"$DOTFILES/scripts/build-zed-config.sh"
+
+# 3a. 1Password CLI gate — prompt once up front so op-dependent build scripts don't each ask.
+OP_READY=0
+if command -v op >/dev/null 2>&1; then
+    # `op vault list`, not `op whoami`: with 1Password app integration enabled,
+    # `op whoami` always reports "not signed in" even though data commands work.
+    if op vault list >/dev/null 2>&1; then
+        OP_READY=1
+    else
+        info "1Password CLI can't read your vaults (needed for Zed + streamrip configs)."
+        info "  Enable 1Password > Settings > Developer > 'Integrate with 1Password CLI', then unlock the app."
+        info "  Or, for a temporary session: eval \$(op signin)"
+        prompt_read -r -p "  ? Press Enter once 1Password is authorized, or 's' to skip op-dependent steps: " REPLY
+        if [[ ! $REPLY =~ ^[Ss]$ ]] && op vault list >/dev/null 2>&1; then
+            OP_READY=1
+        else
+            info "Skipping op-dependent build steps; re-run ./scripts/setup.sh after signing in."
+        fi
+    fi
+fi
+
+if [ "$OP_READY" -eq 1 ]; then
+    chmod +x "$DOTFILES/scripts/build-zed-config.sh"
+    "$DOTFILES/scripts/build-zed-config.sh"
+else
+    info "Skipping Zed config build (needs 1Password CLI signed in)."
+fi
 chmod +x "$DOTFILES/scripts/build-vscode-config.sh"
 "$DOTFILES/scripts/build-vscode-config.sh"
 chmod +x "$DOTFILES/scripts/build-launchd-plists.sh"
@@ -93,11 +193,15 @@ chmod +x "$DOTFILES/scripts/build-launchd-plists.sh"
 # on a machine without that vault item, so we prompt before running it. The
 # stow loop below uses INSTALL_STREAMRIP to keep build + stow in sync.
 INSTALL_STREAMRIP=0
-read -r -p "  ? Install streamrip (Qobuz music ripping)? [y/N] " REPLY
+prompt_read -r -p "  ? Install streamrip (Qobuz music ripping)? [y/N] " REPLY
 if [[ $REPLY =~ ^[Yy]$ ]]; then
-    INSTALL_STREAMRIP=1
-    chmod +x "$DOTFILES/scripts/build-streamrip-config.sh"
-    "$DOTFILES/scripts/build-streamrip-config.sh"
+    if [ "$OP_READY" -eq 1 ]; then
+        INSTALL_STREAMRIP=1
+        chmod +x "$DOTFILES/scripts/build-streamrip-config.sh"
+        "$DOTFILES/scripts/build-streamrip-config.sh"
+    else
+        info "Skipping streamrip: 1Password CLI not signed in."
+    fi
 else
     info "Skipping streamrip."
 fi
@@ -143,6 +247,16 @@ if command -v stow &> /dev/null; then
         success "Seeded ~/.aerospace.toml from source"
     fi
 
+    # Git SSH commit-signing key. The tracked gitconfig sets commit.gpgsign=true
+    # with gpg.format=ssh, so a signing key must exist or every `git commit`
+    # fails. Per-machine ed25519 key, no passphrase so signing stays headless.
+    if [ ! -f "$HOME/.ssh/id_signing" ]; then
+        info "Generating SSH commit-signing key..."
+        mkdir -p "$HOME/.ssh" && chmod 700 "$HOME/.ssh"
+        ssh-keygen -t ed25519 -C "git signing key" -f "$HOME/.ssh/id_signing" -N "" -q
+        success "Created ~/.ssh/id_signing — add the .pub to GitHub as a Signing Key"
+    fi
+
     # Regenerate Karabiner JSON from the EDN source. The repo tracks
     # karabiner.edn (Goku's source format); the runtime karabiner.json is
     # generated and not stowed. Without this step a fresh machine has an
@@ -152,9 +266,40 @@ if command -v stow &> /dev/null; then
     # Brewfile (`yqrashawn/goku/goku`, installed at step 2) has run. If goku
     # is missing for any reason, this is a silent no-op rather than a fatal
     # error — the user can run `goku` manually afterwards.
+    KARABINER_JSON="$HOME/.config/karabiner/karabiner.json"
     if command -v goku &>/dev/null && [ -f "$HOME/.config/karabiner.edn" ]; then
-        info "Regenerating Karabiner JSON via goku..."
-        goku || info "WARNING: goku failed; run it manually after Karabiner is permission-granted"
+        if [ ! -f "$KARABINER_JSON" ]; then
+            info "WARNING: $KARABINER_JSON not found."
+            info "  Open Karabiner-Elements once to generate it, grant input-monitoring"
+            info "  permission, then re-run ./scripts/setup.sh (or run 'goku' manually)."
+        else
+            # Karabiner-Elements names its starter profile "Default profile" on
+            # first launch; goku needs exact match "Default". Quit the app before
+            # editing so its in-memory state can't race-write the file back.
+            if command -v jq &>/dev/null \
+                && ! jq -e '.profiles[] | select(.name == "Default")' "$KARABINER_JSON" >/dev/null 2>&1; then
+                info "Renaming Karabiner profile to 'Default' for goku compatibility..."
+                osascript -e 'tell application "Karabiner-Elements" to quit' >/dev/null 2>&1 || true
+                tmp=$(mktemp) \
+                    && jq '(.profiles[0].name) = "Default"' "$KARABINER_JSON" >"$tmp" \
+                    && mv "$tmp" "$KARABINER_JSON" \
+                    && success "Karabiner profile renamed to 'Default'"
+                open -g -a "Karabiner-Elements" 2>/dev/null || true
+            fi
+
+            info "Regenerating Karabiner JSON via goku..."
+            goku || info "WARNING: goku failed; run it manually after Karabiner is permission-granted"
+        fi
+
+        # Start the goku watcher service now that karabiner.edn is in place.
+        # We intentionally don't use `restart_service: true` in the Brewfile
+        # because bundle runs before stow; gokuw would launch with nothing
+        # to watch, exit, and launchd would throttle the respawns into a
+        # Bootstrap failed: 5 (EIO). Starting it here avoids that race.
+        if ! brew services list | grep -q '^goku.*started'; then
+            info "Starting goku watcher service..."
+            brew services start yqrashawn/goku/goku || info "WARNING: failed to start goku service; run 'brew services start yqrashawn/goku/goku' manually"
+        fi
     fi
 
     # 4b. DEVONthink Pipeline (opt-in, single-machine only)
@@ -167,7 +312,7 @@ if command -v stow &> /dev/null; then
         info "DEVONthink.app not found. Skipping pipeline install."
         info "Install DEVONthink, open Lorebook, then re-run setup.sh to enable the pipeline."
     else
-        read -r -p "  ? Install DEVONthink pipeline (smart rules + launchd agents)? [y/N] " REPLY
+        prompt_read -r -p "  ? Install DEVONthink pipeline (smart rules + launchd agents)? [y/N] " REPLY
         if [[ $REPLY =~ ^[Yy]$ ]]; then
             info "Stowing DEVONthink pipeline..."
             cd "$STOW_DIR"
@@ -208,7 +353,7 @@ if command -v stow &> /dev/null; then
             success "DEVONthink pipeline installed"
 
             # Wiki integration (optional)
-            read -r -p "  ? Initialize LLM Wiki directory at ~/Wiki? [y/N] " REPLY
+            prompt_read -r -p "  ? Initialize LLM Wiki directory at ~/Wiki? [y/N] " REPLY
             if [[ $REPLY =~ ^[Yy]$ ]]; then
                 chmod +x "$DOTFILES/scripts/init-wiki.sh"
                 "$DOTFILES/scripts/init-wiki.sh"
@@ -233,7 +378,7 @@ fi
 if [[ "$(uname)" == "Darwin" ]]; then
     info "Applying macOS defaults..."
     if [ -f "$DOTFILES/scripts/macos.sh" ]; then
-        read -r -p "  ? Apply macOS defaults? [y/N] " REPLY
+        prompt_read -r -p "  ? Apply macOS defaults? [y/N] " REPLY
         if [[ $REPLY =~ ^[Yy]$ ]]; then
             # Ensure it's executable
             chmod +x "$DOTFILES/scripts/macos.sh"
@@ -256,7 +401,9 @@ if [ -n "$FISH_PATH" ]; then
         success "Fish added to /etc/shells"
     fi
 
-    if [ "$SHELL" != "$FISH_PATH" ]; then
+    # $SHELL is inherited from the parent and doesn't reflect a mid-session chsh; ask dscl.
+    CURRENT_LOGIN_SHELL=$(dscl . -read "/Users/$USER" UserShell 2>/dev/null | awk '{print $2}')
+    if [ "$CURRENT_LOGIN_SHELL" != "$FISH_PATH" ]; then
         info "Changing default shell to fish..."
         chsh -s "$FISH_PATH"
         success "Default shell changed to fish"
@@ -340,9 +487,14 @@ fi
 # 9. Espanso Setup
 if command -v espanso &> /dev/null; then
     info "Setting up Espanso..."
-    espanso service register || true
-    espanso start || true
-    success "Espanso registered and started"
+    espanso service register >/dev/null 2>&1 || true
+    if espanso_err=$(espanso start 2>&1); then
+        success "Espanso registered and started"
+    else
+        info "WARNING: espanso start failed:"
+        printf '%s\n' "$espanso_err" | sed 's/^/    /'
+        info "  Try: espanso restart  (or kill stale espanso processes and re-run)"
+    fi
 fi
 
 echo ""

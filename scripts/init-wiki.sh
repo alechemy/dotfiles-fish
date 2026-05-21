@@ -17,6 +17,36 @@ TEMPLATE="$DOTFILES/devonthink/wiki-claude-md-template.md"
 info() { printf "\r  [ \033[00;34m..\033[0m ] %s\n" "$1"; }
 success() { printf "\r\033[2K  [ \033[00;32mOK\033[0m ] %s\n" "$1"; }
 
+ensure_tty_foreground() {
+    [[ -t 1 ]] || return 0
+    [[ -r /dev/tty && -w /dev/tty ]] || return 0
+    [[ -x /usr/bin/python3 ]] || return 0
+
+    /usr/bin/python3 - <<'PY' 2>/dev/null || true
+import os
+import signal
+
+try:
+    fd = os.open('/dev/tty', os.O_RDWR)
+except OSError:
+    raise SystemExit(0)
+
+old_handler = signal.signal(signal.SIGTTOU, signal.SIG_IGN)
+try:
+    my_pgid = os.getpgrp()
+    if os.tcgetpgrp(fd) != my_pgid:
+        os.tcsetpgrp(fd, my_pgid)
+finally:
+    signal.signal(signal.SIGTTOU, old_handler)
+    os.close(fd)
+PY
+}
+
+prompt_read() {
+    ensure_tty_foreground
+    read "$@"
+}
+
 info "Initializing wiki at $WIKI_DIR"
 
 # Create directory structure
@@ -75,7 +105,7 @@ fi
 
 # Initialize git repo
 if [ ! -d "$WIKI_DIR/.git" ]; then
-    read -p "  ? Initialize git repository in $WIKI_DIR? [y/N] " -n 1 -r
+    prompt_read -p "  ? Initialize git repository in $WIKI_DIR? [y/N] " -n 1 -r
     echo
     if [[ $REPLY =~ ^[Yy]$ ]]; then
         git -C "$WIKI_DIR" init

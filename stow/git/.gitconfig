@@ -1,6 +1,7 @@
 [user]
   name = Alec Custer
   email = alcuster@icloud.com
+  signingkey = ~/.ssh/id_signing.pub
 [core]
   excludesfile = ~/.gitignore
   editor = nano
@@ -23,6 +24,12 @@
   defaultBranch = main
 [push]
   autoSetupRemote = true
+[gpg]
+  format = ssh
+[commit]
+  gpgsign = true
+[tag]
+  gpgsign = true
 [include]
   path = ~/.gitconfig.proxy
 [includeIf "gitdir:~/Work/"]
