@@ -157,12 +157,6 @@
   "git.blame.editorDecoration.enabled": true,
   "git.blame.ignoreWhitespace": true,
   "githubPullRequests.pullBranch": "never",
-  "gitlens.remotes": [
-    {
-      "domain": "git.example.com",
-      "type": "GitLab",
-    },
-  ],
 
   // HTML
   // ----------------------------------------
