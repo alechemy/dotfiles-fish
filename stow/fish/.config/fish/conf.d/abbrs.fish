@@ -3,6 +3,8 @@
 abbr -a -- glog 'git log -n10 --oneline'
 abbr -a -- unpop 'git reset --merge'
 
+abbr -a dotfiles "$HOME/.dotfiles"
+
 # Kill a process running on a given port
 # Usage: > kill_port 8081
 function kill_port
