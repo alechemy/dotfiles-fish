@@ -15,7 +15,9 @@ OUT="$ZED_DIR/settings.json"
 # file with fully-resolved 1Password secrets sitting on disk indefinitely.
 TMP=""
 cleanup() {
-    [[ -n "$TMP" && -f "$TMP" ]] && rm -f "$TMP"
+    if [[ -n "$TMP" && -f "$TMP" ]]; then
+        rm -f "$TMP"
+    fi
 }
 trap cleanup EXIT
 
