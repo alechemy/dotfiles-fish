@@ -2,20 +2,24 @@ font-family = Operator Mono SSm Lig
 font-size = 14.0
 background-opacity = .90
 background-blur = true
+alpha-blending = linear-corrected
 theme = Catppuccin Macchiato
 cursor-style = bar
 cursor-style-blink = false
 adjust-cursor-thickness = 1
 macos-icon = retro
-quit-after-last-window-closed = true
 shell-integration-features = no-cursor
 macos-window-shadow = false
+macos-option-as-alt = true
 macos-titlebar-style = tabs
 keybind = cmd+enter=text:\x1b[13;9u
 keybind = shift+enter=text:\x1b\r
 keybind = cmd+t=new_split:auto
 keybind = cmd+shift+t=new_tab
+keybind = global:cmd+ctrl+alt+shift+t=toggle_quick_terminal
+quick-terminal-position = right
 clipboard-paste-protection = false
 notify-on-command-finish = unfocused
 notify-on-command-finish-action = notify
 notify-on-command-finish-after = 10s
+auto-update = off
