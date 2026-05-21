@@ -95,5 +95,5 @@ Work-specific config in `stow-work/` is not auto-linked. Opt in on a work machin
 
 ```bash
 cd ~/.dotfiles/stow-work
-stow --restow --ignore='.DS_Store' --target="$HOME" work
+stow --restow --no-folding --ignore='.DS_Store' --target="$HOME" work
 ```

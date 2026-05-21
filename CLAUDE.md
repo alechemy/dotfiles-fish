@@ -8,37 +8,53 @@ Personal dotfiles managed with GNU Stow on macOS. All packages under `stow/` mir
 
 **Key tools:** Fish shell, Homebrew, Mise (runtime versions), Starship (prompt), Ghostty (terminal), Zed (editor).
 
+## Hardware setup
+
+This dotfiles setup runs on a MacBook (with notch) used in two mutually exclusive modes. In portable mode the lid is open and the laptop is standalone. In docked mode the lid is closed (clamshell) and an ultrawide external monitor is the only active display. The user never runs with both displays active at once.
+
+Two implications when designing or evaluating features in this repo:
+
+1. **Single active display.** Even though two physical displays exist, only one is in use at any given moment. Workflows that depend on switching focus between monitors, mirroring across displays, or coordinating UI state across multiple active screens do not apply here and should not be proposed.
+
+2. **Battery awareness on portable.** Docked mode is reliably on AC; portable mode is usually on battery. Features that poll on a timer, hit the network repeatedly, or otherwise wake the CPU should either degrade gracefully when on battery (longer intervals, deferred work) or skip entirely until the machine is plugged in. Apply this thinking both when adding new functionality and when reviewing existing code that may not have considered it.
+
 ## Common Commands
 
 Bootstrap a fresh machine:
+
 ```bash
 ./scripts/setup.sh
 ```
 
 Restow a single package after adding/removing files:
+
 ```bash
 cd ~/.dotfiles/stow
 stow --restow --no-folding --ignore='.DS_Store' --target="$HOME" <package>
 ```
 
 Unstow (remove symlinks for) a package:
+
 ```bash
 cd ~/.dotfiles/stow
 stow --delete --target="$HOME" <package>
 ```
 
 Opt into work config:
+
 ```bash
 cd ~/.dotfiles/stow-work
-stow --restow --ignore='.DS_Store' --target="$HOME" work
+stow --restow --no-folding --ignore='.DS_Store' --target="$HOME" work
 ```
 
 Rebuild Zed config (injects 1Password secrets):
+
 ```bash
 ./scripts/build-zed-config.sh
 ```
 
 Capture currently installed Homebrew packages (to a temp file to preserve Brewfile sections):
+
 ```bash
 brew bundle dump --file=/tmp/Brewfile --force
 # Then manually copy needed lines into ~/.dotfiles/Brewfile
@@ -55,6 +71,7 @@ Each directory under `stow/` must mirror the path relative to `$HOME`. For examp
 ### Generated configs (template → build → stow)
 
 Some package configs are generated at install time from a tracked template. The pattern:
+
 1. `config.template.{json,toml}` (tracked) — full config with placeholders
 2. A build script in `scripts/` produces the real config (gitignored). Two flavors:
    - **`op inject`**: resolves `op://Vault/Item/Field` references via 1Password CLI. Requires an authenticated `op` session; build scripts fail loudly if the output still contains `op://`.
@@ -63,6 +80,7 @@ Some package configs are generated at install time from a tracked template. The 
 4. The build script is called from `setup.sh` before stowing.
 
 Current consumers:
+
 - `stow/zed/` — op inject + `${HOME}` (`scripts/build-zed-config.sh`)
 - `stow/streamrip/` — op inject + `${HOME}` (`scripts/build-streamrip-config.sh`)
 - `stow/vscode/` — `${HOME}` only (`scripts/build-vscode-config.sh`)
