@@ -2,8 +2,8 @@
 # Watch ~/Downloads/SingleFile/ for new .html files and hand each one to
 # ingest-singlefile-html.py. Launched by com.user.singlefile-watcher.plist.
 #
-# fswatch emits one NUL-terminated event per filesystem change. We only
-# act on "Created" events for .html files, wait ~2s for the write to
+# fswatch emits one NUL-terminated event per filesystem change. We act on
+# "Created" and "Renamed" events for .html files, wait ~2s for the write to
 # settle, then invoke the ingester. The ingester deletes the staging file
 # on success, so the only files remaining in the folder are failed
 # captures awaiting manual cleanup.
@@ -82,10 +82,13 @@ for backlog_path in "$STAGING_DIR"/*.html; do
 done
 shopt -u nullglob 2>/dev/null || true
 
-# --event Created: only fire on new-file events (not writes, renames, deletes)
-# --format "%p": just the path (default includes flags we don't want parsed)
+# --event Created --event Renamed: catch files written directly into the folder
+#   *and* files that arrive via rename. Browser downloads (SingleFile's save
+#   path) finalize by renaming a temp file to the final .html — FSEvents reports
+#   that as Renamed, not Created, so without Renamed here a live desktop capture
+#   is missed until the next watcher restart's backlog sweep.
 # -0: NUL-separated output so filenames with newlines don't break us
-/opt/homebrew/bin/fswatch -0 --event Created "$STAGING_DIR" | while IFS= read -r -d '' path; do
+/opt/homebrew/bin/fswatch -0 --event Created --event Renamed "$STAGING_DIR" | while IFS= read -r -d '' path; do
     case "$path" in
         *.html)
             ingest_html "$path" fswatch
