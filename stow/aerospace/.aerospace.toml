@@ -88,10 +88,10 @@ on-mode-changed = [
     # Target the external monitor by name so the laptop's built-in display
     # always falls through to the 8 px fallback, even if main briefly shifts
     # during dock/undock or while running lid-open without the external.
-    outer.left = [{ monitor."DELL U4025QW" = 600 }, 8]
-    outer.right = [{ monitor."DELL U4025QW" = 600 }, 8]
+    outer.left = [{ monitor."DELL U4025QW" = 600 }, 4]
+    outer.right = [{ monitor."DELL U4025QW" = 600 }, 4]
     outer.bottom =     8
-    outer.top =        48
+    outer.top = [{ monitor."Built-in Retina Display" = 12 }, 48]
 
 # 'main' binding mode declaration
 # See: https://nikitabobko.github.io/AeroSpace/guide#binding-modes
@@ -118,8 +118,8 @@ on-mode-changed = [
     cmd-alt-ctrl-shift-space = 'fullscreen'
 
     # See: https://nikitabobko.github.io/AeroSpace/commands#resize
-    # cmd-alt-ctrl-shift-minus = 'resize smart -50'
-    # cmd-alt-ctrl-shift-equal = 'resize smart +50'
+    cmd-alt-ctrl-shift-minus = 'resize smart -100'
+    cmd-alt-ctrl-shift-equal = 'resize smart +100'
 
     # Cycle outer gap presets (full → medium → narrow) on ultrawide
     cmd-alt-ctrl-shift-g = 'exec-and-forget bash $HOME/.dotfiles/scripts/aerospace-cycle-gaps.sh'
