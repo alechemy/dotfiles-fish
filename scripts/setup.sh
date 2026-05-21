@@ -247,6 +247,24 @@ if command -v stow &> /dev/null; then
         success "Seeded ~/.aerospace.toml from source"
     fi
 
+    # NAS auto-mount agent. Stowed above by the main loop; bootstrap it now so
+    # the shares mount without waiting for the next login. The agent re-runs at
+    # every login (RunAtLoad) and on network changes (WatchPaths /etc/resolv.conf).
+    NAS_MOUNT_PLIST="$HOME/Library/LaunchAgents/com.user.mount-nas.plist"
+    if [ -f "$NAS_MOUNT_PLIST" ]; then
+        info "Loading NAS auto-mount agent..."
+        if nas_err=$(launchctl bootstrap "gui/$(id -u)" "$NAS_MOUNT_PLIST" 2>&1); then
+            success "NAS auto-mount agent loaded"
+        else
+            case "$nas_err" in
+                *"Bootstrap failed: 17"*|*"already loaded"*)
+                    info "NAS auto-mount agent already loaded" ;;
+                *)
+                    info "WARNING: failed to load NAS auto-mount agent: $nas_err" ;;
+            esac
+        fi
+    fi
+
     # Git SSH commit-signing key. The tracked gitconfig sets commit.gpgsign=true
     # with gpg.format=ssh, so a signing key must exist or every `git commit`
     # fails. Per-machine ed25519 key, no passphrase so signing stays headless.

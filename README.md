@@ -52,6 +52,7 @@ This installs Homebrew + all dependencies from `Brewfile`, builds generated conf
 │   ├── git/                 # Git config + global gitignore
 │   ├── karabiner/           # Keyboard remapping
 │   ├── mise/                # Runtime version manager
+│   ├── nas-mount/           # Auto-mount NAS SMB shares (launch agent)
 │   ├── navidrome/           # Music server scripts
 │   ├── sketchybar/          # Menu bar
 │   ├── starship/            # Shell prompt theme
