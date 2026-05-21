@@ -4,7 +4,10 @@
 PLUGIN_DIR="$CONFIG_DIR/plugins"
 
 ##### Bar Appearance #####
-sketchybar --bar position=top height=40 blur_radius=30 color=0x40000000 topmost=window_level
+# notch_width reserves a center gap on notched displays (MacBook built-in) so
+# items in left/right positions don't render under the notch. Ignored on
+# external displays, so the same config works clamshell or standalone.
+sketchybar --bar position=top height=40 blur_radius=30 color=0x40000000 topmost=window_level notch_width=200
 
 ##### Changing Defaults #####
 default=(
@@ -36,10 +39,12 @@ sketchybar --add item vpn right \
   --subscribe vpn proxy_toggle
 
 # Volume
+# display_change re-runs the script on undock/redock so the compact-vs-spacious
+# label (driven by plugins/lib/display_mode.sh) updates without a full reload.
 sketchybar --add item volume right \
   --set volume script="$PLUGIN_DIR/volume.sh" \
   click_script="$PLUGIN_DIR/volume_click.sh" \
-  --subscribe volume volume_change
+  --subscribe volume volume_change display_change
 
 # Aerospace Workspace Indicators (explicit 1-6; added right-to-left so they render 1..6)
 sketchybar --add event aerospace_workspace_change
