@@ -26,13 +26,15 @@ if command -v codium &> /dev/null; then
         echo
         if [[ $REPLY =~ ^[Yy]$ ]]; then
             info "Installing VSCodium extensions..."
+            args=()
             while IFS= read -r module || [[ -n "$module" ]]; do
-                # Skip comments and empty lines
                 [[ "$module" =~ ^#.*$ ]] && continue
                 [[ -z "$module" ]] && continue
-
-                codium --install-extension "$module" --force
+                args+=(--install-extension "$module")
             done < "$VSCODE_STOW/extensions.txt"
+            if [ ${#args[@]} -gt 0 ]; then
+                codium "${args[@]}" --force || info "WARNING: one or more extensions failed to install (see codium output above); re-run setup.sh to retry"
+            fi
             success "Extensions installed"
         else
             info "Skipping VSCodium extensions."
