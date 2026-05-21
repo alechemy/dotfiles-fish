@@ -1,0 +1,8 @@
+# mise owns the pnpm version (see stow/mise/.config/mise/config.toml).
+# `pmOnFail: ignore` tells pnpm to skip its own packageManager / devEngines
+# version check instead of trying to download a pinned version, which would
+# fight mise for ownership.
+#
+# In v11, packageManagerStrict / managePackageManagerVersions were collapsed
+# into this single setting. Accepted values: download | warn | error | ignore.
+pmOnFail: ignore

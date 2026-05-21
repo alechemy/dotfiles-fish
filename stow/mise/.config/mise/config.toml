@@ -1,5 +1,6 @@
 [tools]
 node = "lts"
+pnpm = "11"
 python = "latest"
 java = "latest"
 
