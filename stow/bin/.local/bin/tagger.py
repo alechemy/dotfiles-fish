@@ -57,7 +57,7 @@ def process_file(
         actions.append("genre")
 
         if is_compilation:
-            audio["cpil"] = [True]
+            audio["cpil"] = True  # bare bool: mutagen renders a list as truthy
             actions.append("compilation")
 
         if album_artist:
