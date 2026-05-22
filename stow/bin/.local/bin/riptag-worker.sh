@@ -1,7 +1,7 @@
 #!/bin/sh
 
 # Worker script for the riptag pipeline.
-# Downloads an album, tags it, and moves it to Apple Music's auto-add folder.
+# Downloads an album, tags it, and organizes it into the music library.
 #
 # Called by the `riptag` fish function. In remote (NAS) mode, riptag deploys
 # this script to /tmp via scp and runs it — no permanent copy on the NAS.
@@ -10,19 +10,19 @@
 #   riptag-worker.sh [--compilation] [--playlist-mode] [--year YYYY] [--local] <url> <genre>
 #   riptag-worker.sh [--compilation] [--playlist-mode] [--year YYYY] [--local] --resume <session-id> <genre>
 #
-# --playlist-mode unifies metadata across the downloaded folder so Apple Music
-# treats the tracks as one album: forces albumartist="Various Artists" and
-# embeds the first track's cover art into every track.
-# --year sets the same year on every track (Music.app uses year as part of
-# album identity, so unifying it stops compilations from being split).
+# --playlist-mode unifies metadata across the downloaded folder so the tracks
+# are filed as one album: forces albumartist="Various Artists" and embeds the
+# first track's cover art into every track.
+# --year sets the same year on every track.
 #
 # Exit codes:
-#   0  All tracks downloaded successfully; album tagged and copied.
+#   0  All tracks downloaded successfully; album tagged and organized.
 #   1  Hard error (crash, bad args, etc.)
 #   2  Some tracks failed; session ID written to /tmp/riptag-resume-id.
 #
 # Environment variables:
 #   TAGGER_SCRIPT        Path to tagger.py (auto-set by riptag in remote mode)
+#   ORGANIZER_SCRIPT     Path to music-organize.py (auto-set by riptag remotely)
 #   STREAMRIP_DOWNLOADS  Local download dir (default: ~/StreamripDownloads)
 #   LOCAL_RIP            Path to local rip command (default: rip)
 #
@@ -32,8 +32,8 @@
 
 
 # --- CONFIGURATION (NAS defaults) ---
-INBOX_DIR="/share/Media/Music/Inbox"
-AUTO_ADD_DIR="/share/Media/Music/Music/Media.localized/Automatically Add to Music.localized"
+INBOX_DIR="/share/Media/Music-Inbox"
+LIBRARY_DIR="/share/Media/Music"
 RIP_CONFIG="/share/CACHEDEV1_DATA/streamrip/config.toml"
 RIP_LOG_FILE="/tmp/rip-download.log"
 RIP_EXIT_FILE="/tmp/rip-exit-status.txt"
@@ -80,12 +80,15 @@ done
 # --- LOCAL MODE OVERRIDES ---
 if [ $LOCAL_MODE -eq 1 ]; then
   INBOX_DIR="${STREAMRIP_DOWNLOADS:-$HOME/StreamripDownloads}"
+  LIBRARY_DIR="/Volumes/Media/Music"
   PYTHON_CMD="${LOCAL_PYTHON:-python3}"
   RIP_CMD="${LOCAL_RIP:-rip}"
   : "${TAGGER_SCRIPT:=$HOME/.local/bin/tagger.py}"
+  : "${ORGANIZER_SCRIPT:=$HOME/.local/bin/music-organize.py}"
   RIP_CONFIG=""
 else
   : "${TAGGER_SCRIPT:=/share/CACHEDEV1_DATA/python-apps/tagger.py}"
+  : "${ORGANIZER_SCRIPT:=/share/CACHEDEV1_DATA/python-apps/music-organize.py}"
 fi
 
 # --- VALIDATION ---
@@ -190,26 +193,35 @@ else
   "$PYTHON_CMD" "$TAGGER_SCRIPT" --genre "$GENRE" $COMPILATION_FLAG $YEAR_ARGS "$ALBUM_PATH"
 fi
 
-# --- STEP 4: MOVE TO AUTO-ADD FOLDER ---
-printf "%s\n" "--> Step 4: Moving album to Apple Music folder..."
-ALBUM_NAME=$(basename "$ALBUM_PATH")
-if [ $LOCAL_MODE -eq 1 ]; then
-  rsync -av "$ALBUM_PATH/" "$NAS_HOST:$AUTO_ADD_DIR/$ALBUM_NAME/"
-  if [ $? -eq 0 ]; then
-    rm -rf "$ALBUM_PATH"
-  else
-    printf "%s\n" "ERROR: Failed to copy album to NAS. Files kept at: $ALBUM_PATH"
-    exit 1
-  fi
-else
-  rsync -av --remove-source-files "$ALBUM_PATH/" "$AUTO_ADD_DIR/$ALBUM_NAME/"
+# --- STEP 4: ORGANIZE INTO THE LIBRARY ---
+printf "%s\n" "--> Step 4: Organizing album into the library..."
+MANIFEST_FILE="/tmp/riptag-organize-manifest.txt"
+rm -f "$MANIFEST_FILE"
+"$PYTHON_CMD" "$ORGANIZER_SCRIPT" \
+  --library-root "$LIBRARY_DIR" \
+  --on-collision replace \
+  --manifest "$MANIFEST_FILE" \
+  "$ALBUM_PATH"
+ORGANIZE_EXIT=$?
+if [ "$ORGANIZE_EXIT" -ne 0 ]; then
+  printf "%s\n" "ERROR: Organizing failed; files left at: $ALBUM_PATH"
+  rm -f "$MANIFEST_FILE"
+  exit 1
 fi
 
 # --- STEP 5: FIX PERMISSIONS ---
-printf "%s\n" "--> Step 5: Setting permissions..."
-if [ $LOCAL_MODE -eq 1 ]; then
-  ESCAPED_PATH=$(printf "%s\n" "$AUTO_ADD_DIR/$ALBUM_NAME" | sed "s/'/'\\\\''/g")
-  ssh "$NAS_HOST" "chmod -R 775 '$ESCAPED_PATH'"
-else
-  chmod -R 775 "$AUTO_ADD_DIR/$ALBUM_NAME"
+# NAS mode: music-organize.py already set permissions on the native filesystem.
+# Local mode: it wrote across the SMB mount, where chmod does not stick — redo
+# it on the NAS side, one organized album folder (and its artist folder) at a time.
+if [ $LOCAL_MODE -eq 1 ] && [ -f "$MANIFEST_FILE" ]; then
+  printf "%s\n" "--> Step 5: Setting permissions on the NAS..."
+  while IFS= read -r album_dir; do
+    [ -z "$album_dir" ] && continue
+    nas_dir=$(printf "%s" "$album_dir" | sed 's#^/Volumes/Media#/share/Media#')
+    artist_dir=$(dirname "$nas_dir")
+    esc_album=$(printf "%s" "$nas_dir" | sed "s/'/'\\\\''/g")
+    esc_artist=$(printf "%s" "$artist_dir" | sed "s/'/'\\\\''/g")
+    ssh "$NAS_HOST" "chmod 775 '$esc_artist'; chmod -R 775 '$esc_album'"
+  done < "$MANIFEST_FILE"
 fi
+rm -f "$MANIFEST_FILE"

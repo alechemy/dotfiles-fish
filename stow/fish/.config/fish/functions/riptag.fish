@@ -1,4 +1,4 @@
-function riptag -d "download, tag, and import an album to Apple Music"
+function riptag -d "download, tag, and organize an album into the music library"
     # --- Configuration ---
     set -l NAS admin@192.168.50.54
     set -l NAS_RIP /share/CACHEDEV1_DATA/python-apps/streamrip_env/bin/rip
@@ -6,6 +6,7 @@ function riptag -d "download, tag, and import an album to Apple Music"
     set -l LOCAL_PYTHON $HOME/Developer/streamrip/.venv/bin/python3
     set -l LOCAL_RIP $HOME/Developer/streamrip/.venv/bin/rip
     set -l TAGGER $HOME/.local/bin/tagger.py
+    set -l ORGANIZER $HOME/.local/bin/music-organize.py
     set -l WORKER $HOME/.local/bin/riptag-worker.sh
     set -l ALLOWED_GENRES Ambient Bluegrass Classical Country Electronic Experimental Folk Hip-Hop Jazz Lo-Fi Mashup Pop R&B Reggae Rock Soundtrack Unknown
 
@@ -192,8 +193,8 @@ function riptag -d "download, tag, and import an album to Apple Music"
             return 1
         end
 
-        # Success — nudge Music.app
-        __riptag_nudge_music
+        # Success
+        __riptag_done
         return 0
     end
 
@@ -294,12 +295,12 @@ for r in json.load(sys.stdin):
         LOCAL_PYTHON="$LOCAL_PYTHON" LOCAL_RIP="$LOCAL_RIP" "$WORKER" --local $compilation_flag $playlist_flag $year_args "$url" "$genre"
     else
         # Deploy scripts to NAS /tmp, then run via SSH
-        scp -q "$TAGGER" "$WORKER" "$NAS":/tmp/
+        scp -q "$TAGGER" "$ORGANIZER" "$WORKER" "$NAS":/tmp/
         if test $status -ne 0
             echo "ERROR: Failed to deploy scripts to NAS."
             return 1
         end
-        ssh -t "$NAS" ". ~/.profile 2>/dev/null; TAGGER_SCRIPT=/tmp/tagger.py bash /tmp/riptag-worker.sh $compilation_flag $playlist_flag $year_args '$url' '$genre'"
+        ssh -t "$NAS" ". ~/.profile 2>/dev/null; TAGGER_SCRIPT=/tmp/tagger.py ORGANIZER_SCRIPT=/tmp/music-organize.py bash /tmp/riptag-worker.sh $compilation_flag $playlist_flag $year_args '$url' '$genre'"
     end
     set -l worker_status $status
 
@@ -318,17 +319,14 @@ for r in json.load(sys.stdin):
         return 1
     end
 
-    # --- Nudge Music.app ---
-    __riptag_nudge_music
+    # --- Done ---
+    __riptag_done
 end
 
-function __riptag_nudge_music
-    echo "--> Triggering Music.app import..."
-    pgrep -xq Music; or open -j -a Music
-    set -l auto_add_dir '/Volumes/Media/Music/Music/Media.localized/Automatically Add to Music.localized'
-    open -g "$auto_add_dir"
+function __riptag_done
     echo ""
-    echo "✅ Done! Album should now be importing into Music.app."
+    echo "✅ Done! Album organized into the library."
+    echo "   Navidrome will pick it up on its next scan."
 end
 
 function __riptag_usage
