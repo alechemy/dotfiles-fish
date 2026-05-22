@@ -48,8 +48,8 @@ on performSmartRule(theRecords)
                         set elapsed to nowEpoch - (stampDate as integer)
                     end try
                     if elapsed > maxWaitSeconds then
-                        log message "Format Boox Comments: timed out waiting for plain text after " & elapsed & "s, advancing with empty comment" info recName
-                        set comment of theRecord to ""
+                        log message "Format Boox Comments: timed out waiting for plain text after " & elapsed & "s, advancing" info recName
+                        my preserveCommentFallback(theRecord)
                         set currentErrors to (get custom meta data for "ErrorCount" from theRecord)
                         if currentErrors is missing value or currentErrors is "" then set currentErrors to 0
                         add custom meta data (currentErrors + 1) for "ErrorCount" to theRecord
@@ -58,7 +58,7 @@ on performSmartRule(theRecords)
                     end if
                 else
                     log message "Format Boox Comments: no RecognizedAt timestamp found, advancing" info recName
-                    set comment of theRecord to ""
+                    my preserveCommentFallback(theRecord)
                     set currentErrors to (get custom meta data for "ErrorCount" from theRecord)
                     if currentErrors is missing value or currentErrors is "" then set currentErrors to 0
                     add custom meta data (currentErrors + 1) for "ErrorCount" to theRecord
@@ -125,3 +125,22 @@ on performSmartRule(theRecords)
         end repeat
     end tell
 end performSmartRule
+
+-- Non-destructive fallback for the timeout / no-RecognizedAt branches above.
+-- Setting `comment` to "" on timeout was wiping comments that prior good passes
+-- had populated (Handle Updated Notebooks resets Commented=0 on re-imports, so
+-- Format runs again and the timeout can fire against an already-formatted note).
+-- New behavior: keep an existing comment as-is. If the comment is empty but
+-- plain text has populated by now (OCR finished just past the wait), use the
+-- raw OCR text so the record still carries content rather than nothing.
+on preserveCommentFallback(theRecord)
+    tell application id "DNtp"
+        set existingComment to comment of theRecord
+        if existingComment is missing value then set existingComment to ""
+        if existingComment is "" then
+            set ptNow to plain text of theRecord
+            if ptNow is missing value then set ptNow to ""
+            if ptNow is not "" then set comment of theRecord to ptNow
+        end if
+    end tell
+end preserveCommentFallback

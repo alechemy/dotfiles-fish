@@ -18,11 +18,15 @@ on performSmartRule(theRecords)
 				set searchQuery to "mdsourcefile==" & recordKey
 				set searchResults to search searchQuery in searchContainer
 
-				-- Look for an existing record with the same SourceFile key
+				-- Look for an existing record with the same SourceFile key. Exclude
+				-- currentRecord itself: a SourceFile-bearing record that re-enters Sweep
+				-- (e.g. during a manual repair) would otherwise match itself and end up
+				-- in the delete-current-record branch below.
 				set existingMatch to missing value
 				if searchResults is not missing value then
 					repeat with matchedRecord in searchResults
-						if (get custom meta data for "SourceFile" from matchedRecord) is recordKey then
+						if (get custom meta data for "SourceFile" from matchedRecord) is recordKey ¬
+							and (uuid of matchedRecord) is not (uuid of currentRecord) then
 							set existingMatch to matchedRecord
 							exit repeat
 						end if
@@ -115,24 +119,42 @@ on performSmartRule(theRecords)
 				end if
 
 				if (existingMatch is not missing value) and (not isCollision) then
-					-- Replace existing: overwrite file at the filesystem level, re-index
-					do shell script "cp " & quoted form of newPath & " " & quoted form of existingPath
-					synchronize record existingMatch
+					-- Short-circuit byte-identical re-exports. The Boox re-emits the same
+					-- notebook PDF on every device sync; without this guard, an unchanged
+					-- notebook tours the full pipeline again (OCR → Format → Enrich →
+					-- Archive → Wiki) for no reason, and each re-tour can race the
+					-- async-OCR / 5-min Format timeout and blank the existing comment.
+					set identicalReimport to false
+					try
+						set newHash to do shell script "shasum -a 256 " & quoted form of newPath & " | cut -d' ' -f1"
+						set oldHash to do shell script "shasum -a 256 " & quoted form of existingPath & " | cut -d' ' -f1"
+						if newHash is oldHash then set identicalReimport to true
+					end try
 
-					-- Reset pipeline flags so Extract Boox Handwritten criteria will match again
-					add custom meta data 0 for "Recognized" to existingMatch
-					add custom meta data 0 for "Commented" to existingMatch
-					add custom meta data 0 for "AIEnriched" to existingMatch
-					add custom meta data 1 for "NameLocked" to existingMatch
-					add custom meta data 1 for "NeedsProcessing" to existingMatch
+					if identicalReimport then
+						log message "Handle Updated Notebooks: identical re-export of " & recordKey & ", discarding new copy" info recName
+						set survivingRecord to existingMatch
+						delete record currentRecord
+					else
+						-- Replace existing: overwrite file at the filesystem level, re-index
+						do shell script "cp " & quoted form of newPath & " " & quoted form of existingPath
+						synchronize record existingMatch
 
-					-- Move back to 00_INBOX so the Extract and Format processing rules can see it
-					set inboxGroup to get record at "/00_INBOX" in targetDatabase
-					move record existingMatch to inboxGroup
+						-- Reset pipeline flags so Extract Boox Handwritten criteria will match again
+						add custom meta data 0 for "Recognized" to existingMatch
+						add custom meta data 0 for "Commented" to existingMatch
+						add custom meta data 0 for "AIEnriched" to existingMatch
+						add custom meta data 1 for "NameLocked" to existingMatch
+						add custom meta data 1 for "NeedsProcessing" to existingMatch
 
-					-- Clean up the temporary import
-					set survivingRecord to existingMatch
-					delete record currentRecord
+						-- Move back to 00_INBOX so the Extract and Format processing rules can see it
+						set inboxGroup to get record at "/00_INBOX" in targetDatabase
+						move record existingMatch to inboxGroup
+
+						-- Clean up the temporary import
+						set survivingRecord to existingMatch
+						delete record currentRecord
+					end if
 				else
 					if isCollision then
 						-- Fork the ID by appending a timestamp so it doesn't collide anymore
