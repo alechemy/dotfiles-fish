@@ -7,8 +7,13 @@
 # this script to /tmp via scp and runs it — no permanent copy on the NAS.
 #
 # Usage:
-#   riptag-worker.sh [--compilation] [--playlist-mode] [--year YYYY] [--local] <url> <genre>
-#   riptag-worker.sh [--compilation] [--playlist-mode] [--year YYYY] [--local] --resume <session-id> <genre>
+#   riptag-worker.sh [--compilation] [--playlist-mode] [--year YYYY] [--replaces PATH] [--local] <url> <genre>
+#   riptag-worker.sh [--compilation] [--playlist-mode] [--year YYYY] [--replaces PATH] [--local] --resume <session-id> <genre>
+#
+# --replaces PATH enables guarded re-download mode: PATH (relative to the library
+# root) is the existing album folder this download should replace. music-organize.py
+# replaces it only if the new download is no worse on track count and quality;
+# otherwise the existing folder is kept and the download discarded.
 #
 # --playlist-mode unifies metadata across the downloaded folder so the tracks
 # are filed as one album: forces albumartist="Various Artists" and embeds the
@@ -50,16 +55,19 @@ LOCAL_MODE=0
 RESUME_ID=""
 URL=""
 GENRE=""
+REPLACES=""
 
 YEAR=""
 
 while [ $# -gt 0 ]; do
   case $1 in
     --compilation) COMPILATION_FLAG="--compilation"; shift ;;
+    --no-compilation) COMPILATION_FLAG="--no-compilation"; shift ;;
     --playlist-mode) PLAYLIST_MODE=1; shift ;;
     --year) YEAR="$2"; shift 2 ;;
     --local) LOCAL_MODE=1; shift ;;
     --resume) RESUME_ID="$2"; shift 2 ;;
+    --replaces) REPLACES="$2"; shift 2 ;;
     *)
       if [ -n "$RESUME_ID" ]; then
         # Resume mode: only genre is positional
@@ -151,7 +159,7 @@ if [ -n "$SESSION_ID" ]; then
   # Save genre + compilation + playlist-mode + year so resume doesn't need them re-specified
   PLAYLIST_FLAG_SAVED=""
   if [ $PLAYLIST_MODE -eq 1 ]; then PLAYLIST_FLAG_SAVED="--playlist-mode"; fi
-  printf "%s\n%s\n%s\n%s\n" "$GENRE" "$COMPILATION_FLAG" "$PLAYLIST_FLAG_SAVED" "$YEAR" > "/tmp/riptag-$SESSION_ID.meta"
+  printf "%s\n%s\n%s\n%s\n%s\n" "$GENRE" "$COMPILATION_FLAG" "$PLAYLIST_FLAG_SAVED" "$YEAR" "$REPLACES" > "/tmp/riptag-$SESSION_ID.meta"
   rm -f "$RIP_LOG_FILE"
   exit 2
 fi
@@ -197,13 +205,30 @@ fi
 printf "%s\n" "--> Step 4: Organizing album into the library..."
 MANIFEST_FILE="/tmp/riptag-organize-manifest.txt"
 rm -f "$MANIFEST_FILE"
-"$PYTHON_CMD" "$ORGANIZER_SCRIPT" \
-  --library-root "$LIBRARY_DIR" \
-  --on-collision replace \
-  --manifest "$MANIFEST_FILE" \
-  "$ALBUM_PATH"
-ORGANIZE_EXIT=$?
-if [ "$ORGANIZE_EXIT" -ne 0 ]; then
+if [ -n "$REPLACES" ]; then
+  printf "%s\n" "    Re-download mode: replaces '$REPLACES' only if the new download is no worse."
+  "$PYTHON_CMD" "$ORGANIZER_SCRIPT" \
+    --library-root "$LIBRARY_DIR" \
+    --on-collision replace \
+    --manifest "$MANIFEST_FILE" \
+    --replaces "$REPLACES" \
+    "$ALBUM_PATH"
+  ORGANIZE_EXIT=$?
+else
+  "$PYTHON_CMD" "$ORGANIZER_SCRIPT" \
+    --library-root "$LIBRARY_DIR" \
+    --on-collision replace \
+    --manifest "$MANIFEST_FILE" \
+    "$ALBUM_PATH"
+  ORGANIZE_EXIT=$?
+fi
+if [ "$ORGANIZE_EXIT" -eq 3 ]; then
+  # Guard kept the existing library copy; music-organize.py discarded the download.
+  # Exit 3 propagates so riptag reports "kept" rather than "organized".
+  printf "%s\n" "--> Kept the existing library copy; the new download was not an improvement."
+  rm -f "$MANIFEST_FILE"
+  exit 3
+elif [ "$ORGANIZE_EXIT" -ne 0 ]; then
   printf "%s\n" "ERROR: Organizing failed; files left at: $ALBUM_PATH"
   rm -f "$MANIFEST_FILE"
   exit 1

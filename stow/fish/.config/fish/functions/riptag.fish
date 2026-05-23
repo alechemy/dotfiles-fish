@@ -20,6 +20,7 @@ function riptag -d "download, tag, and organize an album into the music library"
     set -l resume_id
     set -l url_or_query
     set -l genre
+    set -l replaces
 
     for arg in $argv
         switch $arg
@@ -27,7 +28,7 @@ function riptag -d "download, tag, and organize an album into the music library"
                 set compilation_flag --compilation
                 set compilation_explicit 1
             case '--compilation=false'
-                set compilation_flag
+                set compilation_flag --no-compilation
                 set compilation_explicit 1
             case '--year=*'
                 set year (string replace -- '--year=' '' $arg)
@@ -37,6 +38,8 @@ function riptag -d "download, tag, and organize an album into the music library"
             case '--resume=*'
                 set resume_id (string replace -- '--resume=' '' $arg)
                 set local_mode 1
+            case '--replaces=*'
+                set replaces (string replace -- '--replaces=' '' $arg)
             case '-h' '--help'
                 __riptag_usage
                 return 0
@@ -78,6 +81,9 @@ function riptag -d "download, tag, and organize an album into the music library"
             end
             if test $year_explicit -eq 0 -a (count $meta_lines) -ge 4 -a -n "$meta_lines[4]"
                 set year "$meta_lines[4]"
+            end
+            if test -z "$replaces" -a (count $meta_lines) -ge 5 -a -n "$meta_lines[5]"
+                set replaces "$meta_lines[5]"
             end
         else
             # No meta file — treat positional arg as genre
@@ -133,13 +139,10 @@ function riptag -d "download, tag, and organize an album into the music library"
         return 1
     end
 
-    # --- Auto-set compilation for Soundtrack ---
-    if test "$genre" = Soundtrack -a $compilation_explicit -eq 0
-        set compilation_flag --compilation
-        echo "ℹ️  Auto-setting compilation flag for Soundtrack genre"
-    end
-
     # --- Auto-detect playlist URLs ---
+    # (Soundtrack auto-compilation now lives in tagger.py, which can check the
+    # actual downloaded tracks — a single-artist soundtrack like Bo Burnham's
+    # INSIDE shouldn't be marked compilation just because the genre is Soundtrack.)
     if string match -q '*/playlist/*' "$url_or_query"
         set playlist_flag --playlist-mode
         if test $compilation_explicit -eq 0
@@ -159,6 +162,17 @@ function riptag -d "download, tag, and organize an album into the music library"
         set year_args --year $year
     end
 
+    # --- Build replaces args (re-download guard; passed to worker if set) ---
+    # $replaces_args is a list for direct worker calls; $replaces_remote is a
+    # single shell-escaped string spliced into the NAS-mode ssh command.
+    set -l replaces_args
+    set -l replaces_remote
+    if test -n "$replaces"
+        set replaces_args --replaces "$replaces"
+        set -l esc (string replace -a "'" "'\\''" "$replaces")
+        set replaces_remote "--replaces '$esc'"
+    end
+
     # --- Resume mode: skip URL resolution, go straight to worker ---
     if test -n "$resume_id"
         echo "🔄 Resuming session $resume_id"
@@ -175,7 +189,7 @@ function riptag -d "download, tag, and organize an album into the music library"
         echo "   Mode: local (VPN resume)"
         echo ""
 
-        LOCAL_PYTHON="$LOCAL_PYTHON" LOCAL_RIP="$LOCAL_RIP" "$WORKER" --local --resume "$resume_id" $compilation_flag $playlist_flag $year_args "$genre"
+        LOCAL_PYTHON="$LOCAL_PYTHON" LOCAL_RIP="$LOCAL_RIP" "$WORKER" --local --resume "$resume_id" $compilation_flag $playlist_flag $year_args $replaces_args "$genre"
         set -l worker_status $status
 
         if test $worker_status -eq 2
@@ -187,6 +201,10 @@ function riptag -d "download, tag, and organize an album into the music library"
                 echo "  riptag --resume=$sid"
             end
             return 1
+        else if test $worker_status -eq 3
+            echo ""
+            echo "↩️  Kept the existing library copy — the new download wasn't an improvement."
+            return 0
         else if test $worker_status -ne 0
             echo ""
             echo "❌ Something went wrong."
@@ -292,7 +310,7 @@ for r in json.load(sys.stdin):
 
     # --- Run the worker ---
     if test $local_mode -eq 1
-        LOCAL_PYTHON="$LOCAL_PYTHON" LOCAL_RIP="$LOCAL_RIP" "$WORKER" --local $compilation_flag $playlist_flag $year_args "$url" "$genre"
+        LOCAL_PYTHON="$LOCAL_PYTHON" LOCAL_RIP="$LOCAL_RIP" "$WORKER" --local $compilation_flag $playlist_flag $year_args $replaces_args "$url" "$genre"
     else
         # Deploy scripts to NAS /tmp, then run via SSH
         scp -q "$TAGGER" "$ORGANIZER" "$WORKER" "$NAS":/tmp/
@@ -300,7 +318,7 @@ for r in json.load(sys.stdin):
             echo "ERROR: Failed to deploy scripts to NAS."
             return 1
         end
-        ssh -t "$NAS" ". ~/.profile 2>/dev/null; TAGGER_SCRIPT=/tmp/tagger.py ORGANIZER_SCRIPT=/tmp/music-organize.py bash /tmp/riptag-worker.sh $compilation_flag $playlist_flag $year_args '$url' '$genre'"
+        ssh -t "$NAS" ". ~/.profile 2>/dev/null; TAGGER_SCRIPT=/tmp/tagger.py ORGANIZER_SCRIPT=/tmp/music-organize.py bash /tmp/riptag-worker.sh $compilation_flag $playlist_flag $year_args $replaces_remote '$url' '$genre'"
     end
     set -l worker_status $status
 
@@ -313,6 +331,10 @@ for r in json.load(sys.stdin):
                 echo "  riptag --resume=$sid"
         end
         return 1
+    else if test $worker_status -eq 3
+        echo ""
+        echo "↩️  Kept the existing library copy — the new download wasn't an improvement."
+        return 0
     else if test $worker_status -ne 0
         echo ""
         echo "❌ Something went wrong."
@@ -330,14 +352,18 @@ function __riptag_done
 end
 
 function __riptag_usage
-    echo "Usage: riptag [--compilation|--compilation=false] [--year=YYYY] [--local] <url|search_query> [genre]"
-    echo "       riptag --resume=<session-id> [--compilation|--compilation=false] [--year=YYYY] [genre]"
+    echo "Usage: riptag [--compilation|--compilation=false] [--year=YYYY] [--replaces=PATH] [--local] <url|search_query> [genre]"
+    echo "       riptag --resume=<session-id> [--compilation|--compilation=false] [--year=YYYY] [--replaces=PATH] [genre]"
     echo ""
     echo "Options:"
     echo "  --compilation          Mark as compilation album"
     echo "  --compilation=false    Explicitly not a compilation"
     echo "  --year=YYYY            Set the same year on every track"
     echo "                         (auto-defaults to current year for playlist URLs)"
+    echo "  --replaces=PATH        Re-download guard: PATH (relative to the library"
+    echo "                         root) is the existing album folder to replace;"
+    echo "                         the replacement happens only if the new download"
+    echo "                         is no worse on track count and quality"
     echo "  --local                Download locally instead of on NAS"
     echo "  --resume=<id>          Resume a failed session (implies --local)"
     echo ""

@@ -30,6 +30,7 @@ import os
 import re
 import shutil
 import sys
+from datetime import datetime
 
 from mutagen.flac import FLAC
 from mutagen.mp3 import MP3
@@ -211,8 +212,94 @@ def chmod_quiet(path, mode):
         pass
 
 
+# --------------------------------------------------- quality compare + archive
+def track_quality(path):
+    """Comparable quality for one file (bigger tuple = better).
+
+    Lossless files rank (1, depth, rate, 0); lossy rank (0, 0, 0, bitrate) — so
+    any lossless beats any lossy, and the album is judged by its worst track."""
+    ext = os.path.splitext(path)[1].lower()
+    try:
+        if ext == ".flac":
+            i = FLAC(path).info
+            return (1, getattr(i, "bits_per_sample", 0) or 0, i.sample_rate or 0, 0)
+        if ext == ".m4a":
+            i = MP4(path).info
+            if (getattr(i, "codec", "") or "") == "alac":
+                return (1, getattr(i, "bits_per_sample", 0) or 0, i.sample_rate or 0, 0)
+            return (0, 0, 0, i.bitrate or 0)
+        if ext == ".mp3":
+            return (0, 0, 0, MP3(path).info.bitrate or 0)
+    except Exception:
+        return None
+    return None
+
+
+def album_quality(files):
+    """Worst track quality across an album, or None if nothing is readable."""
+    quals = [q for q in (track_quality(f) for f in files) if q is not None]
+    return min(quals) if quals else None
+
+
+def fmt_quality(q):
+    if q is None:
+        return "unknown"
+    if q[0]:
+        return f"{q[1] or '?'}-bit/{(q[2] or 0) // 1000 or '?'}kHz lossless"
+    return f"{(q[3] or 0) // 1000}kbps lossy"
+
+
+def evaluate_replacement(new_files, existing_dir):
+    """Decide whether a staged download should replace an existing album folder.
+
+    Returns (ok, reason). The download wins only if it has at least the track
+    count and at least the quality (worst-track basis) of the existing folder."""
+    existing_files = list(iter_audio(existing_dir))
+    new_n, existing_n = len(new_files), len(existing_files)
+    new_q, existing_q = album_quality(new_files), album_quality(existing_files)
+    problems = []
+    if new_n < existing_n:
+        problems.append(f"fewer tracks ({new_n} new vs {existing_n} existing)")
+    if new_q is not None and existing_q is not None and new_q < existing_q:
+        problems.append(
+            f"lower quality ({fmt_quality(new_q)} new vs {fmt_quality(existing_q)} existing)"
+        )
+    if problems:
+        return False, "; ".join(problems)
+    return True, f"{new_n} tracks vs {existing_n}, quality {fmt_quality(new_q)}"
+
+
+def archive_folder(path, archive_root, dry_run):
+    """Move an album folder into archive_root/<date>/<artist>/<album>; return the dest."""
+    dest = unique_path(
+        os.path.join(
+            archive_root,
+            datetime.now().strftime("%Y-%m-%d"),
+            os.path.basename(os.path.dirname(path)),
+            os.path.basename(path),
+        )
+    )
+    if not dry_run:
+        os.makedirs(os.path.dirname(dest), exist_ok=True)
+        shutil.move(path, dest)
+    return dest
+
+
+def log_decision(archive_root, line, dry_run):
+    """Append one timestamped replace/keep decision to the archive's decisions.log."""
+    if dry_run or not archive_root:
+        return
+    try:
+        os.makedirs(archive_root, exist_ok=True)
+        with open(os.path.join(archive_root, "decisions.log"), "a", encoding="utf-8") as f:
+            f.write(f"{datetime.now().isoformat(timespec='seconds')}  {line}\n")
+    except OSError as e:
+        print(f"  -> WARNING: could not write decision log: {e}", file=sys.stderr)
+
+
 # ----------------------------------------------------------------- organizing
-def organize_source(source, library_root, policy, dry_run, manifest, stats):
+def organize_source(source, library_root, policy, dry_run, manifest, stats,
+                    replaces=None, archive_root=None):
     is_dir = os.path.isdir(source)
     if is_dir:
         audio = list(iter_audio(source))
@@ -242,9 +329,36 @@ def organize_source(source, library_root, policy, dry_run, manifest, stats):
 
     album_dirs = sorted({d for _, d, _ in plan})
 
+    # guarded replacement (re-download mode): compare the staged download
+    # against the known existing folder and keep it untouched unless the
+    # download wins on both track count and quality.
+    guard_archived = None
+    if replaces:
+        existing_dir = os.path.join(library_root, replaces)
+        if os.path.isdir(existing_dir):
+            ok, reason = evaluate_replacement([f for f, _, _ in plan], existing_dir)
+            if not ok:
+                print(f"  -> KEPT EXISTING: {replaces} ({reason})")
+                log_decision(archive_root, f"KEPT    {replaces} :: {reason}", dry_run)
+                stats["kept"].append(source)
+                if not dry_run:
+                    shutil.rmtree(source, ignore_errors=True)
+                return
+            arch = archive_folder(existing_dir, archive_root, dry_run)
+            guard_archived = os.path.abspath(existing_dir)
+            print(f"  -> REPLACE OK: {replaces} ({reason})")
+            print(f"  -> archived existing album: {existing_dir} -> {arch}")
+            log_decision(
+                archive_root,
+                f"REPLACE {replaces} :: {reason} :: archived -> {arch}",
+                dry_run,
+            )
+
     # album-level collision handling
     skipped = set()
     for d in album_dirs:
+        if guard_archived and os.path.abspath(d) == guard_archived:
+            continue  # already archived above by the re-download guard
         if not os.path.exists(d):
             continue
         if policy == "replace":
@@ -257,9 +371,13 @@ def organize_source(source, library_root, policy, dry_run, manifest, stats):
                 )
                 skipped.add(d)
                 continue
-            print(f"  -> replacing existing album: {d}")
-            if not dry_run:
-                shutil.rmtree(d)
+            if archive_root:
+                arch = archive_folder(d, archive_root, dry_run)
+                print(f"  -> archived existing album: {d} -> {arch}")
+            else:
+                print(f"  -> replacing existing album: {d}")
+                if not dry_run:
+                    shutil.rmtree(d)
         elif policy == "skip":
             print(f"  -> skipping, album already exists: {d}")
             skipped.add(d)
@@ -362,6 +480,20 @@ def main():
         "(one per line) for downstream permission fixes.",
     )
     parser.add_argument(
+        "--replaces",
+        help="Path (relative to --library-root) of an existing album folder this "
+        "download should replace. The replacement happens only if the new download "
+        "has at least the track count AND at least the quality of the existing "
+        "folder; otherwise the existing folder is kept untouched, the download is "
+        "discarded, and the script exits 3. The replaced folder is archived (see "
+        "--archive-dir), never deleted.",
+    )
+    parser.add_argument(
+        "--archive-dir",
+        help="Where replaced album folders are archived (default: a 'Music-Replaced' "
+        "folder beside --library-root). Only used when --replaces is given.",
+    )
+    parser.add_argument(
         "sources", nargs="+", help="Album folders or audio files to organize."
     )
     args = parser.parse_args()
@@ -373,7 +505,15 @@ def main():
         )
         sys.exit(1)
 
-    stats = {"moved": 0, "failed": []}
+    archive_root = None
+    if args.replaces or args.archive_dir:
+        archive_root = (
+            os.path.abspath(os.path.expanduser(args.archive_dir))
+            if args.archive_dir
+            else os.path.join(os.path.dirname(library_root), "Music-Replaced")
+        )
+
+    stats = {"moved": 0, "failed": [], "kept": []}
     manifest = set()
     for src in args.sources:
         src = os.path.abspath(os.path.expanduser(src))
@@ -383,7 +523,8 @@ def main():
             continue
         print(f"Organizing: {src}")
         organize_source(
-            src, library_root, args.on_collision, args.dry_run, manifest, stats
+            src, library_root, args.on_collision, args.dry_run, manifest, stats,
+            replaces=args.replaces, archive_root=archive_root,
         )
 
     if args.manifest and not args.dry_run:
@@ -398,6 +539,12 @@ def main():
             file=sys.stderr,
         )
         sys.exit(1)
+    if stats["kept"]:
+        print(
+            f"{len(stats['kept'])} download(s) rejected by the replacement guard; "
+            "existing library copy kept."
+        )
+        sys.exit(3)
 
 
 if __name__ == "__main__":
