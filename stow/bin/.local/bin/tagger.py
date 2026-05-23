@@ -8,6 +8,7 @@
 
 import argparse
 import os
+import re
 import sys
 
 from mutagen.mp4 import MP4, MP4Cover
@@ -37,10 +38,49 @@ def first_embedded_cover(paths):
     return None
 
 
+_FEAT_RE = re.compile(r"\s+(?:feat\.?|ft\.?|featuring|with)\s+", re.I)
+
+
+def _norm_artist(s):
+    """Strip 'feat./featuring/with' suffixes; lowercase; collapse whitespace."""
+    return _FEAT_RE.split(str(s or ""), maxsplit=1)[0].strip().lower()
+
+
+def _read_artists(filepath):
+    """Return (album_artist_norm, track_artist_norm) for one m4a, either may be None."""
+    try:
+        a = MP4(filepath)
+    except Exception:
+        return (None, None)
+    aa = a.get("aART"); ta = a.get("\xa9ART")
+    return (_norm_artist(aa[0]) if aa else None,
+            _norm_artist(ta[0]) if ta else None)
+
+
+def auto_compilation(paths):
+    """True if the album looks like a compilation.
+
+    Two signals, in order:
+      1. If the album-level artist (aART) is "Various Artists", it's a compilation
+         — Qobuz uses this label even when every track's per-track artist is the
+         same composer (e.g. Rob Simonsen's *Spectacular Now* OST has aART
+         "Various Artists" but \\xa9ART "Rob Simonsen" on every track).
+      2. Otherwise, count distinct per-track artists. Multi-artist → compilation;
+         single-artist → not (e.g. Bo Burnham's INSIDE)."""
+    aart, tart = set(), set()
+    for fp in iter_m4as(paths):
+        aa, ta = _read_artists(fp)
+        if aa: aart.add(aa)
+        if ta: tart.add(ta)
+    if any(a == "various artists" for a in aart):
+        return True
+    return len(tart) > 1
+
+
 def process_file(
     filepath,
     genre,
-    is_compilation=False,
+    is_compilation=None,
     album_artist=None,
     album=None,
     year=None,
@@ -56,9 +96,13 @@ def process_file(
         audio["\xa9gen"] = genre
         actions.append("genre")
 
-        if is_compilation:
+        if is_compilation is True:
             audio["cpil"] = True  # bare bool: mutagen renders a list as truthy
-            actions.append("compilation")
+            actions.append("compilation=true")
+        elif is_compilation is False:
+            audio["cpil"] = False
+            actions.append("compilation=false")
+        # is_compilation None: leave cpil at whatever the source set it to
 
         if album_artist:
             audio["aART"] = album_artist
@@ -93,10 +137,14 @@ def process_file(
 
 parser = argparse.ArgumentParser(description="A simple M4A genre and tag editor.")
 parser.add_argument("--genre", required=True, help="The genre to set for the files.")
-parser.add_argument(
-    "--compilation",
-    action="store_true",
-    help="Mark the files as part of a compilation album.",
+comp_group = parser.add_mutually_exclusive_group()
+comp_group.add_argument(
+    "--compilation", dest="compilation", action="store_const", const=True, default=None,
+    help="Force compilation flag on (cpil=True).",
+)
+comp_group.add_argument(
+    "--no-compilation", dest="compilation", action="store_const", const=False,
+    help="Force compilation flag off (cpil=False).",
 )
 parser.add_argument("--album-artist", dest="album_artist",
                     help="Override album artist (aART) on every track.")
@@ -123,9 +171,20 @@ if args.unify_cover:
         fmt = "JPEG" if unified_cover.imageformat == MP4Cover.FORMAT_JPEG else "PNG"
         print(f"Unifying cover from first track ({len(bytes(unified_cover))} bytes, {fmt}).")
 
+# Auto-detect compilation for Soundtrack genre when not explicitly set.
+# Single-artist soundtracks (e.g. Bo Burnham's INSIDE) are not compilations;
+# multi-artist soundtracks (e.g. Lost in Translation OST) are.
+final_compilation = args.compilation
+if args.compilation is None and args.genre == "Soundtrack":
+    final_compilation = auto_compilation(args.paths)
+    print(f"Auto-detected Soundtrack compilation = {final_compilation} "
+          f"(from per-track artist tags)")
+
 extras = []
-if args.compilation:
-    extras.append("compilation")
+if final_compilation is True:
+    extras.append("compilation=true")
+elif final_compilation is False:
+    extras.append("compilation=false")
 if args.album_artist:
     extras.append(f"albumartist='{args.album_artist}'")
 if args.album:
@@ -148,7 +207,7 @@ for fp in iter_m4as(args.paths):
     process_file(
         fp,
         args.genre,
-        is_compilation=args.compilation,
+        is_compilation=final_compilation,
         album_artist=args.album_artist,
         album=args.album,
         year=args.year,

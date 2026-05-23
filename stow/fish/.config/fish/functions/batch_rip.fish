@@ -104,7 +104,8 @@ with open(retry_path, 'w') as f:
         return 1
     end
 
-    # Parse JSON into tab-separated lines: url\tgenre\tcompilation\tartist\ttitle\tsessionId
+    # Parse JSON into tab-separated lines:
+    #   url\tgenre\tcompilation\tartist\ttitle\tsessionId\texisting_path
     # Entries with "skip": true are excluded
     set -l entries (python3 -c "
 import json, sys
@@ -116,10 +117,13 @@ for e in data:
     parts = [
         e.get('url', ''),
         e.get('genre', ''),
-        'true' if e.get('compilation') else 'false',
+        ('true' if e.get('compilation') is True
+         else 'false' if e.get('compilation') is False
+         else ''),
         e.get('artist', ''),
         e.get('title', ''),
         e.get('sessionId', ''),
+        e.get('existing_path', ''),
     ]
     print('\t'.join(parts))
 " "$input_file")
@@ -159,6 +163,7 @@ for e in data:
         set -l artist $fields[4]
         set -l title $fields[5]
         set -l session_id $fields[6]
+        set -l existing_path $fields[7]
 
         if test -z "$url" -o -z "$genre"
             _log_error "Missing url or genre in entry $current"
@@ -182,14 +187,23 @@ for e in data:
             set riptag_args "--resume=$session_id"
             if test "$compilation" = true
                 set -a riptag_args --compilation
+            else if test "$compilation" = false
+                set -a riptag_args --compilation=false
             end
             set -a riptag_args $genre
         else
             set riptag_args $local_flag
             if test "$compilation" = true
                 set -a riptag_args --compilation
+            else if test "$compilation" = false
+                set -a riptag_args --compilation=false
             end
             set -a riptag_args $url $genre
+        end
+
+        # Re-download guard: replace one specific existing library folder, safely
+        if test -n "$existing_path"
+            set -a riptag_args "--replaces=$existing_path"
         end
 
         echo -en $yellow"[$current/$total]"$nc" $display ($genre) "
