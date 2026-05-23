@@ -34,6 +34,10 @@ brew "imagemagick"
 brew "jq"
 brew "jscpd"
 brew "lazygit"
+# Pillow (built from source in ~/Developer/streamrip/.venv) dynamically links these
+# at runtime; pinned here so `brew autoremove` can't drop them and break `rip`.
+brew "libimagequant"
+brew "libraqm"
 brew "m1ddc"
 brew "markdownlint-cli"
 brew "mas"
