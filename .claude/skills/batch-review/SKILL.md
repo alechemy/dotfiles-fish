@@ -1,21 +1,27 @@
 ---
 name: batch-review
 description: Review albums from the Qobuz batch-rip queue and build a corrected downloads queue. Reads raw input.json, verifies URLs and explicit status, appends validated entries to downloads.json.
-argument-hint: [count=10]
+argument-hint: [count=10] [workdir=batch-rip-work]
 ---
 
 # Batch Review
 
-You are processing albums from `batch-rip-work/input.json` into a corrected download queue at `batch-rip-work/downloads.json`.
+You are processing albums from a batch-rip queue: reading `<workdir>/input.json` and building a corrected download queue at `<workdir>/downloads.json`.
 
-Parse arguments from: **$ARGUMENTS** (default count is 10 if not specified).
+Parse arguments from **$ARGUMENTS**:
+
+- A bare integer is the **count** — how many unprocessed albums to review this run (default 10).
+- Any other token is the **workdir** — the directory (relative to the repo root) holding the queue files (default `batch-rip-work`). For the re-download queue, pass `batch-rip-work/redownload`.
+
+Every file path below is relative to `<workdir>`.
 
 ## Context
 
-- **Raw input (read-only):** `batch-rip-work/input.json` — JSON array of `{url, genre, artist, title, compilation?}` objects. Do NOT modify this file.
-- **Output queue:** `batch-rip-work/downloads.json` — validated/corrected entries ready for `batch_rip`. You append to this file. Create it as `[]` if it doesn't exist.
-- **Reviewed log:** `batch-rip-work/reviewed.json` — flat JSON array of album IDs the skill has already processed (any outcome). You append to this file. Create it as `[]` if it doesn't exist.
-- **Rejection log:** `batch-rip-work/not_found_library.md` — human-readable log of albums that can't be downloaded. You append to this file.
+- **Raw input (read-only):** `<workdir>/input.json` — JSON array of `{url, genre, artist, title, compilation?, existing_path?}` objects. Do NOT modify this file.
+  - `existing_path?` — when present, the entry is a **guarded re-download**: the value is the library folder this download will replace, and the import guard (`music-organize.py --replaces`) compares the real download against that folder, keeping whichever is better. Carry this field through unchanged to `downloads.json`.
+- **Output queue:** `<workdir>/downloads.json` — validated/corrected entries ready for `batch_rip`. You append to this file. Create it as `[]` if it doesn't exist.
+- **Reviewed log:** `<workdir>/reviewed.json` — flat JSON array of album IDs the skill has already processed (any outcome). You append to this file. Create it as `[]` if it doesn't exist.
+- **Rejection log:** `<workdir>/not_found_library.md` — human-readable log of albums that can't be downloaded. You append to this file.
 - **Search command:** `fish -c 'rip search -o <output.json> -n <count> qobuz album "<query>"'` (must use `-o` flag; must be invoked via `fish -c` as `rip` is a fish function)
 
 ## Determining what to process
@@ -63,17 +69,23 @@ Fetch all N albums in parallel (batches of 5–10 curl calls). Then for each:
 
 ### Step 2: Verify identity
 
-- Does the response match the expected artist and title?
-- If **not a match** (wrong album, 404, region-locked, etc.):
-  - Search for the correct album using `rip search` or the search API.
-  - If found → **action:** use the corrected URL in the output.
+Does the response match the expected artist and title? Use a **lenient** check designed to pass harmless display differences (curly vs straight quotes, "&" vs "and", "Pt." vs "Part", "Various Artists" vs a named composer, abbreviated titles like "NFR!" vs "Norman Fucking Rockwell!", Japanese vs romanised artist names, etc.) while still catching genuinely wrong URLs.
+
+The rule: split title and artist into significant words — case-insensitive, treating whitespace, dashes, slashes, underscores, parentheses, and CJK punctuation like the corner brackets `「」` and middle-dot `・` as word boundaries; drop trivial stopwords (*the, a, an, and, &, of, in, on, at, to, for*). It's a **match** when the input and the response share at least one significant word on **either** the title or the artist. For compilation entries, only check the title (the artist is often "Various Artists" on one side and the credited composer on the other). Only flag as a mismatch when *both* artist and title have no meaningful overlap with the Qobuz response — that's the case that catches genuinely wrong URLs (e.g. an input "Beach Boys / Pet Sounds" returning "John Wilson Orchestra / That's Entertainment" shares no significant words on either axis).
+
+- If **not a match**:
+  - Search for the correct album using `rip search` (`<artist> <title>`).
+  - For each candidate, run the same lenient check. Take the first that matches.
+  - If found → **action:** use the corrected URL in the output (status `url-swap`).
   - If not found → **action:** log to `not_found_library.md`, omit from output.
 
 ### Step 3: Check streamability
 
 - The album-level `streamable` flag is unreliable — check `tracks[].streamable` for each track.
-- If **any tracks are not streamable** → **action:** log to `not_found_library.md` under "## Partially streamable", omit from output.
-- Do not proceed to the explicit/clean check for partial albums.
+- Count the streamable tracks and note the count in the table either way (e.g. "12/14 streamable").
+- If **some tracks are not streamable**, the action depends on whether the entry has an `existing_path`:
+  - **Has `existing_path`** (a guarded re-download): **keep it** in the output — status stays `ready`/`url-swap`, just note the streamable count. The import guard compares the real download against the existing library copy and keeps whichever is better, so a partially-streamable release is safe here and was already accounted for upstream.
+  - **No `existing_path`** (a fresh download with nothing to fall back on): **action:** log to `not_found_library.md` under "## Partially streamable", omit from output, and do not proceed to the explicit/clean check.
 
 ### Step 4: Check explicit/clean status
 
@@ -106,7 +118,7 @@ Qobuz URL column: always include the full bare URL (e.g. `https://play.qobuz.com
 
 After showing the table, immediately apply changes without prompting:
 
-1. **Append validated entries to `downloads.json`**: for each album with status `ready` or `url-swap`, append `{url, genre, artist, title}` (include `compilation: true` if set) to the array. Use the corrected URL where applicable.
+1. **Append validated entries to `downloads.json`**: for each album with status `ready` or `url-swap`, append `{url, genre, artist, title}` to the array — include `compilation: true` if set, and carry `existing_path` through unchanged if the input entry had it. Use the corrected URL where applicable (a `url-swap` changes only `url`; `existing_path` is unaffected since it refers to the library folder, not the Qobuz release).
 
 2. **Append to `not_found_library.md`**: log any `skip` or `partial` albums under the appropriate heading.
 
