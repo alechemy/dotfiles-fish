@@ -13,6 +13,19 @@
 #
 # Uses AppleScript to drive the user's running Chromium instance.
 # No CDP, no Playwright, no profile modification.
+#
+# Trigger mechanism: after each URL loads, AppleScript sends ⌘D to the
+# frontmost window. SingleFile must be bound to ⌘D (Save page) in
+# chrome://extensions/shortcuts, which overrides Chromium's default
+# "Add bookmark" binding — Chromium's extension-shortcut UI doesn't
+# accept ⌘⌥+letter combos, so ⌘D is the cleanest option. If you
+# rebind the extension shortcut, update the keystroke line below.
+#
+# A URL-marker / SingleFile auto-save approach was tried and abandoned:
+# fragments don't survive HTTPS-upgrade or canonicalization redirects on
+# many content sites, and query-param markers have a smaller but still
+# real version of the same problem. The keystroke path is brittle in
+# that it requires Chromium to be frontmost, but it's redirect-proof.
 
 set -euo pipefail
 
@@ -51,15 +64,60 @@ fi
 
 # --- Helpers ---
 
+# Strip scheme + query/fragment so HTTPS-upgrade and query canonicalization
+# don't break the content match below (see the script header for why URL
+# markers in the launched URL itself were abandoned).
+url_signature() {
+    local u="$1"
+    u="${u#http://}"
+    u="${u#https://}"
+    u="${u%%[?#]*}"
+    printf '%s' "$u"
+}
+
+# Pick the SingleFile-produced HTML that corresponds to $target_url.
+#
+# The original implementation just took the newest .html in $OUTPUT_DIR with
+# `find -newer "$marker" -print -quit`. That races: parallel
+# capture-bookmarks-batch invocations or a manual browser save during a batch
+# run will both deposit files into the same directory, and the wrong one
+# would get returned and then handed to ingest-singlefile-html.py with a
+# bookmark UUID — silently filing unrelated content under a tracked URL.
+#
+# Now: of all .html files newer than $marker, pick the one whose first 16 KB
+# contains the URL's host+path signature (SingleFile embeds the source URL
+# near the top of the saved file). Return failure if zero or multiple match
+# — better to surface a capture failure to the caller than to commit the
+# wrong document.
 wait_for_new_file() {
-    local marker="$1"
+    local marker="$1" target_url="$2"
+    local sig
+    sig=$(url_signature "$target_url")
     local end=$((SECONDS + timeout))
 
     while [[ $SECONDS -lt $end ]]; do
-        new_file=$(find -L "$OUTPUT_DIR" -maxdepth 1 -name "*.html" -newer "$marker" -print -quit 2>/dev/null || true)
-        if [[ -n "$new_file" ]]; then
-            echo "$new_file"
-            return 0
+        local candidates=()
+        while IFS= read -r f; do
+            [[ -n "$f" ]] && candidates+=("$f")
+        done < <(find -L "$OUTPUT_DIR" -maxdepth 1 -name "*.html" -newer "$marker" 2>/dev/null)
+
+        if (( ${#candidates[@]} > 0 )); then
+            local matches=()
+            for cand in "${candidates[@]}"; do
+                if head -c 16384 "$cand" 2>/dev/null | grep -qF -- "$sig"; then
+                    matches+=("$cand")
+                fi
+            done
+            if (( ${#matches[@]} == 1 )); then
+                echo "${matches[0]}"
+                return 0
+            fi
+            if (( ${#matches[@]} > 1 )); then
+                echo "wait_for_new_file: ${#matches[@]} files match '$sig' in $OUTPUT_DIR; refusing to guess" >&2
+                printf '  %s\n' "${matches[@]}" >&2
+                return 1
+            fi
+            # Zero matches yet — file may still be writing its head, keep polling.
         fi
         sleep 1
     done
@@ -109,14 +167,25 @@ APPLESCRIPT
     # Create a timestamp marker for detecting new files
     marker=$(mktemp /tmp/sf-marker.XXXXXX)
 
-    # Trigger SingleFile via Cmd+D
-    osascript -e 'tell application "System Events" to keystroke "d" using command down'
+    # Trigger SingleFile via ⌘D (must be bound in chrome://extensions/shortcuts).
+    # `keystroke` always targets the frontmost app — `tell process "Chromium"`
+    # doesn't change that, it only scopes UI-element queries. So we re-activate
+    # Chromium immediately before sending the keystroke; without the activate,
+    # if the user clicked away during the SETTLE_SECONDS sleep above (5s by
+    # default) the ⌘D fires Finder's Duplicate or Safari's Bookmark instead.
+    # The short delay gives macOS time to actually shift focus before the
+    # keystroke event is dispatched.
+    osascript <<'APPLESCRIPT'
+tell application "Chromium" to activate
+delay 0.15
+tell application "System Events" to keystroke "d" using command down
+APPLESCRIPT
 
-    # Wait for the output file
-    if new_file=$(wait_for_new_file "$marker"); then
+    # Wait for the output file, identified by URL signature in its content.
+    if new_file=$(wait_for_new_file "$marker" "$url"); then
         echo "$new_file"
     else
-        echo -e "FAIL\t$url\tTimed out waiting for SingleFile download after ${timeout}s" >&2
+        echo -e "FAIL\t$url\tNo SingleFile output matching URL after ${timeout}s" >&2
     fi
 
     rm -f "$marker"
