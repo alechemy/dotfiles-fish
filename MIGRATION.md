@@ -84,7 +84,7 @@ These live outside the dotfiles repo. Copy via Time Machine, AirDrop, or `scp`.
   cd ~/.dotfiles/stow && stow --restow --no-folding --ignore='.DS_Store' --target="$HOME" navidrome
   ```
 
-- [ ] **Navidrome Keychain entry.** Both the `feishin` sketchybar plugin and `play-random-album.sh` look up the Navidrome password via macOS Keychain. Run: `security add-generic-password -s 'Navidrome' -a 'alec' -w '<password>' -U`. Without this, the sketchybar plugin shows "No keychain" and the play-random-album hotkey fails silently.
+- [ ] **Navidrome Keychain entry.** The `feishin` sketchybar plugin looks up the Navidrome password via macOS Keychain. Run: `security add-generic-password -s 'Navidrome' -a 'alec' -w '<password>' -U`. Without this, the sketchybar plugin shows "No keychain".
 - [ ] If you commit-sign via SSH (recommended given the 1Password agent): `git config --global user.signingkey "<your ssh pubkey>"` and `git config --global commit.gpgsign true` (the global gitconfig in `stow/git/` may already handle this — check).
 
 ## 7. macOS permission grants (TCC)
