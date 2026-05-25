@@ -64,9 +64,10 @@ def auto_compilation(paths):
 
 def process_file(
     filepath,
-    genre,
+    genre=None,
     is_compilation=None,
     album_artist=None,
+    artist=None,
     album=None,
     year=None,
     cover=None,
@@ -78,8 +79,9 @@ def process_file(
         audio = MP4(filepath)
         actions = []
 
-        audio["\xa9gen"] = genre
-        actions.append("genre")
+        if genre is not None:
+            audio["\xa9gen"] = genre
+            actions.append(f"genre={genre}")
 
         if is_compilation is True:
             audio["cpil"] = True  # bare bool: mutagen renders a list as truthy
@@ -92,6 +94,10 @@ def process_file(
         if album_artist:
             audio["aART"] = album_artist
             actions.append(f"albumartist={album_artist}")
+
+        if artist:
+            audio["\xa9ART"] = artist
+            actions.append(f"artist={artist}")
 
         if album:
             audio["\xa9alb"] = album
@@ -121,7 +127,12 @@ def process_file(
 
 
 parser = argparse.ArgumentParser(description="A simple M4A genre and tag editor.")
-parser.add_argument("--genre", required=True, help="The genre to set for the files.")
+parser.add_argument(
+    "--genre",
+    help="Genre to set on every track (e.g. for a fresh tag pass). Omit to "
+         "leave the genre tag untouched (e.g. for an incremental retag that "
+         "only touches artist or album fields).",
+)
 comp_group = parser.add_mutually_exclusive_group()
 comp_group.add_argument(
     "--compilation", dest="compilation", action="store_const", const=True, default=None,
@@ -133,6 +144,10 @@ comp_group.add_argument(
 )
 parser.add_argument("--album-artist", dest="album_artist",
                     help="Override album artist (aART) on every track.")
+parser.add_argument("--artist",
+                    help="Override per-track artist (©ART) on every track. "
+                         "Useful for single-artist albums where the album "
+                         "artist and per-track artist should match.")
 parser.add_argument("--album", help="Override album name (©alb) on every track.")
 parser.add_argument("--year", help="Override year (©day) on every track.")
 parser.add_argument(
@@ -165,21 +180,29 @@ if args.compilation is None and args.genre == "Soundtrack":
     print(f"Auto-detected Soundtrack compilation = {final_compilation} "
           f"(from per-track artist tags)")
 
-extras = []
+parts = []
+if args.genre:
+    parts.append(f"genre='{args.genre}'")
 if final_compilation is True:
-    extras.append("compilation=true")
+    parts.append("compilation=true")
 elif final_compilation is False:
-    extras.append("compilation=false")
+    parts.append("compilation=false")
 if args.album_artist:
-    extras.append(f"albumartist='{args.album_artist}'")
+    parts.append(f"albumartist='{args.album_artist}'")
+if args.artist:
+    parts.append(f"artist='{args.artist}'")
 if args.album:
-    extras.append(f"album='{args.album}'")
+    parts.append(f"album='{args.album}'")
 if args.year:
-    extras.append(f"year='{args.year}'")
+    parts.append(f"year='{args.year}'")
 if unified_cover is not None:
-    extras.append("unified cover")
-suffix = (" + " + ", ".join(extras)) if extras else ""
-print(f"Setting genre='{args.genre}'{suffix} and clearing comment/copyright tags...")
+    parts.append("unified cover")
+if not parts:
+    print("ERROR: nothing to do — pass at least one of --genre, "
+          "--album-artist, --artist, --album, --year, or --unify-cover.",
+          file=sys.stderr)
+    sys.exit(1)
+print(f"Setting {', '.join(parts)} and clearing comment/copyright tags...")
 
 for path in args.paths:
     if os.path.isdir(path):
@@ -194,6 +217,7 @@ for fp in iter_m4as(args.paths):
         args.genre,
         is_compilation=final_compilation,
         album_artist=args.album_artist,
+        artist=args.artist,
         album=args.album,
         year=args.year,
         cover=unified_cover,
