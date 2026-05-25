@@ -18,6 +18,13 @@ Two implications when designing or evaluating features in this repo:
 
 2. **Battery awareness on portable.** Docked mode is reliably on AC; portable mode is usually on battery. Features that poll on a timer, hit the network repeatedly, or otherwise wake the CPU should either degrade gracefully when on battery (longer intervals, deferred work) or skip entirely until the machine is plugged in. Apply this thinking both when adding new functionality and when reviewing existing code that may not have considered it.
 
+   The canonical gate is `~/.local/bin/should-run-background-job` (source: `stow/bin/.local/bin/should-run-background-job`). It exits 0 on AC, non-zero on battery or UPS power, and accepts `--urgent` for user-invoked or deadline-bound work. The expected call patterns:
+   - Bash entry script (launchd-driven): `"$HOME/.local/bin/should-run-background-job" || exit 0` — exit 0 from the caller so launchd doesn't treat the skip as a failure.
+   - Python entry script: run as a subprocess, return early on non-zero. Always honor explicit user-invocation flags (`--force`, `--backfill`, `--dry-run`) as urgency overrides so the gate never blocks a manual run.
+   - SketchyBar plugin or similar always-on consumer: branch to a cheap last-known-state path on skip rather than exiting with no UI update.
+
+   `pipeline-record-run` (the missed-run tracker) should fire _before_ the gate so routine battery skips don't register as missed launchd ticks. Apple-signed `pmset` is the underlying detection mechanism; no TCC implications.
+
 ## Common Commands
 
 Bootstrap a fresh machine:
@@ -30,7 +37,7 @@ Restow a single package after adding/removing files:
 
 ```bash
 cd ~/.dotfiles/stow
-stow --restow --no-folding --ignore='.DS_Store' --target="$HOME" <package>
+stow --restow --no-folding --ignore='.DS_Store' --ignore='__pycache__' --target="$HOME" <package>
 ```
 
 Unstow (remove symlinks for) a package:
@@ -44,7 +51,7 @@ Opt into work config:
 
 ```bash
 cd ~/.dotfiles/stow-work
-stow --restow --no-folding --ignore='.DS_Store' --target="$HOME" work
+stow --restow --no-folding --ignore='.DS_Store' --ignore='__pycache__' --target="$HOME" work
 ```
 
 Rebuild Zed config (injects 1Password secrets):
@@ -91,7 +98,7 @@ A separate `__HOME__` expansion pattern exists for launch-agent plist templates 
 
 1. Create `stow/<toolname>/` mirroring the `$HOME` path (e.g. `stow/lazygit/.config/lazygit/`)
 2. Place the config file inside
-3. Restow: `cd stow && stow --restow --no-folding --ignore='.DS_Store' --target="$HOME" <toolname>`
+3. Restow: `cd stow && stow --restow --no-folding --ignore='.DS_Store' --ignore='__pycache__' --target="$HOME" <toolname>`
 4. If installed via Homebrew, add to `Brewfile`
 5. If the tool writes new files to its config dir at runtime, you need `--no-folding` (already the default in setup.sh)
 
@@ -121,6 +128,10 @@ Pick a script's shebang from this three-tier rule:
 3. **Pure stdlib, not TCC-sensitive** → `#!/usr/bin/env python3`. Resolves through PATH to mise's Python.
 
 For tier 1 scripts, even when the launchd plist provides the interpreter explicitly (`/usr/bin/python3 /path/to/script.py`), still write the shebang as `#!/usr/bin/python3` so direct invocation during testing uses the same interpreter as production rather than mise's.
+
+### Audio tagging with mutagen
+
+When writing MP4/m4a boolean atoms (`cpil`, `pgap`) with mutagen, assign a **bare bool** — `audio["cpil"] = True` — never a list. mutagen renders a list by truthiness, so `audio["cpil"] = [False]` silently writes `True`. `tagger.py` sets the compilation flag this way.
 
 ## External design notes (gitignored, outside the repo)
 
