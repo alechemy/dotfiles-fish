@@ -28,6 +28,14 @@ function run(argv) {
     String(now.getDate()).padStart(2, "0"),
   ].join("-");
 
+  // dateStr is spliced into a DT search query below. The format guarantee
+  // comes from the construction above (Date methods always produce well-
+  // formed numbers), but assert it explicitly so a future change accepting
+  // an external date argument can't introduce query injection by accident.
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+    errorExit(`Invariant: dateStr "${dateStr}" must be yyyy-mm-dd`);
+  }
+
   const dt = Application("DEVONthink");
 
   let db;
