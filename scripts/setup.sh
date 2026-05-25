@@ -59,7 +59,7 @@ prompt_read() {
 # ~/.gitconfig (or similar) don't break the install.
 backup_stow_conflicts() {
     local package=$1 conflicts
-    conflicts=$(stow --no --no-folding --ignore='.DS_Store' --target="$HOME" "$package" 2>&1 || true)
+    conflicts=$(stow --no --no-folding --ignore='.DS_Store' --ignore='__pycache__' --target="$HOME" "$package" 2>&1 || true)
     if echo "$conflicts" | grep -q 'cannot stow'; then
         echo "$conflicts" | grep 'existing target' | while read -r line; do
             local target target_path
@@ -233,7 +233,7 @@ if command -v stow &> /dev/null; then
             # streamrip is opt-in (already gated by INSTALL_STREAMRIP above)
             [[ "$package" == "streamrip" && "$INSTALL_STREAMRIP" -ne 1 ]] && continue
             backup_stow_conflicts "$package"
-            stow --restow --no-folding --ignore='.DS_Store' --target="$HOME" "$package"
+            stow --restow --no-folding --ignore='.DS_Store' --ignore='__pycache__' --target="$HOME" "$package"
         fi
     done
     cd "$DOTFILES"
@@ -335,7 +335,7 @@ if command -v stow &> /dev/null; then
             info "Stowing DEVONthink pipeline..."
             cd "$STOW_DIR"
             backup_stow_conflicts devonthink
-            stow --restow --no-folding --ignore='.DS_Store' --target="$HOME" devonthink
+            stow --restow --no-folding --ignore='.DS_Store' --ignore='__pycache__' --target="$HOME" devonthink
             cd "$DOTFILES"
             success "DEVONthink pipeline stowed"
 
