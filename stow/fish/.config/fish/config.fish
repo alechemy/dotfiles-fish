@@ -14,7 +14,9 @@ end
 # This won't be added again if you remove it.
 source ~/.orbstack/shell/init2.fish 2>/dev/null || :
 
-# Added by LM Studio CLI (lms)
-set -gx PATH $PATH /Users/alec/.lmstudio/bin
-# End of LM Studio CLI section
+# LM Studio CLI (lms) — installed via `lms bootstrap`. Gate on directory
+# existence so a machine without LM Studio doesn't carry a dead PATH entry.
+if test -d ~/.lmstudio/bin
+    fish_add_path ~/.lmstudio/bin
+end
 
