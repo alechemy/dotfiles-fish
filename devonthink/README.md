@@ -580,30 +580,44 @@ Each daily note follows this structure (see `Daily Note.md` for a standalone DEV
 
 ### create-daily-note.sh
 
-Install location: `~/.local/bin/create-daily-note.sh` (must be `chmod +x`). See [`create-daily-note.sh`](../stow/devonthink/.local/bin/create-daily-note.sh).
+Source: [`stow/devonthink/.local/bin/create-daily-note.sh`](../stow/devonthink/.local/bin/create-daily-note.sh). Stowed to `~/.local/bin/create-daily-note.sh`.
 
 ### launchd Plist
 
-File: `~/Library/LaunchAgents/com.user.dt-daily-note.plist`. See [`com.user.dt-daily-note.plist`](../stow/devonthink/Library/LaunchAgents/com.user.dt-daily-note.plist).
+Template (tracked): [`stow/devonthink/Library/LaunchAgents/com.user.dt-daily-note.plist.template`](../stow/devonthink/Library/LaunchAgents/com.user.dt-daily-note.plist.template). The generated plist (gitignored) is rendered to the same directory by `scripts/build-launchd-plists.sh`, which substitutes `__HOME__`, and is then stowed to `~/Library/LaunchAgents/com.user.dt-daily-note.plist`.
 
 ### Installation
 
+Both the script and the launchd job are installed as part of the standard bootstrap — there is nothing to copy by hand:
+
 ```bash
-# 1. Install the script
-sudo cp create-daily-note.sh ~/.local/bin/create-daily-note.sh
-sudo chmod +x ~/.local/bin/create-daily-note.sh
-
-# 2. Install the launchd plist
-cp com.user.dt-daily-note.plist ~/Library/LaunchAgents/
-
-# 3. Load the job (takes effect immediately; first run at next 06:15)
-launchctl load ~/Library/LaunchAgents/com.user.dt-daily-note.plist
-
-# 4. (Optional) Test it right now
-~/.local/bin/create-daily-note.sh
+./scripts/setup.sh
 ```
 
-To unload: `launchctl unload ~/Library/LaunchAgents/com.user.dt-daily-note.plist`
+That run will (when you opt into the DEVONthink pipeline at the prompt):
+
+1. Run `scripts/build-launchd-plists.sh` to render `*.plist.template` → `*.plist` with `__HOME__` expanded.
+2. Stow `devonthink` so `~/.local/bin/create-daily-note.sh` and `~/Library/LaunchAgents/com.user.dt-daily-note.plist` become symlinks back into the repo.
+3. `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.user.dt-daily-note.plist` to load the job (idempotent; "already loaded" is tolerated).
+
+To re-render the plist after editing the template:
+
+```bash
+./scripts/build-launchd-plists.sh
+launchctl kickstart -k "gui/$(id -u)/com.user.dt-daily-note"   # pick up the new plist
+```
+
+To unload:
+
+```bash
+launchctl bootout "gui/$(id -u)/com.user.dt-daily-note"
+```
+
+To test the script directly (writes today's daily note if missing, then exits):
+
+```bash
+~/.local/bin/create-daily-note.sh
+```
 
 ### Backfilling Missed Dates
 
