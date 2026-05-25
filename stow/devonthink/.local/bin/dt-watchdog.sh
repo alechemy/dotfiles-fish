@@ -49,23 +49,29 @@ if ! pgrep -qx "$DT_APP_NAME"; then
     log "DEVONthink launched"
 fi
 
-# ── 2. Ensure Maestral is running ─────────────────────────────────────────────
-if ! pgrep -qx "$MAESTRAL_APP_NAME"; then
-    log "Maestral not running — launching '$MAESTRAL_APP_NAME'"
-    open -a "$MAESTRAL_APP_NAME"
+# ── 2. Ensure Maestral is running (skip on battery) ───────────────────────────
+# A Shortcuts automation quits Maestral when the laptop unplugs; relaunching it
+# here every 5 min would fight that automation. Defer to the same battery gate.
+if "$HOME/.local/bin/should-run-background-job"; then
+    if ! pgrep -qx "$MAESTRAL_APP_NAME"; then
+        log "Maestral not running — launching '$MAESTRAL_APP_NAME'"
+        open -a "$MAESTRAL_APP_NAME"
 
-    waited=0
-    while ! pgrep -qx "$MAESTRAL_APP_NAME"; do
-        sleep 2
-        waited=$((waited + 2))
-        if [ "$waited" -ge "$MAESTRAL_LAUNCH_TIMEOUT" ]; then
-            log "ERROR: '$MAESTRAL_APP_NAME' did not appear within ${MAESTRAL_LAUNCH_TIMEOUT}s"
-            exit 1
-        fi
-    done
-    log "Maestral launched"
+        waited=0
+        while ! pgrep -qx "$MAESTRAL_APP_NAME"; do
+            sleep 2
+            waited=$((waited + 2))
+            if [ "$waited" -ge "$MAESTRAL_LAUNCH_TIMEOUT" ]; then
+                log "ERROR: '$MAESTRAL_APP_NAME' did not appear within ${MAESTRAL_LAUNCH_TIMEOUT}s"
+                exit 1
+            fi
+        done
+        log "Maestral launched"
+    else
+        log "OK: Maestral running"
+    fi
 else
-    log "OK: Maestral running"
+    log "skip: Maestral check (on battery)"
 fi
 
 # ── 3. Ensure the target database is open ────────────────────────────────────
