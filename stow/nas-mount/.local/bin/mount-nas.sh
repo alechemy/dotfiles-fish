@@ -21,13 +21,24 @@ set -u
 NAS_HOST="192.168.50.54"
 NAS_USER="alec"
 SHARES=(Media Archive)
+HOME_GATEWAY="192.168.50.1"  # only attempt mounts when this is the default gateway
 
 log() {
     printf '%s  %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$1"
 }
 
-# Skip quietly when the NAS isn't reachable on the SMB port: portable mode away
-# from home, or login fired before Wi-Fi came up (WatchPaths retries later).
+# Network-identity gate. Reading the default route is a kernel routing-table
+# lookup — it doesn't poke the Wi-Fi radio the way an SMB probe to a remote
+# IP would when associated with a foreign network. Works on both Wi-Fi and
+# ethernet (docked mode), and avoids Location Services / SSID-read issues.
+GATEWAY=$(/sbin/route -n get default 2>/dev/null | awk '/^[[:space:]]*gateway:/ {print $2}')
+if [ "$GATEWAY" != "$HOME_GATEWAY" ]; then
+    log "default gateway is '${GATEWAY:-none}', not $HOME_GATEWAY — skipping."
+    exit 0
+fi
+
+# Even on the home LAN the NAS may be powered off, or login may have fired
+# before Wi-Fi associated (WatchPaths will retry on the next resolver change).
 if ! /usr/bin/nc -z -G 5 -w 5 "$NAS_HOST" 445 >/dev/null 2>&1; then
     log "NAS $NAS_HOST not reachable on :445 — skipping."
     exit 0
