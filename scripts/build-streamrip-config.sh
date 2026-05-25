@@ -20,10 +20,12 @@ if ! command -v op >/dev/null 2>&1; then
   echo "  Install with: brew install --cask 1password-cli" >&2
   exit 1
 fi
-if ! op whoami >/dev/null 2>&1; then
-  echo "Error: 1Password CLI is not signed in." >&2
-  echo "  Sign in with: eval \$(op signin)" >&2
-  echo "  Or enable Touch ID/SSH agent in 1Password's Developer settings." >&2
+# `op vault list` rather than `op whoami`: with 1Password app integration
+# enabled, `op whoami` reports "not signed in" even when data commands work.
+if ! op vault list >/dev/null 2>&1; then
+  echo "Error: 1Password CLI can't read your vaults." >&2
+  echo "  Enable 1Password > Settings > Developer > 'Integrate with 1Password CLI', then unlock the app." >&2
+  echo "  Or, for a temporary session: eval \$(op signin)" >&2
   exit 1
 fi
 
