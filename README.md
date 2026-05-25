@@ -53,7 +53,7 @@ This installs Homebrew + all dependencies from `Brewfile`, builds generated conf
 │   ├── karabiner/           # Keyboard remapping
 │   ├── mise/                # Runtime version manager
 │   ├── nas-mount/           # Auto-mount NAS SMB shares (launch agent)
-│   ├── navidrome/           # Music server scripts
+│   ├── navidrome/           # Navidrome client env
 │   ├── sketchybar/          # Menu bar
 │   ├── starship/            # Shell prompt theme
 │   ├── streamrip/           # Music downloader config (1Password op inject)
