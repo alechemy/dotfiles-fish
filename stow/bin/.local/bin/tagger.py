@@ -8,10 +8,13 @@
 
 import argparse
 import os
-import re
+import pathlib
 import sys
 
-from mutagen.mp4 import MP4, MP4Cover
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+from _music_tags import is_compilation_album, norm_artist  # noqa: E402
+
+from mutagen.mp4 import MP4, MP4Cover  # noqa: E402
 
 
 def iter_m4as(paths):
@@ -38,14 +41,6 @@ def first_embedded_cover(paths):
     return None
 
 
-_FEAT_RE = re.compile(r"\s+(?:feat\.?|ft\.?|featuring|with)\s+", re.I)
-
-
-def _norm_artist(s):
-    """Strip 'feat./featuring/with' suffixes; lowercase; collapse whitespace."""
-    return _FEAT_RE.split(str(s or ""), maxsplit=1)[0].strip().lower()
-
-
 def _read_artists(filepath):
     """Return (album_artist_norm, track_artist_norm) for one m4a, either may be None."""
     try:
@@ -53,28 +48,18 @@ def _read_artists(filepath):
     except Exception:
         return (None, None)
     aa = a.get("aART"); ta = a.get("\xa9ART")
-    return (_norm_artist(aa[0]) if aa else None,
-            _norm_artist(ta[0]) if ta else None)
+    return (norm_artist(aa[0]) if aa else None,
+            norm_artist(ta[0]) if ta else None)
 
 
 def auto_compilation(paths):
-    """True if the album looks like a compilation.
-
-    Two signals, in order:
-      1. If the album-level artist (aART) is "Various Artists", it's a compilation
-         — Qobuz uses this label even when every track's per-track artist is the
-         same composer (e.g. Rob Simonsen's *Spectacular Now* OST has aART
-         "Various Artists" but \\xa9ART "Rob Simonsen" on every track).
-      2. Otherwise, count distinct per-track artists. Multi-artist → compilation;
-         single-artist → not (e.g. Bo Burnham's INSIDE)."""
+    """True if the album looks like a compilation; see _music_tags.compilation_signal."""
     aart, tart = set(), set()
     for fp in iter_m4as(paths):
         aa, ta = _read_artists(fp)
         if aa: aart.add(aa)
         if ta: tart.add(ta)
-    if any(a == "various artists" for a in aart):
-        return True
-    return len(tart) > 1
+    return is_compilation_album(aart, tart)
 
 
 def process_file(
