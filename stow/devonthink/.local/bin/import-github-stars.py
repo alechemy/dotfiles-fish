@@ -74,15 +74,47 @@ def _migrate_state_file():
         log(f"Migrated state file to {STATE_FILE}")
 
 
+STATE_SCHEMA_VERSION = 1
+
+
 def load_imported():
+    """Return the set of previously-imported full_name strings.
+
+    Fails closed: raises on unreadable or unrecognized state rather than
+    silently returning empty, which would cause every star in the user's
+    history to be re-imported into 00_INBOX on the next launchd tick. The
+    only case that legitimately returns empty is "file does not exist yet"
+    (genuine first run).
+
+    Accepts the legacy bare-list format ([id1, id2, ...]) for transparent
+    migration; the next save_imported() call upgrades the on-disk format to
+    the v1 schema ({"version": 1, "ids": [...]}).
+    """
     _migrate_state_file()
+    if not os.path.exists(STATE_FILE):
+        return set()
     try:
-        if os.path.exists(STATE_FILE):
-            with open(STATE_FILE, "r") as f:
-                return set(json.load(f))
-    except Exception:
-        pass
-    return set()
+        with open(STATE_FILE, "r") as f:
+            data = json.load(f)
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RuntimeError(
+            f"State file {STATE_FILE} is unreadable ({type(exc).__name__}: {exc}). "
+            f"Imports are paused until the file is inspected and either "
+            f"repaired or removed."
+        ) from exc
+    if isinstance(data, list):
+        return set(data)
+    if (
+        isinstance(data, dict)
+        and data.get("version") == STATE_SCHEMA_VERSION
+        and isinstance(data.get("ids"), list)
+    ):
+        return set(data["ids"])
+    raise RuntimeError(
+        f"State file {STATE_FILE} has an unrecognized schema "
+        f"(top-level type: {type(data).__name__}). Imports are paused until "
+        f"the file is inspected and either repaired or removed."
+    )
 
 
 def save_imported(repos):
@@ -92,7 +124,11 @@ def save_imported(repos):
     )
     try:
         with os.fdopen(fd, "w") as f:
-            json.dump(sorted(repos), f, indent=2)
+            json.dump(
+                {"version": STATE_SCHEMA_VERSION, "ids": sorted(repos)},
+                f,
+                indent=2,
+            )
         os.replace(tmp, STATE_FILE)
     except Exception:
         try:
@@ -258,7 +294,8 @@ def import_to_devonthink(star, script_path):
 
 def main():
     # Surface missed runs from laptop sleep cycles. Best-effort; never block
-    # the import on the helper failing.
+    # the import on the helper failing. Runs *before* the battery gate so
+    # routine battery skips don't register as missed runs.
     subprocess.run(
         [
             os.path.expanduser("~/.local/bin/pipeline-record-run"),
@@ -267,6 +304,19 @@ def main():
         ],
         check=False,
     )
+
+    # Skip launchd-driven runs on battery. User-invoked runs (--force,
+    # --backfill, --dry-run) bypass the gate so explicit intent always wins.
+    user_invoked = BACKFILL or FORCE_REPO is not None or DRY_RUN
+    if not user_invoked:
+        gate = subprocess.run(
+            [os.path.expanduser("~/.local/bin/should-run-background-job")],
+            capture_output=True,
+            text=True,
+        )
+        if gate.returncode != 0:
+            log(gate.stderr.strip() or "skipping: not on AC power")
+            return
 
     # Verify gh CLI is authenticated
     try:
@@ -337,4 +387,12 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    import traceback
+    try:
+        main()
+    except Exception as exc:
+        # Surface fatal errors in the regular log file rather than only in
+        # /tmp/github-stars-import.log, which the user is unlikely to check.
+        log(f"FATAL: {type(exc).__name__}: {exc}")
+        log(traceback.format_exc())
+        sys.exit(1)
