@@ -35,8 +35,16 @@ If `setup.sh` halts early, fix the reported issue and re-run — it's idempotent
 - [ ] **Operator Mono SSm Lig** — paid font from typography.com. Used by Ghostty and Zed. Drop the `.otf` files into `~/Library/Fonts/`. Without this, both apps fall back to a system monospace.
 - [ ] **SingleFile browser extension** — install in Chromium (`ungoogled-chromium`, installed via Brewfile):
   - From the Chrome Web Store (or load unpacked from the SingleFile repo).
-  - In the extension's settings, set the auto-save directory to `~/Downloads/SingleFile/` (the DT watcher reads from there — note the casing, it's what `stow/devonthink/.local/bin/singlefile-watcher.sh` watches).
-  - Pin the toolbar icon if you want one-click capture.
+  - In **SingleFile → Options → File name**, set the filename template to:
+
+    ```
+    SingleFile/%if-empty<{page-title}|No title>.{filename-extension}
+    ```
+
+    The `SingleFile/` prefix lands captures in `~/Downloads/SingleFile/` — the folder `stow/devonthink/.local/bin/singlefile-watcher.sh` watches (note the casing). Keep `%if-empty<{page-title}|No title>` verbatim; the ingester keys on the literal `No title` placeholder.
+  - In Chromium settings, leave the download location at the default `~/Downloads` and turn **off** "Ask where to save each file" — otherwise the `SingleFile/` prefix won't resolve to the watched folder.
+  - Bind SingleFile's shortcut to `Cmd+D` in `chrome://extensions/shortcuts` (used by `capture-with-singlefile` and for one-click desktop capture).
+  - Full rationale: `devonthink/README.md` → "SingleFile extension setup".
 - [ ] Any paid Setapp / direct-download apps not listed in `Brewfile` that you actively use.
 
 ## 4. Local repos to clone
@@ -54,7 +62,7 @@ These live outside the dotfiles repo. Copy via Time Machine, AirDrop, or `scp`.
   - `~/.dotfiles/stow/devonthink/Library/LaunchAgents/com.user.granola-import.plist.template` (re-stow `devonthink` and re-run `scripts/build-launchd-plists.sh` after copying)
   - `~/.local/share/granola-import/` — design notes (`NOTES.md`) + any cached state.
 - [ ] **Importer idempotency state.** Copy the whole `~/.local/state/devonthink/` directory. It holds two kinds of files: the JSON idempotency state that prevents importers from re-importing everything on first run (`github-stars-imported.json`, `granola-imported.json`, `granola-version.json`, optional `granola-failure.json`, plus any `.bak` siblings), and the `*.last-run` heartbeat files for every launchd-driven pipeline (`dt-daily-note`, `dt-watchdog`, `github-stars-import`, `granola-import`, `singlefile-watcher`). Without the JSONs, the next launchd fire re-imports your full GitHub star history and every Granola meeting and spams duplicate failure records into DT. Without the heartbeats, the watchdog flags pipelines as stale.
-- [ ] **Dropzone action bundle.** The repo tracks `dropzone/Send to DEVONthink.dzbundle/` but it lives outside the stow tree (Dropzone reads from `~/Library/Application Support/Dropzone 4/Actions/`, not `~/.config`). Copy it over: `cp -R ~/.dotfiles/dropzone/Send\ to\ DEVONthink.dzbundle ~/Library/Application\ Support/Dropzone\ 4/Actions/`. Then open Dropzone preferences and confirm the action shows up in the grid.
+- [ ] **Dropzone grid layout (`Actions5.dzdb`).** The action bundles (`Send to DEVONthink.dzbundle`, `Send to DEVONthink Inbox.dzbundle`) come along automatically via `stow/dropzone/` — they land at `~/Library/Application Support/Dropzone/Actions/`. What does *not* come along is the grid layout itself, which Dropzone 5 stores in `~/Library/Application Support/Dropzone/Actions5.dzdb` (a SQLite DB that mutates at runtime, so it's not stowed). To restore the grid (custom display names like "Send to 99_ARCHIVE", positions, "Automatically Add to Music" → Move Files target path, etc.), quit Dropzone 5, then `cp` the `Actions5.dzdb` from the old Mac's `~/Library/Application Support/Dropzone/` into the same path on the new Mac, then relaunch. Without this swap, Dropzone 5 will discover the bundles but show them as default-named entries you have to drag into the grid yourself. Note: on Dropzone 4 the path was `~/Library/Application Support/Dropzone 4/Actions/`; Dropzone 5 uses the unversioned `Dropzone/` dir.
 - [ ] `~/.gnupg/` — only if you sign commits with GPG. If you're using 1Password SSH agent + git's commit signing via SSH, skip this.
 - [ ] `~/.config/op/` — 1Password CLI local state. Optional; 1Password rebuilds on first auth.
 - [ ] **Hazel rules**, **Keyboard Maestro macros**, **Alfred workflows**, **Drafts actions** — none of these tools store their state in `~/.config`. Export from the old machine and import on the new one. See each app's "backup/sync" feature. (Espanso is *not* in this list: its config and matches live in `stow/espanso/.config/espanso/`, and `setup.sh` registers + starts the service at step 9.)
