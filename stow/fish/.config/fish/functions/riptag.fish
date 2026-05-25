@@ -164,7 +164,10 @@ function riptag -d "download, tag, and organize an album into the music library"
 
     # --- Build replaces args (re-download guard; passed to worker if set) ---
     # $replaces_args is a list for direct worker calls; $replaces_remote is a
-    # single shell-escaped string spliced into the NAS-mode ssh command.
+    # single shell-escaped string spliced into the NAS-mode ssh command. Built
+    # here (not next to the NAS-mode block below) because $replaces is fully
+    # resolved by this point — unlike $url, which is only set later in the
+    # URL-resolution block.
     set -l replaces_args
     set -l replaces_remote
     if test -n "$replaces"
@@ -312,13 +315,27 @@ for r in json.load(sys.stdin):
     if test $local_mode -eq 1
         LOCAL_PYTHON="$LOCAL_PYTHON" LOCAL_RIP="$LOCAL_RIP" "$WORKER" --local $compilation_flag $playlist_flag $year_args $replaces_args "$url" "$genre"
     else
+        # Shell-escape user-controlled args before splicing into the ssh
+        # command string. Apostrophes in genre names ("rock 'n' roll"), URLs,
+        # or a hand-typed year would otherwise break out of the single-quote
+        # wrapping and execute on the NAS shell. Same escape pattern as
+        # $replaces_remote above. Built here (not earlier) because $url is
+        # only resolved during the URL-resolution block above.
+        set -l url_remote (string replace -a "'" "'\\''" "$url")
+        set -l genre_remote (string replace -a "'" "'\\''" "$genre")
+        set -l year_args_remote
+        if test -n "$year"
+            set -l year_esc (string replace -a "'" "'\\''" "$year")
+            set year_args_remote "--year '$year_esc'"
+        end
+
         # Deploy scripts to NAS /tmp, then run via SSH
         scp -q "$TAGGER" "$ORGANIZER" "$WORKER" "$NAS":/tmp/
         if test $status -ne 0
             echo "ERROR: Failed to deploy scripts to NAS."
             return 1
         end
-        ssh -t "$NAS" ". ~/.profile 2>/dev/null; TAGGER_SCRIPT=/tmp/tagger.py ORGANIZER_SCRIPT=/tmp/music-organize.py bash /tmp/riptag-worker.sh $compilation_flag $playlist_flag $year_args $replaces_remote '$url' '$genre'"
+        ssh -t "$NAS" ". ~/.profile 2>/dev/null; TAGGER_SCRIPT=/tmp/tagger.py ORGANIZER_SCRIPT=/tmp/music-organize.py bash /tmp/riptag-worker.sh $compilation_flag $playlist_flag $year_args_remote $replaces_remote '$url_remote' '$genre_remote'"
     end
     set -l worker_status $status
 
