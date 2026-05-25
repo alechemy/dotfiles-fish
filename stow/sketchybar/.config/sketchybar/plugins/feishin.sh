@@ -6,6 +6,31 @@ if ! pgrep -xq "Feishin"; then
   exit 0
 fi
 
+# Cache paths — defined before any expensive work so the battery gate below
+# can short-circuit with a dimmed last-known-song readout without touching
+# the keychain, sourcing the env file, or opening any sockets.
+mkdir -p "$HOME/.cache"
+LAST_SONG_FILE="$HOME/.cache/navidrome-last-song"
+AUTH_CACHE="$HOME/.cache/navidrome-auth"
+AUTH_MAX_AGE=300 # re-auth every 5 minutes
+
+# Battery gate: on battery, skip the keychain lookup, the `nc` reachability
+# probe (would wake Wi-Fi every 5s), and the curl auth + getNowPlaying calls.
+# Must come before any of those — sketchybar fires this plugin under
+# `update_freq=5`, so anything above this line is paid 12 times a minute.
+if ! "$HOME/.local/bin/should-run-background-job" >/dev/null 2>&1; then
+  if [ -f "$LAST_SONG_FILE" ]; then
+    ARTIST=$(cut -f1 "$LAST_SONG_FILE")
+    TITLE=$(cut -f2 "$LAST_SONG_FILE")
+    sketchybar --set "$NAME" \
+      icon=" $ARTIST –" label=" $TITLE" \
+      icon.color="0x80ffffff" label.color="0x80ffffff"
+  else
+    sketchybar --set "$NAME" icon=" Battery" label=""
+  fi
+  exit 0
+fi
+
 NAVIDROME_ENV="$HOME/.config/navidrome/env"
 if [ ! -f "$NAVIDROME_ENV" ]; then
   sketchybar --set "$NAME" icon=" No config" label=""
@@ -22,8 +47,7 @@ fi
 
 # Fast reachability gate: when Navidrome is unreachable (off home network or
 # NAS down), skip the curl block entirely. Without this, the plugin pays a
-# 3-second curl timeout every 5 seconds whenever Wi-Fi isn't on the home LAN,
-# which is real battery drain on a laptop.
+# 3-second curl timeout every 5 seconds whenever Wi-Fi isn't on the home LAN.
 ND_HOSTPORT="${NAVIDROME_URL#*://}"   # strip scheme
 ND_HOSTPORT="${ND_HOSTPORT%%/*}"      # strip any path
 ND_HOST="${ND_HOSTPORT%:*}"
@@ -33,11 +57,6 @@ if ! /usr/bin/nc -zw1 "$ND_HOST" "$ND_PORT" >/dev/null 2>&1; then
   sketchybar --set "$NAME" icon=" Offline" label=""
   exit 0
 fi
-
-mkdir -p "$HOME/.cache"
-LAST_SONG_FILE="$HOME/.cache/navidrome-last-song"
-AUTH_CACHE="$HOME/.cache/navidrome-auth"
-AUTH_MAX_AGE=300 # re-auth every 5 minutes
 
 # Load cached auth if fresh enough
 if [ -f "$AUTH_CACHE" ]; then

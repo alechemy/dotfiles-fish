@@ -1,0 +1,70 @@
+#!/bin/bash
+# should-run-background-job [--urgent]
+#
+# Power-awareness gate for periodic background jobs. Exits 0 when it's OK to
+# run heavy work (network fetches, decryption, AI calls, full-disk scans),
+# non-zero when the caller should skip this tick and try again later.
+#
+# Default policy:
+#   AC Power → exit 0 (run)
+#   Battery Power or UPS → exit 1 (skip), with a one-line reason on stderr
+#
+# Override:
+#   --urgent  Always exit 0 regardless of power source. Use for user-invoked
+#             runs (CLI --force / --backfill flags) and for work that genuinely
+#             can't wait (security-relevant, deadline-bound).
+#
+# Usage from a launchd-driven script:
+#
+#   "$HOME/.local/bin/should-run-background-job" || exit 0
+#
+# Exit 0 from the caller (not non-zero) so launchd doesn't treat the skip as
+# a job failure and throttle / disable the agent.
+#
+# Usage from Python:
+#
+#   if subprocess.run([HELPER]).returncode != 0:
+#       sys.exit(0)
+#
+# Power-source detection uses /usr/bin/pmset (Apple-signed, stable across OS
+# versions). The first line of `pmset -g batt` is one of:
+#
+#   Now drawing from 'AC Power'
+#   Now drawing from 'Battery Power'
+#   Now drawing from 'UPS Power'
+#
+# Anything other than AC Power is treated as "skip" — UPS implies a power
+# event in progress and is the safer default.
+
+set -euo pipefail
+
+for arg in "$@"; do
+    case "$arg" in
+        --urgent)
+            exit 0
+            ;;
+        -h|--help)
+            sed -n '2,/^set -euo/p' "$0" | sed 's/^# \{0,1\}//; /^set -euo/d'
+            exit 0
+            ;;
+    esac
+done
+
+power_source=$(/usr/bin/pmset -g batt | /usr/bin/awk -F\' 'NR==1 {print $2; exit}')
+
+case "$power_source" in
+    "AC Power")
+        exit 0
+        ;;
+    "")
+        # pmset returned nothing parseable. Don't pretend we know; default to
+        # allowing the run rather than silently disabling every background
+        # job. The alternative (skip) would be a silent denial of service.
+        echo "should-run-background-job: pmset returned no power source; allowing run" >&2
+        exit 0
+        ;;
+    *)
+        echo "should-run-background-job: skipping (power source: ${power_source})" >&2
+        exit 1
+        ;;
+esac
