@@ -896,39 +896,13 @@ math {
     font-size: 1rem;
   }
 
-  p {
-    text-wrap: auto;
-  }
-  h1,
-  h2,
-  h3,
-  h4,
-  h5,
-  h6 {
-    text-wrap: auto;
-  }
-
-  /* Code blocks: wrap instead of horizontal scroll on mobile.
-       Reading code on a phone is already compromised; wrapping is
-       less bad than nested horizontal scroll. */
+  /* Code blocks: compact padding for narrow viewports.
+       Wrapping behavior is handled separately in the touch-gated
+       block below so it doesn't fire in a narrow desktop window. */
   pre {
     padding: 0.9em 1em;
     font-size: 0.82em;
     border-radius: 4px;
-  }
-  pre code {
-    white-space: pre-wrap;
-    word-break: break-word;
-    overflow-wrap: anywhere;
-  }
-
-  /* Inline code: allow wrapping so long identifiers don't
-       push the paragraph off-screen. */
-  p code,
-  li code,
-  td code {
-    white-space: normal;
-    word-break: break-word;
   }
 
   /* Tables: wrap in a horizontally-scrollable container.
@@ -974,6 +948,47 @@ math {
   .theme-toggle svg {
     width: 20px;
     height: 20px;
+  }
+}
+
+/* ============================================================
+   MOBILE — TEXT WRAPPING & LINE BREAKING
+   These rules trade desktop-quality line breaking for phone
+   ergonomics: plain wrapping over balanced lines, and wrapped
+   code over horizontal scroll. They are additionally gated on
+   (pointer: coarse) so they fire on real touch devices only.
+   A narrow desktop window — Marked 2 sized down, or with a max
+   line width set — keeps text-wrap: pretty/balance and code
+   horizontal scroll instead of inheriting the phone fallbacks.
+   ============================================================ */
+@media (max-width: 640px) and (pointer: coarse) {
+  /* Drop the costlier line-balancing; plain wrapping on phones */
+  p,
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    text-wrap: auto;
+  }
+
+  /* Code blocks: wrap instead of horizontal scroll on a phone.
+     Reading code on a phone is already compromised; wrapping is
+     less bad than nested horizontal scroll. */
+  pre code {
+    white-space: pre-wrap;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+  }
+
+  /* Inline code: allow wrapping so long identifiers don't
+     push the paragraph off-screen. */
+  p code,
+  li code,
+  td code {
+    white-space: normal;
+    word-break: break-word;
   }
 }
 
