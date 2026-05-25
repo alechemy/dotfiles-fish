@@ -21,44 +21,54 @@ tell application id "DNtp"
 
         if targetRecord is missing value then return
 
-        -- 2. Only process Markdown files (still save non-markdown!)
+        -- 2. Only post-process Markdown — still save non-markdown normally.
         set recType to type of targetRecord as string
         if recType is not in {"markdown", "«constant ****mkdn»"} then
             save theWindow
             return
         end if
 
-        set thePath to path of targetRecord
-        if thePath is "" or thePath is missing value then
-            save theWindow
-            return
-        end if
-
-        -- 3. Flush editor to disk
+        -- 3. Flush the editor's in-memory edits into DT's record state so
+        --    `plain text` reflects what the user just typed. (Previously this
+        --    script ran `sed -i ''` on `path of theRecord` then
+        --    `synchronize record` — exactly the pattern devonthink/CLAUDE.md
+        --    warns against, because sync races DT's buffered write and can
+        --    overwrite the in-memory record with stale/empty disk state.)
         save theWindow
 
-        -- 4. Wait for file to be stable on disk
-        set deadline to (current date) + 2
-        repeat
+        set originalText to plain text of targetRecord
+        if originalText is missing value or originalText is "" then return
+
+        -- 4. Transform via a stdin-style shell pipeline using a tempfile we
+        --    own. We never touch `path of theRecord` — only our scratch file.
+        --    `markdownlint-stdin-fix` is the existing repo helper that wraps
+        --    `markdownlint --fix` (which is file-only) into a stdin/stdout
+        --    transformer; the leading sed handles tabs → two spaces.
+        set lintHelper to (POSIX path of (path to home folder)) & ".local/bin/markdownlint-stdin-fix"
+        set tmpPath to do shell script "mktemp /tmp/dt-save-override.XXXXXX"
+        set newText to originalText
+        try
+            set fileRef to open for access (POSIX file tmpPath) with write permission
+            write originalText to fileRef as «class utf8»
+            close access fileRef
+            set newText to do shell script ¬
+                "/usr/bin/sed 's/\\t/  /g' " & quoted form of tmpPath & ¬
+                " | " & quoted form of lintHelper
+        on error errMsg number errNum
             try
-                do shell script "test -s " & quoted form of thePath
-                exit repeat
+                close access (POSIX file tmpPath)
             end try
-            if (current date) > deadline then
-                display alert "Lint Warning" message "Timed out waiting for file on disk."
-                return
-            end if
-            delay 0.1
-        end repeat
-        delay 0.3
+            do shell script "rm -f " & quoted form of tmpPath
+            error errMsg number errNum
+        end try
+        do shell script "rm -f " & quoted form of tmpPath
 
-        -- 5. Modify in a single shell invocation
-        do shell script ¬
-            "sed -i '' 's/\\t/  /g' " & quoted form of thePath & ¬
-            " && /opt/homebrew/bin/markdownlint " & quoted form of thePath & " --quiet --fix || true"
-
-        -- 6. Refresh DEVONthink
-        synchronize record targetRecord
+        -- 5. Write back through DT only if the lint actually changed
+        --    something, then save again to persist the cleanup pass.
+        if newText is not equal to originalText then
+            set plain text of targetRecord to newText
+            save theWindow
+        end if
 
     on error error_message number error_number
         if error_number is not -128 then
