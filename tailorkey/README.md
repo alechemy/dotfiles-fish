@@ -275,7 +275,7 @@ The default-layout reference (`Go60 Default TailorKey Layout.png`) shows large "
 
 ### Customizations vs. upstream v4.2m⁶
 
-Three tweaks, all in the `combos` array. Layer-key contents (positions 0–59) match stock. The unmodified reference sits at `upstream/Go60 TailorKey v4.2m⁶ macOS Bilateral.json`. Worth noting: the working file's `uuid`, `parent_uuid`, `date`, and `creator` fields still match upstream — the customizations were applied by hand-editing the JSON, not via the TailorKey web editor, so editor metadata never got rewritten.
+Four tweaks: three in the `combos` array, one in `inputListeners`. Layer-key contents (positions 0–59) match stock. The unmodified reference sits at `upstream/Go60 TailorKey v4.2m⁶ macOS Bilateral.json`. Worth noting: the working file's `uuid`, `parent_uuid`, `date`, and `creator` fields still match upstream — the customizations are applied by hand-editing the JSON, not via the TailorKey web editor, so editor metadata never gets rewritten. When pulling a change back out of the web editor, copy only the intended delta into this file and leave the metadata fields alone (the editor blanks `uuid`, rewrites `parent_uuid`, and stamps `creator`).
 
 #### Tweak A: F-key combos rebound to macOS consumer codes
 
@@ -307,6 +307,17 @@ The same combos now chord the *number-row + top-alpha-row* keys at column N–1 
 #### Tweak C: Hyper combo moved to the thumb cluster
 
 `sticky_hyp_rght_v1_TKZ` `keyPositions` moved from `[43, 51]` (M + End, on the bottom alpha row and nav row) to `[56, 59]` (LSHFT + Space, both on the thumb cluster). Much friendlier chord.
+
+#### Tweak D: touchpad scroll speed reduced
+
+The Cirque touchpad feeds `&cirque_lh_listener`, whose default input chain runs `&zip_xy_to_scroll_mapper` — so ordinary touchpad movement scrolls. A `&zip_xy_scaler [mul, div]` processor scales that movement by `mul/div` before it becomes scroll. Both the default scaler and the MouseSlow-layer (15) override were dialed down to slow scrolling:
+
+| Listener / node                          | Upstream `&zip_xy_scaler` | Yours      | Effective scale       |
+|-------------------------------------------|---------------------------|------------|-----------------------|
+| `&cirque_lh_listener` top-level           | `[11, 12]`                | `[1, 12]`  | 0.92× → 0.083× (~11× slower) |
+| `&cirque_lh_listener` node `layer_15`     | `[5, 14]`                 | `[1, 16]`  | 0.36× → 0.063× (~5.7× slower) |
+
+Only the left-hand listener is touched; `&cirque_rh_listener` is unchanged (it's the move-mapped half and isn't the scroll path). Made in the TailorKey web editor and ported here by integrating just the `inputListeners` delta — the editor's metadata rewrites (`uuid`, `parent_uuid`, `creator`) were intentionally not carried over.
 
 ---
 
