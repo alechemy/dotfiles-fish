@@ -199,6 +199,16 @@ if [[ "$LAST_DATE" == "$TODAY" ]]; then
   exit 0
 fi
 
+# Refuse to run against a future-dated state. The only ways LAST_DATE > TODAY
+# are a manually-created future note or a date-parsing slip in the AppleScript
+# finder — neither is automatic recovery territory, and under `set -u` the
+# downstream `${FILL_DATES[0]}` index would abort with an unbound-variable
+# error anyway.
+if [[ "$LAST_DATE" > "$TODAY" ]]; then
+  log "WARNING: LAST_DATE ($LAST_DATE) is in the future; refusing to backfill"
+  exit 0
+fi
+
 # Build the list of dates from LAST_DATE+1 through TODAY.
 # Uses date -v+1d to avoid DST-related second-counting errors.
 FILL_DATES=()
