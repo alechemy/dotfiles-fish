@@ -576,7 +576,7 @@ Each daily note follows this structure (see `Daily Note.md` for a standalone DEV
 
 - **Heading** — full day-of-week, month, day, year.
 - **Bullet** — empty starter bullet for quick capture.
-- **Tag** — the DT tag `type/daily` is applied to the record via AppleScript (not embedded in the document body), enabling smart groups and filtering.
+- **Tag** — the DT tag `Daily Note` is applied to the record via AppleScript (not embedded in the document body), enabling smart groups and filtering.
 
 ### create-daily-note.sh
 
