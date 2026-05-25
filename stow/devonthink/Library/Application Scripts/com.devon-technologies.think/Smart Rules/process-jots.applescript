@@ -35,10 +35,22 @@ on performSmartRule(theRecords)
 		end try
 
 		repeat with theRecord in theRecords
-			set jotLine to plain text of theRecord
-			if jotLine is "" then
+			set jotText to plain text of theRecord
+			if jotText is "" then
 				log message "Process Jots: empty jot, skipping"
 			else
+				-- Stable per-jot idempotency marker. Embed the source
+				-- record's UUID as an HTML comment trailing the bullet so
+				-- the "already imported" check matches on the marker rather
+				-- than on the body text. The previous substring-on-body
+				-- check collapsed two distinct jots that happened to share
+				-- a bullet line (identical timestamp + text, e.g. duplicate
+				-- Drafts sends or a race-fire of the Every-Minute trigger
+				-- before the trash-move propagated). HTML comments are
+				-- invisible in rendered Markdown.
+				set jotMarker to "<!-- jot:" & (uuid of theRecord) & " -->"
+				set jotLine to jotText & " " & jotMarker
+
 				-- Use creation date to find the right daily note
 				set cDate to creation date of theRecord
 				set cYear to year of cDate as text
@@ -49,59 +61,47 @@ on performSmartRule(theRecords)
 				set targetNote to get record at (groupPath & "/" & targetFilename) in targetDB
 
 				if targetNote is not missing value then
-					-- Skip if already present (idempotency)
-					if (plain text of targetNote) does not contain jotLine then
-						set pyScript to "import sys, os, re" & linefeed & ¬
-							"note = sys.stdin.read()" & linefeed & ¬
-							"jot = os.environ['JOT_LINE']" & linefeed & ¬
-							"marker = os.environ['SECTION_HEADER']" & linefeed & ¬
-							"lines = note.splitlines()" & linefeed & ¬
-							"empty_bullet = re.compile(r'^\\s*[-*]\\s*$')" & linefeed & ¬
-							"content_bullet = re.compile(r'^\\s*[-*]\\s+\\S')" & linefeed & ¬
-							"h2 = None" & linefeed & ¬
-							"for i, l in enumerate(lines):" & linefeed & ¬
-							"    if l.strip() == marker:" & linefeed & ¬
-							"        h2 = i" & linefeed & ¬
-							"        break" & linefeed & ¬
-							"if h2 is None:" & linefeed & ¬
-							"    lines += ['', jot]" & linefeed & ¬
-							"else:" & linefeed & ¬
-							"    last_content = None" & linefeed & ¬
-							"    for i in range(h2 - 1, -1, -1):" & linefeed & ¬
-							"        if content_bullet.match(lines[i]):" & linefeed & ¬
-							"            last_content = i" & linefeed & ¬
-							"            break" & linefeed & ¬
-							"    if last_content is not None:" & linefeed & ¬
-							"        insert_at = last_content + 1" & linefeed & ¬
-							"        while insert_at < h2 and re.match(r'^[ \\t]', lines[insert_at]):" & linefeed & ¬
-							"            insert_at += 1" & linefeed & ¬
-							"        lines.insert(insert_at, jot)" & linefeed & ¬
-							"    else:" & linefeed & ¬
-							"        placeholder = None" & linefeed & ¬
-							"        for i in range(h2 - 1, -1, -1):" & linefeed & ¬
-							"            if empty_bullet.match(lines[i]):" & linefeed & ¬
-							"                placeholder = i" & linefeed & ¬
-							"                break" & linefeed & ¬
-							"        if placeholder is not None:" & linefeed & ¬
-							"            lines[placeholder] = jot" & linefeed & ¬
-							"        else:" & linefeed & ¬
-							"            ins = h2" & linefeed & ¬
-							"            while ins > 0 and lines[ins - 1].strip() == '':" & linefeed & ¬
-							"                ins -= 1" & linefeed & ¬
-							"            lines[ins:h2] = ['', jot, '']" & linefeed & ¬
-							"print('\\n'.join(lines), end='')"
+					-- Skip if already imported (idempotency by UUID marker)
+					if (plain text of targetNote) does not contain jotMarker then
+						-- Insertion logic lives in a standalone helper script
+						-- (~/.local/bin/insert-jot-into-daily-note.py) rather
+						-- than an inlined heredoc — the heredoc form was
+						-- ~40 lines of Python encoded one-string-per-line
+						-- with no syntax highlighting and no way to test
+						-- outside of triggering an actual smart rule. The
+						-- helper takes the note body on stdin, JOT_LINE and
+						-- SECTION_HEADER via env, and prints the modified
+						-- body on stdout. Wire format matches the prior
+						-- inlined version verbatim.
+						set pyHelper to (POSIX path of (path to home folder)) & ".local/bin/insert-jot-into-daily-note.py"
 
 						set noteBody to plain text of targetNote
 						set tmpPath to do shell script "mktemp /tmp/dt-jot.XXXXXX"
-						set fileRef to open for access (POSIX file tmpPath) with write permission
-						write noteBody to fileRef as «class utf8»
-						close access fileRef
+						-- Wrap tmpPath consumption in try/on error so the tempfile
+						-- is removed even when the helper invocation or file I/O
+						-- raises. Without this, an error mid-block leaves
+						-- /tmp/dt-jot.XXXXXX behind until macOS's periodic /tmp
+						-- sweep collects it (~3 days). The inner `close access`
+						-- guard handles the case where `open for access` succeeded
+						-- but `write` failed.
+						set newBody to ""
+						try
+							set fileRef to open for access (POSIX file tmpPath) with write permission
+							write noteBody to fileRef as «class utf8»
+							close access fileRef
 
-						set newBody to do shell script ¬
-							"export JOT_LINE=" & quoted form of jotLine & ¬
-							" && export SECTION_HEADER=" & quoted form of sectionHeader & ¬
-							" && /usr/bin/python3 -c " & quoted form of pyScript & ¬
-							" < " & quoted form of tmpPath
+							set newBody to do shell script ¬
+								"export JOT_LINE=" & quoted form of jotLine & ¬
+								" && export SECTION_HEADER=" & quoted form of sectionHeader & ¬
+								" && /usr/bin/python3 " & quoted form of pyHelper & ¬
+								" < " & quoted form of tmpPath
+						on error errMsg number errNum
+							try
+								close access (POSIX file tmpPath)
+							end try
+							do shell script "rm -f " & quoted form of tmpPath
+							error errMsg number errNum
+						end try
 						do shell script "rm -f " & quoted form of tmpPath
 
 						set plain text of targetNote to newBody
