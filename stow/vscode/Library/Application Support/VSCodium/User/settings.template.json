@@ -196,8 +196,13 @@
 
   // PYTHON
   // ----------------------------------------
-  "python.defaultInterpreterPath": "/opt/homebrew/bin/python3",
+  "python.defaultInterpreterPath": "${HOME}/.local/share/mise/installs/python/latest/bin/python3",
   "python.languageServer": "Pylance",
+  // VSCodium's Open VSX build of ms-python.python ships without the `pet`
+  // (python-env-tools) binary, so the new env-discovery extension fails with
+  // ENOENT on every interpreter. Disable it to fall back to the legacy
+  // resolver that honors python.defaultInterpreterPath directly.
+  "python.useEnvironmentsExtension": false,
   "[python]": {
     "editor.defaultFormatter": "charliermarsh.ruff",
   },
