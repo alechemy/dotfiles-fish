@@ -962,6 +962,15 @@ math {
    horizontal scroll instead of inheriting the phone fallbacks.
    ============================================================ */
 @media (max-width: 640px) and (pointer: coarse) {
+  /* Serif prose pair reads better at phone sizes; bump base size
+     since phones are held closer than a laptop screen. */
+  :root {
+    --font-prose:
+      "Tiempos Text", "Source Serif Pro", Charter, Georgia, serif;
+    --font-mono: "Berkeley Mono", "SF Mono", Menlo, Consolas, monospace;
+    --font-size-base: 18px;
+  }
+
   /* Drop the costlier line-balancing; plain wrapping on phones */
   p,
   h1,
