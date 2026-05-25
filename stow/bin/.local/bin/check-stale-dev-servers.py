@@ -83,7 +83,7 @@ def notify(hits):
 
 
 def main():
-    run_silent([str(HOME / ".local/bin/pipeline-record-run"), "com.user.check-stale-dev-servers"])
+    run_silent([str(HOME / ".local/bin/pipeline-record-run"), "com.user.check-stale-dev-servers", "3600"])
     gate = run_silent([str(HOME / ".local/bin/should-run-background-job")])
     if gate is not None and gate.returncode != 0:
         return 0
