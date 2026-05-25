@@ -6,11 +6,12 @@ set -euo pipefail
 # settings we’re about to change
 osascript -e 'tell application "System Settings" to quit' || true
 
-# Ask for the administrator password upfront
+# Ask for the administrator password upfront. Touch ID for sudo (enabled by
+# setup.sh:0b) means later prompts inside this script are a fingerprint tap,
+# so we deliberately do not background a `sudo -nv` keep-alive loop here —
+# that pattern has been linked to intermittent SIGTTIN suspensions on
+# macOS 26 (see the same removal in setup.sh:78-84).
 sudo -v
-
-# Keep-alive: update existing `sudo` time stamp until script has finished
-while true; do sudo -n true; sleep 60; kill -0 "$$" || exit; done 2>/dev/null &
 
 ###############################################################################
 # General UI/UX                                                               #
@@ -44,9 +45,6 @@ defaults write com.apple.Finder AppleShowAllFiles -bool true
 
 # Always show all files elsewhere
 defaults write -g AppleShowAllFiles -bool true
-
-# Always show file extensions, even for filetypes macOS hides them on by default.
-defaults write -g AppleShowAllExtensions -bool true
 
 # Sort folders before files in Finder list views, including on the Desktop.
 defaults write com.apple.finder _FXSortFoldersFirst -bool true
