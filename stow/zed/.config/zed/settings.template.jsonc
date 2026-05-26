@@ -13,8 +13,12 @@
   },
   "project_panel": {
     "hide_root": true,
+    "hide_gitignore": false,
     "dock": "right",
     "default_width": 500
+  },
+  "file_finder": {
+    "include_ignored": true
   },
   "title_bar": {
     "show_sign_in": false
@@ -39,7 +43,7 @@
   "theme": {
     "mode": "dark",
     "light": "One Light",
-    "dark": "Night Owl"
+    "dark": "Night Owl Dark"
   },
   "icon_theme": "VSCode Icons for Zed (Dark Angular)",
 
