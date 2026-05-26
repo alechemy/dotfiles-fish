@@ -231,8 +231,12 @@ on run argv
         -- Scenario 1 only: log the new bookmark to today's daily note.
         -- Scenario 2 bookmarks were already logged by Post-Enrich & Archive
         -- when they first arrived via Extract: Web Content, so re-logging
-        -- here would duplicate the entry.
-        if isNewBookmark then
+        -- here would duplicate the entry. When the page had no usable
+        -- <title> (isGenericTitle), defer logging — Post-Enrich & Archive
+        -- writes the daily-note line after AI enrichment supplies a real
+        -- title, so the entry lands with a meaningful name instead of
+        -- "No title — host/path".
+        if isNewBookmark and not isGenericTitle then
             try
                 set cDate to current date
                 set cYear to year of cDate as text
