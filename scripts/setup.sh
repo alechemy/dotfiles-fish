@@ -182,6 +182,15 @@ if [ "$OP_READY" -eq 1 ]; then
     "$DOTFILES/scripts/build-zed-config.sh"
 else
     info "Skipping Zed config build (needs 1Password CLI signed in)."
+    # A `git clone` never produces stow/zed/.config/zed/settings.json (gitignored).
+    # If the file is present here without a rebuild, this tree was copied from
+    # another machine and the file holds personal API keys resolved by op inject.
+    # Stowing it would symlink those secrets into ~/.config/zed/.
+    if [ -f "$DOTFILES/stow/zed/.config/zed/settings.json" ]; then
+        info "WARNING: stow/zed/.config/zed/settings.json already exists and will be stowed as-is."
+        info "  If this tree was copied from another machine it contains personal API keys."
+        info "  Sign into 1Password CLI and re-run setup.sh, or delete the file before continuing."
+    fi
 fi
 chmod +x "$DOTFILES/scripts/build-vscode-config.sh"
 "$DOTFILES/scripts/build-vscode-config.sh"
@@ -238,6 +247,36 @@ if command -v stow &> /dev/null; then
     done
     cd "$DOTFILES"
     success "Dotfiles stowed"
+
+    # 4a. Opt-in work config (stow-work/work/).
+    #
+    # stow-work/ is gitignored apart from .gitkeep, so a fresh `git clone` has
+    # an empty work package and this block is a no-op. After a file-copy from
+    # another machine the package has content and we stow it automatically.
+    #
+    # The work package mixes $HOME-mirroring subtrees (.config, .ssh, .m2)
+    # with top-level items that are installed by hand and must NOT be stowed:
+    # standalone Markdown docs, scripts/ (root-owned wrappers installed to
+    # /usr/local/bin), and sudoers.d/ (root-owned fragments in /etc/sudoers.d).
+    # The .stow-local-ignore that excludes them is itself gitignored, so we
+    # seed it here when missing.
+    if [ -d "$DOTFILES/stow-work/work" ] && [ -n "$(ls -A "$DOTFILES/stow-work/work" 2>/dev/null)" ]; then
+        WORK_IGNORE="$DOTFILES/stow-work/work/.stow-local-ignore"
+        if [ ! -f "$WORK_IGNORE" ]; then
+            info "Seeding stow-work/work/.stow-local-ignore..."
+            cat >"$WORK_IGNORE" <<'EOF'
+.*\.md$
+^scripts$
+^sudoers\.d$
+EOF
+        fi
+        info "Stowing stow-work/work..."
+        cd "$DOTFILES/stow-work"
+        backup_stow_conflicts work
+        stow --restow --no-folding --ignore='.DS_Store' --ignore='__pycache__' --target="$HOME" work
+        cd "$DOTFILES"
+        success "stow-work/work stowed"
+    fi
 
     # Aerospace runtime config is not stowed (scripts/aerospace-*-gaps.sh
     # rewrites it). Seed it from source on fresh installs so aerospace doesn't

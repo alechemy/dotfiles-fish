@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
-Personal dotfiles managed with GNU Stow on macOS. All packages under `stow/` mirror the `$HOME` directory structure and are auto-linked by `setup.sh`. `stow-work/` holds opt-in work-specific config.
+Personal dotfiles managed with GNU Stow on macOS. All packages under `stow/` mirror the `$HOME` directory structure and are auto-linked by `setup.sh`. `stow-work/` holds work-specific config: gitignored apart from `.gitkeep`, so a fresh `git clone` leaves it empty and `setup.sh` skips it. After a file-copy from another machine the package has content and `setup.sh` auto-stows it (see step 4a in `scripts/setup.sh`).
 
 **Key tools:** Fish shell, Homebrew, Mise (runtime versions), Starship (prompt), Ghostty (terminal), Zed (editor).
 
