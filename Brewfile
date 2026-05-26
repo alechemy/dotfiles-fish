@@ -69,6 +69,7 @@ cask "nikitabobko/tap/aerospace"
 cask "alfred"
 cask "app-tamer"
 cask "appcleaner"
+cask "claude-code@latest"
 cask "cleanshot"
 # dropzone disabled until the cask is updated to v5
 # cask "dropzone"
@@ -91,12 +92,15 @@ cask "xld"
 cask "zed@preview"
 
 # Mac App Store
+mas "1Password for Safari", id: 1569813296
 mas "CotEditor", id: 1024640650
+mas "Drafts", id: 1435957248
 mas "Dropover", id: 1355679052
 mas "Fantastical", id: 975937182
 mas "Find Any File", id: 402569179
 mas "Folder Peek", id: 1615988943
 mas "GrandPerspective", id: 1111570163
+mas "Keka", id: 470158793
 mas "Name Mangler 3", id: 603637384
 mas "Peek", id: 1554235898
 mas "Refined GitHub", id: 1519867270

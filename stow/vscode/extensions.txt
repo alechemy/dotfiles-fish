@@ -15,6 +15,7 @@ esbenp.prettier-vscode
 firsttris.vscode-jest-runner
 fmoronzirfas.open-in-marked
 hashicorp.terraform
+idleberg.applescript
 mkhl.shfmt
 ms-playwright.playwright
 ms-python.debugpy
@@ -25,7 +26,6 @@ ndonfris.fish-lsp
 nrwl.angular-console
 redhat.vscode-xml
 sdras.night-owl
-supermaven.supermaven
 tamasfe.even-better-toml
 usernamehw.errorlens
 vscode-icons-team.vscode-icons
