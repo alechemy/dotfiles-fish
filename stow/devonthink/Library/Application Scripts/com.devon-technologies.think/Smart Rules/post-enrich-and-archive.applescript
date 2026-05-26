@@ -369,6 +369,61 @@ on performSmartRule(theRecords)
 					log message "Post-Enrich & Archive: web clip name propagation failed: " & errMsg info recName
 				end try
 			end if
+			-- =============================================
+			-- Step 3.6: Daily-note link for web clips
+			-- =============================================
+			-- The SingleFile ingester defers daily-note logging when the
+			-- page had no usable <title> (NameLocked=0 + placeholder
+			-- name). Step 3.5 above has now propagated the AI-enriched
+			-- name to the bookmark sibling, so we can append a
+			-- daily-note line with a real title. Idempotent: skipped
+			-- when DailyNoteLinked is already 1 (the typical path,
+			-- where the ingester logged with a good title up front).
+			if isWebClip and (type of theRecord is markdown) and clipSource is not "" and destGroup is not missing value then
+				try
+					set bmUUID to my uuidFromItemLink(clipSource)
+					if bmUUID is not "" then
+						set bmRecord to get record with uuid bmUUID
+						if bmRecord is not missing value then
+							set isLinked to (get custom meta data for "DailyNoteLinked" from bmRecord)
+							if isLinked is not 1 then
+								set bmCreated to creation date of bmRecord
+								set cYear to year of bmCreated as text
+								set cMonth to text -2 thru -1 of ("0" & ((month of bmCreated) as integer))
+								set cDay to text -2 thru -1 of ("0" & (day of bmCreated))
+								set targetFilename to cYear & "-" & cMonth & "-" & cDay & ".md"
+								set targetNote to get record at (groupPath & "/" & targetFilename) in targetDB
+
+								if targetNote is not missing value then
+									set bmName to name of bmRecord
+									set secSinceMidnight to time of bmCreated
+									set cHour to secSinceMidnight div 3600
+									set cMin to (secSinceMidnight mod 3600) div 60
+									if cHour ≥ 12 then
+										set ampm to "pm"
+										if cHour > 12 then set cHour to cHour - 12
+									else
+										set ampm to "am"
+										if cHour is 0 then set cHour to 12
+									end if
+									set timeStr to (cHour as text) & ":" & text -2 thru -1 of ("0" & (cMin as text)) & ampm
+									set linkText to "- " & timeStr & ": [🔗 " & bmName & "](x-devonthink-item://" & bmUUID & ")"
+
+									if (plain text of targetNote) does not contain bmUUID then
+										my appendToSection(targetNote, sectionHeader, linkText & return)
+									end if
+									add custom meta data 1 for "DailyNoteLinked" to bmRecord
+								else
+									log message "Post-Enrich & Archive: daily note (" & targetFilename & ") not found, skipping web clip link" info recName
+								end if
+							end if
+						end if
+					end if
+				on error errMsg
+					log message "Post-Enrich & Archive: web clip daily note link failed: " & errMsg info recName
+				end try
+			end if
+
 
 			-- =============================================
 			-- Step 4: Archive
