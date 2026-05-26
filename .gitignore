@@ -25,5 +25,6 @@ stow/devonthink/Library/LaunchAgents/com.user.github-stars-import.plist
 stow/devonthink/Library/LaunchAgents/com.user.granola-import.plist*
 stow/devonthink/Library/LaunchAgents/com.user.singlefile-watcher.plist
 stow/nas-mount/Library/LaunchAgents/com.user.mount-nas.plist
+stow/bin/Library/LaunchAgents/com.user.check-stale-dev-servers.plist
 stow/devonthink/.local/bin/import-granola.py
 stow/devonthink/.local/bin/import-granola-parse.py
