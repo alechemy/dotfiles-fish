@@ -71,6 +71,7 @@ cask "app-tamer"
 cask "appcleaner"
 cask "claude-code@latest"
 cask "cleanshot"
+cask "copilot-cli"
 # dropzone disabled until the cask is updated to v5
 # cask "dropzone"
 cask "espanso"
