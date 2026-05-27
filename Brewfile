@@ -109,3 +109,7 @@ mas "Things", id: 904280696
 mas "Tot", id: 1491071483
 mas "Transmit", id: 1436522307
 mas "Wipr", id: 1662217862
+# Xcode is ~15 GB; uncomment to install eagerly on a fresh machine, otherwise
+# install on demand via `mas install 497799835` (requires the Apple ID to have
+# previously "obtained" Xcode in the App Store at least once).
+# mas "Xcode", id: 497799835
