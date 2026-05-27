@@ -21,7 +21,6 @@ keybind = cmd+shift+j=goto_split:down
 keybind = cmd+shift+k=goto_split:up
 keybind = cmd+shift+l=goto_split:right
 keybind = global:cmd+ctrl+alt+shift+t=toggle_quick_terminal
-keybind = cmd+ctrl+r=text:\x03/exit\rclaude\x20--continue\r
 quick-terminal-position = right
 clipboard-paste-protection = false
 notify-on-command-finish = unfocused
