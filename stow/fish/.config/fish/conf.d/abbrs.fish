@@ -5,6 +5,8 @@ abbr -a -- unpop 'git reset --merge'
 
 abbr -a dotfiles "$HOME/.dotfiles"
 
+abbr -a -- copilot 'copilot --allow-all'
+
 # Kill a process running on a given port
 # Usage: > kill_port 8081
 function kill_port
