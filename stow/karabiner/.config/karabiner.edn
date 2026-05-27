@@ -4,6 +4,7 @@
                       :delay 500
                       :alone 1000
                       :held 500}}
+ :applications {:ghostty ["^com\\.mitchellh\\.ghostty$"]}
  :main [{:des "HYPER KEY! Change caps_lock to right command + right control + right option + right shift."
          :rules [[:##caps_lock :!QWEright_shift nil {:alone :escape}]]}
 
@@ -53,4 +54,11 @@
                  [:!CQWER8 "/opt/homebrew/bin/aerospace move-node-to-workspace 8"]
                  [:!CTOSQ8 "/opt/homebrew/bin/aerospace move-node-to-workspace 8"]
                  [:!CQWER9 "/opt/homebrew/bin/aerospace move-node-to-workspace 9"]
-                 [:!CTOSQ9 "/opt/homebrew/bin/aerospace move-node-to-workspace 9"]]}]}
+                 [:!CTOSQ9 "/opt/homebrew/bin/aerospace move-node-to-workspace 9"]]}
+
+        ;; Claude Code: terminal-resize wrap-fix chord. Exits the foreground
+        ;; Claude session and resumes the latest --continue. Ghostty-scoped so
+        ;; cmd+ctrl+r passes through unchanged everywhere else.
+        {:des "Ghostty: cmd+ctrl+r => restart Claude Code (exit + claude --continue)"
+         :rules [[:!CTr "$HOME/.local/bin/claude-restart" [:ghostty]]
+                 [:!QWr "$HOME/.local/bin/claude-restart" [:ghostty]]]}]}

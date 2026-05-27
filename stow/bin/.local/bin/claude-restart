@@ -1,0 +1,17 @@
+#!/bin/bash
+# Karabiner-invoked: 3× Ctrl+C handles idle ("press again to exit") and mid-tool
+# (cancel→confirm→exit); post-exit delay lets the resume command land at the
+# shell prompt instead of Claude's input buffer, which discards it on exit.
+
+osascript <<'AS'
+tell application "System Events"
+  keystroke "c" using control down
+  delay 0.08
+  keystroke "c" using control down
+  delay 0.08
+  keystroke "c" using control down
+  delay 0.7
+  keystroke "claude --continue"
+  keystroke return
+end tell
+AS
