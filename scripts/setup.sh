@@ -53,6 +53,29 @@ prompt_read() {
     read "$@"
 }
 
+# Bootstrap an always-on user LaunchAgent, treating "already loaded" as a
+# no-op and logging a warning (not a hard failure) on other errors. The
+# DEVONthink opt-in block has its own stricter loader that fails hard.
+load_launch_agent() {
+    local plist=$1 display=${2:-} err
+    display=${display:-$(basename "$plist" .plist)}
+    if [ ! -f "$plist" ]; then
+        info "$display agent plist not found at $plist, skipping"
+        return 0
+    fi
+    info "Loading $display agent..."
+    if err=$(launchctl bootstrap "gui/$(id -u)" "$plist" 2>&1); then
+        success "$display agent loaded"
+        return 0
+    fi
+    case "$err" in
+        *"Bootstrap failed: 17"*|*"already loaded"*)
+            info "$display agent already loaded" ;;
+        *)
+            info "WARNING: failed to load $display agent: $err" ;;
+    esac
+}
+
 # Dry-run stow for a package and back up any non-symlink files that would
 # conflict, preserving them as <target>.backup.<epoch>. Called immediately
 # before the actual `stow --restow` so first-run machines with pre-existing
@@ -301,23 +324,12 @@ EOF
         success "Seeded ~/.aerospace.toml from source"
     fi
 
-    # NAS auto-mount agent. Stowed above by the main loop; bootstrap it now so
-    # the shares mount without waiting for the next login. The agent re-runs at
-    # every login (RunAtLoad) and on network changes (WatchPaths /etc/resolv.conf).
-    NAS_MOUNT_PLIST="$HOME/Library/LaunchAgents/com.user.mount-nas.plist"
-    if [ -f "$NAS_MOUNT_PLIST" ]; then
-        info "Loading NAS auto-mount agent..."
-        if nas_err=$(launchctl bootstrap "gui/$(id -u)" "$NAS_MOUNT_PLIST" 2>&1); then
-            success "NAS auto-mount agent loaded"
-        else
-            case "$nas_err" in
-                *"Bootstrap failed: 17"*|*"already loaded"*)
-                    info "NAS auto-mount agent already loaded" ;;
-                *)
-                    info "WARNING: failed to load NAS auto-mount agent: $nas_err" ;;
-            esac
-        fi
-    fi
+    # Always-on user LaunchAgents. Stowed above by the main loop; bootstrap now
+    # so they're live without waiting for the next login. RunAtLoad means each
+    # also fires once immediately. The DEVONthink agents are loaded separately
+    # in the opt-in block below.
+    load_launch_agent "$HOME/Library/LaunchAgents/com.user.mount-nas.plist" "NAS auto-mount"
+    load_launch_agent "$HOME/Library/LaunchAgents/com.user.check-stale-dev-servers.plist" "stale-dev-servers"
 
     # Git SSH commit-signing key. The tracked gitconfig sets commit.gpgsign=true
     # with gpg.format=ssh, so a signing key must exist or every `git commit`
