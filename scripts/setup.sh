@@ -95,6 +95,21 @@ if ! xcode-select -p &>/dev/null; then
     fail "Wait for the Xcode CLT install to finish, then re-run ./scripts/setup.sh"
 fi
 
+# 0a. Keep xcode-select pointed at Xcode.app when it's installed (CLT alone
+#     omits xctrace, full SDKs, Instruments). Self-heal a stale pointer to a
+#     deleted Xcode with --reset.
+XCODE_APP_DEV="/Applications/Xcode.app/Contents/Developer"
+current_xcode_dev=$(xcode-select -p 2>/dev/null || true)
+if [ -d "$XCODE_APP_DEV" ] && [ "$current_xcode_dev" != "$XCODE_APP_DEV" ]; then
+    info "Repointing xcode-select at Xcode.app (was: ${current_xcode_dev:-unset})..."
+    sudo xcode-select -s "$XCODE_APP_DEV"
+    success "xcode-select now points at $XCODE_APP_DEV"
+elif [ -n "$current_xcode_dev" ] && [ ! -d "$current_xcode_dev" ]; then
+    info "xcode-select points at missing path $current_xcode_dev; resetting..."
+    sudo xcode-select --reset
+    success "xcode-select reset to system default ($(xcode-select -p 2>/dev/null || echo 'unset'))"
+fi
+
 # 0b. Touch ID for sudo. macOS ships a template at /etc/pam.d/sudo_local.template
 #     with `pam_tid.so` commented out; the active file (/etc/pam.d/sudo_local)
 #     survives OS updates, unlike edits to /etc/pam.d/sudo. This cuts down on
