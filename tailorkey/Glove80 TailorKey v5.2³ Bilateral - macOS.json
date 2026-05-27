@@ -13479,10 +13479,30 @@
       ]
     },
     {
-      "name": "right_caps_word_v1_TKZ",
-      "description": "GE - combo_caps_word_right",
+      "name": "right_hyper_ACSG_space_enter_v1_TKZ",
+      "description": "sticky hyper (Alt + Ctrl + Shift + Gui) on Space + Enter - mirrors Go60 muscle memory",
       "binding": {
-        "value": "&caps_word"
+        "value": "&sk",
+        "params": [
+          {
+            "value": "LA",
+            "params": [
+              {
+                "value": "LC",
+                "params": [
+                  {
+                    "value": "LS",
+                    "params": [
+                      {
+                        "value": "LGUI"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
       },
       "keyPositions": [
         73,

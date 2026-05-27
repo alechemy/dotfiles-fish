@@ -11360,7 +11360,7 @@
   "combos": [
     {
       "name": "sticky_hyp_rght_v1_TKZ",
-      "description": "sticky \"hyper\" modifiers (Win + Alt + Ctrl + Shift) on Shift + Space - TailorKey",
+      "description": "sticky \"hyper\" modifiers (Win + Alt + Ctrl + Shift) on Space + Enter - TailorKey",
       "binding": {
         "value": "&sk",
         "params": [
@@ -11385,7 +11385,7 @@
         ]
       },
       "keyPositions": [
-        56,
+        58,
         59
       ],
       "timeoutMs": 50,
