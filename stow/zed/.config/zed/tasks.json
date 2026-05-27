@@ -3,7 +3,11 @@
     "label": "Open in Marked 2",
     "command": "marked",
     "args": ["$ZED_FILE"],
-    "tags": ["markdown"]
+    "tags": ["markdown"],
+    "reveal": "never",
+    "hide": "on_success",
+    "show_summary": false,
+    "show_command": false
   },
   {
     "label": "Markdownlint Fix",
