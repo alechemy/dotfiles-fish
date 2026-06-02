@@ -117,6 +117,14 @@ When the work needs Python ≥ 3.10 or third-party packages, use the split-archi
 
 `scripts/lint-launchd-plists.sh` enforces both rules across every plist template in the repo and runs as part of `setup.sh`. It will halt the bootstrap on any violation.
 
+### Launch agents and TCC-protected folders
+
+The same Apple-signed-vs-rotating-identity split that governs AppleEvents also governs the per-folder TCC protections on `~/Downloads`, `~/Desktop`, and `~/Documents`. When a launch agent reads or writes a file in one of those folders, macOS checks the accessing binary's signature. Apple-signed binaries (`/usr/bin/python3`, `/bin/mv`, `/bin/mkdir`, `osascript`) are not blocked in this context; non-Apple-signed helpers (Homebrew/`mise`/`uv`-managed tools — `node`/`defuddle`, `magick`, `markdownlint`, etc.) trigger a one-time "X wants to access files in your Downloads folder" prompt. Because launch agents run headless, a fumbled or dismissed keystroke on that prompt writes a persistent *deny* rule, after which the helper's `open()` returns `EPERM` on every run — silently, since the surrounding Apple-signed script keeps working. (`fswatch` is exempt: FSEvents *monitoring* is a different code path than file `open()` and does not trip the per-folder check.)
+
+The rule: **a non-Apple-signed helper invoked under a launch agent must never open a file directly inside a TCC-protected folder.** Stage the file into the per-user temp dir first (`tempfile.TemporaryDirectory()` / `mktemp`, which lives under `$TMPDIR` → `/var/folders/…`, not protected) and point the helper at the copy. Do the copy itself with an Apple-signed binary. `ingest-singlefile-html.py` is the reference: it copies the staging HTML out of `~/Downloads/SingleFile/` into `tmpdir` before handing it to `defuddle`. This also makes the pipeline robust to the helper's path/signature rotating on upgrade — there is no folder grant to lose.
+
+This is not enforced by a linter; it is a design rule to apply whenever a new pipeline reads from or writes to Downloads/Desktop/Documents under launchd.
+
 ### Python script shebangs
 
 Python interpreter management is split between mise and uv on purpose. mise (`stow/mise/.config/mise/config.toml`) provides the day-to-day `python3` on `$PATH`. uv (Brewfile) is reserved for scripts that declare third-party deps via PEP 723. There is no repo-wide `pyproject.toml` / `uv.lock` — each script stands alone.
