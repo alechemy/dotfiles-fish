@@ -973,8 +973,32 @@ def main() -> int:
     ai_chat_platform = is_ai_chat_url(source_url)
 
     with tempfile.TemporaryDirectory() as tmpdir:
+        # Copy the staging file into tmpdir up front and do all downstream
+        # work against that copy. Two reasons:
+        #
+        # 1. defuddle is a Node binary (mise shim, ad-hoc signed). Under the
+        #    launchd watcher it has no TCC grant for the Downloads folder, so
+        #    reading ~/Downloads/SingleFile/*.html directly fails with EPERM
+        #    and silently drops the markdown extract. (Apple-signed
+        #    /usr/bin/python3 — this script and compress_images — is exempt,
+        #    which is why parse/compress/import all still work.) tmpdir lives
+        #    under the per-user $TMPDIR (/var/folders/…), which is not a
+        #    TCC-protected location, so Node can read it.
+        #
+        # 2. DT names an imported record after the file's stem. When
+        #    safe_title differs from the staging file's stem (always true in
+        #    the generic "No title" case, since we augment with a URL
+        #    suffix), importing the raw staging file would land with the
+        #    wrong name and require a `set name` rename event to fix it. That
+        #    rename fires Util: Lock Name on Rename, which would force
+        #    NameLocked=1 and defeat the untitled-page fallback. The
+        #    properly-named twin makes import land with the right name from
+        #    the start.
+        import_html_path = Path(tmpdir) / f"{safe_title}.html"
+        shutil.copy2(html_path, import_html_path)
+
         md_path = Path(tmpdir) / f"{safe_title}.md"
-        has_md = run_defuddle(html_path, md_path)
+        has_md = run_defuddle(import_html_path, md_path)
         if has_md:
             strip_inline_data_images(md_path)
             # AI chat transform runs on the raw defuddle output; lint after,
@@ -982,17 +1006,6 @@ def main() -> int:
             if ai_chat_platform:
                 transform_to_report(md_path, ai_chat_platform)
             lint_markdown(md_path)
-
-        # DT names an imported record after the file's stem. When safe_title
-        # differs from the staging file's stem (always true in the generic
-        # "No title" case, since we augment with a URL suffix), importing
-        # would land with the wrong name and require a `set name` rename
-        # event to fix it. That rename fires Util: Lock Name on Rename,
-        # which would force NameLocked=1 and defeat the untitled-page
-        # fallback. Copy the staging file to a properly-named twin in tmpdir
-        # so import lands with the right name from the start.
-        import_html_path = Path(tmpdir) / f"{safe_title}.html"
-        shutil.copy2(html_path, import_html_path)
 
         try:
             uuids = import_to_devonthink(
