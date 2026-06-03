@@ -30,13 +30,26 @@ sketchybar --default "${default[@]}"
 sketchybar --add item clock right \
   --set clock update_freq=10 icon= script="$PLUGIN_DIR/clock.sh"
 
+# Battery — only drawn on the MacBook display (undocked); the icon reflects the
+# charge level and click reveals the exact percentage. Hidden when docked
+# (clamshell on AC). display_change re-runs it on undock/redock; system_woke
+# refreshes after sleep.
+sketchybar --add item battery right \
+  --set battery update_freq=60 \
+  label.drawing=off \
+  click_script="$PLUGIN_DIR/battery_click.sh" \
+  script="$PLUGIN_DIR/battery.sh" \
+  --subscribe battery display_change system_woke
+
 # VPN / Work Proxy status
+# display_change re-runs the script on undock/redock so it can hide itself when
+# idle on the MacBook display (see plugins/vpn.sh).
 sketchybar --add event proxy_toggle
 sketchybar --add item vpn right \
   --set vpn update_freq=10 \
   click_script="$PLUGIN_DIR/vpn_click.sh" \
   script="$PLUGIN_DIR/vpn.sh" \
-  --subscribe vpn proxy_toggle
+  --subscribe vpn proxy_toggle display_change
 
 # Volume
 # display_change re-runs the script on undock/redock so the compact-vs-spacious
@@ -50,7 +63,7 @@ sketchybar --add item volume right \
 sketchybar --add event aerospace_workspace_change
 
 sketchybar --add item space.6 right \
-  --subscribe space.6 aerospace_workspace_change \
+  --subscribe space.6 aerospace_workspace_change display_change \
   --set space.6 \
   background.color=0x44ffffff \
   background.corner_radius=5 \
@@ -64,7 +77,7 @@ sketchybar --add item space.6 right \
   script="$PLUGIN_DIR/aerospace.sh 6"
 
 sketchybar --add item space.5 right \
-  --subscribe space.5 aerospace_workspace_change \
+  --subscribe space.5 aerospace_workspace_change display_change \
   --set space.5 \
   background.color=0x44ffffff \
   background.corner_radius=5 \
@@ -78,7 +91,7 @@ sketchybar --add item space.5 right \
   script="$PLUGIN_DIR/aerospace.sh 5"
 
 sketchybar --add item space.4 right \
-  --subscribe space.4 aerospace_workspace_change \
+  --subscribe space.4 aerospace_workspace_change display_change \
   --set space.4 \
   background.color=0x44ffffff \
   background.corner_radius=5 \
@@ -92,7 +105,7 @@ sketchybar --add item space.4 right \
   script="$PLUGIN_DIR/aerospace.sh 4"
 
 sketchybar --add item space.3 right \
-  --subscribe space.3 aerospace_workspace_change \
+  --subscribe space.3 aerospace_workspace_change display_change \
   --set space.3 \
   background.color=0x44ffffff \
   background.corner_radius=5 \
@@ -106,7 +119,7 @@ sketchybar --add item space.3 right \
   script="$PLUGIN_DIR/aerospace.sh 3"
 
 sketchybar --add item space.2 right \
-  --subscribe space.2 aerospace_workspace_change \
+  --subscribe space.2 aerospace_workspace_change display_change \
   --set space.2 \
   background.color=0x44ffffff \
   background.corner_radius=5 \
@@ -120,7 +133,7 @@ sketchybar --add item space.2 right \
   script="$PLUGIN_DIR/aerospace.sh 2"
 
 sketchybar --add item space.1 right \
-  --subscribe space.1 aerospace_workspace_change \
+  --subscribe space.1 aerospace_workspace_change display_change \
   --set space.1 \
   background.color=0x44ffffff \
   background.corner_radius=5 \
