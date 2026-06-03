@@ -20,5 +20,5 @@ if ipconfig getifaddr "$WIFI_DEV" >/dev/null 2>&1; then
   sketchybar --set "$NAME" drawing=off
 else
   # Offline reminder.
-  sketchybar --set "$NAME" icon="󰖪" icon.color=0xfff5a623 label="No Wi-Fi" drawing=on
+  sketchybar --set "$NAME" icon="󰖪" icon.color=0xfff5a623 label="" drawing=on
 fi
