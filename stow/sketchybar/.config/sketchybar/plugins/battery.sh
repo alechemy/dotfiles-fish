@@ -10,33 +10,33 @@ if [ "$(display_mode)" = "spacious" ]; then
 fi
 
 BATT=$(pmset -g batt)
+
+# Charging means plugged in, so the charge level isn't actionable — hide it.
+if echo "$BATT" | grep -q "AC Power"; then
+  sketchybar --set "$NAME" drawing=off
+  exit 0
+fi
+
 PERCENT=$(echo "$BATT" | grep -Eo '[0-9]+%' | head -1 | tr -d '%')
 [ -z "$PERCENT" ] && PERCENT=0
 
-CHARGING=false
-echo "$BATT" | grep -q "AC Power" && CHARGING=true
+# Nerd-font (Material Design Icons) battery glyphs.
+case "$PERCENT" in
+100) ICON="󰁹" ;;
+9[0-9]) ICON="󰂂" ;;
+8[0-9]) ICON="󰂁" ;;
+7[0-9]) ICON="󰂀" ;;
+6[0-9]) ICON="󰁿" ;;
+5[0-9]) ICON="󰁾" ;;
+4[0-9]) ICON="󰁽" ;;
+3[0-9]) ICON="󰁼" ;;
+2[0-9]) ICON="󰁻" ;;
+1[0-9]) ICON="󰁺" ;;
+*) ICON="󰂎" ;;
+esac
 
-# Nerd-font (Material Design Icons) battery glyphs; charging overrides level.
-if [ "$CHARGING" = true ]; then
-  ICON="󰂄"
-else
-  case "$PERCENT" in
-  100) ICON="󰁹" ;;
-  9[0-9]) ICON="󰂂" ;;
-  8[0-9]) ICON="󰂁" ;;
-  7[0-9]) ICON="󰂀" ;;
-  6[0-9]) ICON="󰁿" ;;
-  5[0-9]) ICON="󰁾" ;;
-  4[0-9]) ICON="󰁽" ;;
-  3[0-9]) ICON="󰁼" ;;
-  2[0-9]) ICON="󰁻" ;;
-  1[0-9]) ICON="󰁺" ;;
-  *) ICON="󰂎" ;;
-  esac
-fi
-
-# Warn (red) when draining and at/under 20%.
-if [ "$CHARGING" = false ] && [ "$PERCENT" -le 20 ]; then
+# Warn (red) at/under 20%.
+if [ "$PERCENT" -le 20 ]; then
   COLOR=0xffff5f5f
 else
   COLOR=0xffffffff
