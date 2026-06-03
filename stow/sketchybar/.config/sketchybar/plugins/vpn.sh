@@ -10,5 +10,13 @@ if ifconfig 2>/dev/null | grep -q 'inet 10\.5\.'; then
   exit 0
 fi
 
-# Nothing active — show idle state so it's still clickable
-sketchybar --set "$NAME" icon="🔴" label="" drawing=on
+# Nothing active. On the MacBook display (undocked) the proxy/VPN toggle is
+# irrelevant, so hide it entirely to reclaim space — the active branches above
+# still draw it as a "you forgot to turn the proxy off" reminder. Docked, keep
+# the idle red dot so it stays clickable.
+source "$CONFIG_DIR/plugins/lib/display_mode.sh"
+if [ "$(display_mode)" = "compact" ]; then
+  sketchybar --set "$NAME" drawing=off
+else
+  sketchybar --set "$NAME" icon="🔴" label="" drawing=on
+fi
