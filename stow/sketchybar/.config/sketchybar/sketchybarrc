@@ -41,6 +41,16 @@ sketchybar --add item battery right \
   script="$PLUGIN_DIR/battery.sh" \
   --subscribe battery display_change system_woke
 
+# Wi-Fi — only drawn on the MacBook display (undocked) and only when offline, as
+# a "you have no connection" reminder; invisible whenever Wi-Fi is up or docked.
+# wifi_change fires it on connect/disconnect; display_change/system_woke are
+# backstops, plus a slow poll since a false "online" defeats the indicator.
+sketchybar --add item wifi right \
+  --set wifi update_freq=30 \
+  drawing=off \
+  script="$PLUGIN_DIR/wifi.sh" \
+  --subscribe wifi wifi_change display_change system_woke
+
 # VPN / Work Proxy status
 # display_change re-runs the script on undock/redock so it can hide itself when
 # idle on the MacBook display (see plugins/vpn.sh).
