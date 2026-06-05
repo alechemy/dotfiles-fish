@@ -1,0 +1,38 @@
+#!/bin/sh
+# hrm-reconcile — toggle the software home-row-mods app (HRM.app,
+# com.wontaeyang.HRM) based on which keyboard is attached.
+#
+# HRM should run ONLY when the built-in keyboard is the sole HRM-capable board.
+# The Glove80 (USB) and Go60 (Bluetooth) both implement home row mods in
+# firmware, so running HRM.app on top of either double-applies the behavior.
+# Kill the software layer whenever a firmware board is present; otherwise
+# launch it.
+#
+# Idempotent: safe to run from any trigger (Keyboard Maestro USB/wake macro,
+# Shortcuts Bluetooth automation, manual invocation), any number of times. Every
+# trigger is just a "something changed, re-check" nudge; this script is the sole
+# authority on the desired state, derived fresh from device presence each run.
+#
+# TCC-free by design: ioreg, pkill, pgrep, and open are Apple-signed and send no
+# AppleEvents, so this never trips the Automation-grant rotation that launchd
+# pipelines in this repo otherwise have to guard against. Quitting via `pkill`
+# (not `osascript ... to quit`) is deliberate for the same reason.
+#
+# Both boards surface as IOHIDInterface entries regardless of transport (USB or
+# Bluetooth), so a single ioreg query covers both. Confirm the Go60's exact
+# Product string the first time it is connected and update BOARDS if it differs:
+#   ioreg -r -c IOHIDInterface -d1 | grep -i go60
+
+BOARDS='Glove80|Go60'
+
+if ioreg -r -c IOHIDInterface -d1 | grep -qiE "$BOARDS"; then
+	logger -t hrm-reconcile "hrm-reconcile: firmware board present -> quitting HRM.app"
+	pkill -x HRM
+elif pgrep -x HRM >/dev/null; then
+	logger -t hrm-reconcile "hrm-reconcile: built-in keyboard only -> HRM.app already running"
+else
+	logger -t hrm-reconcile "hrm-reconcile: built-in keyboard only -> launching HRM.app"
+	open -gja HRM
+fi
+
+exit 0
