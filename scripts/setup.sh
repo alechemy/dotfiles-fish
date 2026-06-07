@@ -373,6 +373,27 @@ EOF
 
             info "Regenerating Karabiner JSON via goku..."
             goku || info "WARNING: goku failed; run it manually after Karabiner is permission-granted"
+
+            # Force-enable "Modify events" for the Glove80 (vendor 5824 / product
+            # 10203). ZMK mouse-key emulation (HID_POINTING=y) makes the board
+            # advertise a mouse HID collection, so Karabiner sees a composite
+            # keyboard+pointing device and leaves it ungrabbed by default — its
+            # F-key -> m1ddc media-key rules then never fire (raw F11 falls through
+            # to Show Desktop). Reflashing the board re-defaults the toggle to off,
+            # so re-assert it on every setup run. goku preserves the devices array
+            # across regeneration, so this is not clobbered.
+            if command -v jq &>/dev/null \
+                && ! jq -e '.profiles[] | select(.selected==true) | .devices[]? | select(.identifiers.vendor_id==5824 and .identifiers.product_id==10203 and .ignore==false)' "$KARABINER_JSON" >/dev/null 2>&1; then
+                info "Enabling Karabiner 'Modify events' for the Glove80..."
+                tmp=$(mktemp) \
+                    && jq '(.profiles[] | select(.selected==true) | .devices) |=
+                             (( . // [] | map(select(.identifiers.vendor_id != 5824 or .identifiers.product_id != 10203)) )
+                              + [{"identifiers":{"is_keyboard":true,"is_pointing_device":true,"vendor_id":5824,"product_id":10203},
+                                  "ignore":false,"manipulate_caps_lock_led":false,"treat_as_built_in_keyboard":false,
+                                  "disable_built_in_keyboard_if_exists":false}])' "$KARABINER_JSON" >"$tmp" \
+                    && mv "$tmp" "$KARABINER_JSON" \
+                    && success "Glove80 enabled in Karabiner (Modify events on)"
+            fi
         fi
 
         # Start the goku watcher service now that karabiner.edn is in place.
