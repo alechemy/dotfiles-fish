@@ -562,7 +562,7 @@ The schedule is set to a daytime wake-hour rather than the small hours: `StartCa
 The primary DEVONthink smart rule pipeline integrates directly with daily notes via the **Process: Daily Notes** step:
 
 - **Extracting Daily Logs:** For handwritten notes, the pipeline searches for headers like "Daily Notes", "Today", "Journal", or "Log". If found, it extracts the content beneath them and automatically appends it to today's daily note. Deduplication ensures that repeated notebook updates don't result in duplicated entries.
-- **Linking Temporal Events:** For any document processed by the pipeline, if the AI enrichment step identified a specific `EventDate` (e.g., from meeting notes), the pipeline automatically appends a wikilink to that document on the daily note corresponding to that specific date.
+- **Linking Temporal Events:** For any document processed by the pipeline, if the AI enrichment step identified a specific `EventDate` (e.g., from meeting notes), the pipeline automatically appends a wikilink to that document on the daily note corresponding to that specific date. If the target note doesn't exist yet — a past/future `EventDate`, or a morning where the 6:15 AM `create-daily-note.sh` run was missed — Post-Enrich & Archive creates it on demand (matching `create-daily-note.sh`'s heading and `Daily Note` tag) rather than dropping the link.
 
 ### Template Format
 
