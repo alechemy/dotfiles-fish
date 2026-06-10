@@ -79,6 +79,8 @@ cask "copilot-cli"
 # dropzone disabled until the cask is updated to v5
 # cask "dropzone"
 cask "espanso"
+# feishin has no Homebrew cask — install manually from github.com/jeffvli/feishin/releases
+# (Navidrome frontend; the SketchyBar 'feishin' plugin depends on it)
 cask "font-hack-nerd-font"
 cask "font-jetbrains-mono"
 cask "ghostty"
@@ -86,10 +88,13 @@ cask "granola"
 cask "wontaeyang/hrm/hrm"
 cask "karabiner-elements"
 cask "keyboard-maestro"
+cask "launchcontrol"
 cask "localsend"
 cask "maestral"
 cask "marked-app"
 cask "orbstack"
+cask "qobuz"
+cask "soundsource"
 cask "tailscale-app"
 cask "ungoogled-chromium"
 cask "vscodium"
@@ -103,16 +108,21 @@ mas "Drafts", id: 1435957248
 mas "Dropover", id: 1355679052
 mas "Fantastical", id: 975937182
 mas "Find Any File", id: 402569179
+mas "Flighty", id: 1358823008
 mas "Folder Peek", id: 1615988943
 mas "GrandPerspective", id: 1111570163
+mas "Hand Mirror", id: 1502839586
+mas "Infuse", id: 1136220934
 mas "Keka", id: 470158793
 mas "Name Mangler 3", id: 603637384
+mas "Parcel", id: 375589283
 mas "Peek", id: 1554235898
 mas "Refined GitHub", id: 1519867270
 mas "StopTheMadness Pro", id: 6471380298
 mas "Things", id: 904280696
 mas "Tot", id: 1491071483
 mas "Transmit", id: 1436522307
+mas "uBlock Origin Lite", id: 6745342698
 mas "Wipr", id: 1662217862
 # Xcode is ~15 GB; uncomment to install eagerly on a fresh machine, otherwise
 # install on demand via `mas install 497799835` (requires the Apple ID to have
