@@ -202,12 +202,12 @@ on performSmartRule(theRecords)
 
 							if (count of newLinesToAppend) > 0 then
 								if hasValidEventDate then
-									set extractTargetFilename to eventDate & ".md"
+									set extractTargetDate to eventDate
 								else
-									set extractTargetFilename to todayFilename
+									set extractTargetDate to todayStr
 								end if
 
-								set extractTargetNote to get record at (groupPath & "/" & extractTargetFilename) in targetDB
+								set extractTargetNote to my getOrCreateDailyNote(targetDB, destGroup, groupPath, extractTargetDate)
 
 								if extractTargetNote is not missing value then
 									set docUUID to uuid of theRecord
@@ -232,7 +232,7 @@ on performSmartRule(theRecords)
 									end repeat
 									add custom meta data updatedLinesRaw for "PreviousDailyNotes" to theRecord
 								else
-									log message "Post-Enrich & Archive: daily note (" & extractTargetFilename & ") not found, skipping extraction" info recName
+									log message "Post-Enrich & Archive: daily note (" & extractTargetDate & ".md) could not be created, skipping extraction" info recName
 								end if
 							end if
 						end if
@@ -247,16 +247,16 @@ on performSmartRule(theRecords)
 					if isLinked is not 1 then
 						try
 							if hasValidEventDate then
-								set targetFilename to eventDate & ".md"
+								set targetDate to eventDate
 							else
 								set cDate to creation date of theRecord
 								set cYear to year of cDate as text
 								set cMonth to text -2 thru -1 of ("0" & ((month of cDate) as integer))
 								set cDay to text -2 thru -1 of ("0" & (day of cDate))
-								set targetFilename to cYear & "-" & cMonth & "-" & cDay & ".md"
+								set targetDate to cYear & "-" & cMonth & "-" & cDay
 							end if
 
-							set targetNote to get record at (groupPath & "/" & targetFilename) in targetDB
+							set targetNote to my getOrCreateDailyNote(targetDB, destGroup, groupPath, targetDate)
 
 							if targetNote is not missing value then
 								-- Determine emoji by document type
@@ -298,7 +298,7 @@ on performSmartRule(theRecords)
 
 								add custom meta data 1 for "DailyNoteLinked" to theRecord
 							else
-								log message "Post-Enrich & Archive: daily note (" & targetFilename & ") not found, skipping wikilink" info recName
+								log message "Post-Enrich & Archive: daily note (" & targetDate & ".md) could not be created, skipping wikilink" info recName
 							end if
 						on error errMsg
 							log message "Post-Enrich & Archive: wikilink append failed: " & errMsg info recName
@@ -391,8 +391,8 @@ on performSmartRule(theRecords)
 								set cYear to year of bmCreated as text
 								set cMonth to text -2 thru -1 of ("0" & ((month of bmCreated) as integer))
 								set cDay to text -2 thru -1 of ("0" & (day of bmCreated))
-								set targetFilename to cYear & "-" & cMonth & "-" & cDay & ".md"
-								set targetNote to get record at (groupPath & "/" & targetFilename) in targetDB
+								set targetDate to cYear & "-" & cMonth & "-" & cDay
+								set targetNote to my getOrCreateDailyNote(targetDB, destGroup, groupPath, targetDate)
 
 								if targetNote is not missing value then
 									set bmName to name of bmRecord
@@ -414,7 +414,7 @@ on performSmartRule(theRecords)
 									end if
 									add custom meta data 1 for "DailyNoteLinked" to bmRecord
 								else
-									log message "Post-Enrich & Archive: daily note (" & targetFilename & ") not found, skipping web clip link" info recName
+									log message "Post-Enrich & Archive: daily note (" & targetDate & ".md) could not be created, skipping web clip link" info recName
 								end if
 							end if
 						end if
@@ -506,3 +506,25 @@ on appendToSection(theNote, sectionHeader, contentBlock)
 		set plain text of theNote to newText
 	end tell
 end appendToSection
+
+-- Returns the daily note for dateStr (YYYY-MM-DD), creating it in destGroup
+-- if it doesn't exist yet. The 6:15 AM launchd job (create-daily-note.sh)
+-- normally seeds these, but an EventDate in the past or future, or a missed
+-- run, can leave the target note absent; creating on demand keeps the
+-- wikilink from being dropped. Mirrors create-daily-note.sh's content and
+-- "Daily Note" tag so an on-demand note is indistinguishable from a seeded one.
+on getOrCreateDailyNote(targetDB, destGroup, groupPath, dateStr)
+	tell application id "DNtp"
+		set noteFilename to dateStr & ".md"
+		set existingNote to get record at (groupPath & "/" & noteFilename) in targetDB
+		if existingNote is not missing value then return existingNote
+
+		set headingDate to do shell script "date -j -f '%Y-%m-%d' " & quoted form of dateStr & " '+%A, %B %-d, %Y'"
+		set noteContent to "# " & headingDate & return & return & "- " & return
+
+		set newNote to create record with {name:dateStr, type:markdown} in destGroup
+		set plain text of newNote to noteContent
+		set tags of newNote to {"Daily Note"}
+		return newNote
+	end tell
+end getOrCreateDailyNote
