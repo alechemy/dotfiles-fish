@@ -426,6 +426,12 @@ EOF
             cd "$DOTFILES"
             success "DEVONthink pipeline stowed"
 
+            # Seed smart rules / smart groups / custom metadata / batch presets
+            # into ~/Library/Application Support/DEVONthink/. Copy-if-absent, so
+            # this never clobbers config DEVONthink already owns on this machine.
+            info "Seeding DEVONthink config (smart rules, custom metadata)..."
+            "$DOTFILES/scripts/seed-devonthink-config.sh"
+
             info "Loading launchd agents..."
             # Bootstrap each plist, surfacing real failures while tolerating the
             # "already loaded" case (launchctl exits 37 / Bootstrap failed: 17).

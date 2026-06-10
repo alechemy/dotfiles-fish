@@ -94,6 +94,21 @@ Current consumers:
 
 A separate `__HOME__` expansion pattern exists for launch-agent plist templates under `stow/*/Library/LaunchAgents/*.plist.template`, handled by `scripts/build-launchd-plists.sh`.
 
+### Seeded config (copy-if-absent, not stowed)
+
+Some app config is portable and worth versioning but is a binary plist the app **rewrites at runtime** — stowing it via symlink is fragile, because an atomic-rename save replaces the symlink with a real file and silently de-stows it. For these, the repo keeps a tracked seed copy and a script copies it into place **only when the target is absent** (so a live, app-mutated file is never clobbered).
+
+The pattern:
+
+1. Seed files live under `stow/<pkg>/_seed/` mirroring their `$HOME`-relative path (e.g. `stow/devonthink/_seed/Library/Application Support/DEVONthink/SmartRules.plist`).
+2. The package's `.stow-local-ignore` lists `_seed` so the directory is never symlinked.
+3. A `scripts/seed-<pkg>-config.sh` walks `_seed/` and `cp`s each file to `$HOME` if the destination does not already exist. It is idempotent and safe to run with the app open.
+4. `setup.sh` calls the seed script after stowing the package.
+
+Only genuinely portable, user-authored config belongs in a seed. Do **not** seed app-shipped defaults (DEVONthink repopulates its built-in AI templates and Smart Rules example `.scpt`s from the app bundle on launch) or machine-specific state (window geometry, the preferences plist, licenses) — verify against the app bundle before adding a file.
+
+Current consumer: `stow/devonthink/_seed/` — DEVONthink smart rules, smart groups, custom metadata, and batch-processing presets (`scripts/seed-devonthink-config.sh`). DEVONthink AI keys live in the macOS Keychain, not these plists, so they are never captured here.
+
 ### Adding a New Package
 
 1. Create `stow/<toolname>/` mirroring the `$HOME` path (e.g. `stow/lazygit/.config/lazygit/`)
