@@ -110,6 +110,11 @@ on-mode-changed = [
     cmd-alt-ctrl-shift-w = 'close'
     cmd-alt-ctrl-shift-backtick = 'exec-and-forget bash -c "$HOME/.dotfiles/scripts/aerospace-cycle-window.sh next"'
 
+    # Hide the focused app without leaving the current workspace. A native Cmd-H
+    # makes macOS activate the next app (often on another workspace) and pulls
+    # AeroSpace there; the handler focuses a sibling first so focus stays put.
+    cmd-h = 'exec-and-forget bash -c "$HOME/.dotfiles/scripts/aerospace-hide.sh"'
+
     # See: https://nikitabobko.github.io/AeroSpace/commands#move
     cmd-alt-ctrl-shift-left  = 'move left'
     cmd-alt-ctrl-shift-down  = 'move down'

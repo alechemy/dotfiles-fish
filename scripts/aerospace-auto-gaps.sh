@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# Auto-select outer gap preset based on tiled window count on focused workspace.
+# Recompute outer gaps from the tiled window count on the focused workspace so
+# every window keeps a constant width (one third of the monitor; see
+# aerospace-gaps-lib.sh for the math).
 # Triggered from AeroSpace callbacks: on-window-detected (new windows),
 # on-focus-changed (closing the focused window shifts focus, so this catches
 # cmd-W), and exec-on-workspace-change (workspace navigation).
@@ -22,6 +24,8 @@ SUPPRESSION_ENABLED=true
 SOURCE_FILE="$HOME/.dotfiles/stow/aerospace/.aerospace.toml"
 RUNTIME_FILE="$HOME/.aerospace.toml"
 SUPPRESS_FILE="/tmp/aerospace-gaps-suppressed-workspace"
+
+. "$HOME/.dotfiles/scripts/aerospace-gaps-lib.sh"
 
 # Skip when more than one monitor is connected (e.g. clamshell + lid open) so
 # the manual + automatic gap states don't fight during transient configs.
@@ -54,11 +58,12 @@ count=$(aerospace list-windows --workspace "$ws" --format "%{window-layout}" \
     | wc -l \
     | tr -d ' ')
 
-# Map count to outer-left/right preset value (px) on the main monitor.
+# Map count to the outer-left/right value that keeps window width constant.
+compute_gap_presets || exit 0
 case "$count" in
-    0|1) target=1000 ;;
-    2)   target=600 ;;
-    *)   target=8 ;;
+    0|1) target=$gap_centered ;;
+    2)   target=$gap_split ;;
+    *)   target=$gap_full ;;
 esac
 
 read_gap() {
