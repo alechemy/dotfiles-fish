@@ -109,6 +109,17 @@ Only genuinely portable, user-authored config belongs in a seed. Do **not** seed
 
 Current consumer: `stow/devonthink/_seed/` — DEVONthink smart rules, smart groups, custom metadata, and batch-processing presets (`scripts/seed-devonthink-config.sh`). DEVONthink AI keys live in the macOS Keychain, not these plists, so they are never captured here.
 
+### SingleFile extension settings (tracked, manually imported)
+
+The SingleFile browser extension keeps its config in browser storage, not a file Stow can target, so the canonical settings live at `stow/devonthink/.config/devonthink-pipeline/singlefile-extension-settings.json` and are applied by hand (SingleFile options → JSON settings editor → paste/import). Stowing only provides a stable path to re-import from; nothing reads the file at runtime.
+
+Two settings are load-bearing for the ingest pipeline and must not drift:
+
+- `filenameTemplate` is prefixed with `SingleFile/` so captures land in `~/Downloads/SingleFile/`, the only folder `singlefile-watcher.sh` watches. It uses `{date-iso}`, not `{date-locale}` — a locale date renders with `/`, which SingleFile treats as a path separator (`/` is not in `filenameReplacedCharacters`), so a locale date would scatter captures into date-named subfolders the watcher never sees.
+- `insertSingleFileComment: true` — `ingest-singlefile-html.py` recovers the source URL *only* from SingleFile's `url:` comment in the first 4 KB; without it every capture is rejected as "Not a SingleFile HTML."
+
+Capture is triggered by ⌘D bound to SingleFile in `chrome://extensions/shortcuts` (see `capture-with-singlefile`). The tracked JSON has every `saveTo*` destination disabled (plain browser download) and all token/secret fields empty — keep it so; a GitHub/S3/WebDAV/REST token here would be a plaintext secret in the repo.
+
 ### Adding a New Package
 
 1. Create `stow/<toolname>/` mirroring the `$HOME` path (e.g. `stow/lazygit/.config/lazygit/`)
