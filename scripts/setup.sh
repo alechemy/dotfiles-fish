@@ -165,6 +165,28 @@ else
     success "Homebrew already installed"
 fi
 
+# 1b. Trust the specific third-party tap entries we install. Homebrew 5.2/6.0
+#     makes $HOMEBREW_REQUIRE_TAP_TRUST the default, after which untrusted taps'
+#     formulae/casks/commands are silently ignored — `brew bundle` would skip
+#     sketchybar, borders, goku, aerospace, and hrm, and `brew autoupdate`
+#     (step 2b) would stop resolving. Trust the exact entries we depend on (not
+#     whole taps, per Homebrew's guidance) before the bundle runs. `brew trust`
+#     is idempotent, doesn't validate that the tap exists yet, and writes
+#     ~/.homebrew/trust.json (or $XDG_CONFIG_HOME/homebrew/trust.json).
+#
+#     When adding a Brewfile entry from a new third-party tap, add it here too,
+#     or it will be ignored once strict tap-trust becomes the default.
+if brew trust --help >/dev/null 2>&1; then
+    info "Trusting third-party tap entries..."
+    if brew trust --command domt4/autoupdate/autoupdate \
+        && brew trust --formula felixkratz/formulae/borders felixkratz/formulae/sketchybar yqrashawn/goku/goku \
+        && brew trust --cask nikitabobko/tap/aerospace wontaeyang/hrm/hrm; then
+        success "Third-party tap entries trusted"
+    else
+        info "WARNING: 'brew trust' reported a failure; some tap entries may be ignored under HOMEBREW_REQUIRE_TAP_TRUST."
+    fi
+fi
+
 # 2. Install dependencies via Brewfile
 if [ -f "$DOTFILES/Brewfile" ]; then
     info "Installing dependencies from Brewfile..."

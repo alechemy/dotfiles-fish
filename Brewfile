@@ -6,6 +6,9 @@
 #   - `brew list --cask` (apps)
 #   - `mas list` (Mac App Store apps)
 
+# Third-party taps. When adding an entry installed from one of these (or a new
+# tap), also trust it in scripts/setup.sh (step 1b) — Homebrew 5.2/6.0 ignores
+# untrusted taps' formulae/casks/commands by default.
 tap "domt4/autoupdate"
 tap "felixkratz/formulae"
 tap "nikitabobko/tap"
