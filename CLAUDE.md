@@ -169,6 +169,12 @@ For tier 1 scripts, even when the launchd plist provides the interpreter explici
 
 When writing MP4/m4a boolean atoms (`cpil`, `pgap`) with mutagen, assign a **bare bool** — `audio["cpil"] = True` — never a list. mutagen renders a list by truthiness, so `audio["cpil"] = [False]` silently writes `True`. `tagger.py` sets the compilation flag this way.
 
+### AeroSpace scripting: identify apps by PID, not name
+
+When a script bridges AeroSpace and System Events (e.g. to hide or focus a specific app), key off the **PID**, not the app name. AeroSpace's `%{app-name}` and the System Events process name disagree for some apps — notably case (`Ghostty` vs `ghostty`) — so a name comparison silently mismatches: it fails to exclude the target when picking a sibling, and `set visible of (process whose name is …)` can no-op against the wrong identity. Use AeroSpace's `%{app-pid}` and hide/match via System Events `unix id` (`first application process whose unix id is <pid>`), which is namespace-safe. Reference: `scripts/aerospace-hide.sh`.
+
+Context for that script: AeroSpace emulates workspaces by hiding/showing windows that all share one macOS Space, so a native Cmd-H on the *frontmost* app makes macOS activate the next global-MRU app — often on another workspace — and AeroSpace follows focus there, yanking you off your workspace. Hiding a *non-frontmost* app moves no focus, so the handler focuses a same-workspace sibling first, then hides the target by PID. AeroSpace exposes no hide/unhide callback, and `reload-config` (the only way to apply a gap change) re-syncs the visible workspace to the focused window's workspace — a no-op when they already agree, but the reason gap recomputes must not run while focus is mid-transition.
+
 ## External design notes (gitignored, outside the repo)
 
 Some pipelines have design docs kept outside the public repo because they document sensitive recipes (e.g. local-store decryption). **Read the relevant file before modifying its pipeline** — the docs cover schema, breakage modes, and debug recipes that aren't reconstructable from the code alone.

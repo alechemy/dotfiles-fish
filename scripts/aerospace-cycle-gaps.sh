@@ -13,6 +13,8 @@ export PATH="/opt/homebrew/bin:$PATH"
 SOURCE_FILE="$HOME/.dotfiles/stow/aerospace/.aerospace.toml"
 RUNTIME_FILE="$HOME/.aerospace.toml"
 
+. "$HOME/.dotfiles/scripts/aerospace-gaps-lib.sh"
+
 # Skip when more than one monitor is connected. See aerospace-auto-gaps.sh
 # for the rationale; the TOML's named-monitor rule keeps the built-in panel
 # on the 8 px fallback regardless.
@@ -27,7 +29,11 @@ fi
 exec 9>/tmp/aerospace-gaps.lock
 flock 9
 
-PRESETS=(8 600 1220)
+if ! compute_gap_presets; then
+    osascript -e 'display notification "Cannot determine screen width; gap cycle skipped." with title "AeroSpace"' >/dev/null 2>&1 || true
+    exit 0
+fi
+PRESETS=("$gap_full" "$gap_split" "$gap_centered")
 LABELS=("full" "split" "centered")
 
 # Read current gap from runtime if present, else from source.
