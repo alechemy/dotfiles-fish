@@ -118,6 +118,8 @@ Two settings are load-bearing for the ingest pipeline and must not drift:
 - `filenameTemplate` is prefixed with `SingleFile/` so captures land in `~/Downloads/SingleFile/`, the only folder `singlefile-watcher.sh` watches. It uses `{date-iso}`, not `{date-locale}` — a locale date renders with `/`, which SingleFile treats as a path separator (`/` is not in `filenameReplacedCharacters`), so a locale date would scatter captures into date-named subfolders the watcher never sees.
 - `insertSingleFileComment: true` — `ingest-singlefile-html.py` recovers the source URL *only* from SingleFile's `url:` comment in the first 4 KB; without it every capture is rejected as "Not a SingleFile HTML."
 
+`filenameReplacedCharacters` entries are regex character-class fragments, not literal characters — that is why the control-range entry is `\u0000-\u001f` (a regex range). Any backslash must be written pre-escaped as `\\` (JSON `"\\\\"`); a single backslash makes SingleFile build the class `[\]+`, where the `\` escapes the `]`, and every save fails with `Invalid regular expression: ... Unterminated character class`. Do not "simplify" the doubled backslash to a single one.
+
 Capture is triggered by ⌘D bound to SingleFile in `chrome://extensions/shortcuts` (see `capture-with-singlefile`). The tracked JSON has every `saveTo*` destination disabled (plain browser download) and all token/secret fields empty — keep it so; a GitHub/S3/WebDAV/REST token here would be a plaintext secret in the repo.
 
 ### Adding a New Package
