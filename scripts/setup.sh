@@ -504,6 +504,26 @@ EOF
         info "WARNING: $GHOSTTY_APPSUPPORT exists and will shadow ~/.config/ghostty/config"
         info "Remove it so Ghostty uses your stowed config: rm \"$GHOSTTY_APPSUPPORT\""
     fi
+
+    # Warn if the Navidrome Keychain entry is missing. The sketchybar music
+    # plugin (plugins/feishin.sh) reads the password via
+    #   security find-generic-password -s 'Navidrome' -a <user>
+    # and shows "No keychain" when it's absent. The password is a personal
+    # secret that can't be provisioned from the repo, so this is a non-fatal
+    # nudge with the exact command. Only relevant once the env file exists —
+    # without it the plugin shows "No config" instead and the entry is moot.
+    # Existence is checked without `-w` so no Keychain-access prompt is raised.
+    NAVIDROME_ENV="$HOME/.config/navidrome/env"
+    if [ -f "$NAVIDROME_ENV" ]; then
+        ND_USER=$(awk -F= '/^[[:space:]]*NAVIDROME_USERNAME=/{gsub(/["[:space:]]/,"",$2); print $2; exit}' "$NAVIDROME_ENV")
+        ND_USER="${ND_USER:-alec}"
+        if ! security find-generic-password -s 'Navidrome' -a "$ND_USER" >/dev/null 2>&1; then
+            echo ""
+            info "WARNING: no 'Navidrome' Keychain entry for user '$ND_USER'."
+            info "  The sketchybar music item will show \"No keychain\" until you add it:"
+            info "    security add-generic-password -s 'Navidrome' -a '$ND_USER' -w '<password>' -U"
+        fi
+    fi
 else
     fail "Stow is not installed. Please check Brewfile installation."
 fi
