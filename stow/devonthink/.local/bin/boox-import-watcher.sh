@@ -54,8 +54,17 @@ wait_for_stable_size() {
     return 1
 }
 
+# An unnamed notebook on the Boox is exported as "Notebook-<n>.pdf", where <n> is
+# the device's incrementing counter. These are throwaway quick notes the user
+# never titled, so the watcher drops them instead of importing — naming a note on
+# the device is the deliberate signal that it should enter DEVONthink.
+is_untitled_notebook() {
+    [[ "$(basename "$1" .pdf)" =~ ^Notebook-[0-9]+$ ]]
+}
+
 # Import one .pdf: wait for quiescence, then hand off to boox-import.sh. Skips
-# truncated files so the next event (or backlog sweep) can retry.
+# truncated files so the next event (or backlog sweep) can retry. Untitled
+# Notebook-<n> exports are deleted rather than imported.
 import_pdf() {
     local path=$1 origin=$2 stability
     stability=$(wait_for_stable_size "$path")
@@ -65,6 +74,11 @@ import_pdf() {
         return 0
     fi
     if [[ -f "$path" ]]; then
+        if is_untitled_notebook "$path"; then
+            log "ignoring untitled Boox note, deleting: $path ($origin)"
+            rm -f "$path"
+            return 0
+        fi
         log "importing ($origin) $path"
         "$IMPORTER" "$path" || log "importer exited non-zero for $path ($origin)"
     fi
