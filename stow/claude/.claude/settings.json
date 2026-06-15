@@ -2,20 +2,59 @@
   "permissions": {
     "defaultMode": "bypassPermissions"
   },
-  "effortLevel": "xhigh",
-  "voice": {
-    "enabled": true,
-    "mode": "tap"
+  "model": "opus[1m]",
+  "env": {
+    "NO_COLOR": "1"
   },
-  "skipDangerousModePermissionPrompt": true,
-  "theme": "dark",
-  "voiceEnabled": true,
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$HOME/.claude/hooks/bash-grep-guard.sh\""
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$HOME/.claude/hooks/comment-noise-check.sh\""
+          }
+        ]
+      }
+    ]
+  },
+  "enabledPlugins": {
+    "chrome-devtools-mcp@chrome-devtools-plugins": true
+  },
   "extraKnownMarketplaces": {
     "expo-plugins": {
       "source": {
         "source": "github",
         "repo": "expo/skills"
       }
+    },
+    "chrome-devtools-plugins": {
+      "source": {
+        "source": "github",
+        "repo": "ChromeDevTools/chrome-devtools-mcp"
+      }
     }
-  }
+  },
+  "effortLevel": "xhigh",
+  "awaySummaryEnabled": false,
+  "voice": {
+    "enabled": true,
+    "mode": "tap"
+  },
+  "skipDangerousModePermissionPrompt": true,
+  "theme": "dark",
+  "editorMode": "normal",
+  "voiceEnabled": true
 }
