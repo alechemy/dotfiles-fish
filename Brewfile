@@ -116,7 +116,6 @@ mas "Infuse", id: 1136220934
 mas "Keka", id: 470158793
 mas "Name Mangler 3", id: 603637384
 mas "Parcel", id: 375589283
-mas "Peek", id: 1554235898
 mas "Refined GitHub", id: 1519867270
 mas "StopTheMadness Pro", id: 6471380298
 mas "Things", id: 904280696
