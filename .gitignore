@@ -9,6 +9,8 @@ dist
 projects.json
 stow-work/*
 !stow-work/.gitkeep
+stow-local/*
+!stow-local/.gitkeep
 stow/git/.gitconfig.work
 stow/fish/.config/fish/fish_variables
 stow/zed/.config/zed/settings.json
