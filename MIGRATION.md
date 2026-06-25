@@ -9,9 +9,9 @@ Everything that `setup.sh` *can't* do for you on a new Mac. Work through it in o
   - In **System Settings → Touch ID & Password**, enable **App Store** under "Use Touch ID for" so any remaining prompts become a fingerprint tap.
 - [ ] **Install 1Password** manually from 1password.com and sign in to your account. Wait until you see your vault before continuing.
 - [ ] In **1Password → Settings → Developer**, enable:
-  - **Use the SSH agent** (replaces `~/.ssh/id_*` for git/ssh)
-  - **Connect with 1Password CLI** + **Biometric unlock for 1Password CLI**
+  - **Connect with 1Password CLI** + **Biometric unlock for 1Password CLI** (the `op inject` build scripts depend on this)
   - (Optional) **Integrate with 1Password CLI** in your terminal
+  - Leave **Use the SSH agent** OFF — this setup doesn't use it. SSH keys are on-disk files (`~/.ssh/id_*`), commit signing uses the local `~/.ssh/id_signing` key, and GitHub git ops go over HTTPS.
 - [ ] Open a terminal and verify: `op whoami` should print your account. If it doesn't, the `build-{zed,streamrip}-config.sh` scripts will fail.
 
 ## 2. Bootstrap
@@ -63,7 +63,7 @@ These live outside the dotfiles repo. Copy via Time Machine, AirDrop, or `scp`.
   - `~/.local/share/granola-import/` — design notes (`NOTES.md`) + any cached state.
 - [ ] **Importer idempotency state.** Copy the whole `~/.local/state/devonthink/` directory. It holds two kinds of files: the JSON idempotency state that prevents importers from re-importing everything on first run (`github-stars-imported.json`, `granola-imported.json`, `granola-version.json`, optional `granola-failure.json`, plus any `.bak` siblings), and the `*.last-run` heartbeat files for every launchd-driven pipeline (`dt-daily-note`, `dt-watchdog`, `github-stars-import`, `granola-import`, `singlefile-watcher`). Without the JSONs, the next launchd fire re-imports your full GitHub star history and every Granola meeting and spams duplicate failure records into DT. Without the heartbeats, the watchdog flags pipelines as stale.
 - [ ] **Dropzone grid layout (`Actions5.dzdb`).** The action bundles (`Send to DEVONthink.dzbundle`, `Send to DEVONthink Inbox.dzbundle`) come along automatically via `stow/dropzone/` — they land at `~/Library/Application Support/Dropzone/Actions/`. What does *not* come along is the grid layout itself, which Dropzone 5 stores in `~/Library/Application Support/Dropzone/Actions5.dzdb` (a SQLite DB that mutates at runtime, so it's not stowed). To restore the grid (custom display names like "Send to 99_ARCHIVE", positions, "Automatically Add to Music" → Move Files target path, etc.), quit Dropzone 5, then `cp` the `Actions5.dzdb` from the old Mac's `~/Library/Application Support/Dropzone/` into the same path on the new Mac, then relaunch. Without this swap, Dropzone 5 will discover the bundles but show them as default-named entries you have to drag into the grid yourself. Note: on Dropzone 4 the path was `~/Library/Application Support/Dropzone 4/Actions/`; Dropzone 5 uses the unversioned `Dropzone/` dir.
-- [ ] `~/.gnupg/` — only if you sign commits with GPG. If you're using 1Password SSH agent + git's commit signing via SSH, skip this.
+- [ ] `~/.gnupg/` — only if you sign commits with GPG. You don't: commit signing here is SSH-based via the local `~/.ssh/id_signing` key (`gpg.format=ssh`), so skip this.
 - [ ] `~/.config/op/` — 1Password CLI local state. Optional; 1Password rebuilds on first auth.
 - [ ] **Hazel rules**, **Keyboard Maestro macros**, **Alfred workflows**, **Drafts actions** — none of these tools store their state in `~/.config`. Export from the old machine and import on the new one. See each app's "backup/sync" feature. (Espanso is *not* in this list: its config and matches live in `stow/espanso/.config/espanso/`, and `setup.sh` registers + starts the service at step 9.)
 - [ ] **Karabiner-Elements** — `~/.config/karabiner/` *is* in the dotfiles (`stow/karabiner/`), so it comes along automatically. Just open the app once on the new machine and grant Input Monitoring.
@@ -85,7 +85,7 @@ These live outside the dotfiles repo. Copy via Time Machine, AirDrop, or `scp`.
   ```
 
 - [ ] **Navidrome Keychain entry.** The `feishin` sketchybar plugin looks up the Navidrome password via macOS Keychain. Run: `security add-generic-password -s 'Navidrome' -a 'alec' -w '<password>' -U`. Without this, the sketchybar plugin shows "No keychain".
-- [ ] If you commit-sign via SSH (recommended given the 1Password agent): `git config --global user.signingkey "<your ssh pubkey>"` and `git config --global commit.gpgsign true` (the global gitconfig in `stow/git/` may already handle this — check).
+- [ ] **Commit signing.** The tracked gitconfig already sets `gpg.format=ssh`, `commit.gpgsign=true`, and `signingkey=~/.ssh/id_signing.pub`, and `setup.sh` generates `~/.ssh/id_signing` if it's missing. Just add `~/.ssh/id_signing.pub` to GitHub as a **Signing Key** (Settings → SSH and GPG keys → New SSH key → type: Signing Key). No 1Password needed.
 
 ## 7. macOS permission grants (TCC)
 
