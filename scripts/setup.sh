@@ -392,10 +392,26 @@ EOF
     # error — the user can run `goku` manually afterwards.
     KARABINER_JSON="$HOME/.config/karabiner/karabiner.json"
     if command -v goku &>/dev/null && [ -f "$HOME/.config/karabiner.edn" ]; then
+        # Karabiner-Elements writes the runtime JSON (with its default profile)
+        # on first launch. On a fresh machine that launch hasn't happened yet, so
+        # the file is absent and goku has nothing to compile into. Launch the app
+        # headless and wait for the file to appear so the rename + goku steps
+        # below run in this same pass, instead of needing a second setup.sh run.
+        # The JSON is created regardless of input-monitoring permission; that
+        # grant only affects whether remapping actually fires, not file creation.
+        if [ ! -f "$KARABINER_JSON" ] && [ -d "/Applications/Karabiner-Elements.app" ]; then
+            info "Karabiner JSON not found; launching Karabiner-Elements to generate it..."
+            open -g -a "Karabiner-Elements" 2>/dev/null || true
+            for _ in $(seq 1 20); do
+                if [ -f "$KARABINER_JSON" ]; then break; fi
+                sleep 0.5
+            done
+        fi
+
         if [ ! -f "$KARABINER_JSON" ]; then
             info "WARNING: $KARABINER_JSON not found."
-            info "  Open Karabiner-Elements once to generate it, grant input-monitoring"
-            info "  permission, then re-run ./scripts/setup.sh (or run 'goku' manually)."
+            info "  Install Karabiner-Elements and open it once to generate it, grant"
+            info "  input-monitoring permission, then re-run ./scripts/setup.sh (or run 'goku')."
         else
             # Karabiner-Elements names its starter profile "Default profile" on
             # first launch; goku needs exact match "Default". Quit the app before
