@@ -12,7 +12,9 @@ case "$file" in
   *) exit 0 ;;
 esac
 
-content=$(printf '%s' "$input" | jq -r '.tool_input.new_string // .tool_input.content // empty' 2>/dev/null)
+# new_string (Edit), content (Write), or every edits[].new_string (MultiEdit, which the
+# unanchored Edit|Write matcher also fires on) — joined so a MultiEdit isn't a blind spot.
+content=$(printf '%s' "$input" | jq -r '[.tool_input.new_string, .tool_input.content, (.tool_input.edits[]?.new_string)] | map(select(type == "string")) | join("\n")' 2>/dev/null)
 [ -z "$content" ] && exit 0
 
 # Comment-ish lines (//, /*, or a JSDoc continuation "* ...") that also carry a
