@@ -338,6 +338,24 @@ EOF
         success "stow-work/work stowed"
     fi
 
+    # 4a-bis. Opt-in machine-local stow package (stow-local/local/).
+    #
+    # Same gitignore treatment as stow-work: a fresh `git clone` ships only
+    # .gitkeep, so this is a no-op. After a file-copy from another machine the
+    # package has content and we stow it. This is the home for personal,
+    # non-shareable tooling that shouldn't live in the public repo. A companion
+    # stow-local/install.sh (also gitignored) finishes any out-of-tree setup and
+    # is run by hand, not from here.
+    if [ -d "$DOTFILES/stow-local/local" ] && [ -n "$(ls -A "$DOTFILES/stow-local/local" 2>/dev/null)" ]; then
+        info "Stowing stow-local/local..."
+        cd "$DOTFILES/stow-local"
+        backup_stow_conflicts local
+        stow --restow --no-folding --ignore='.DS_Store' --ignore='__pycache__' --target="$HOME" local
+        cd "$DOTFILES"
+        success "stow-local/local stowed"
+        [ -x "$DOTFILES/stow-local/install.sh" ] && info "stow-local/install.sh present — run it to finish machine-local setup"
+    fi
+
     # Aerospace runtime config is not stowed (scripts/aerospace-*-gaps.sh
     # rewrites it). Seed it from source on fresh installs so aerospace doesn't
     # start with empty defaults until the first window event fires.
