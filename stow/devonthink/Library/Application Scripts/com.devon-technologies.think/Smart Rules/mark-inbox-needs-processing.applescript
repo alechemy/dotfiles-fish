@@ -17,6 +17,12 @@
 --     Execute Script → External → this file
 
 on performSmartRule(theRecords)
+  -- [follower-guard] only the DEVONthink pipeline driver mutates documents (see should-run-dt-driver)
+  try
+    do shell script "$HOME/.local/bin/should-run-dt-driver"
+  on error
+    return
+  end try
   tell application id "DNtp"
     repeat with theRecord in theRecords
       set current to (get custom meta data for "NeedsProcessing" from theRecord)

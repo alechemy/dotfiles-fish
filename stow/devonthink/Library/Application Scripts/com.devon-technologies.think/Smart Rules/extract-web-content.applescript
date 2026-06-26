@@ -23,6 +23,12 @@
 --   Trigger: On Import / Every Minute
 
 on performSmartRule(theRecords)
+  -- [follower-guard] only the DEVONthink pipeline driver mutates documents (see should-run-dt-driver)
+  try
+    do shell script "$HOME/.local/bin/should-run-dt-driver"
+  on error
+    return
+  end try
 	tell application id "DNtp"
 		set archiveGroup to get record at "/99_ARCHIVE" in database "Lorebook"
 		if archiveGroup is missing value then

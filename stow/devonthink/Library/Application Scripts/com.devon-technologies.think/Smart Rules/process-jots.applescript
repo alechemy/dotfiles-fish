@@ -22,6 +22,12 @@
 -- Inbox forever since On Import only fires once.
 
 on performSmartRule(theRecords)
+  -- [follower-guard] only the DEVONthink pipeline driver mutates documents (see should-run-dt-driver)
+  try
+    do shell script "$HOME/.local/bin/should-run-dt-driver"
+  on error
+    return
+  end try
 	tell application id "DNtp"
 		set dbName to "Lorebook"
 		set groupPath to "/10_DAILY"
