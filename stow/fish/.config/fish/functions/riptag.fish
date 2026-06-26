@@ -208,6 +208,11 @@ function riptag -d "download, tag, and organize an album into the music library"
             echo ""
             echo "↩️  Kept the existing library copy — the new download wasn't an improvement."
             return 0
+        else if test $worker_status -eq 4
+            echo ""
+            echo "⚠️  Album organized, but NAS permissions weren't set (couldn't reach the NAS)."
+            echo "    Re-run the chmod command shown above once the NAS is reachable."
+            return 1
         else if test $worker_status -ne 0
             echo ""
             echo "❌ Something went wrong."
@@ -352,6 +357,11 @@ for r in json.load(sys.stdin):
         echo ""
         echo "↩️  Kept the existing library copy — the new download wasn't an improvement."
         return 0
+    else if test $worker_status -eq 4
+        echo ""
+        echo "⚠️  Album organized, but NAS permissions weren't set (couldn't reach the NAS)."
+        echo "    Re-run the chmod command shown above once the NAS is reachable."
+        return 1
     else if test $worker_status -ne 0
         echo ""
         echo "❌ Something went wrong."

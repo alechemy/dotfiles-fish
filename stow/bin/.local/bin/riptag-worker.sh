@@ -24,6 +24,9 @@
 #   0  All tracks downloaded successfully; album tagged and organized.
 #   1  Hard error (crash, bad args, etc.)
 #   2  Some tracks failed; session ID written to /tmp/riptag-resume-id.
+#   3  Existing library copy kept; the new download was not an improvement.
+#   4  Album organized, but the NAS permission fix (local mode) couldn't reach
+#      the NAS over SSH. Files are in the library; perms need a manual retry.
 #
 # Environment variables:
 #   TAGGER_SCRIPT        Path to tagger.py (auto-set by riptag in remote mode)
@@ -238,6 +241,8 @@ fi
 # NAS mode: music-organize.py already set permissions on the native filesystem.
 # Local mode: it wrote across the SMB mount, where chmod does not stick — redo
 # it on the NAS side, one organized album folder (and its artist folder) at a time.
+PERM_FAILED=0
+FAILED_CMDS=""
 if [ $LOCAL_MODE -eq 1 ] && [ -f "$MANIFEST_FILE" ]; then
   printf "%s\n" "--> Step 5: Setting permissions on the NAS..."
   while IFS= read -r album_dir; do
@@ -246,7 +251,31 @@ if [ $LOCAL_MODE -eq 1 ] && [ -f "$MANIFEST_FILE" ]; then
     artist_dir=$(dirname "$nas_dir")
     esc_album=$(printf "%s" "$nas_dir" | sed "s/'/'\\\\''/g")
     esc_artist=$(printf "%s" "$artist_dir" | sed "s/'/'\\\\''/g")
-    ssh "$NAS_HOST" "chmod 775 '$esc_artist'; chmod -R 775 '$esc_album'"
+    remote_cmd="chmod 775 '$esc_artist'; chmod -R 775 '$esc_album'"
+    # Retry once: a fresh SSH to the LAN can fail transiently (VPN race, or a
+    # first-run macOS Local Network permission prompt that returns EHOSTUNREACH
+    # — "No route to host" — until granted).
+    if ! ssh -o ConnectTimeout=10 "$NAS_HOST" "$remote_cmd"; then
+      sleep 3
+      if ! ssh -o ConnectTimeout=10 "$NAS_HOST" "$remote_cmd"; then
+        PERM_FAILED=1
+        FAILED_CMDS="${FAILED_CMDS}  ssh $NAS_HOST \"$remote_cmd\"
+"
+      fi
+    fi
   done < "$MANIFEST_FILE"
 fi
+
+if [ "$PERM_FAILED" -eq 1 ]; then
+  printf "\n"
+  printf "%s\n" "WARNING: The album is downloaded, tagged, and organized into the library,"
+  printf "%s\n" "but setting permissions on the NAS failed (couldn't reach $NAS_HOST"
+  printf "%s\n" "over SSH). Navidrome may not be able to read the files until you fix this."
+  printf "%s\n" "Once the NAS is reachable, re-run:"
+  printf "\n"
+  printf "%s" "$FAILED_CMDS"
+  # Keep the manifest so the failed paths aren't lost before a retry.
+  exit 4
+fi
+
 rm -f "$MANIFEST_FILE"
