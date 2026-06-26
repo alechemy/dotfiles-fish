@@ -12,6 +12,12 @@
 -- processed.
 
 on performSmartRule(theRecords)
+  -- [follower-guard] only the DEVONthink pipeline driver mutates documents (see should-run-dt-driver)
+  try
+    do shell script "$HOME/.local/bin/should-run-dt-driver"
+  on error
+    return
+  end try
     tell application id "DNtp"
         set maxWaitSeconds to 300 -- 5 minutes
         set theRole to "You are a markdown formatting assistant."

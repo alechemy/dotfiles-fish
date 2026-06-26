@@ -1,0 +1,45 @@
+#!/bin/bash
+# should-run-dt-driver [--urgent|--force]
+#
+# Role gate for the DEVONthink pipeline. Exit 0 if this Mac is the pipeline
+# DRIVER (run document-mutating work); exit 1 if it is a FOLLOWER (skip).
+#
+# Mirrors should-run-background-job. Two consumers:
+#   - the launchd ingest agents (gate before importing), and
+#   - a guard at the top of each auto-firing, mutating smart rule, via
+#     `do shell script "$HOME/.local/bin/should-run-dt-driver"` wrapped in a
+#     try/on-error-return, so a follower's rule engine fires-then-no-ops while
+#     the database still syncs over CloudKit.
+#
+# Role resolution (first match wins):
+#   1. ~/.config/dt-pipeline/role containing "driver" or "follower"
+#   2. this host's LocalHostName listed in ~/.config/dt-pipeline/driver-hosts
+#   3. default: follower  (safe failure mode — a misconfigured Mac sits passive
+#      rather than becoming an accidental co-driver)
+#
+# --urgent / --force always exit 0, for deliberate manual runs on any Mac.
+
+set -euo pipefail
+
+for arg in "$@"; do
+    case "$arg" in
+        --urgent|--force) exit 0 ;;
+        -h|--help) sed -n '2,/^set -euo/p' "$0" | sed 's/^# \{0,1\}//; /^set -euo/d'; exit 0 ;;
+    esac
+done
+
+ROLE_FILE="$HOME/.config/dt-pipeline/role"
+if [ -f "$ROLE_FILE" ]; then
+    case "$(tr -d '[:space:]' < "$ROLE_FILE" | tr '[:upper:]' '[:lower:]')" in
+        driver)   exit 0 ;;
+        follower) echo "should-run-dt-driver: role=follower; skipping driver work" >&2; exit 1 ;;
+    esac
+fi
+
+HOST=$(/usr/sbin/scutil --get LocalHostName 2>/dev/null || hostname -s)
+if grep -qxF "$HOST" "$HOME/.config/dt-pipeline/driver-hosts" 2>/dev/null; then
+    exit 0
+fi
+
+echo "should-run-dt-driver: $HOST is a DEVONthink follower (no role marker); skipping" >&2
+exit 1

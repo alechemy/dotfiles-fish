@@ -492,14 +492,34 @@ EOF
                         ;;
                 esac
             }
-            # com.user.granola-import.plist is built from a gitignored
+            # Pipeline role: exactly one Mac (the driver) runs the document-
+            # mutating ingest agents; followers only sync + serve read/UI, with
+            # mutating smart rules self-skipping via should-run-dt-driver. Default
+            # to follower so a second Mac never becomes an accidental co-driver.
+            ROLE_FILE="$HOME/.config/dt-pipeline/role"
+            mkdir -p "$HOME/.config/dt-pipeline"
+            if [ ! -f "$ROLE_FILE" ]; then
+                prompt_read -r -p "  ? Is this Mac the DEVONthink pipeline DRIVER (ingests + runs smart rules)? [y/N] " REPLY
+                if [[ $REPLY =~ ^[Yy]$ ]]; then echo driver > "$ROLE_FILE"; else echo follower > "$ROLE_FILE"; fi
+            fi
+            DT_ROLE=$(tr -d '[:space:]' < "$ROLE_FILE")
+            info "DEVONthink pipeline role: $DT_ROLE"
+
+            # dt-watchdog runs on every machine (keeps DT + sync alive; mutating
+            # rules self-skip on a follower). The five ingest agents run only on
+            # the driver. com.user.granola-import.plist is built from a gitignored
             # template; load_plist logs and skips if it's absent.
-            for plist in com.user.dt-daily-note \
-                         com.user.dt-watchdog \
-                         com.user.singlefile-watcher \
-                         com.user.boox-import-watcher \
-                         com.user.granola-import \
-                         com.user.github-stars-import; do
+            dt_agents=(com.user.dt-watchdog)
+            if [ "$DT_ROLE" = driver ]; then
+                dt_agents+=(com.user.dt-daily-note \
+                            com.user.singlefile-watcher \
+                            com.user.boox-import-watcher \
+                            com.user.granola-import \
+                            com.user.github-stars-import)
+            else
+                info "  Follower: loading dt-watchdog only; the five ingest agents stay disabled."
+            fi
+            for plist in "${dt_agents[@]}"; do
                 load_plist "$HOME/Library/LaunchAgents/${plist}.plist"
             done
             success "DEVONthink pipeline installed"
