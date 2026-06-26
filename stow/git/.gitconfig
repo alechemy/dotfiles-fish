@@ -6,6 +6,10 @@
   excludesfile = ~/.gitignore
   editor = nano
   pager = delta
+	# Watch filesystem changes so Git status/diff avoid full tree scans in large repos.
+	fsmonitor = true
+	# Cache untracked-file scans to make status faster in large working trees.
+	untrackedCache = true
 [interactive]
   diffFilter = delta --color-only
 [delta]
@@ -24,13 +28,42 @@
   defaultBranch = main
 [push]
   autoSetupRemote = true
+	# Push the current branch to the upstream branch with the same name.
+	default = simple
 [gpg]
   format = ssh
 [commit]
   gpgsign = true
+	# Show the staged diff in the commit editor for a final review.
+	verbose = true
 [tag]
   gpgsign = true
+	# Sort version-like tags naturally, so v2 comes before v10.
+	sort = version:refname
 [include]
   path = ~/.gitconfig.proxy
 [includeIf "gitdir:~/Work/"]
   path = ~/.gitconfig.work
+[rerere]
+	enabled = true
+	# Stage files automatically when rerere replays a recorded conflict resolution.
+	autoupdate = true
+[rebase]
+	# Temporarily stash local changes before rebasing, then reapply them afterward.
+	autoStash = true
+	# Apply fixup!/squash! commits automatically during interactive rebase.
+	autosquash = true
+	# Move dependent branch refs forward when rebasing stacked branches.
+	updateRefs = true
+[fetch]
+	# Remove remote-tracking refs for branches deleted on the remote.
+	prune = true
+[branch]
+	# Show recently updated branches first.
+	sort = -committerdate
+[diff]
+	# Use a diff algorithm that produces cleaner hunks for refactors and moved code.
+	algorithm = histogram
+[column]
+	# Use columns in supported Git output when the terminal is wide enough.
+	ui = auto
