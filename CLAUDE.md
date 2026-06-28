@@ -109,6 +109,22 @@ Only genuinely portable, user-authored config belongs in a seed. Do **not** seed
 
 Current consumer: `stow/devonthink/_seed/` — DEVONthink smart rules, smart groups, custom metadata, and batch-processing presets (`scripts/seed-devonthink-config.sh`). DEVONthink AI keys live in the macOS Keychain, not these plists, so they are never captured here.
 
+### Local Homebrew tap (apps with no upstream cask)
+
+When an app has no Homebrew cask (or only a third-party one we don't want to depend on), the repo carries its own cask under `homebrew/Casks/<token>.rb` and exposes it through a **local-only tap** named `alec/local`, so it installs through the normal `brew bundle` path like any other app.
+
+The mechanism:
+
+1. The cask `.rb` lives in the repo at `homebrew/Casks/<token>.rb` — the single source of truth, version-controlled.
+2. `setup.sh` step 1c creates `$(brew --repository)/Library/Taps/alec/homebrew-local/` and symlinks its `Casks` directory back to `homebrew/Casks/` in the repo. The tap is **not** a git repo and has no remote; a plain directory under `Library/Taps/<user>/homebrew-<repo>/Casks/` is enough for `brew` to resolve `alec/local/<token>`, and `brew update` skips non-git taps. Because `Casks` is a symlink, editing the cask in the repo is live — there is no copy to keep in sync.
+3. The Brewfile references it by its full namespaced token: `cask "alec/local/<token>"`. **Do not** add a `tap "alec/local"` line — that would make `brew bundle` try to clone `github.com/alec/homebrew-local`, which doesn't exist. The tap is materialized by setup.sh instead, before `brew bundle` runs.
+4. Under `HOMEBREW_REQUIRE_TAP_TRUST` (default in Homebrew 6.0), an untrusted tap's casks are silently skipped, so setup.sh step 1b also runs `brew trust --cask alec/local/<token>`.
+5. The cask pins `version` + `sha256` and carries a `livecheck` block; updating means bumping both in the `.rb` (get the new sha256 from `shasum -a 256` of the downloaded asset). `brew livecheck <token>` and `brew autoupdate` flag when a new upstream release exists, but neither edits the cask file — the version bump is manual.
+
+Unsigned/unnotarized apps (most GitHub-release Electron apps) need their quarantine attribute stripped or Gatekeeper blocks the first launch. The cask does this itself in a `postflight` block that runs `xattr -dr com.apple.quarantine "#{appdir}/<App>.app"`, so the strip happens however the cask is installed (`brew bundle`, a direct `brew install --cask`, or an autoupdate upgrade) — no separate `--no-quarantine` flag needed at the call site.
+
+Current consumer: `homebrew/Casks/feishin.rb` — Feishin (Navidrome/Jellyfin/Subsonic desktop client; the SketchyBar `feishin` plugin depends on it).
+
 ### SingleFile extension settings (tracked, manually imported)
 
 The SingleFile browser extension keeps its config in browser storage, not a file Stow can target, so the canonical settings live at `stow/devonthink/.config/devonthink-pipeline/singlefile-extension-settings.json` and are applied by hand (SingleFile options → JSON settings editor → paste/import). Stowing only provides a stable path to re-import from; nothing reads the file at runtime.
