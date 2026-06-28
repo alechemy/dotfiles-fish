@@ -30,9 +30,18 @@ SUPPRESS_FILE="/tmp/aerospace-gaps-suppressed-workspace"
 # Skip when more than one monitor is connected (e.g. clamshell + lid open) so
 # the manual + automatic gap states don't fight during transient configs.
 # The TOML's named-monitor gap rule already keeps the laptop's built-in panel
-# on the 8 px fallback regardless of what's written here.
+# on the 4 px fallback regardless of what's written here.
 mons_json=$(aerospace list-monitors --json 2>/dev/null || echo '[]')
 if [ "$(jq 'length' <<<"$mons_json" 2>/dev/null || echo 1)" -gt 1 ]; then
+    exit 0
+fi
+
+# Auto-gaps only rewrites the DELL's outer gaps; the built-in display always
+# uses the outer fallback, so its window widths never vary with the count. When
+# the DELL isn't connected (laptop mode) there is nothing to adjust, so skip
+# rather than issue a no-op reload-config on every callback.
+if ! jq -e --arg m 'DELL U4025QW' 'any(.[]; ."monitor-name" | contains($m))' \
+        <<<"$mons_json" >/dev/null 2>&1; then
     exit 0
 fi
 

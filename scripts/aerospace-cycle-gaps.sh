@@ -17,7 +17,7 @@ RUNTIME_FILE="$HOME/.aerospace.toml"
 
 # Skip when more than one monitor is connected. See aerospace-auto-gaps.sh
 # for the rationale; the TOML's named-monitor rule keeps the built-in panel
-# on the 8 px fallback regardless.
+# on the 4 px fallback regardless.
 mons_json=$(aerospace list-monitors --json 2>/dev/null || echo '[]')
 if [ "$(jq 'length' <<<"$mons_json" 2>/dev/null || echo 1)" -gt 1 ]; then
     osascript -e 'display notification "Gap cycling is disabled while multiple monitors are connected." with title "AeroSpace"' >/dev/null 2>&1 || true
