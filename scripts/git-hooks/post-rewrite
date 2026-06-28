@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+#
+# Fires after history is rewritten — `git rebase` (incl. a pull with
+# pull.rebase=true, which never triggers post-merge) and `git commit --amend`.
+# Only act on rebase; amend rarely changes which files a package ships and the
+# stale ORIG_HEAD it leaves would diff the wrong range. git sets ORIG_HEAD to
+# the pre-rebase tip. See scripts/restow-changed.sh and CLAUDE.md.
+
+# Drain the old/new SHA pairs git streams on stdin so it doesn't see SIGPIPE.
+cat >/dev/null
+
+[ "${1:-}" = "rebase" ] || exit 0
+
+toplevel="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
+[ -x "$toplevel/scripts/restow-changed.sh" ] || exit 0
+
+"$toplevel/scripts/restow-changed.sh" ORIG_HEAD HEAD || true
+exit 0

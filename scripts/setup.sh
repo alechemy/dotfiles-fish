@@ -149,6 +149,23 @@ fi
 # 0c. ~/Library/LaunchAgents must exist before brew bundle runs any cask that ships an agent.
 mkdir -p "$HOME/Library/LaunchAgents"
 
+# 0d. Point this repo's git hooks at the tracked scripts/git-hooks/ directory so
+#     `git pull` self-heals stow symlinks. A pull updates the working tree under
+#     stow/<pkg>/ but never runs stow, so files synced from another machine land
+#     unlinked (and upstream-deleted files leave dangling symlinks) until the
+#     next setup.sh. The post-merge / post-rewrite hooks restow the affected
+#     packages via scripts/restow-changed.sh. core.hooksPath is local config
+#     (not tracked), so it must be (re)set here on every machine.
+HOOKS_DIR="$DOTFILES/scripts/git-hooks"
+if [ -d "$HOOKS_DIR" ]; then
+    chmod +x "$HOOKS_DIR"/* "$DOTFILES/scripts/restow-changed.sh" 2>/dev/null || true
+    if [ "$(git -C "$DOTFILES" config --local --get core.hooksPath 2>/dev/null)" != "$HOOKS_DIR" ]; then
+        info "Pointing git hooks at scripts/git-hooks (auto-restow on pull)..."
+        git -C "$DOTFILES" config --local core.hooksPath "$HOOKS_DIR"
+        success "git hooks configured (core.hooksPath -> scripts/git-hooks)"
+    fi
+fi
+
 # 1. Install Homebrew
 if ! command -v brew &> /dev/null; then
     info "Installing Homebrew..."

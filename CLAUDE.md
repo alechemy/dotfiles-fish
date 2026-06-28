@@ -75,13 +75,28 @@ Each directory under `stow/` must mirror the path relative to `$HOME`. For examp
 
 `setup.sh` runs `stow --restow --no-folding` for every directory in `stow/` automatically. The `--no-folding` flag prevents Stow from symlinking entire directories (it creates individual file symlinks instead), which avoids conflicts with tools that write new files into their config directories.
 
+### Auto-restow on pull (git hooks)
+
+`git pull` updates the working tree under `stow/<pkg>/` but never invokes stow, so a file added to an already-stowed package on another machine lands **unlinked** after you pull it here (and a file deleted upstream leaves a **dangling** symlink) until the next `setup.sh`. This is the most common way symlinks silently go missing — a new file shows up in the repo but not in `$HOME`.
+
+A git `post-merge` hook (and `post-rewrite`, for `pull.rebase=true` / rebases) closes the gap. The hooks live in the tracked `scripts/git-hooks/` directory and call `scripts/restow-changed.sh ORIG_HEAD HEAD`, which diffs the two refs, maps changed paths to their `stow/`, `stow-work/`, or `stow-local/` package, and restows each one (`stow --restow` recomputes a package's links from its current contents, so new files get linked and removed files get pruned in one pass).
+
+Rules baked into the worker:
+
+- **Opt-in packages** (`devonthink`, `streamrip`, `stow-work/work`, `stow-local/local`) are restowed only if already **active** on this machine — detected by finding at least one of the package's tracked files currently symlinked back into the package. A pull therefore never *activates* config a machine opted out of. Every other `stow/` package is restowed unconditionally, matching `setup.sh`, so a brand-new package syncs in automatically.
+- A package whose directory was deleted entirely upstream can't be auto-pruned (stow needs the package contents to know what to unlink); the worker logs it for manual `stow --delete` instead of erroring.
+- The hooks never abort the git operation: ref/`stow`-missing checks short-circuit to exit 0, and restow failures are non-fatal.
+
+`core.hooksPath` is **local** git config (lives in `.git/config`, not tracked), so it can't ship in the repo — `setup.sh` step 0d points it at `scripts/git-hooks` on every machine and re-marks the hooks executable. To wire it up by hand on a clone that hasn't re-run setup: `git -C ~/.dotfiles config --local core.hooksPath "$PWD/scripts/git-hooks"`. To restow after a sync without waiting for a hook, run `scripts/restow-changed.sh <old-ref> <new-ref>` directly (e.g. `HEAD@{1} HEAD`).
+
 ### Generated configs (template → build → stow)
 
 Some package configs are generated at install time from a tracked template. The pattern:
 
 1. `config.template.{json,toml}` (tracked) — full config with placeholders
-2. A build script in `scripts/` produces the real config (gitignored). Two flavors:
-   - **`op inject`**: resolves `op://Vault/Item/Field` references via 1Password CLI. Requires an authenticated `op` session; build scripts fail loudly if the output still contains `op://`.
+2. A build script in `scripts/` produces the real config (gitignored). Flavors:
+   - **`op inject`**: resolves `op://Vault/Item/Field` references in a tracked template via 1Password CLI. Requires an authenticated `op` session; build scripts fail loudly if the output still contains `op://`.
+   - **`op read`**: fetches a single secret and writes the output directly (no template file). Used when one value goes into a file format where a `*.template` sibling would be harmful — e.g. a fish `conf.d/*.template.fish` would itself be auto-sourced by fish.
    - **`${HOME}` expansion**: pure sed substitution. Used where the target tool needs absolute paths and doesn't honor its own variable substitution.
 3. A `.stow-local-ignore` in the package root excludes the template from stowing. Stow anchors each ignore regex to the whole path segment, so the pattern must match the entire filename: use `.*\.template` (or `.*\.template\.json`), **not** `\.template$` — the latter only matches a file named exactly `.template` and silently lets `foo.plist.template` through.
 4. The build script is called from `setup.sh` before stowing.
@@ -91,6 +106,7 @@ Current consumers:
 - `stow/zed/` — op inject + `${HOME}` (`scripts/build-zed-config.sh`)
 - `stow/streamrip/` — op inject + `${HOME}` (`scripts/build-streamrip-config.sh`)
 - `stow/vscode/` — `${HOME}` only (`scripts/build-vscode-config.sh`)
+- `stow/fish/.config/fish/conf.d/context7.fish` — op read (`scripts/build-context7-config.sh`); exports `CONTEXT7_API_KEY` so terminal-launched Context7 MCP authenticates instead of using the anonymous rate limit. Consumed by Claude Code (reads the env var natively) and Copilot CLI (`stow/copilot/.copilot/mcp-config.json` references it as `${CONTEXT7_API_KEY}`; Copilot forwards only `PATH` + the `env` block to MCP servers, so the reference is required there)
 
 A separate `__HOME__` expansion pattern exists for launch-agent plist templates under `stow/*/Library/LaunchAgents/*.plist.template`, handled by `scripts/build-launchd-plists.sh`.
 

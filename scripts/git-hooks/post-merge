@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+#
+# Restow packages whose files changed in the merge that just completed, so a
+# `git pull` syncing config from another machine self-heals its symlinks
+# without re-running setup.sh. See scripts/restow-changed.sh and CLAUDE.md
+# ("Auto-restow on pull"). Installed via core.hooksPath by setup.sh.
+
+toplevel="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
+[ -x "$toplevel/scripts/restow-changed.sh" ] || exit 0
+
+"$toplevel/scripts/restow-changed.sh" ORIG_HEAD HEAD || true
+exit 0
