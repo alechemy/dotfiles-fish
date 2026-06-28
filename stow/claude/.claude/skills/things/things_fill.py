@@ -3,7 +3,8 @@
 things_fill.py — reliable, idempotent bulk fill for Things 3.
 
 Encodes the hard-won rules for automating Things via its URL scheme:
-  * Things must be FRONTMOST or URL-scheme writes silently no-op  -> we focus it.
+  * Writes fire in the BACKGROUND via `open -g` (no activation), so Things never
+    steals focus / yanks you to another Space; it need not be frontmost.
   * The MCP / `add` command CANNOT create headings; only the `json` command
     (with an auth token) can                                       -> ensure_headings().
   * Multi-item `json` imports TRUNCATE on long URLs (>~4 KB) into a modal
@@ -68,8 +69,10 @@ def existing_titles(project):
         [project] + hs).fetchall()
     con.close(); return set(r[0] for r in rows if r[0])
 
-def focus():
-    subprocess.run(["open", "-a", "Things3"]); time.sleep(0.6)
+def ensure_running():
+    # Launch Things in the BACKGROUND if needed (-g no foreground, -j hidden) so a
+    # tiling WM / Spaces never yanks you to it. Near no-op if already running.
+    subprocess.run(["open", "-g", "-j", "-a", "Things3"]); time.sleep(0.4)
 
 OSA_DISMISS = '''tell application "System Events" to tell (first process whose name contains "Things")
   repeat 12 times
@@ -91,7 +94,7 @@ def dismiss_sheets():
     subprocess.run(["osascript", "-e", OSA_DISMISS], capture_output=True)
 
 def _open(url):
-    subprocess.run(["open", url])
+    subprocess.run(["open", "-g", url])
 
 def ensure_headings(project, titles, token):
     have = set(heading_ids(project))
@@ -100,7 +103,7 @@ def ensure_headings(project, titles, token):
         return
     if not token:
         sys.exit("Need THINGS_AUTH_TOKEN to create headings: " + ", ".join(missing))
-    focus()
+    ensure_running()
     # one json `update` per heading keeps the URL tiny and avoids truncation
     for t in missing:
         data = [{"type": "project", "operation": "update", "id": project,
@@ -136,14 +139,13 @@ def fill(project, todos, headings=None, token=None, dry_run=False):
     if headings:
         ensure_headings(project, headings, token)
     hids = heading_ids(project)
-    focus()
+    ensure_running()
     for i in range(len(by) * 2 + 5):
         have = existing_titles(project)
         missing = [ti for ti in by if ti not in have]
         if not missing: break
         ti = missing[0]; item = by[ti]
         hid = hids.get(item.get("heading", ""))
-        if i % 8 == 0: focus()                  # keep Things frontmost
         add_todo(project, hid, item)
         ok = False
         for _ in range(10):
