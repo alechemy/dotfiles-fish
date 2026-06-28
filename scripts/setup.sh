@@ -240,8 +240,14 @@ fi
 if [ "$OP_READY" -eq 1 ]; then
     chmod +x "$DOTFILES/scripts/build-zed-config.sh"
     "$DOTFILES/scripts/build-zed-config.sh"
+    chmod +x "$DOTFILES/scripts/build-context7-config.sh"
+    "$DOTFILES/scripts/build-context7-config.sh" \
+        || info "WARNING: Context7 key build failed; re-run ./scripts/setup.sh after fixing 1Password."
+    chmod +x "$DOTFILES/scripts/build-things-config.sh"
+    "$DOTFILES/scripts/build-things-config.sh" \
+        || info "WARNING: Things token build failed; re-run ./scripts/setup.sh after fixing 1Password."
 else
-    info "Skipping Zed config build (needs 1Password CLI signed in)."
+    info "Skipping Zed + Context7 + Things config build (needs 1Password CLI signed in)."
     # A `git clone` never produces stow/zed/.config/zed/settings.json (gitignored).
     # If the file is present here without a rebuild, this tree was copied from
     # another machine and the file holds personal API keys resolved by op inject.
