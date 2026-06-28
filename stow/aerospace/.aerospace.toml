@@ -289,3 +289,11 @@ run = 'layout floating'
 [[on-window-detected]]
 if.app-id = 'com.mr-brightside.myParcel'
 run = 'layout floating'
+
+[[on-window-detected]]
+if.app-id = 'com.valvesoftware.steam'
+run = 'layout floating'
+
+[[on-window-detected]]
+if.app-id = 'com.valvesoftware.steam.helper'
+run = 'layout floating'
