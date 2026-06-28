@@ -4,8 +4,8 @@ description: >-
   Reliable automation of Things 3 (the macOS task manager) via the things-mcp server
   and the Things URL scheme. Use whenever creating, updating, organizing, or bulk-loading
   Things projects, headings, or to-dos — especially multi-item writes, which fail in
-  non-obvious ways without these rules. Covers the focus requirement, heading creation,
-  the json-truncation trap, DB-confirmed idempotent writes, and a ready helper script.
+  non-obvious ways without these rules. Covers background (focus-free) writes via `open -g`,
+  heading creation, the json-truncation trap, DB-confirmed idempotent writes, and a helper.
 ---
 
 # Automating Things 3 reliably
@@ -16,9 +16,15 @@ drop or wedge writes. Follow these rules; for any bulk add, **use the bundled he
 
 ## The five rules (each one cost real debugging time)
 
-1. **Things must be the frontmost app** or `open things:///…` writes silently no-op.
-   Run `open -a Things3` first and keep it focused while writing. (Backgrounded Things =
-   nothing lands, no error.)
+1. **Fire writes in the background with `open -g`.** `open -g things:///…` delivers the
+   write **without activating Things**, so it never steals focus or — with a tiling WM
+   (aerospace) / Spaces — yanks you to another workspace. Things does **not** need to be
+   frontmost: measured, `open -g` lands **6/6** with the frontmost app unchanged. Plain
+   `open` / `open -a Things3` *activates* Things — do not use them. If Things isn't running,
+   `open -g` launches it in the background (`open -g -j -a Things3` to pre-warm hidden);
+   rule 4's DB-confirm catches the rare cold-start delay. *(The old "must be frontmost"
+   lore predates trying `-g`; the Apple-Event path — `osascript -e 'tell application
+   "Things3" to make new to do …'` — is an equally focus-free alternative.)*
 2. **The MCP and the `add` command cannot create headings** — they only attach to
    headings that already exist. Create headings via the **`json` command with an auth
    token**. Most reliable: create the *project itself* via a `json` `project` create whose
@@ -60,6 +66,13 @@ python3 ~/.claude/skills/things/things_fill.py spec.json            # fill
 python3 ~/.claude/skills/things/things_fill.py spec.json --dry-run  # show what's missing
 ```
 
+> **The token is already provisioned in the env here — don't re-prompt for it or hardcode
+> it.** `$THINGS_AUTH_TOKEN` is rendered from 1Password into `~/.zshenv` by
+> `~/.dotfiles/scripts/build-things-config.sh` (run by `setup.sh`), and Claude Code's Bash
+> tool runs zsh, which sources `~/.zshenv`. So `update` / `json` / `cancel` and
+> heading-creating writes work with no `export` step. If it ever resolves empty, re-run
+> that build script (needs an unlocked `op`); the `add` command never needs the token.
+
 `spec.json`:
 ```json
 {
@@ -71,9 +84,9 @@ python3 ~/.claude/skills/things/things_fill.py spec.json --dry-run  # show what'
   ]
 }
 ```
-`project` is a uuid or exact title. It focuses Things, ensures headings exist, then adds
-each missing to-do via the `add` command, DB-confirming each. Re-run anytime — it only
-adds what's absent.
+`project` is a uuid or exact title. It ensures Things is running (in the background, never
+foregrounded), ensures headings exist, then adds each missing to-do via the `add` command
+(`open -g`), DB-confirming each. Re-run anytime — it only adds what's absent.
 
 ## MCP tool notes (`things-mcp`, `uvx things-mcp`)
 
