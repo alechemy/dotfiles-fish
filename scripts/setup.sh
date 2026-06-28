@@ -168,11 +168,15 @@ fi
 # 1b. Trust the specific third-party tap entries we install. Homebrew 5.2/6.0
 #     makes $HOMEBREW_REQUIRE_TAP_TRUST the default, after which untrusted taps'
 #     formulae/casks/commands are silently ignored — `brew bundle` would skip
-#     sketchybar, borders, goku, aerospace, and hrm, and `brew autoupdate`
+#     sketchybar, borders, goku, aerospace, hrm, and feishin, and `brew autoupdate`
 #     (step 2b) would stop resolving. Trust the exact entries we depend on (not
 #     whole taps, per Homebrew's guidance) before the bundle runs. `brew trust`
 #     is idempotent, doesn't validate that the tap exists yet, and writes
 #     ~/.homebrew/trust.json (or $XDG_CONFIG_HOME/homebrew/trust.json).
+#
+#     alec/local/feishin is our own local tap (materialized in step 1c); it's
+#     trusted here for the same reason — without it the Brewfile's feishin cask
+#     would be silently skipped under strict tap-trust.
 #
 #     When adding a Brewfile entry from a new third-party tap, add it here too,
 #     or it will be ignored once strict tap-trust becomes the default.
@@ -180,11 +184,27 @@ if brew trust --help >/dev/null 2>&1; then
     info "Trusting third-party tap entries..."
     if brew trust --command domt4/autoupdate/autoupdate \
         && brew trust --formula felixkratz/formulae/borders felixkratz/formulae/sketchybar yqrashawn/goku/goku \
-        && brew trust --cask nikitabobko/tap/aerospace wontaeyang/hrm/hrm; then
+        && brew trust --cask nikitabobko/tap/aerospace wontaeyang/hrm/hrm alec/local/feishin; then
         success "Third-party tap entries trusted"
     else
         info "WARNING: 'brew trust' reported a failure; some tap entries may be ignored under HOMEBREW_REQUIRE_TAP_TRUST."
     fi
+fi
+
+# 1c. Materialize the local Homebrew tap (alec/local) that carries the Feishin
+#     cask. Feishin ships no upstream cask, so the repo keeps one at
+#     homebrew/Casks/feishin.rb and exposes it through a local-only tap whose
+#     Casks directory is a symlink back into this repo — editing the cask here
+#     is live, with no copy to keep in sync. Must run before `brew bundle`
+#     (step 2) so the Brewfile's `cask "alec/local/feishin"` resolves. The
+#     cask's postflight strips com.apple.quarantine so the unsigned app launches
+#     without a Gatekeeper prompt.
+LOCAL_TAP_DIR="$(brew --repository)/Library/Taps/alec/homebrew-local"
+if [ "$(readlink "$LOCAL_TAP_DIR/Casks" 2>/dev/null)" != "$DOTFILES/homebrew/Casks" ]; then
+    info "Materializing local Homebrew tap (alec/local)..."
+    mkdir -p "$LOCAL_TAP_DIR"
+    ln -sfn "$DOTFILES/homebrew/Casks" "$LOCAL_TAP_DIR/Casks"
+    success "Local tap alec/local linked to homebrew/Casks"
 fi
 
 # 2. Install dependencies via Brewfile

@@ -79,8 +79,13 @@ cask "copilot-cli"
 # dropzone disabled until the cask is updated to v5
 # cask "dropzone"
 cask "espanso"
-# feishin has no Homebrew cask — install manually from github.com/jeffvli/feishin/releases
-# (Navidrome frontend; the SketchyBar 'feishin' plugin depends on it)
+# Feishin has no upstream Homebrew cask, so this repo carries one in a local-only
+# tap: homebrew/Casks/feishin.rb, linked in as `alec/local` by setup.sh (step 1c)
+# and trusted in step 1b. The cask's postflight strips com.apple.quarantine so the
+# unsigned app launches without a Gatekeeper prompt. Bump version + sha256 in the
+# cask to update; `brew livecheck feishin` reports new releases.
+# (Navidrome frontend; the SketchyBar 'feishin' plugin depends on it.)
+cask "alec/local/feishin"
 cask "font-hack-nerd-font"
 cask "font-jetbrains-mono"
 cask "ghostty"
