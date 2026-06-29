@@ -1,23 +1,24 @@
 ---
 name: slop-review
-description: Review a codebase's prose surface — READMEs, docs, comments, public strings, package metadata — for AI-written slop, audience leaks, redundancy/drift, inaccuracy, and scaffold leftovers. Invoke only when the user explicitly uses `/slop-review` or asks to review a repo for slop / smells / sloppy comments / stale or inaccurate docs.
+description: Review a codebase's prose surface — READMEs, docs, comments, public strings, package metadata — for AI-written slop, audience leaks, internal/private leakage, redundancy/drift, inaccuracy, scaffold leftovers, and LLM-generation detritus. Invoke only when the user explicitly uses `/slop-review` or asks to review a repo for slop / smells / sloppy comments / stale or inaccurate docs.
 user_invocable: true
 ---
 
 # slop-review
 
-A reviewer's lens for the text humans read *around* code — not the logic. It flags writing that was authored by (or for) an AI agent and leaked into human-facing material, plus the inaccuracies, redundancy, and leftovers that accumulate in agent-assisted repos.
+A reviewer's lens for the text humans read *around* code — not the logic. It flags writing that was authored by (or for) an AI agent and leaked into human-facing material, plus the inaccuracies, redundancy, internal-detail leakage, and leftovers that accumulate in agent-assisted repos.
 
 It is a **review** tool: by default it reports findings and recommends exact changes; it applies them only when asked. It does not hunt for correctness bugs (use `/code-review`) or rewrite long-form prose against the 48 writing tropes (use `/prose-check`). The two are complements — `slop-review` decides *what* in a codebase is slop; `prose-check` is a deeper rewrite engine for a single prose document.
 
 ## The north-star test
 
-For every sentence, comment, and claim, ask two questions:
+For every sentence, comment, and claim, ask three questions:
 
 1. **Would a specific human reader — the one this file is actually for — write this unprompted, and need it?**
 2. **Is every concrete claim in it true against the repo right now?**
+3. **If this repo went public tomorrow, is this safe to expose** — no private names, ticket IDs, internal roadmap, or team politics?
 
-If the text is reassurance, emphasis, preemptive defense, restatement of an adjacent diagram/table/code, or an instruction aimed at a model — it's slop. If a load-bearing claim hasn't been checked against ground truth, check it before trusting it (or before flagging its opposite).
+If the text is reassurance, emphasis, preemptive defense, restatement of an adjacent diagram/table/code, or an instruction aimed at a model — it's slop. If a load-bearing claim hasn't been checked against ground truth, check it before trusting it (or before flagging its opposite). If it would leak internal detail to a public reader, cut or neutralize it (category **H**) — that test ignores the human/agent audience split.
 
 **AI prose over-signals.** It closes loops ("…, nothing else."), pre-defends scope ("no Turborepo, no web"), restates what it just showed, and answers objections no reader raised — because it optimizes for sounding complete, not for informing a particular person. That instinct is the thing you are hunting.
 
@@ -29,6 +30,8 @@ The same sentence can be correct in one file and slop in another. Audience is se
 - **Human-facing files** — `README.md`, `CONTRIBUTING.md`, `DECISIONS.md`/ADRs, package `README`s, `--help` text, user-visible strings, error messages, code comments. A new teammate reads these. Agent-process language here is a leak.
 
 Before flagging, identify which kind of file you are in. The most common false positive is flagging legitimate agent-instruction text inside an agent-instruction file.
+
+Audience exempts only *process* text, not *content*. Confidential material — personal names, ticket IDs, internal roadmap, private tooling, cross-team politics — is out of place even in `AGENTS.md`/`CLAUDE.md`, where the rule above would otherwise tell you to stand down. That is category **H**, and it is not gated by audience.
 
 ## The taxonomy
 
@@ -62,10 +65,21 @@ Tag each finding with its category.
 - *Protect, never flag:* API/function/class docs, genuinely non-obvious decisions, and the reasoning behind tricky logic. The goal is signal, not zero comments.
 
 **F — Scaffold / placeholder leftover.** `create-*-app` dead assets, demo screens/routes, lorem/placeholder copy, a template `LICENSE` with the wrong holder, wiring-proof stores nothing consumes, stray `TODO`/`FIXME`, debug `console.log`.
+- **LLM-generation detritus:** stray wrapper tags leaked into a committed file (`</content>`, `<file>`, `<answer>`), trailing tool-call markup or a "Here is the updated file:" preamble, duplicated frontmatter, or a fenced ` ```markdown ` wrapper around an entire `.md`. Literal and cheap to grep — sweep for these across all tracked files, not just the prose surface.
 
 **G — Marketing / filler prose.** Generated-sounding connective tissue.
 - Feature-list run-ons ("Browse …, search …, dig into …, and keep …").
 - Empty intensifiers and hollow rationale ("pinned deliberately", "carefully chosen", "X has the full rationale").
+- Self-congratulatory naming of the team's own code: "the crown jewel", "the heart of the app", "our beautiful/elegant X". Say what it does, not how proud you are of it.
+
+**H — Internal / private leakage.** Confidential or team-internal detail that does not belong in version control — orthogonal to audience, so flag it even in agent-facing files.
+- Personal names and interpersonal/political context: "exists to satisfy maintainers Travis & Tim", "never assign them X", turf and who-owns-what.
+- Internal tracker IDs and tickets: `JIRA-123`, `ABC-45`, "TMDB-105 stays open".
+- Private roadmap / phase planning and codenames for unshipped features: "deferred to v2/v3", "Layer 3 later", an internal feature name.
+- References to private tooling or boards: a personal task manager, an internal-only tracker, "the dev's board", a named internal design file.
+- Cross-team status and politics: "pending the web team's buy-in", "held until legal signs off".
+- Dated internal decisions / status stamps: "decided 2026-06-24", "Status (2026-06-25): …", "verified June 2026".
+- *Test:* if the repo went public tomorrow, would this name someone, embarrass someone, or expose internal process? If so, cut or neutralize it — keep the engineering signal, drop the private specifics (e.g. "out of scope for now: notifications, video, ads" instead of a v2/v3 roadmap).
 
 ## Method
 
@@ -79,13 +93,13 @@ Tag each finding with its category.
 ## Scaling
 
 - **Small target** (a file or two): review inline.
-- **Whole repo:** fan out parallel read-only agents by lane — (a) doc accuracy vs ground truth, (b) audience leaks + over-signal, (c) comment noise, (d) scaffold/asset leftovers — then dedupe and adversarially re-verify the load-bearing findings before reporting. One level of delegation is enough.
+- **Whole repo:** fan out parallel read-only agents by lane — (a) doc accuracy vs ground truth, (b) audience leaks + over-signal + internal/private leakage, (c) comment noise, (d) scaffold/asset leftovers + generation detritus — then dedupe and adversarially re-verify the load-bearing findings before reporting. One level of delegation is enough.
 
 ## Output format
 
 Lead with a one-line verdict (clean / minor polish / needs a pass). Then findings, most important first, **Confirmed** before **Optional** before **Judgment call**. For each:
 
-- **Category** (A–G) and tag.
+- **Category** (A–H) and tag.
 - `file:line` and a short quote of the offending text.
 - **Why** it's a smell (which test it fails).
 - **Exact recommended change** (the replacement text, or "delete").
