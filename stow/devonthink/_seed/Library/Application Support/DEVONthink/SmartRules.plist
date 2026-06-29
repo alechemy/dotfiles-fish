@@ -269,7 +269,7 @@
 		<key>IndexOffset</key>
 		<integer>0</integer>
 		<key>LastExecution</key>
-		<real>802385248.32911301</real>
+		<real>804429992.83090496</real>
 		<key>UseUUIDKey</key>
 		<true/>
 		<key>data</key>
@@ -307,7 +307,7 @@
 		<key>IndexOffset</key>
 		<integer>0</integer>
 		<key>LastExecution</key>
-		<real>802385248.32912195</real>
+		<real>804430001.32796001</real>
 		<key>UseUUIDKey</key>
 		<true/>
 		<key>data</key>
@@ -340,7 +340,7 @@
 			<key>UUID</key>
 			<string>C3F2896E-DC19-416A-BF17-1722468F2A36</string>
 			<key>date</key>
-			<date>2026-05-22T23:28:02Z</date>
+			<date>2026-06-29T02:23:29Z</date>
 		</dict>
 	</dict>
 	<dict>
@@ -349,7 +349,7 @@
 		<key>IndexOffset</key>
 		<integer>0</integer>
 		<key>LastExecution</key>
-		<real>802385248.32912302</real>
+		<real>804430001.32796299</real>
 		<key>UseUUIDKey</key>
 		<true/>
 		<key>data</key>
@@ -385,7 +385,7 @@
 		<key>IndexOffset</key>
 		<integer>0</integer>
 		<key>LastExecution</key>
-		<real>802385248.32912695</real>
+		<real>804430001.46632504</real>
 		<key>UseUUIDKey</key>
 		<true/>
 		<key>data</key>
@@ -424,7 +424,7 @@
 		<key>IndexOffset</key>
 		<integer>0</integer>
 		<key>LastExecution</key>
-		<real>802385248.32912803</real>
+		<real>804430001.32796705</real>
 		<key>UseUUIDKey</key>
 		<true/>
 		<key>data</key>
@@ -472,7 +472,7 @@
 		<key>IndexOffset</key>
 		<integer>0</integer>
 		<key>LastExecution</key>
-		<real>802385248.32913005</real>
+		<real>804430001.32797205</real>
 		<key>UseUUIDKey</key>
 		<true/>
 		<key>data</key>
@@ -513,13 +513,13 @@
 		<key>IndexOffset</key>
 		<integer>0</integer>
 		<key>LastExecution</key>
-		<real>802385248.32913101</real>
+		<real>804429997.32553601</real>
 		<key>UseUUIDKey</key>
 		<true/>
 		<key>data</key>
 		<data>
 		AAAAAAA/AAH///8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
-		AAAAAP////////8AAERCSUQAAAAkAEEAMwAxADEAOQBEADEAQQAtADEAOQAx
+		AAAAAP//BP////8AAERCSUQAAAAkAEEAMwAxADEAOQBEADEAQQAtADEAOQAx
 		ADIALQA0ADEAOAA4AC0AQQBFADYANQAtADkARgAwAEYARQA5ADIARgAyADAA
 		NwBFVVVJRAAAACQARQA2ADEAOABFADMARAA4AC0ARABCADkAOAAtADQAOAAy
 		ADIALQBCADUANwA3AC0ANwA2ADcAMwBGADgARgA2ADQANwBDAEZYVFJBIwD/
@@ -532,7 +532,7 @@
 		/wAAAAAAAAAA//8A/wD/AAAAAP//AAAAAP///1NCU0cAAABmAAAAAAAMAAH/
 		//8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAP//////
 		//8AAFhUUkEjAP////8B//8AAAAAAAAAAP//AP8A/wAAAAD//wAAAAD///9L
-		U1RQS1NUUEtTVFBLRVZFAAAABAAAAABLQUNUQ0xBUwAAAAcASwBBAGMAdABp
+		U1RQS1NUUEtTVFBLRVZFAAAABAAAAAFLQUNUQ0xBUwAAAAcASwBBAGMAdABp
 		AG8AblJMQVQAAAARWFRSQQgeAAAAAAAAAEtTVFBDTEFTAAAABwBLAEEAYwB0
 		AGkAbwBuUkxBVAAAADtURVhUAAAAAQAxWFRSQQghAAAAAAAAAElETlQAAAAM
 		AG0AZAByAGUAYwBvAGcAbgBpAHoAZQBkS1NUUENMQVMAAAAHAEsAQQBjAHQA
@@ -548,7 +548,7 @@
 			<key>UUID</key>
 			<string>D2DB2E58-08DA-4352-8E74-88AC83D01528</string>
 			<key>date</key>
-			<date>2026-02-26T02:08:44Z</date>
+			<date>2026-06-29T05:54:14Z</date>
 		</dict>
 	</dict>
 	<dict>
@@ -557,7 +557,7 @@
 		<key>IndexOffset</key>
 		<integer>0</integer>
 		<key>LastExecution</key>
-		<real>802385248.32913303</real>
+		<real>804430001.32797599</real>
 		<key>UseUUIDKey</key>
 		<true/>
 		<key>data</key>
@@ -588,7 +588,7 @@
 			<key>UUID</key>
 			<string>747C70C8-772D-48DF-BF39-55D7F7BCBE0F</string>
 			<key>date</key>
-			<date>2026-04-24T23:00:14Z</date>
+			<date>2026-06-29T06:04:17Z</date>
 		</dict>
 	</dict>
 	<dict>
@@ -597,13 +597,13 @@
 		<key>IndexOffset</key>
 		<integer>0</integer>
 		<key>LastExecution</key>
-		<real>802385248.32913399</real>
+		<real>804429993.832165</real>
 		<key>UseUUIDKey</key>
 		<true/>
 		<key>data</key>
 		<data>
 		AAAAAAALAQH///8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
-		AAAAAP////////8AAERCSUQAAAAkAEEAMwAxADEAOQBEADEAQQAtADEAOQAx
+		AAAAAP//Av////8AAERCSUQAAAAkAEEAMwAxADEAOQBEADEAQQAtADEAOQAx
 		ADIALQA0ADEAOAA4AC0AQQBFADYANQAtADkARgAwAEYARQA5ADIARgAyADAA
 		NwBFVVVJRAAAACQARQA2ADEAOABFADMARAA4AC0ARABCADkAOAAtADQAOAAy
 		ADIALQBCADUANwA3AC0ANwA2ADcAMwBGADgARgA2ADQANwBDAEZYVFJBIwD/
@@ -613,20 +613,17 @@
 		CKEO0gYHDAkICA8jMT5ARUtUVVdZXl9hZgAAAAAAAAEBAAAAAAAAABAAAAAA
 		AAAAAAAAAAAAAABnU0JTRwAAAGYAAAAAAA4BAf///wAAAAAAAAAAAAAAAAAA
 		AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA/////////wAAWFRSQSMA/////wH/
-		/wAAAAAAAAAA//8A/wD/AAAAAP//AAAAAP///0tTVFBTQlNHAAAAZgAAAAAA
-		DAEB////AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD/
-		////////AABYVFJBIwD/////Af//AAAAAAAAAAD//wD/AP8AAAAA//8AAAAA
-		////S1NUUEtTVFBLRVZFAAAABAAAAABLQUNUQ0xBUwAAAAcASwBBAGMAdABp
-		AG8AblJMQVQAAADZVEVYVAAAAGAAfgAvAEwAaQBiAHIAYQByAHkALwBBAHAA
-		cABsAGkAYwBhAHQAaQBvAG4AIABTAGMAcgBpAHAAdABzAC8AYwBvAG0ALgBk
-		AGUAdgBvAG4ALQB0AGUAYwBoAG4AbwBsAG8AZwBpAGUAcwAuAHQAaABpAG4A
-		awAvAFMAbQBhAHIAdAAgAFIAdQBsAGUAcwAvAGwAaQBuAHQALQBtAGEAcgBr
-		AGQAbwB3AG4ALgBhAHAAcABsAGUAcwBjAHIAaQBwAHRYVFJBCAYAAAAAAAAA
-		S1NUUENMQVMAAAAHAEsAQQBjAHQAaQBvAG5STEFUAAAAO1RFWFQAAAABADFY
-		VFJBCCEAAAAAAAAASUROVAAAAAwAbQBkAHIAZQBjAG8AZwBuAGkAegBlAGRL
-		U1RQQ0xBUwAAAAcASwBBAGMAdABpAG8AblJMQVQAAAA5VEVYVAAAAAEAMVhU
-		UkEIIQAAAAAAAABJRE5UAAAACwBtAGQAYwBvAG0AbQBlAG4AdABlAGRLU1RQ
-		S1NUUEtTVFA=
+		/wAAAAAAAAAA//8A/wD/AAAAAP//AAAAAP///0tTVFBLU1RQS0VWRQAAAAQA
+		AAAAS0FDVENMQVMAAAAHAEsAQQBjAHQAaQBvAG5STEFUAAAA2VRFWFQAAABg
+		AH4ALwBMAGkAYgByAGEAcgB5AC8AQQBwAHAAbABpAGMAYQB0AGkAbwBuACAA
+		UwBjAHIAaQBwAHQAcwAvAGMAbwBtAC4AZABlAHYAbwBuAC0AdABlAGMAaABu
+		AG8AbABvAGcAaQBlAHMALgB0AGgAaQBuAGsALwBTAG0AYQByAHQAIABSAHUA
+		bABlAHMALwBsAGkAbgB0AC0AbQBhAHIAawBkAG8AdwBuAC4AYQBwAHAAbABl
+		AHMAYwByAGkAcAB0WFRSQQgGAAAAAAAAAEtTVFBDTEFTAAAABwBLAEEAYwB0
+		AGkAbwBuUkxBVAAAADtURVhUAAAAAQAxWFRSQQghAAAAAAAAAElETlQAAAAM
+		AG0AZAByAGUAYwBvAGcAbgBpAHoAZQBkS1NUUENMQVMAAAAHAEsAQQBjAHQA
+		aQBvAG5STEFUAAAAOVRFWFQAAAABADFYVFJBCCEAAAAAAAAASUROVAAAAAsA
+		bQBkAGMAbwBtAG0AZQBuAHQAZQBkS1NUUEtTVFBLU1RQ
 		</data>
 		<key>name</key>
 		<string>Extract: Native Text Bypass</string>
@@ -646,7 +643,7 @@
 		<key>IndexOffset</key>
 		<integer>0</integer>
 		<key>LastExecution</key>
-		<real>802385248.54446006</real>
+		<real>804429994.67785299</real>
 		<key>UseUUIDKey</key>
 		<true/>
 		<key>data</key>
@@ -678,7 +675,7 @@
 			<key>UUID</key>
 			<string>3D33C71E-481A-44C6-948B-B88A38F6B459</string>
 			<key>date</key>
-			<date>2026-06-02T22:08:52Z</date>
+			<date>2026-06-28T18:48:35Z</date>
 		</dict>
 	</dict>
 	<dict>
@@ -687,7 +684,7 @@
 		<key>IndexOffset</key>
 		<integer>0</integer>
 		<key>LastExecution</key>
-		<real>802385248.32913697</real>
+		<real>804430001.327981</real>
 		<key>UseUUIDKey</key>
 		<true/>
 		<key>data</key>
@@ -726,7 +723,7 @@
 		<key>IndexOffset</key>
 		<integer>0</integer>
 		<key>LastExecution</key>
-		<real>802383009.47461903</real>
+		<real>804429056.01430595</real>
 		<key>UseUUIDKey</key>
 		<true/>
 		<key>data</key>
@@ -765,7 +762,7 @@
 		<key>IndexOffset</key>
 		<integer>0</integer>
 		<key>LastExecution</key>
-		<real>802385248.547436</real>
+		<real>804430001.46633601</real>
 		<key>UseUUIDKey</key>
 		<true/>
 		<key>data</key>

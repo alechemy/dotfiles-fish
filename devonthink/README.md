@@ -186,6 +186,8 @@ The `Commented` flag is flipped inside the script (not as a declarative action) 
 
 Documents not flagged as handwritten Boox notes but lacking a text layer (e.g., flat PDFs, screenshots, photos of receipts) are run through standard OCR. Because DT's built-in OCR is synchronous, both `Recognized` and `Commented` are set in the same rule immediately after OCR completes — no separate verification step is needed.
 
+`Word Count is 0` operationalizes "lacking a text layer." A born-digital PDF carries selectable text (`Word Count > 0`), so it is deliberately *not* matched here — it is fast-tracked by [Extract: Native Text Bypass](#extract-native-text-bypass-true-fast-track) instead, which preserves its native text layer rather than replacing it with a lower-fidelity re-OCR.
+
 Use "OCR - Apply" (not "OCR - To searchable PDF" or "OCR & Continue"). The latter two create a new record imported to the Global Inbox, which the Sweep rule picks up and recycles through this rule indefinitely, producing one new duplicate per minute.
 
 - Search in
@@ -194,6 +196,7 @@ Use "OCR - Apply" (not "OCR - To searchable PDF" or "OCR & Continue"). The latte
   - NeedsProcessing is On
   - Handwritten is Off
   - Recognized is Off
+  - Word Count is 0
   - Any of the following are true:
     - Kind is Image
     - Kind is PDF/PS
@@ -379,8 +382,8 @@ Bookmarks are excluded because they are handled by [Extract: Web Content](#extra
   - NeedsProcessing is On
   - Handwritten is Off
   - Recognized is Off
+  - Word Count is greater than 0
   - Kind is not Image
-  - Kind is not PDF/PS
   - Kind is not Bookmark
 - Trigger
   - Every Minute
@@ -389,6 +392,8 @@ Bookmarks are excluded because they are handled by [Extract: Web Content](#extra
   - Run AppleScript (embedded) — see [`lint-markdown.applescript`](../stow/devonthink/Library/Application%20Scripts/com.devon-technologies.think/Smart%20Rules/lint-markdown.applescript)
   - Change Recognized to 1
   - Change Commented to 1
+
+> **Design note — the scan-vs-native-text split keys on `Word Count`, not `Kind`.** A born-digital PDF and a scanned PDF are both `Kind PDF/PS`; the text layer is what separates them. [Extract: Scans & Images](#extract-scans--images) takes `Word Count is 0` (no text layer → needs OCR); this rule takes `Word Count is greater than 0` (already has selectable text → skip OCR). That is why `Kind is not PDF/PS` was **removed** from this rule — a text-bearing PDF has to be allowed in. Don't re-add it or drop either `Word Count` condition: either change orphans born-digital PDFs, which then match no extraction rule and stall in `00_INBOX` with no OCR error to flag them.
 
 ### Enrich: AI Metadata
 
