@@ -5,7 +5,7 @@
 [core]
   excludesfile = ~/.gitignore
   editor = nano
-  pager = delta
+  pager = hunk pager
 	# Watch filesystem changes so Git status/diff avoid full tree scans in large repos.
 	fsmonitor = true
 	# Cache untracked-file scans to make status faster in large working trees.

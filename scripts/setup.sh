@@ -200,7 +200,11 @@ fi
 if brew trust --help >/dev/null 2>&1; then
     info "Trusting third-party tap entries..."
     if brew trust --command domt4/autoupdate/autoupdate \
-        && brew trust --formula felixkratz/formulae/borders felixkratz/formulae/sketchybar yqrashawn/goku/goku \
+        && brew trust --formula \
+            felixkratz/formulae/borders \
+            felixkratz/formulae/sketchybar \
+            modem-dev/tap/hunk \
+            yqrashawn/goku/goku \
         && brew trust --cask nikitabobko/tap/aerospace wontaeyang/hrm/hrm alec/local/feishin; then
         success "Third-party tap entries trusted"
     else
