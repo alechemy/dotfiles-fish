@@ -27,13 +27,13 @@ Boox device → Dropbox (via Boox export)
   → Handle Updated Notebooks (for Boox re-imports): replace content in-place, reset flags, delete duplicate
   → Extract: Boox Handwritten (OCR) → sets Recognized=1
   → Format: Boox Comments (LLM markdown formatting → Finder Comment) → sets Commented=1
-  → Extract: Scans & Images (standard OCR for non-handwritten images/PDFs) → sets Recognized=1, Commented=1
+  → Extract: Scans & Images (standard OCR for non-handwritten images/PDFs with no text layer — Word Count 0) → sets Recognized=1, Commented=1
   → Extract: Web Content (bookmarks → clean title + NeedsSingleFile=1 OR SkipSingleFile=1 depending on domain (~/.config/devonthink-pipeline/singlefile-skip-domains.txt) + daily-note wikilink + archive directly to 99_ARCHIVE in one pass — does NOT flow through Post-Enrich & Archive)
 
 SingleFile ingestion is OUT of smart rules — it's Python scripts + an fswatch launchd agent. See devonthink/README.md → "SingleFile Ingestion Pipeline".
   Scenario 1 (desktop save): Chrome SingleFile ext → ~/Downloads/SingleFile/*.html → fswatch → ingest-singlefile-html.py → creates bookmark + HTML snapshot + markdown in DT in one atomic AppleScript pass
   Scenario 2 (queued bookmark): capture-bookmarks-batch.py (manual/hotkey) → finds NeedsSingleFile=1 bookmarks → per-URL: capture-with-singlefile → ingest-singlefile-html.py --bookmark <UUID> (reuses existing bookmark, clears the flag)
-  → Extract: Native Text Bypass (text-native docs skip OCR, excludes bookmarks and HTML) → sets Recognized=1, Commented=1
+  → Extract: Native Text Bypass (text-native docs — markdown/RTF/HTML and born-digital PDFs with a text layer, i.e. Word Count > 0 — skip OCR; bookmarks excluded, they go through Extract: Web Content) → sets Recognized=1, Commented=1
   → Enrich: AI Metadata (single LLM call → title, eventDate, type, tags, summary, lowConfidence) → sets AIEnriched=1
   → Post-Enrich & Archive (action items → Things 3, daily notes extraction + wikilinks, archive to 99_ARCHIVE) → move only on success
   → Export: Wiki Raw (post-archive, writes metadata + content to ~/Wiki/raw/) → sets WikiExported=1
@@ -44,6 +44,7 @@ Smart rule scripts live in `../stow/devonthink/Library/Application Scripts/com.d
 ## Key design decisions
 
 - **AI enrichment is one LLM call** returning a JSON object with `title`, `eventDate`, `type`, `tags`, `summary`, `lowConfidence`. The script passes `as "JSON"` so DT returns a native AppleScript record — no string parsing.
+- **Scan vs. native-text routing keys on `Word Count`, not `Kind` alone.** `Extract: Scans & Images` matches `(Kind Image or PDF/PS) and Word Count = 0` — only documents with no text layer go to OCR. `Extract: Native Text Bypass` matches `Word Count > 0 and Kind is not Bookmark` (markdown, RTF, HTML, **and born-digital PDFs that already carry selectable text**) and sets `Recognized=1, Commented=1` without OCR. So a born-digital PDF (`Word Count > 0`) bypasses OCR and keeps its crisp text layer instead of having it replaced by a lower-fidelity re-OCR; a scanned/image PDF (`Word Count = 0`) goes to OCR. Do **not** drop the `Word Count` conditions or re-add `Kind is not PDF/PS` to the bypass — either change re-opens a gap where born-digital PDFs match no extraction rule and stall in `00_INBOX` with no error. The original symptom was a born-digital PDF wedged at Extract: Scans & Images because OCR couldn't run (ABBYY engine not installed); the routing guard keeps such PDFs off the OCR path entirely.
 - **Programmatic record creators must pre-do early-pipeline work and pre-set the flags that would have been set by it.** Every metadata or content mutation on a just-created record triggers a DT index update, a DTTG sync event, and a UI re-render. When several smart rules fire `On Import` on the same fresh record in rapid succession, DT's UI can transiently double or triple-render it (phantom rows in rule filter views) — observed historically with phone-synced bookmarks and with SingleFile-ingested markdown. The fix is not "reduce the number of rules" but "do the work upstream so the rules don't match in the first place":
   - For markdown records landing in `00_INBOX`, call `~/.local/bin/lint-markdown-file` on the file before import and set `Recognized=1, Commented=1` at creation — this keeps `Extract: Native Text Bypass` from matching.
   - For bookmark records landing in `00_INBOX`, set `Recognized=1, Commented=1, AIEnriched=1` (or own the bookmark's journey entirely, as `Extract: Web Content` now does) to keep `Post-Enrich & Archive` from matching.
