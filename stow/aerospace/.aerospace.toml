@@ -130,13 +130,14 @@ on-mode-changed = [
     cmd-alt-ctrl-shift-g = 'exec-and-forget bash $HOME/.dotfiles/scripts/aerospace-cycle-gaps.sh'
 
     # See: https://nikitabobko.github.io/AeroSpace/commands#workspace
-    # Hyper (CapsLock) + number = switch workspace
-    cmd-alt-ctrl-shift-1 = 'workspace 1'
-    cmd-alt-ctrl-shift-2 = 'workspace 2'
-    cmd-alt-ctrl-shift-3 = 'workspace 3'
-    cmd-alt-ctrl-shift-4 = 'workspace 4'
-    cmd-alt-ctrl-shift-5 = 'workspace 5'
-    cmd-alt-ctrl-shift-6 = 'workspace 6'
+    # Hyper (CapsLock) + number = switch workspace. --auto-back-and-forth makes
+    # re-pressing the focused workspace's key jump back to the previous one.
+    cmd-alt-ctrl-shift-1 = 'workspace --auto-back-and-forth 1'
+    cmd-alt-ctrl-shift-2 = 'workspace --auto-back-and-forth 2'
+    cmd-alt-ctrl-shift-3 = 'workspace --auto-back-and-forth 3'
+    cmd-alt-ctrl-shift-4 = 'workspace --auto-back-and-forth 4'
+    cmd-alt-ctrl-shift-5 = 'workspace --auto-back-and-forth 5'
+    cmd-alt-ctrl-shift-6 = 'workspace --auto-back-and-forth 6'
     # cmd-alt-ctrl-shift-7 = 'workspace 7'
     # cmd-alt-ctrl-shift-8 = 'workspace 8'
     # cmd-alt-ctrl-shift-9 = 'workspace 9'
@@ -164,19 +165,19 @@ on-mode-changed = [
     semicolon = 'mode main'
     cmd-alt-ctrl-shift-semicolon = 'mode main'
 
-    # Move focused window to a workspace, then exit. The explicit gap-script
-    # invocation is needed because move-node-to-workspace (without
-    # --focus-follows-window) doesn't fire on-focus-changed — the globally
-    # focused window is still the moved one, just on another workspace — so
-    # the originating workspace's gaps would otherwise stay stale until the
-    # next focus event. The lock in aerospace-auto-gaps.sh makes the duplicate
-    # invocation safe if on-focus-changed does happen to fire.
-    1 = ['move-node-to-workspace 1', 'exec-and-forget bash $HOME/.dotfiles/scripts/aerospace-auto-gaps.sh', 'mode main']
-    2 = ['move-node-to-workspace 2', 'exec-and-forget bash $HOME/.dotfiles/scripts/aerospace-auto-gaps.sh', 'mode main']
-    3 = ['move-node-to-workspace 3', 'exec-and-forget bash $HOME/.dotfiles/scripts/aerospace-auto-gaps.sh', 'mode main']
-    4 = ['move-node-to-workspace 4', 'exec-and-forget bash $HOME/.dotfiles/scripts/aerospace-auto-gaps.sh', 'mode main']
-    5 = ['move-node-to-workspace 5', 'exec-and-forget bash $HOME/.dotfiles/scripts/aerospace-auto-gaps.sh', 'mode main']
-    6 = ['move-node-to-workspace 6', 'exec-and-forget bash $HOME/.dotfiles/scripts/aerospace-auto-gaps.sh', 'mode main']
+    # Move focused window to a workspace, then exit. move-node-to-workspace
+    # (without --focus-follows-window) doesn't fire on-focus-changed — the
+    # globally focused window is still the moved one, just on another
+    # workspace — so the originating workspace's gaps would stay stale. Firing
+    # the on-focus-changed callback by hand recomputes them; the lock in
+    # aerospace-auto-gaps.sh makes the duplicate invocation safe if the real
+    # callback also fires.
+    1 = ['move-node-to-workspace 1', 'run-callback on-focus-changed', 'mode main']
+    2 = ['move-node-to-workspace 2', 'run-callback on-focus-changed', 'mode main']
+    3 = ['move-node-to-workspace 3', 'run-callback on-focus-changed', 'mode main']
+    4 = ['move-node-to-workspace 4', 'run-callback on-focus-changed', 'mode main']
+    5 = ['move-node-to-workspace 5', 'run-callback on-focus-changed', 'mode main']
+    6 = ['move-node-to-workspace 6', 'run-callback on-focus-changed', 'mode main']
     tab = ['exec-and-forget bash -c "aerospace workspace-back-and-forth && prev=\$(aerospace list-workspaces --focused) && aerospace workspace-back-and-forth && aerospace move-node-to-workspace --focus-follows-window \$prev"', 'mode main']
     backtick = ['exec-and-forget bash -c "$HOME/.dotfiles/scripts/aerospace-cycle-window.sh prev"', 'mode main']
 

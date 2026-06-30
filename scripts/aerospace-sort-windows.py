@@ -69,7 +69,7 @@ def main() -> int:
         print("no workspace-assignment rules found", file=sys.stderr)
         return 1
 
-    moved = 0
+    moves: list[str] = []
     for w in list_windows():
         app_id = w.get("app-bundle-id") or ""
         app_name = w.get("app-name") or ""
@@ -78,15 +78,15 @@ def main() -> int:
         for matcher, target in rules:
             if match(matcher, app_id, app_name):
                 if current != target:
-                    subprocess.run(
-                        ["aerospace", "move-node-to-workspace",
-                         "--window-id", str(wid), target],
-                        check=False,
-                    )
-                    moved += 1
+                    moves.append(f"move-node-to-workspace --window-id {wid} {target}")
                 break
 
-    print(f"sorted {moved} window(s)")
+    if moves:
+        # One eval batches every move into a single AeroSpace round-trip,
+        # avoiding the per-window relayout flicker of moving them one at a time.
+        subprocess.run(["aerospace", "eval", "--", " ; ".join(moves)], check=False)
+
+    print(f"sorted {len(moves)} window(s)")
     return 0
 
 
