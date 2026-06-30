@@ -8,3 +8,7 @@ java = "latest"
 # so they survive node upgrades and get reproduced on fresh machines.
 "npm:defuddle" = "latest"
 "npm:eas-cli" = "latest"
+# uncomment (goldziher/uncomment): AST/tree-sitter comment stripper, distributed
+# on npm as uncomment-cli. The deterministic half of the agent comment-noise
+# stack — invoked by the opt-in Stop/agentStop hooks and per-repo commit gates.
+"npm:uncomment-cli" = "latest"

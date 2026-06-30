@@ -1,11 +1,12 @@
 {
+  "env": {
+    "NO_COLOR": "1"
+  },
   "permissions": {
     "defaultMode": "bypassPermissions"
   },
   "model": "opus[1m]",
-  "env": {
-    "NO_COLOR": "1"
-  },
+  "outputStyle": "Terse",
   "hooks": {
     "PreToolUse": [
       {
@@ -18,13 +19,34 @@
         ]
       }
     ],
-    "PostToolUse": [
+    "UserPromptSubmit": [
       {
-        "matcher": "Edit|Write",
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"$HOME/.claude/hooks/comment-noise-check.sh\""
+            "command": "bash \"$HOME/.claude/hooks/comment-policy-inject.sh\" UserPromptSubmit"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$HOME/.claude/hooks/comment-policy-inject.sh\" SessionStart"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$HOME/.local/bin/agent-strip-comments\"",
+            "timeout": 30
           }
         ]
       }
@@ -49,6 +71,7 @@
   },
   "effortLevel": "xhigh",
   "awaySummaryEnabled": false,
+  "tui": "fullscreen",
   "voice": {
     "enabled": true,
     "mode": "tap"

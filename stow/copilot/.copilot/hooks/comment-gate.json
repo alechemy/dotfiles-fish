@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "hooks": {
+    "agentStop": [
+      {
+        "type": "command",
+        "bash": "bash \"$HOME/.local/bin/agent-strip-comments\"",
+        "timeoutSec": 30
+      }
+    ]
+  }
+}

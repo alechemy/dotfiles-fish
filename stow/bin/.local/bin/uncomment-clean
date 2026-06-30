@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# uncomment, then tidy the trailing whitespace it leaves. `uncomment` strips comments
+# but does not reformat, so removing an inline comment leaves the code before it with
+# trailing whitespace. This wrapper trims that on each processed file afterward.
+#
+# Drop-in for `uncomment`: pass the same flags and file paths. Trimming is skipped for
+# Markdown-family files (trailing spaces are significant hard breaks) and for binaries
+# (perl's -T text test), so it never corrupts a file or breaks Markdown line breaks.
+#
+# Resolves the uncomment binary without relying on PATH (hooks may run without mise
+# activation): PATH -> mise shim -> mise install path.
+
+set -u
+
+uncomment=""
+for c in \
+  "$(command -v uncomment 2>/dev/null || true)" \
+  "$HOME/.local/share/mise/shims/uncomment" \
+  "$HOME/.local/share/mise/installs/npm-uncomment-cli/latest/bin/uncomment"; do
+  if [ -n "$c" ] && [ -x "$c" ]; then uncomment=$c; break; fi
+done
+[ -n "$uncomment" ] || exit 0
+
+"$uncomment" "$@" || true
+
+command -v perl >/dev/null 2>&1 || exit 0
+for arg in "$@"; do
+  [ -f "$arg" ] || continue
+  case "$arg" in
+    *.md | *.markdown | *.mdx | *.mdc | *.rmd | *.Rmd) continue ;;
+  esac
+  perl -e 'exit(-T $ARGV[0] ? 0 : 1)' "$arg" 2>/dev/null || continue
+  perl -i -pe 's/[ \t]+$//' "$arg" 2>/dev/null || true
+done
+exit 0

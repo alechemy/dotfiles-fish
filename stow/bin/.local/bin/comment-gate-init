@@ -1,0 +1,75 @@
+#!/usr/bin/env bash
+# Adopt the deterministic comment gate in a repo: drop the opt-in marker the agent
+# strippers key on (Claude Code `Stop` / Copilot `agentStop`), then print ready-to-paste
+# pre-commit / lefthook / CI snippets for the non-bypassable commit gate.
+#
+# Usage: comment-gate-init [repo-dir]   (defaults to the current directory)
+
+set -euo pipefail
+
+dir=${1:-$PWD}
+root=$(git -C "$dir" rev-parse --show-toplevel 2>/dev/null) || {
+  echo "comment-gate-init: $dir is not inside a git repository" >&2
+  exit 1
+}
+
+marker="$root/.uncommentrc.toml"
+if [ -e "$marker" ]; then
+  echo "Opt-in marker already present: $marker"
+else
+  cat >"$marker" <<'TOML'
+# Opt into deterministic comment stripping for this repo.
+#
+# Presence of this file enables the in-session agent stripper (Claude Code Stop /
+# Copilot agentStop hooks) and marks the repo for the commit/CI gate below. uncomment
+# preserves TODO, FIXME, docstrings, and lint pragmas by default; the hook also keeps
+# IMPORTANT / NOTE / WARNING / SAFETY / SECURITY / keep. Set remove_docs = true to also
+# strip docstrings. Newer uncomment CLIs read these keys natively; the hook honors
+# remove_docs and its keep-set regardless of CLI version.
+
+# remove_docs = false
+TOML
+  echo "Created opt-in marker: $marker"
+fi
+
+cat <<'EOF'
+
+In-session stripping is now active for this repo (Claude Code & Copilot CLI).
+For the non-bypassable commit gate, wire ONE local hook and mirror it in CI. Each
+runs uncomment plus a Markdown-aware trailing-whitespace trim (uncomment leaves
+trailing whitespace where it removes an inline comment; it does not reformat), so
+the gate needs no project formatter. Snippets are self-contained — they don't rely
+on this machine's uncomment-clean wrapper.
+
+-- pre-commit (.pre-commit-config.yaml) -------------------------------
+repos:
+  - repo: local
+    hooks:
+      - id: uncomment
+        name: strip AI comment noise
+        entry: uncomment -i IMPORTANT -i NOTE -i WARNING -i SAFETY -i SECURITY -i keep
+        language: system
+        pass_filenames: true
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0                              # run `pre-commit autoupdate` to pin latest
+    hooks:
+      - id: trailing-whitespace              # tidies what uncomment leaves; Markdown-aware
+        args: [--markdown-linebreak-ext=md,markdown]
+
+-- lefthook (lefthook.yml) --------------------------------------------
+pre-commit:
+  commands:
+    strip-comments:
+      run: |
+        uncomment -i IMPORTANT -i NOTE -i WARNING -i SAFETY -i SECURITY -i keep {staged_files}
+        for f in {staged_files}; do case "$f" in *.md|*.markdown|*.mdx) ;; *) perl -e 'exit(-T $ARGV[0] ? 0 : 1)' "$f" 2>/dev/null && perl -i -pe 's/[ \t]+$//' "$f" ;; esac; done
+      stage_fixed: true
+
+-- CI mirror (GitHub Actions) — the non-bypassable half ---------------
+# git commit --no-verify can skip the local hook but not CI.
+- run: |
+    npm i -g uncomment-cli
+    uncomment -i IMPORTANT -i NOTE -i WARNING -i SAFETY -i SECURITY -i keep .
+    git ls-files -mz | while IFS= read -r -d '' f; do case "$f" in *.md|*.markdown|*.mdx) ;; *) perl -e 'exit(-T $ARGV[0] ? 0 : 1)' "$f" 2>/dev/null && perl -i -pe 's/[ \t]+$//' "$f" ;; esac; done
+    git diff --exit-code   # fails the build if comment noise reached the branch
+EOF
