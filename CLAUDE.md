@@ -154,6 +154,20 @@ Two settings are load-bearing for the ingest pipeline and must not drift:
 
 Capture is triggered by ⌘D bound to SingleFile in `chrome://extensions/shortcuts` (see `capture-with-singlefile`). The tracked JSON has every `saveTo*` destination disabled (plain browser download) and all token/secret fields empty — keep it so; a GitHub/S3/WebDAV/REST token here would be a plaintext secret in the repo.
 
+### Chromium → Safari bookmark bridge (Alfred)
+
+Alfred's bookmark search reads only Safari and Google Chrome, and it gates the Chrome source on the **app** being installed (it re-unticks "Google Chrome" in its Bookmarks prefs if `com.google.Chrome` isn't registered with LaunchServices — a fake `Bookmarks` file at Chrome's path is not enough). On a Chromium-default machine that leaves Safari as the only no-keyword path into Alfred's default results. `stow/chromium-bookmarks/` bridges the two so bookmarks made naturally in Chromium surface in Alfred without a keyword and without installing Chrome.
+
+`com.user.chromium-bookmarks-sync.plist` runs `chromium-bookmarks-sync.py` (KeepAlive). It `fswatch`es the Chromium profile's `Bookmarks` file **directly** (not the profile dir, which Chromium writes constantly — watching the single file is event-driven and never wakes on unrelated profile churn; fswatch reliably catches the atomic rename-over Chromium uses to save). On each change it rebuilds one top-level Safari folder (`Chromium`) from the Chromium tree, leaving every other Safari bookmark untouched. Alfred indexes Safari bookmarks regardless of folder, so the mirrored entries become searchable.
+
+Load-bearing design rules:
+
+- **Full Disk Access.** `~/Library/Safari/` is FDA-gated. The plist's `ProgramArguments[0]` is `/usr/bin/python3` (Apple-signed, stable path) **invoked directly** — not via a bash wrapper — so TCC attributes the file access to python3 itself; granting FDA to `/usr/bin/python3` once is sufficient and survives interpreter upgrades. Until that grant exists the agent loads and watches but logs a permission error instead of writing. `setup.sh` loads the agent only when `~/Library/Application Support/Chromium/Default` exists and prints the FDA reminder.
+- **Defer while Safari runs.** Safari caches bookmarks in memory and rewrites the file on its own edits, which would clobber a folder injected underneath it. The sync skips (logging a defer) whenever `pgrep -x Safari` matches; catch-up is the next Chromium bookmark change or the next agent load (RunAtLoad). The script does not depend on Safari ever being open — Alfred reads the file, not Safari.
+- **iCloud bookmark sync must stay off.** Verified off on this account (only `KEYCHAIN_SYNC` is enabled in `MobileMeAccounts.plist`; `BOOKMARKS` is absent). If Safari bookmark sync were on, the managed folder would propagate to other devices or be reverted by CloudKit.
+- **Idempotent + non-destructive.** Managed-folder UUIDs derive deterministically (`uuid5`) from each Chromium node's `guid`, so an unchanged Chromium tree produces a byte-identical folder and the script no-ops without rewriting `Bookmarks.plist`. It matches its own folder by a fixed `WebBookmarkUUID` (or `Title == "Chromium"`) and rebuilds only that. A one-time pre-write backup lands at `~/.local/state/chromium-bookmarks-sync/Safari-Bookmarks.firstrun-backup.plist`.
+- Modes for manual use/testing: `--once` (single sync), `--dry-run` (report, no write), `--force` (sync even while Safari is running). The default (no args) is the watch loop the agent uses.
+
 ### Adding a New Package
 
 1. Create `stow/<toolname>/` mirroring the `$HOME` path (e.g. `stow/lazygit/.config/lazygit/`)

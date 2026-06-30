@@ -418,6 +418,16 @@ EOF
     load_launch_agent "$HOME/Library/LaunchAgents/com.user.mount-nas.plist" "NAS auto-mount"
     load_launch_agent "$HOME/Library/LaunchAgents/com.user.check-stale-dev-servers.plist" "stale-dev-servers"
 
+    # Chromium -> Safari bookmark bridge for Alfred. Only load where the Chromium
+    # profile exists; on a non-Chromium machine the watcher would exit and
+    # KeepAlive would throttle-respawn it. Writing Safari's bookmarks is Full
+    # Disk Access-gated, so /usr/bin/python3 must be granted FDA (see CLAUDE.md);
+    # until then the agent runs but logs a permission error instead of syncing.
+    if [ -d "$HOME/Library/Application Support/Chromium/Default" ]; then
+        load_launch_agent "$HOME/Library/LaunchAgents/com.user.chromium-bookmarks-sync.plist" "chromium-bookmarks sync"
+        info "  Grant Full Disk Access to /usr/bin/python3 so the bookmark sync can write Safari's bookmarks"
+    fi
+
     # Git SSH commit-signing key. The tracked gitconfig sets commit.gpgsign=true
     # with gpg.format=ssh, so a signing key must exist or every `git commit`
     # fails. Per-machine ed25519 key, no passphrase so signing stays headless.

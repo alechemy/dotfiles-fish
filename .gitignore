@@ -13,6 +13,7 @@ stow-local/*
 !stow-local/.gitkeep
 stow/git/.gitconfig.work
 stow/fish/.config/fish/fish_variables
+stow/fish/.config/fish/conf.d/context7.fish
 stow/zed/.config/zed/settings.json
 stow/streamrip/Library/Application Support/streamrip/config.toml
 stow/vscode/Library/Application Support/VSCodium/User/settings.json
@@ -28,5 +29,6 @@ stow/devonthink/Library/LaunchAgents/com.user.granola-import.plist*
 stow/devonthink/Library/LaunchAgents/com.user.singlefile-watcher.plist
 stow/nas-mount/Library/LaunchAgents/com.user.mount-nas.plist
 stow/bin/Library/LaunchAgents/com.user.check-stale-dev-servers.plist
+stow/chromium-bookmarks/Library/LaunchAgents/com.user.chromium-bookmarks-sync.plist
 stow/devonthink/.local/bin/import-granola.py
 stow/devonthink/.local/bin/import-granola-parse.py
