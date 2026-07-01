@@ -10,11 +10,7 @@ $line_break\
 $python\
 $character"""
 
-# The first git call in a fresh session is cold (binary, fsmonitor daemon, and
-# working-tree pages all unwarmed, often racing login I/O), which overruns
-# starship's 500ms default and prints a "git timed out" warning. fsmonitor +
-# untrackedcache keep warm calls sub-50ms; this just gives the cold one headroom.
-command_timeout = 1000
+command_timeout = 1500
 
 [directory]
 style = "blue"
