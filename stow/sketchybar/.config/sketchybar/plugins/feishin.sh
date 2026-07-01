@@ -2,7 +2,8 @@
 
 # If Feishin is not running, show "nothing playing"
 if ! pgrep -xq "Feishin"; then
-  sketchybar --set "$NAME" icon="" label=" Nothing playing"
+  sketchybar --set "$NAME" icon="" label=" Nothing playing" \
+    label.font="Helvetica Neue:Regular:14.0"
   exit 0
 fi
 
@@ -24,6 +25,7 @@ if ! "$HOME/.local/bin/should-run-background-job" >/dev/null 2>&1; then
     TITLE=$(cut -f2 "$LAST_SONG_FILE")
     sketchybar --set "$NAME" \
       icon=" $ARTIST –" label=" $TITLE" \
+      label.font="Helvetica Neue:Bold:14.0" \
       icon.color="0x80ffffff" label.color="0x80ffffff"
   else
     sketchybar --set "$NAME" icon=" Battery" label=""
@@ -116,6 +118,7 @@ set_track() {
   local icon_prefix="$1" artist="$2" title="$3"
   sketchybar --set "$NAME" \
     icon="$icon_prefix $artist –" label=" $title" \
+    label.font="Helvetica Neue:Bold:14.0" \
     icon.color="$TEXT_COLOR" label.color="$TEXT_COLOR"
 }
 
