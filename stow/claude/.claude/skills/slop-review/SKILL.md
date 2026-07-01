@@ -62,6 +62,7 @@ Tag each finding with its category.
 **E — Comment noise.** (Mirror the project's own comment conventions; match its density.)
 - Changelog narration: "// in OnInit, not the constructor, so …", "// fixed null check", contrasting code with a prior version.
 - Restating what the code plainly says; scaffold/boilerplate comments.
+- *Any tracked file with comments — not just `.ts`/`.js` source.* Config dotfiles (`.prettierignore`, `.gitignore`, `.editorconfig`), CI/workflow YAML, and build config (`babel.config.js`, `metro.config.js`) accrete the same restate-the-obvious noise: `# Tool-managed lockfile` above `pnpm-lock.yaml`, or `# Dependencies (Prettier already skips node_modules)` above `node_modules/`. Same bar — does the comment explain non-obvious behavior or document an entity?
 - *Protect, never flag:* API/function/class docs, genuinely non-obvious decisions, and the reasoning behind tricky logic. The goal is signal, not zero comments.
 
 **F — Scaffold / placeholder leftover.** `create-*-app` dead assets, demo screens/routes, lorem/placeholder copy, a template `LICENSE` with the wrong holder, wiring-proof stores nothing consumes, stray `TODO`/`FIXME`, debug `console.log`.
@@ -84,7 +85,7 @@ Tag each finding with its category.
 ## Method
 
 1. **Classify audience** for each file in scope (human vs agent). This gates categories A and B.
-2. **Scope the surface.** Prioritize, in order: top-level `README`/`CONTRIBUTING`/onboarding docs → ADRs/decision docs → package `README`s and metadata → public strings and `--help`/error text → code comments → scaffold/asset leftovers. Do **not** slop-review business logic; you are reviewing prose, not behavior.
+2. **Scope the surface.** Prioritize, in order: top-level `README`/`CONTRIBUTING`/onboarding docs → ADRs/decision docs → package `README`s and metadata → public strings and `--help`/error text → comments in any tracked file → scaffold/asset leftovers. "Comments" is not just `.ts`/`.js` source — config dotfiles (`.prettierignore`, `.gitignore`, `.editorconfig`), CI/workflow YAML, and build config carry the same noise; don't let a markdown-and-source sweep skip them. Do **not** slop-review business logic; you are reviewing prose, not behavior.
 3. **Verify before flagging.** For every category-C candidate, check ground truth (`git ls-files`, the lockfile, `package.json` scripts, the actual path). Confirm a smell before reporting it — a plausible-but-wrong flag is worse than a miss.
 4. **Classify severity.** Separate **Confirmed** (verified, clearly slop) from **Optional polish** from **Judgment call** — text that smells AI-written but is load-bearing (e.g. a "the web app is a separate stack" line that is the actual *reason* for an architecture choice). Flag judgment calls; do not auto-delete them.
 5. **Don't over-correct.** Recommend the minimal change that removes the smell while preserving real information. When in doubt, surface it rather than cut it.
@@ -93,7 +94,7 @@ Tag each finding with its category.
 ## Scaling
 
 - **Small target** (a file or two): review inline.
-- **Whole repo:** fan out parallel read-only agents by lane — (a) doc accuracy vs ground truth, (b) audience leaks + over-signal + internal/private leakage, (c) comment noise, (d) scaffold/asset leftovers + generation detritus — then dedupe and adversarially re-verify the load-bearing findings before reporting. One level of delegation is enough.
+- **Whole repo:** fan out parallel read-only agents by lane — (a) doc accuracy vs ground truth, (b) audience leaks + over-signal + internal/private leakage, (c) comment noise across all tracked files (source **and** config dotfiles/CI YAML), (d) scaffold/asset leftovers + generation detritus — then dedupe and adversarially re-verify the load-bearing findings before reporting. One level of delegation is enough.
 
 ## Output format
 
