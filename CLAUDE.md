@@ -106,7 +106,7 @@ Current consumers:
 - `stow/zed/` — op inject + `${HOME}` (`scripts/build-zed-config.sh`)
 - `stow/streamrip/` — op inject + `${HOME}` (`scripts/build-streamrip-config.sh`)
 - `stow/vscode/` — `${HOME}` only (`scripts/build-vscode-config.sh`)
-- `stow/fish/.config/fish/conf.d/context7.fish` — op read (`scripts/build-context7-config.sh`); exports `CONTEXT7_API_KEY` so terminal-launched Context7 MCP authenticates instead of using the anonymous rate limit. Consumed by Claude Code (reads the env var natively) and Copilot CLI (`stow/copilot/.copilot/mcp-config.json` references it as `${CONTEXT7_API_KEY}`; Copilot forwards only `PATH` + the `env` block to MCP servers, so the reference is required there)
+- `stow/fish/.config/fish/conf.d/context7.fish` — op read (`scripts/build-context7-config.sh`); exports `CONTEXT7_API_KEY` so terminal-launched Context7 MCP authenticates instead of using the anonymous rate limit. Consumed by Claude Code (reads the env var natively) and Copilot CLI (the Copilot user MCP file references it as `${CONTEXT7_API_KEY}`; Copilot forwards only `PATH` + the `env` block to MCP servers, so the reference is required there). Copilot reads a single user MCP file (`~/.copilot/mcp-config.json`), and a work-only server shares it, so that file lives in `stow-work/work/.copilot/mcp-config.json` — context7 in Copilot is therefore present only on machines with the work package stowed
 
 A separate `__HOME__` expansion pattern exists for launch-agent plist templates under `stow/*/Library/LaunchAgents/*.plist.template`, handled by `scripts/build-launchd-plists.sh`.
 
