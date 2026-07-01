@@ -123,8 +123,11 @@ on-mode-changed = [
     cmd-alt-ctrl-shift-space = 'fullscreen'
 
     # See: https://nikitabobko.github.io/AeroSpace/commands#resize
-    cmd-alt-ctrl-shift-minus = 'resize smart -100'
-    cmd-alt-ctrl-shift-equal = 'resize smart +100'
+    # With 2+ tiled windows this is a native `resize smart`; with a single tiled
+    # window on the ultrawide (where native resize is a no-op) it widens/narrows
+    # the outer gaps so the lone window can break out of the 1/3-width cap.
+    cmd-alt-ctrl-shift-minus = 'exec-and-forget bash -c "$HOME/.dotfiles/scripts/aerospace-resize-window.sh shrink"'
+    cmd-alt-ctrl-shift-equal = 'exec-and-forget bash -c "$HOME/.dotfiles/scripts/aerospace-resize-window.sh grow"'
 
     # Cycle outer gap presets (full → medium → narrow) on ultrawide
     cmd-alt-ctrl-shift-g = 'exec-and-forget bash $HOME/.dotfiles/scripts/aerospace-cycle-gaps.sh'
