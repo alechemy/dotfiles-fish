@@ -6,7 +6,7 @@ user_invocable: true
 
 # Summarize
 
-Universal content summarizer. Takes any input — YouTube video, web article, whitepaper/PDF, epub book, podcast, lecture — and produces a rich markdown summary imported into DEVONthink's Lorebook inbox and processed by the standard pipeline (AI enrichment → action items → daily notes → archive → wiki export).
+Universal content summarizer. Takes any input — YouTube video, web article, whitepaper/PDF, epub book, podcast, lecture — and produces a rich markdown summary imported into DEVONthink's Lorebook inbox and processed by the standard pipeline (AI enrichment → action items → daily notes → archive).
 
 ## Requirements
 
@@ -181,7 +181,7 @@ Based on content type, choose the appropriate metadata:
 | Podcast episode  | `Summary`    | `recording` URL, `show`, `hosts`, `guests`, `duration`      |
 | Lecture / talk   | `Summary`    | `speaker`, `recording` URL                                  |
 
-The record gets `NeedsProcessing=1` and `NameLocked=1` when imported. The pipeline handles tags, summary metadata, archival, daily note linking, and wiki export.
+The record gets `NeedsProcessing=1` and `NameLocked=1` when imported. The pipeline handles tags, summary metadata, archival, and daily note linking.
 
 ## Step 3: Analyze structure, determine depth, and plan sections
 

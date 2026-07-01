@@ -401,7 +401,7 @@ A single LLM call per document generates a title, event date, document type, tag
 
 **Token-usage controls** — two guards keep spend bounded:
 
-1. **Content cap** — Before the LLM call, the script filters out daily-notes and action-items sections (those are extracted separately by Post-Enrich & Archive and shouldn't steer the title/summary), then caps very long documents at a head+tail window (6000 words from the front + 2000 from the back + a truncation marker). The 8000-word threshold matches the wiki-export truncation. Covers markdown, txt, rtf, PDFs (post-OCR), and HTML — any record with populated `plain text` goes through this path.
+1. **Content cap** — Before the LLM call, the script filters out daily-notes and action-items sections (those are extracted separately by Post-Enrich & Archive and shouldn't steer the title/summary), then caps very long documents at a head+tail window (6000 words from the front + 2000 from the back + a truncation marker). Covers markdown, txt, rtf, PDFs (post-OCR), and HTML — any record with populated `plain text` goes through this path.
 2. **Input-hash cache** — After a successful enrichment, the SHA-256 of `recName + filteredText` is stored in `EnrichInputHash`. If `AIEnriched` gets reset to 0 later (manual retry, `ErrorCount` cleanup, etc.) and the content hasn't changed, the rule skips the LLM call entirely — applied fields from the prior successful run stay in place, just `AIEnriched` flips back to 1. To force a fresh LLM call on otherwise-unchanged content, clear the `EnrichInputHash` field too.
 
 The script reads each field from the record and applies it:
@@ -525,24 +525,6 @@ Reverts a document's filename to the value stored in `PreviousName` (the name it
 >
 > An earlier version used two declarative actions: `Change NeedsProcessing to 0` followed by `Move to 99_ARCHIVE`. If the move failed silently, the flag was already cleared, so the rule would never re-match. The AppleScript replacement moves **first**, then clears the flag only on success.
 
-### Export: Wiki Raw
-
-Exports archived documents to `~/Wiki/raw/` as markdown files with YAML frontmatter, bridging the DEVONthink pipeline to an LLM-maintained wiki (see [Wiki Integration](#wiki-integration) below). Each export includes the document's metadata (title, date, type, tags, summary, DEVONthink item link) and text content (truncated to ~8000 words). The wiki layer reads these raw exports and compiles them into a structured, interlinked knowledge base.
-
-This rule is independent of the main pipeline — it runs on already-archived documents and doesn't gate any other step.
-
-- Search in
-  - 99_ARCHIVE
-- Criteria
-  - WikiExported is Off
-  - Kind is Any Document
-- Trigger
-  - Hourly
-- Actions
-  - Run AppleScript (external) — see [`export-wiki-raw.applescript`](../stow/devonthink/Library/Application%20Scripts/com.devon-technologies.think/Smart%20Rules/export-wiki-raw.applescript)
-
-> **Prerequisites.** The `WikiExported` (Boolean) custom metadata field must be created in DEVONthink Settings → Data → Custom Metadata. The `~/Wiki/raw/` directory must exist (created by `scripts/init-wiki.sh`).
-
 ## Handle Updated Notebooks AppleScript
 
 Runs as the first action in Sweep: Lorebook Inbox. Only processes records where `Handwritten` is already set (by the Boox import watcher), so non-Boox documents pass through untouched. Handles the "same notebook, updated content" case by matching on SourceFile metadata. If an existing document is found, its content is replaced in-place (preserving UUID, name, tags, and links). The script then resets the document's state flags (`Recognized=0`, `Commented=0`, `AIEnriched=0`, `NeedsProcessing=1`) so it runs back through the pipeline for fresh OCR, formatted comments, and a new summary. Crucially, it sets `NameLocked=1` so the AI enrichment step doesn't overwrite its filename, preserving any existing WikiLinks. Finally, the new import is deleted. If no match is found, the document is tagged with SourceFile metadata and the sweep continues into the normal pipeline.
@@ -645,7 +627,6 @@ done
 
 ## Integrations
 
-- [Wiki Integration](docs/wiki.md) — LLM-maintained knowledge base fed by pipeline exports
 - [Granola Integration](docs/granola.md) — automated meeting notes import from Granola
 - [GitHub Stars Integration](docs/github-stars.md) — automated bookmark import for starred repos
 - [Summarize Skill](docs/summarize.md) — on-demand content summarization via Claude Code

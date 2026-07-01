@@ -723,45 +723,6 @@
 		<key>IndexOffset</key>
 		<integer>0</integer>
 		<key>LastExecution</key>
-		<real>804429056.01430595</real>
-		<key>UseUUIDKey</key>
-		<true/>
-		<key>data</key>
-		<data>
-		AAAAAAB/AAH///8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
-		AAAAAP////////8AAERCSUQAAAAkAEEAMwAxADEAOQBEADEAQQAtADEAOQAx
-		ADIALQA0ADEAOAA4AC0AQQBFADYANQAtADkARgAwAEYARQA5ADIARgAyADAA
-		NwBFVVVJRAAAACQANgBCADAANwBCAEYAMABCAC0ANABEAEYARQAtADQANABF
-		ADcALQBBADAANAA0AC0ANgA2ADMAQwA3AEYARAAwAEQAMgAxADJYVFJBIwD/
-		////Af//AAAAAAAAAAD//wD/AP8AAAAA//8AAAAA////a01EPwAAAFticGxp
-		c3QwMNEBAl5tZHdpa2lleHBvcnRlZKED0gQFBgdVdmFsdWVYb3BlcmF0b3II
-		EAQICxocIScwMQAAAAAAAAEBAAAAAAAAAAgAAAAAAAAAAAAAAAAAAAAzS1NU
-		UEtFVkUAAAAAAAAgAEtBQ1RDTEFTAAAABwBLAEEAYwB0AGkAbwBuUkxBVAAA
-		AN1URVhUAAAAYgB+AC8ATABpAGIAcgBhAHIAeQAvAEEAcABwAGwAaQBjAGEA
-		dABpAG8AbgAgAFMAYwByAGkAcAB0AHMALwBjAG8AbQAuAGQAZQB2AG8AbgAt
-		AHQAZQBjAGgAbgBvAGwAbwBnAGkAZQBzAC4AdABoAGkAbgBrAC8AUwBtAGEA
-		cgB0ACAAUgB1AGwAZQBzAC8AZQB4AHAAbwByAHQALQB3AGkAawBpAC0AcgBh
-		AHcALgBhAHAAcABsAGUAcwBjAHIAaQBwAHRYVFJBCAYAAAAAAAAAS1NUUEtT
-		VFBLU1RQ
-		</data>
-		<key>name</key>
-		<string>Export: Wiki Raw</string>
-		<key>settings</key>
-		<dict/>
-		<key>sync</key>
-		<dict>
-			<key>UUID</key>
-			<string>ABA359D9-2989-49B0-8527-995AD95B0594</string>
-			<key>date</key>
-			<date>2026-04-19T17:49:07Z</date>
-		</dict>
-	</dict>
-	<dict>
-		<key>Enabled</key>
-		<true/>
-		<key>IndexOffset</key>
-		<integer>0</integer>
-		<key>LastExecution</key>
 		<real>804430001.46633601</real>
 		<key>UseUUIDKey</key>
 		<true/>

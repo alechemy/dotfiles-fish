@@ -22,7 +22,7 @@ GitHub API (/user/starred)
   Enrich: AI Metadata → AIEnriched=1
          │
          ▼
-  Post-Enrich & Archive → moves to 99_ARCHIVE, exports to Wiki
+  Post-Enrich & Archive → moves to 99_ARCHIVE
 ```
 
 For each newly starred repo, the script:

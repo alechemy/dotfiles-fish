@@ -596,13 +596,6 @@ EOF
                 load_plist "$HOME/Library/LaunchAgents/${plist}.plist"
             done
             success "DEVONthink pipeline installed"
-
-            # Wiki integration (optional)
-            prompt_read -r -p "  ? Initialize LLM Wiki directory at ~/Wiki? [y/N] " REPLY
-            if [[ $REPLY =~ ^[Yy]$ ]]; then
-                chmod +x "$DOTFILES/scripts/init-wiki.sh"
-                "$DOTFILES/scripts/init-wiki.sh"
-            fi
         else
             info "Skipping DEVONthink pipeline."
         fi

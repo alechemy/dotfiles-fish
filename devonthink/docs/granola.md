@@ -33,7 +33,7 @@ Granola app
                     │
                     ▼
         Standard pipeline: Native Text Bypass → AI Enrichment
-        → Post-Enrich & Archive → Wiki Export
+        → Post-Enrich & Archive
 ```
 
 For each meeting in the local store that hasn't been imported yet, the parser:

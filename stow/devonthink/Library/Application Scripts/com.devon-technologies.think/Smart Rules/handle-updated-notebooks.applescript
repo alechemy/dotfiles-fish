@@ -51,7 +51,7 @@ on performSmartRule(theRecords)
 					-- Short-circuit byte-identical re-exports. The Boox re-emits the same
 					-- notebook PDF on every device sync; without this guard, an unchanged
 					-- notebook tours the full pipeline again (OCR → Format → Enrich →
-					-- Archive → Wiki) for no reason, and each re-tour can race the
+					-- Archive) for no reason, and each re-tour can race the
 					-- async-OCR / 5-min Format timeout and blank the existing comment.
 					set identicalReimport to false
 					try

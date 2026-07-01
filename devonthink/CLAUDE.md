@@ -36,10 +36,9 @@ SingleFile ingestion is OUT of smart rules — it's Python scripts + an fswatch 
   → Extract: Native Text Bypass (text-native docs — markdown/RTF/HTML and born-digital PDFs with a text layer, i.e. Word Count > 0 — skip OCR; bookmarks excluded, they go through Extract: Web Content) → sets Recognized=1, Commented=1
   → Enrich: AI Metadata (single LLM call → title, eventDate, type, tags, summary, lowConfidence) → sets AIEnriched=1
   → Post-Enrich & Archive (action items → Things 3, daily notes extraction + wikilinks, archive to 99_ARCHIVE) → move only on success
-  → Export: Wiki Raw (post-archive, writes metadata + content to ~/Wiki/raw/) → sets WikiExported=1
 ```
 
-Smart rule scripts live in `../stow/devonthink/Library/Application Scripts/com.devon-technologies.think/Smart Rules/`. Standalone Python helpers called by those scripts live in `../stow/devonthink/.local/bin/`. Standalone AppleScript utilities live in `utils/`. Integration docs (Wiki, Granola, GitHub Stars, Summarize) live in `docs/`. The canonical reference for rule criteria, triggers, and actions is `README.md`.
+Smart rule scripts live in `../stow/devonthink/Library/Application Scripts/com.devon-technologies.think/Smart Rules/`. Standalone Python helpers called by those scripts live in `../stow/devonthink/.local/bin/`. Standalone AppleScript utilities live in `utils/`. Integration docs (Granola, GitHub Stars, Summarize) live in `docs/`. The canonical reference for rule criteria, triggers, and actions is `README.md`.
 
 ## Key design decisions
 
@@ -60,7 +59,6 @@ Smart rule scripts live in `../stow/devonthink/Library/Application Scripts/com.d
 - **Archive uses AppleScript, not declarative actions.** Move happens first; `NeedsProcessing` is cleared only on success, preventing silent data loss if the move fails.
 - **Handwritten notes use the Finder Comment** as the AI-readable text source (not `plain text`) because OCR output is formatted by the LLM before enrichment.
 - **`EnrichStartedAt` timestamp** enforces a 5-minute timeout on LLM calls so records don't get stuck retrying indefinitely.
-- **Wiki is indexed into Lorebook, not a separate database.** The `~/Wiki/wiki/` directory is indexed into a `20_WIKI` group in Lorebook so that `[[wikilinks]]` resolve between wiki pages and archived documents, and See Also works cross-collection. All pipeline smart rules are scoped to `00_INBOX` so they don't touch indexed wiki files.
 
 ## External dependencies
 
@@ -76,4 +74,4 @@ Smart rule scripts live in `../stow/devonthink/Library/Application Scripts/com.d
 
 ## Custom metadata fields
 
-See the table in `README.md` → "Custom Metadata Setup" for the full list. The pipeline-critical boolean flags are: `NeedsProcessing`, `Handwritten`, `Recognized`, `Commented`, `AIEnriched`, `NameLocked`, `WikiExported`, `NeedsSingleFile`, `SkipSingleFile`, `SingleFileTooLarge`, `AIChatTranscript`. Granola imports also use `GranolaID` (Text) and `GranolaParticipants` (Multi-line Text).
+See the table in `README.md` → "Custom Metadata Setup" for the full list. The pipeline-critical boolean flags are: `NeedsProcessing`, `Handwritten`, `Recognized`, `Commented`, `AIEnriched`, `NameLocked`, `NeedsSingleFile`, `SkipSingleFile`, `SingleFileTooLarge`, `AIChatTranscript`. Granola imports also use `GranolaID` (Text) and `GranolaParticipants` (Multi-line Text).

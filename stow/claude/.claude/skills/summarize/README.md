@@ -1,6 +1,6 @@
 # summarize
 
-Claude Code skill that summarizes any content — YouTube videos, articles, PDFs, EPUBs, podcasts — into a rich DEVONthink markdown record with section-by-section breakdowns. The summary is imported into `00_INBOX` and flows through the standard pipeline (AI enrichment → archive → wiki export).
+Claude Code skill that summarizes any content — YouTube videos, articles, PDFs, EPUBs, podcasts — into a rich DEVONthink markdown record with section-by-section breakdowns. The summary is imported into `00_INBOX` and flows through the standard pipeline (AI enrichment → archive).
 
 Adapted from [reysu/ai-life-skills](https://github.com/reysu/ai-life-skills) for DEVONthink integration instead of Obsidian.
 

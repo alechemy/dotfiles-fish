@@ -628,18 +628,6 @@
 	</dict>
 	<dict>
 		<key>date</key>
-		<real>797300772.47082603</real>
-		<key>identifier</key>
-		<string>mdwikiexported</string>
-		<key>index</key>
-		<integer>46</integer>
-		<key>title</key>
-		<string>WikiExported</string>
-		<key>type</key>
-		<string>bool</string>
-	</dict>
-	<dict>
-		<key>date</key>
 		<real>797296728.29808497</real>
 		<key>identifier</key>
 		<string>mdgranolaid</string>
