@@ -17,7 +17,16 @@
   ],
   "custom_defined_behaviors": "",
   "custom_devicetree": "",
-  "config_parameters": [],
+  "config_parameters": [
+    {
+      "paramName": "DEEP_SLEEP",
+      "value": "y"
+    },
+    {
+      "paramName": "DEEP_SLEEP_TIMEOUT_MS",
+      "value": "900000"
+    }
+  ],
   "layout_parameters": {
     "cirque_touch_sensitivity": ""
   },
@@ -9620,7 +9629,7 @@
           "code": "&zip_temp_layer",
           "params": [
             14,
-            250
+            1000
           ]
         }
       ],
@@ -9734,7 +9743,7 @@
           "code": "&zip_temp_layer",
           "params": [
             14,
-            250
+            1000
           ]
         }
       ],

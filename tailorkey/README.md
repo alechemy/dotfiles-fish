@@ -51,7 +51,7 @@ Mouse clicks are bound via `&mkp` with `LCLK` / `MCLK` / `RCLK`. Wheel/movement 
 For `&mkp` to actually emit clicks, the firmware needs HID pointing reports enabled:
 
 - **Glove80**: `HID_POINTING = "y"` is set in this user's `config_parameters` ✓
-- **Go60**: `config_parameters` is empty. The Go60 supports an integrated Cirque touchpad (note `layout_parameters.cirque_touch_sensitivity`), which provides HID pointing via the touchpad sensor. If you want `&mkp` on a Go60 without the Cirque, you would need to add `HID_POINTING = "y"` under Advanced Configuration in the TailorKey editor before flashing.
+- **Go60**: `config_parameters` carries only deep-sleep settings (Go60 Tweak E), not HID pointing. The Go60 supports an integrated Cirque touchpad (note `layout_parameters.cirque_touch_sensitivity`), which provides HID pointing via the touchpad sensor. If you want `&mkp` on a Go60 without the Cirque, you would need to add `HID_POINTING = "y"` under Advanced Configuration in the TailorKey editor before flashing.
 
 **After flashing any change that adds/removes HID pointing or modifies HID descriptors, unpair the keyboard from every host and re-pair**, or input may not register. This is called out in each layout's own `notes` field.
 
@@ -290,7 +290,7 @@ The default-layout reference (`Go60 Default TailorKey Layout.png`) shows large "
 
 ### Customizations vs. upstream v4.2m⁶
 
-Four tweaks: three in the `combos` array, one in `inputListeners`. Layer-key contents (positions 0–59) match stock. The unmodified reference sits at `upstream/Go60 TailorKey v4.2m⁶ macOS Bilateral.json`. Worth noting: the working file's `uuid`, `parent_uuid`, `date`, and `creator` fields still match upstream — the customizations are applied by hand-editing the JSON, not via the TailorKey web editor, so editor metadata never gets rewritten. When pulling a change back out of the web editor, copy only the intended delta into this file and leave the metadata fields alone (the editor blanks `uuid`, rewrites `parent_uuid`, and stamps `creator`).
+Six tweaks: three in the `combos` array, two in `inputListeners`, one in `config_parameters`. Layer-key contents (positions 0–59) match stock. The unmodified reference sits at `upstream/Go60 TailorKey v4.2m⁶ macOS Bilateral.json`. Worth noting: the working file's `uuid`, `parent_uuid`, `date`, and `creator` fields still match upstream — the customizations are applied by hand-editing the JSON, not via the TailorKey web editor, so editor metadata never gets rewritten. When pulling a change back out of the web editor, copy only the intended delta into this file and leave the metadata fields alone (the editor blanks `uuid`, rewrites `parent_uuid`, and stamps `creator`).
 
 #### Tweak A: F-key combos rebound to macOS consumer codes
 
@@ -333,6 +333,26 @@ The Cirque touchpad feeds `&cirque_lh_listener`, whose default input chain runs 
 | `&cirque_lh_listener` node `layer_15`     | `[5, 14]`                 | `[1, 16]`  | 0.36× → 0.063× (~5.7× slower) |
 
 Only the left-hand listener is touched; `&cirque_rh_listener` is unchanged (it's the move-mapped half and isn't the scroll path). Made in the TailorKey web editor and ported here by integrating just the `inputListeners` delta — the editor's metadata rewrites (`uuid`, `parent_uuid`, `creator`) were intentionally not carried over.
+
+#### Tweak E: deep sleep enabled
+
+`config_parameters` (empty upstream) now enables ZMK deep sleep. Stock defaults leave it off, so the board never software-powers-off and idle drain flattens the ~1000 mAh/side battery in about two weeks of standby; with deep sleep the board disconnects BLE and powers down peripherals after the timeout, extending standby to months. The timeout is set to the ZMK default explicitly, for self-documentation.
+
+| `paramName`             | Value    | Kconfig alias                   | Meaning                                          |
+|-------------------------|----------|---------------------------------|--------------------------------------------------|
+| `DEEP_SLEEP`            | `y`      | `CONFIG_ZMK_SLEEP`              | Enable deep sleep                                |
+| `DEEP_SLEEP_TIMEOUT_MS` | `900000` | `CONFIG_ZMK_IDLE_SLEEP_TIMEOUT` | Idle ms before deep sleep (900000 = 15 min)      |
+
+The first keypress after the timeout is spent waking + reconnecting BLE (a beat of latency, and on a split the right half re-links a moment after the left), not typing. No HID descriptor changes, so no unpair/re-pair is needed — unlike the `HID_POINTING` change on the Glove80.
+
+#### Tweak F: Mouse-layer hold-open lengthened after touchpad use
+
+Each Cirque listener (`&cirque_lh_listener`, `&cirque_rh_listener`) ends its `inputProcessors` chain with `&zip_temp_layer [layer, timeout-ms]`, which momentarily activates the Mouse layer (14) while the touchpad is in use and holds it that many ms after the last motion. Both were bumped from the stock `250` to `1000` so the layer stays live for a full second after you lift off — long enough to reach a click without the layer dropping. Kept the two listeners in sync.
+
+| Listener              | Upstream `&zip_temp_layer` | Yours       |
+|-----------------------|----------------------------|-------------|
+| `&cirque_lh_listener` | `[14, 250]`                | `[14, 1000]` |
+| `&cirque_rh_listener` | `[14, 250]`                | `[14, 1000]` |
 
 ---
 
