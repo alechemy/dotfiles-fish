@@ -14,7 +14,7 @@ The Things URL scheme + `things-mcp` are powerful but have sharp edges that sile
 drop or wedge writes. Follow these rules; for any bulk add, **use the bundled helper
 `things_fill.py`** rather than hand-rolling URL opens.
 
-## The five rules (each one cost real debugging time)
+## The six rules (each one cost real debugging time)
 
 1. **Fire writes in the background with `open -g`.** `open -g things:///…` delivers the
    write **without activating Things**, so it never steals focus or — with a tiling WM
@@ -47,6 +47,13 @@ drop or wedge writes. Follow these rules; for any bulk add, **use the bundled he
 5. **No hard-delete** exists in the URL scheme. `cancel`/`complete` moves items to the
    Logbook (the human empties Trash manually). `add` won't create tags — tags must
    already exist.
+6. **Percent-encode params with `quote(v, safe='')` — never `urlencode`/`quote_plus`.**
+   Things' URL parser does **not** treat `+` as a space; it stores it literally, so
+   `urlencode` silently saves the title `A B` as `A+B` (same for notes). The helper's `add`
+   does this right (`things_fill.py:127`); when you hand-roll an `add`/`update`/`json` URL,
+   encode each value with `urllib.parse.quote(str(v), safe="")`. To skip URL assembly (and
+   its encoding) entirely for a one-off, use AppleScript `make new to do` — params pass
+   directly, no escaping.
 
 ## Don't burst opens
 
@@ -56,7 +63,7 @@ lands, before the next — naturally serialized, never bursted.
 
 ## The helper: `things_fill.py`
 
-Idempotent bulk fill that applies all five rules. Write a spec JSON and run it:
+Idempotent bulk fill that applies all six rules. Write a spec JSON and run it:
 
 ```bash
 # (only needed if it must CREATE headings)
@@ -87,6 +94,13 @@ python3 ~/.claude/skills/things/things_fill.py spec.json --dry-run  # show what'
 `project` is a uuid or exact title. It ensures Things is running (in the background, never
 foregrounded), ensures headings exist, then adds each missing to-do via the `add` command
 (`open -g`), DB-confirming each. Re-run anytime — it only adds what's absent.
+
+The helper is **project-scoped** — every to-do gets a `list-id`, so it can't place a
+project-less to-do into Inbox/Anytime/Someday. For a one-off unfiled to-do, don't
+hand-roll a URL (that's how the `+`-encoding trap in rule 6 bites); use the MCP `add_todo`
+or AppleScript `make new to do … with properties {name:…}` and set the list, e.g.
+`osascript -e 'tell application "Things3" to make new to do with properties {name:"…", notes:"…"}'`
+(lands in Inbox; `move … to list "Anytime"` to file it).
 
 ## MCP tool notes (`things-mcp`, `uvx things-mcp`)
 
