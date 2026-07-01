@@ -325,7 +325,7 @@
   "eslint.lintTask.enable": true,
   "explorer.confirmDragAndDrop": false,
   "explorer.confirmPasteNative": false,
-  "explorer.excludeGitIgnore": true,
+  "explorer.excludeGitIgnore": false,
   "extensions.autoUpdate": "onlyEnabledExtensions",
   "fileNestingUpdater.autoUpdateInterval": 10080, // 1 week
   "fileNestingUpdater.promptOnAutoUpdate": false,
