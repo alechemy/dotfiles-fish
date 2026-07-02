@@ -67,6 +67,12 @@ brew bundle dump --file=/tmp/Brewfile --force
 # Then manually copy needed lines into ~/.dotfiles/Brewfile
 ```
 
+Capture currently installed VSCodium extensions (extensions.txt drifts silently — nothing auto-captures installs):
+
+```bash
+codium --list-extensions | sort > ~/.dotfiles/stow/vscode/extensions.txt
+```
+
 ## Architecture
 
 ### Stow Package Layout

@@ -122,7 +122,7 @@ The Granola importer is **not** an Automation sender into Granola — it reads G
 
 `scripts/macos.sh` covers a lot but doesn't touch user-preference territory. You probably want to revisit:
 
-- [ ] **Trackpad** — tap to click, tracking speed, three-finger drag.
+- [ ] **Trackpad** — tracking speed, three-finger drag (tap-to-click is set by `macos.sh` for both the built-in and Bluetooth trackpads).
 - [ ] **Keyboard** — key repeat (`System Settings → Keyboard → Key Repeat Rate`), modifier keys (Caps Lock → Control if you use that).
 - [ ] **Sound** — output device, alert volume.
 - [ ] **Display arrangement** — if running in clamshell with the external monitor, set the external as the primary display in System Settings → Displays.

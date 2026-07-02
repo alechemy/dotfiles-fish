@@ -124,7 +124,9 @@ defaults write com.apple.screencapture show-thumbnail -bool false
 
 # Tap-to-click on the trackpad.
 defaults write com.apple.driver.AppleBluetoothMultitouch.trackpad Clicking -bool true
+defaults write com.apple.AppleMultitouchTrackpad Clicking -bool true
 defaults write -g com.apple.mouse.tapBehavior -int 1
+defaults -currentHost write NSGlobalDomain com.apple.mouse.tapBehavior -int 1
 
 # Save new documents to local disk by default, not iCloud Drive.
 defaults write -g NSDocumentSaveNewDocumentsToCloud -bool false
