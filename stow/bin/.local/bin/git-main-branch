@@ -1,9 +1,9 @@
 #!/usr/bin/env fish
 
-set toplevel (git rev-parse --show-toplevel)
-and if test -f $toplevel/.git/refs/remotes/origin/main
+git rev-parse --git-dir >/dev/null 2>&1
+and if git show-ref --verify --quiet refs/remotes/origin/main
     echo main
-else if test -f $toplevel/.git/refs/heads/main
+else if git show-ref --verify --quiet refs/heads/main
     echo main
 else
     echo master
