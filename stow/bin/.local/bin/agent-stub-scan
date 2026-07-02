@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+# Completion gate for the Claude Code `Stop` hook: blocks ending the turn while
+# stub markers (TODO/FIXME, not-implemented, placeholder bodies) remain on lines
+# the agent itself added this session, feeding the list back so the model either
+# finishes the work or explicitly tells the user why the markers stay.
+#
+# Scoping is stricter than agent-strip-comments because this hook can block:
+# only exact edit targets from the transcript count, and only their added lines
+# (git diff vs HEAD; the whole file when untracked) — pre-existing markers never
+# trigger. Exits 2 with the report on a hit; 0 otherwise, including when
+# stop_hook_active is set (one enforcement round per stop chain, so a marker the
+# user asked for costs at most one extra round-trip) and on any infrastructure
+# failure.
+
+set -u
+
+input=$(cat 2>/dev/null || true)
+
+[ "$(printf '%s' "$input" | jq -r '.stop_hook_active // false' 2>/dev/null)" = "true" ] && exit 0
+
+cwd=$(printf '%s' "$input" | jq -r '.cwd // empty' 2>/dev/null || true)
+{ [ -n "$cwd" ] && [ -d "$cwd" ]; } || cwd=$PWD
+transcript=$(printf '%s' "$input" | jq -r '.transcript_path // empty' 2>/dev/null || true)
+{ [ -n "$transcript" ] && [ -f "$transcript" ]; } || exit 0
+
+command -v git >/dev/null 2>&1 || exit 0
+root=$(git -C "$cwd" rev-parse --show-toplevel 2>/dev/null) || exit 0
+git -C "$root" rev-parse --verify -q HEAD >/dev/null 2>&1 || exit 0
+
+edited=$(jq -r '
+  select(.type=="assistant") | .message.content[]?
+  | select(.type=="tool_use" and (.name|test("^(Edit|Write|MultiEdit|NotebookEdit)$")))
+  | (.input.file_path // .input.notebook_path // empty)
+' "$transcript" 2>/dev/null | sort -u)
+[ -n "$edited" ] || exit 0
+
+changed=$(git -C "$root" diff --name-only HEAD 2>/dev/null || true)
+untracked=$(git -C "$root" ls-files --others --exclude-standard 2>/dev/null || true)
+
+STUB='(^|[^[:alnum:]_])(TODO|FIXME|HACK|XXX)([^[:alnum:]_]|$)|[Nn]ot (yet )?implemented|NotImplementedError|unimplemented!|[Ii]mplement (this|later)'
+
+report=$(
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    rel=${f#"$root"/}
+    [ "$rel" = "$f" ] && continue
+    [ -f "$f" ] || continue
+    if printf '%s\n' "$untracked" | grep -qxF -- "$rel"; then
+      grep -nI -E "$STUB" -- "$f" 2>/dev/null | sed "s|^|${rel}:|"
+    elif printf '%s\n' "$changed" | grep -qxF -- "$rel"; then
+      git -C "$root" diff -U0 HEAD -- "$rel" 2>/dev/null | awk -v f="$rel" '
+        /^\+\+\+/ { next }
+        /^@@/ { match($0, /\+[0-9]+/); n = substr($0, RSTART + 1, RLENGTH - 1) + 0; next }
+        /^\+/ { printf "%s:%d:%s\n", f, n, substr($0, 2); n++ }
+      ' | grep -E -- "$STUB" 2>/dev/null
+    fi
+  done <<<"$edited" | head -20
+)
+[ -n "$report" ] || exit 0
+
+{
+  printf 'Stub markers remain on lines you added this session:\n%s\n' "$report"
+  printf 'Finish these implementations before ending the turn. If a marker is intentional (e.g. the user asked for scaffolding), state that to the user explicitly and end the turn again.\n'
+} >&2
+exit 2

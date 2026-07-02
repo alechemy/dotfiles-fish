@@ -46,6 +46,11 @@
             "type": "command",
             "command": "bash \"$HOME/.local/bin/agent-strip-comments\"",
             "timeout": 30
+          },
+          {
+            "type": "command",
+            "command": "bash \"$HOME/.local/bin/agent-stub-scan\"",
+            "timeout": 15
           }
         ]
       }
