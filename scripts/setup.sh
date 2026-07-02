@@ -177,6 +177,9 @@ if ! command -v brew &> /dev/null; then
     elif [[ -f /usr/local/bin/brew ]]; then
         eval "$(/usr/local/bin/brew shellenv)"
     fi
+    # A failed installer download yields an empty command substitution, which
+    # /bin/bash -c "" treats as success — verify brew actually landed.
+    command -v brew &> /dev/null || fail "Homebrew install failed (network?); re-run ./scripts/setup.sh"
     success "Homebrew installed"
 else
     success "Homebrew already installed"
@@ -593,7 +596,7 @@ EOF
                 prompt_read -r -p "  ? Is this Mac the DEVONthink pipeline DRIVER (ingests + runs smart rules)? [y/N] " REPLY
                 if [[ $REPLY =~ ^[Yy]$ ]]; then echo driver > "$ROLE_FILE"; else echo follower > "$ROLE_FILE"; fi
             fi
-            DT_ROLE=$(tr -d '[:space:]' < "$ROLE_FILE")
+            DT_ROLE=$(tr -d '[:space:]' < "$ROLE_FILE" | tr '[:upper:]' '[:lower:]')
             info "DEVONthink pipeline role: $DT_ROLE"
 
             # dt-watchdog runs on every machine (keeps DT + sync alive; mutating
@@ -669,7 +672,7 @@ if [[ "$(uname)" == "Darwin" ]]; then
 fi
 
 # 6. Fish Shell Setup (Add to /etc/shells and chsh)
-FISH_PATH="$(command -v fish)"
+FISH_PATH="$(command -v fish || true)"
 if [ -n "$FISH_PATH" ]; then
     if ! grep -q "$FISH_PATH" /etc/shells; then
         info "Adding fish to /etc/shells..."
