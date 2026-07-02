@@ -240,7 +240,7 @@ if [ -f "$DOTFILES/Brewfile" ]; then
     fi
 fi
 
-# 2b. Schedule `brew autoupdate` (24h interval, upgrade + cleanup, run at load,
+# 2b. Schedule `brew autoupdate` (daily at 6:00, upgrade + cleanup, run at load,
 #     prompt for sudo via pinentry-mac when a cask needs it, only when on AC
 #     power so battery isn't drained by background upgrades). Idempotent: skip
 #     if the launchd job is already loaded so re-running setup.sh doesn't
@@ -252,6 +252,23 @@ if brew tap | grep -q '^domt4/autoupdate$'; then
         info "Starting brew autoupdate (daily, --upgrade --cleanup --immediate --sudo --ac-only)..."
         brew autoupdate start 86400 --upgrade --cleanup --immediate --sudo --ac-only
         success "brew autoupdate scheduled"
+    fi
+    # The tap only writes StartInterval (24h from agent load); pin the run to
+    # 6:00 by swapping in a StartCalendarInterval. Re-running `brew autoupdate
+    # start` regenerates the plist, so converge on every setup run.
+    AUTOUPDATE_PLIST="$HOME/Library/LaunchAgents/com.github.domt4.homebrew-autoupdate.plist"
+    if [[ -f "$AUTOUPDATE_PLIST" ]] &&
+        /usr/libexec/PlistBuddy -c 'Print :StartInterval' "$AUTOUPDATE_PLIST" >/dev/null 2>&1; then
+        info "Pinning brew autoupdate to 6:00 daily..."
+        /usr/libexec/PlistBuddy \
+            -c 'Delete :StartInterval' \
+            -c 'Add :StartCalendarInterval dict' \
+            -c 'Add :StartCalendarInterval:Hour integer 6' \
+            -c 'Add :StartCalendarInterval:Minute integer 0' \
+            "$AUTOUPDATE_PLIST"
+        launchctl bootout "gui/$(id -u)/com.github.domt4.homebrew-autoupdate" 2>/dev/null || true
+        launchctl bootstrap "gui/$(id -u)" "$AUTOUPDATE_PLIST"
+        success "brew autoupdate pinned to 6:00 daily"
     fi
 fi
 
