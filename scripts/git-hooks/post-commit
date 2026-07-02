@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+#
+# git skips post-merge when a merge stops on conflicts, and the resolving
+# `git commit` fires post-commit instead — so the restow runs here for
+# conflict-resolution merge commits. A clean `git merge` doesn't run
+# post-commit, and non-merge commits are filtered by the HEAD^2 check, so
+# this fires precisely for resolved merges; restow is idempotent anyway.
+
+toplevel="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
+[ -x "$toplevel/scripts/restow-changed.sh" ] || exit 0
+git rev-parse --quiet --verify HEAD^2 >/dev/null || exit 0
+
+"$toplevel/scripts/restow-changed.sh" HEAD^1 HEAD || true
+exit 0

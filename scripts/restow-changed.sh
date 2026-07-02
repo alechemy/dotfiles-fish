@@ -40,21 +40,29 @@ command -v stow >/dev/null 2>&1 || {
 git -C "$DOTFILES" rev-parse --verify --quiet "${OLD}^{commit}" >/dev/null || exit 0
 git -C "$DOTFILES" rev-parse --verify --quiet "${NEW}^{commit}" >/dev/null || exit 0
 
-# True when at least one of the package's tracked files is currently a symlink
-# pointing back into this package — i.e. the package is stowed on this machine.
-# Walks all tracked files so packages whose first entries are unstowed (e.g.
-# devonthink's _seed/ copies) are still detected by their real stowed files.
+# True when at least one of the package's files is currently a symlink pointing
+# back into this package — i.e. the package is stowed on this machine.
+# Enumerates from disk, not git ls-files: a package whose only stowable file is
+# generated/gitignored (streamrip's config.toml) is invisible to ls-files.
+# Also probes the pre-merge tree's paths: after an upstream rename/replace of
+# every stowed file, only the old paths' (now dangling) symlinks prove activity,
+# and [ -L ] + readlink work fine on dangling links.
 is_active() {
     local root="$1" pkg="$2" f rel target dest
     while IFS= read -r f; do
-        rel="${f#"$root/$pkg/"}"
+        rel="${f#"$DOTFILES/"}"
+        rel="${rel#"$root/$pkg/"}"
         target="$HOME/$rel"
         [ -L "$target" ] || continue
         dest="$(readlink "$target")"
         case "$dest" in
             *"/$root/$pkg/"*) return 0 ;;
         esac
-    done < <(git -C "$DOTFILES" ls-files "$root/$pkg")
+    done < <(
+        find "$DOTFILES/$root/$pkg" -type f \
+            -not -path '*/_seed/*' -not -name .stow-local-ignore -not -name .DS_Store
+        git -C "$DOTFILES" ls-tree -r --name-only "$OLD" -- "$root/$pkg" 2>/dev/null
+    )
     return 1
 }
 
@@ -65,8 +73,10 @@ restow_pkg() {
            --target="$HOME" "$pkg" )
 }
 
+# Package content always lives at root/pkg/file (depth >= 3); depth-2 entries
+# like stow-work/.gitkeep are not packages.
 changed="$(git -C "$DOTFILES" diff --name-only "$OLD" "$NEW" -- stow stow-work stow-local 2>/dev/null \
-    | awk -F/ 'NF >= 2 { print $1, $2 }' | sort -u)"
+    | awk -F/ 'NF >= 3 { print $1, $2 }' | sort -u)"
 
 [ -n "$changed" ] || exit 0
 
@@ -99,5 +109,45 @@ while read -r root pkg; do
 done <<EOF
 $changed
 EOF
+
+# Generated configs: outputs are gitignored, so a pull that changes a template
+# leaves the built file stale (restow is a no-op for it). Rebuild the affected
+# ones; failures warn but never abort the git operation.
+changed_files="$(git -C "$DOTFILES" diff --name-only "$OLD" "$NEW" 2>/dev/null)"
+
+rebuild() {
+    if "$DOTFILES/scripts/$1"; then
+        echo "restow-changed: rebuilt via scripts/$1"
+    else
+        echo "restow-changed: scripts/$1 failed; re-run it by hand" >&2
+    fi
+}
+
+op_ok() { command -v op >/dev/null 2>&1 && op vault list >/dev/null 2>&1; }
+
+if grep -q '\.plist\.template$' <<<"$changed_files"; then
+    rebuild build-launchd-plists.sh
+    echo "restow-changed: launchd still runs the old agent definition(s); bootout + bootstrap the affected label(s) or log out/in" >&2
+fi
+if grep -q '^stow/vscode/.*settings\.template\.json$' <<<"$changed_files"; then
+    rebuild build-vscode-config.sh
+fi
+if grep -q '^stow/zed/.*settings\.template\.jsonc$' <<<"$changed_files"; then
+    if op_ok; then
+        rebuild build-zed-config.sh
+    else
+        echo "restow-changed: zed template changed but 1Password CLI is unavailable; run scripts/build-zed-config.sh by hand" >&2
+    fi
+fi
+if grep -q '^stow/streamrip/.*config\.template\.toml$' <<<"$changed_files"; then
+    if op_ok; then
+        rebuild build-streamrip-config.sh
+    else
+        echo "restow-changed: streamrip template changed but 1Password CLI is unavailable; run scripts/build-streamrip-config.sh by hand" >&2
+    fi
+fi
+if grep -q '^stow/navidrome/\.config/navidrome/env\.template$' <<<"$changed_files"; then
+    echo "restow-changed: navidrome env.template changed; update ~/.config/navidrome/env by hand" >&2
+fi
 
 exit 0
