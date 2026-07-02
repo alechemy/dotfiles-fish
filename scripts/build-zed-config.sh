@@ -5,6 +5,9 @@
 #
 set -e
 
+# Outputs hold resolved secrets; keep them (and the .tmp staging file) 0600.
+umask 077
+
 DOTFILES="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ZED_DIR="$DOTFILES/stow/zed/.config/zed"
 TEMPLATE="$ZED_DIR/settings.template.jsonc"

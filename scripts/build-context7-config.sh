@@ -13,6 +13,9 @@
 #
 set -e
 
+# Outputs hold resolved secrets; keep them (and the .tmp staging file) 0600.
+umask 077
+
 DOTFILES="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUT="$DOTFILES/stow/fish/.config/fish/conf.d/context7.fish"
 OP_REF="op://Private/25nqmf6ljgb6ry5aowcegxabpa/credential"

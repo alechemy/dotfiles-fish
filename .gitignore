@@ -1,5 +1,6 @@
 *~
 *.log
+*.tmp
 **/.DS_Store
 .env*
 !.env.template
@@ -21,14 +22,10 @@ stow/navidrome/.config/navidrome/env
 batch-rip-work
 stow/devonthink/.local/share/devonthink-capture/node_modules
 stow/devonthink/.local/share/devonthink-capture/package-lock.json
-stow/devonthink/Library/LaunchAgents/com.user.boox-import-watcher.plist
-stow/devonthink/Library/LaunchAgents/com.user.dt-daily-note.plist
-stow/devonthink/Library/LaunchAgents/com.user.dt-watchdog.plist
-stow/devonthink/Library/LaunchAgents/com.user.github-stars-import.plist
-stow/devonthink/Library/LaunchAgents/com.user.granola-import.plist*
-stow/devonthink/Library/LaunchAgents/com.user.singlefile-watcher.plist
-stow/nas-mount/Library/LaunchAgents/com.user.mount-nas.plist
-stow/bin/Library/LaunchAgents/com.user.check-stale-dev-servers.plist
-stow/chromium-bookmarks/Library/LaunchAgents/com.user.chromium-bookmarks-sync.plist
+# Generated launch-agent plists (built from *.plist.template by
+# scripts/build-launchd-plists.sh); the glob doesn't match the templates.
+stow/*/Library/LaunchAgents/*.plist
+# granola-import's template is itself gitignored (documents a sensitive pipeline)
+stow/devonthink/Library/LaunchAgents/com.user.granola-import.plist.template
 stow/devonthink/.local/bin/import-granola.py
 stow/devonthink/.local/bin/import-granola-parse.py
