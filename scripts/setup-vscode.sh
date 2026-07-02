@@ -19,10 +19,44 @@ fail() {
     exit 1
 }
 
+# Some macOS tools invoked during bootstrap can leave this script's process
+# group out of the tty foreground slot; a bare `read` then gets SIGTTIN and
+# the parent shell reports `suspended (tty input)`. Copied from setup.sh,
+# whose step 8 runs this script after the most SIGTTIN-prone steps.
+ensure_tty_foreground() {
+    [[ -t 1 ]] || return 0
+    [[ -r /dev/tty && -w /dev/tty ]] || return 0
+    [[ -x /usr/bin/python3 ]] || return 0
+
+    /usr/bin/python3 - <<'PY' 2>/dev/null || true
+import os
+import signal
+
+try:
+    fd = os.open('/dev/tty', os.O_RDWR)
+except OSError:
+    raise SystemExit(0)
+
+old_handler = signal.signal(signal.SIGTTOU, signal.SIG_IGN)
+try:
+    my_pgid = os.getpgrp()
+    if os.tcgetpgrp(fd) != my_pgid:
+        os.tcsetpgrp(fd, my_pgid)
+finally:
+    signal.signal(signal.SIGTTOU, old_handler)
+    os.close(fd)
+PY
+}
+
+prompt_read() {
+    ensure_tty_foreground
+    read "$@"
+}
+
 # Install extensions
 if command -v codium &> /dev/null; then
     if [ -f "$VSCODE_STOW/extensions.txt" ]; then
-        read -p "  ? Install VSCodium extensions? [y/N] " -n 1 -r
+        prompt_read -p "  ? Install VSCodium extensions? [y/N] " -n 1 -r
         echo
         if [[ $REPLY =~ ^[Yy]$ ]]; then
             info "Installing VSCodium extensions..."

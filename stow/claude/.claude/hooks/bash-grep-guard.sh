@@ -9,32 +9,56 @@
 # Blocks bare grep/egrep/fgrep (exit 2, message to stderr) and redirects to ripgrep —
 # the first-class Grep tool when it's wired, otherwise `rg` via Bash (the Grep tool is
 # absent in some sessions, returning "No such tool available"). A grep used as a pipe
-# filter (right after `|`) is left alone once color is disabled (--color=never or a
-# leading NO_COLOR=) — filtering another command's stdout is what grep is for, and
-# color-off output renders fine. A grep used for a content search (start of command, or
-# after ; & ( newline) is redirected to ripgrep even with color off, since ripgrep is
-# the right tool there regardless.
+# filter (right after `|`) is left alone once ITS OWN pipeline segment disables color
+# (--colou?r=never among that grep's args, or NO_COLOR= immediately before the grep
+# word) — filtering another command's stdout is what grep is for, and color-off output
+# renders fine. Color-off tokens elsewhere in the command don't count: the corruption
+# comes from the grep that renders last, so the check must be per-segment. A grep used
+# for a content search (start of command, or after ; & ( newline) is redirected to
+# ripgrep even with color off, since ripgrep is the right tool there regardless.
 
 input=$(cat)
 
 cmd=$(printf '%s' "$input" | jq -r '.tool_input.command // empty' 2>/dev/null)
 [ -z "$cmd" ] && exit 0
 
-# grep family at a command position: start of string, or after a shell separator
-# (| & ; ( newline) and optional spaces. A bare space is deliberately NOT a boundary,
+# Walk the command segment by segment (split on | & ; ( and newlines — quote-blind,
+# consistent with the rest of this guard), tracking each segment's leading separator.
+# grep must open its segment to count: a bare space is deliberately NOT a boundary,
 # so the word "grep" inside a quoted argument (echo, commit messages) doesn't trip it.
 # This means grep behind a wrapper word (git/sudo/xargs grep) slips through — accepted,
 # since those are rare and the no-false-positive property matters more.
-sep=$'(^|[|&;(\n])'
-[[ "$cmd" =~ ${sep}[[:space:]]*(grep|egrep|fgrep)([[:space:]]|$) ]] || exit 0
-lead="${BASH_REMATCH[1]}"
+split_re=$'^([^|&;(\n]*)([|&;(\n])(.*)$'
+blocked=0
+rest="$cmd"
+lead="^"
+while [ -n "$rest" ] || [ "$lead" != "done" ]; do
+  if [[ "$rest" =~ $split_re ]]; then
+    seg="${BASH_REMATCH[1]}"
+    nextlead="${BASH_REMATCH[2]}"
+    rest="${BASH_REMATCH[3]}"
+  else
+    seg="$rest"
+    nextlead="done"
+    rest=""
+  fi
 
-# Pipe filter (grep right after `|`): filtering another command's stdout is grep's job,
-# and color-off output renders fine — allow it. A content search (any other command
-# position) is redirected to ripgrep regardless of color, so it falls through.
-if [[ "$lead" == "|" ]]; then
-  [[ "$cmd" =~ (--colou?r=never|NO_COLOR=) ]] && exit 0
-fi
+  s="${seg#"${seg%%[![:space:]]*}"}"
+  nocolor=0
+  if [[ "$s" =~ ^NO_COLOR=[^[:space:]]*[[:space:]]+(.*)$ ]]; then
+    nocolor=1
+    s="${BASH_REMATCH[1]}"
+  fi
+  if [[ "$s" =~ ^(grep|egrep|fgrep)([[:space:]]|$) ]]; then
+    if [[ "$lead" != "|" ]] || { [[ $nocolor -eq 0 ]] && ! [[ "$s" =~ --colou?r=never ]]; }; then
+      blocked=1
+    fi
+  fi
+
+  lead="$nextlead"
+done
+
+[ "$blocked" -eq 1 ] || exit 0
 
 cat >&2 <<'EOF'
 Blocked: grep via the Bash tool corrupts its own output here. The Bash tool runs under
