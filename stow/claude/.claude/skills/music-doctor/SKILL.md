@@ -1,7 +1,6 @@
 ---
 name: music-doctor
 description: Routine, exhaustive health checks against the music library at /Volumes/Media/Music — detects corrupt tracks, metadata drift, duplicates, empty folders, miscategorized albums, and quality regressions, with a stable dismissal mechanism so resolved-by-design issues stay quiet on future runs. Invoke when the user explicitly says `/music-doctor`, "music doctor", "music library check / scan / health", "audit my music library", or asks for music library stats.
-user_invocable: true
 ---
 
 # music-doctor

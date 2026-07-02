@@ -1,7 +1,6 @@
 ---
 name: prose-check
 description: Anti-slop prose rewrite/review tool covering 48 LLM writing tropes. Invoke only when the user explicitly uses the `/prose-check` slash command or says phrases like "slop check this," "run prose-check," "rewrite this for slop," or "anti-trope review."
-user_invocable: true
 ---
 
 # prose-check

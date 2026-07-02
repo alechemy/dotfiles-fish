@@ -1,7 +1,6 @@
 ---
 name: summarize
 description: Summarize any content (YouTube video, article, whitepaper/PDF, podcast episode, book chapter, etc.) into a rich DEVONthink markdown record with section-by-section breakdowns. Imports the summary into DEVONthink and flows through the standard pipeline.
-user_invocable: true
 ---
 
 # Summarize

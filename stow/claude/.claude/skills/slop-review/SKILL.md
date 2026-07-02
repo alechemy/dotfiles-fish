@@ -1,7 +1,6 @@
 ---
 name: slop-review
 description: Review a codebase's prose surface — READMEs, docs, comments, public strings, package metadata — for AI-written slop, audience leaks, internal/private leakage, redundancy/drift, inaccuracy, scaffold leftovers, and LLM-generation detritus. Invoke only when the user explicitly uses `/slop-review` or asks to review a repo for slop / smells / sloppy comments / stale or inaccurate docs.
-user_invocable: true
 ---
 
 # slop-review
