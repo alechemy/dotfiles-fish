@@ -11,7 +11,9 @@ indexes Chromium bookmarks with no keyword and no extra app.
 Watches the Chromium Bookmarks file directly via fswatch (event-driven, so it
 never polls or wakes on Chromium's other profile writes). Defers while Safari
 is running: Safari caches bookmarks in memory and rewrites the file on its own
-edits, which would clobber a folder we injected underneath it.
+edits, which would clobber a folder we injected underneath it. While a sync is
+pending from such a defer, the watcher polls for Safari's exit and syncs as
+soon as it quits; with nothing pending it never wakes on a timer.
 
 Writing ~/Library/Safari/ is Full-Disk-Access-gated, so the launchd agent runs
 this under /usr/bin/python3 (Apple-signed, stable path); grant FDA to that
@@ -45,6 +47,7 @@ MANAGED_UUID = str(uuid.uuid5(NS, "managed-root")).upper()
 
 SETTLE = 1.0
 MAX_COALESCE = 10.0
+SAFARI_POLL = 30.0
 
 
 def log(msg):
@@ -196,8 +199,8 @@ def sync(force=False, dry_run=False):
         log(f"Chromium bookmarks not found at {CHROMIUM_BM}")
         return
     if not force and safari_running():
-        log("Safari is running; deferring (syncs on next bookmark change or next agent load)")
-        return
+        log("Safari is running; deferring")
+        return True
     try:
         chromium = json.loads(CHROMIUM_BM.read_text(encoding="utf-8"))
     except (ValueError, OSError) as e:
@@ -264,7 +267,7 @@ def watch():
         sys.exit(0)
 
     log(f"starting; watching {CHROMIUM_BM}")
-    sync()
+    pending = bool(sync())
 
     proc = subprocess.Popen(
         [fswatch, "-0", "--latency", "1", str(CHROMIUM_BM)], stdout=subprocess.PIPE
@@ -277,7 +280,12 @@ def watch():
     # SETTLE seconds of quiet, so the last save in a burst is never dropped.
     # MAX_COALESCE bounds staleness if events somehow never go quiet.
     while not eof:
-        timeout = SETTLE if dirty_since is not None else None
+        if dirty_since is not None:
+            timeout = SETTLE
+        elif pending:
+            timeout = SAFARI_POLL
+        else:
+            timeout = None
         readable, _, _ = select.select([fd], [], [], timeout)
         now = time.monotonic()
         if readable:
@@ -294,10 +302,11 @@ def watch():
                 if dirty_since is not None and now - dirty_since < MAX_COALESCE:
                     continue
         if dirty_since is None:
-            continue
+            if not pending or safari_running():
+                continue
         dirty_since = None
         try:
-            sync()
+            pending = bool(sync())
         except Exception:
             import traceback
             log("ERROR: sync failed (watcher continues):\n" + traceback.format_exc())
