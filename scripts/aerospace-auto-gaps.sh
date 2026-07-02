@@ -55,16 +55,35 @@ fi
 
 # Auto-gaps only rewrites the DELL's outer gaps; the built-in display always
 # uses the outer fallback, so its window widths never vary with the count. When
-# the DELL isn't connected (laptop mode) there is nothing to adjust, so skip
-# rather than issue a no-op reload-config on every callback.
+# the DELL isn't connected (laptop mode) there is no gap to adjust, but source
+# edits must still propagate to the runtime copy — otherwise reload_wm reloads
+# a stale runtime for the whole portable session. Sync (under the shared lock,
+# so a concurrent cycle-gaps rebuild can't race the copy) and exit. The plain
+# copy is safe: the DELL gap values are inert undocked, and the first docked
+# event recomputes them.
 if ! jq -e --arg m 'DELL U4025QW' 'any(.[]; ."monitor-name" | contains($m))' \
         <<<"$mons_json" >/dev/null 2>&1; then
+    if [ ! -f "$RUNTIME_FILE" ] || [ -L "$RUNTIME_FILE" ] || [ "$SOURCE_FILE" -nt "$RUNTIME_FILE" ]; then
+        exec 9>/tmp/aerospace-gaps.lock
+        flock 9
+        TMP=$(mktemp "$RUNTIME_FILE.XXXXXX")
+        trap 'rm -f "$TMP"' EXIT
+        cp "$SOURCE_FILE" "$TMP"
+        chmod 0644 "$TMP"
+        mv "$TMP" "$RUNTIME_FILE"
+        aerospace reload-config
+        log "portable-sync source->runtime trigger=$TRIGGER"
+    fi
     exit 0
 fi
 
+# Mark pending before trying the lock: marking after a failed flock leaves a
+# window where the holder's final pending check completes before the mark
+# lands, dropping the event. The winner clears its own self-set flag at the
+# top of pass 1.
 exec 9>/tmp/aerospace-gaps.lock
+: >"$PENDING_FILE"
 if ! flock -n 9; then
-    : >"$PENDING_FILE"
     exit 0
 fi
 

@@ -24,6 +24,15 @@ if [ "$(jq 'length' <<<"$mons_json" 2>/dev/null || echo 1)" -gt 1 ]; then
     exit 0
 fi
 
+# Presets only exist for the ultrawide; on the built-in panel the cycle would
+# bake built-in-derived values into the DELL entries and suppress auto-gaps
+# with no visible effect until the next dock.
+if ! jq -e --arg m 'DELL U4025QW' 'any(.[]; ."monitor-name" | contains($m))' \
+        <<<"$mons_json" >/dev/null 2>&1; then
+    osascript -e 'display notification "Gap cycling only applies on the ultrawide." with title "AeroSpace"' >/dev/null 2>&1 || true
+    exit 0
+fi
+
 # Block on the same lock as auto-gaps so a manual cycle and an automatic
 # rebuild can't race each other.
 exec 9>/tmp/aerospace-gaps.lock

@@ -11,6 +11,9 @@ function reload_wm -d "Reload window manager stack (Goku, AeroSpace, SketchyBar,
 
   if type -q aerospace
     echo "→ Reloading AeroSpace config"
+    # Sync ~/.aerospace.toml from the dotfiles source first: reload-config
+    # alone re-reads the runtime copy, which may be stale in portable mode.
+    ~/.dotfiles/scripts/aerospace-auto-gaps.sh reload_wm
     aerospace reload-config; or set failed 1
   else
     echo "✗ aerospace not found in PATH"
