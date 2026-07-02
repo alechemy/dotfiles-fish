@@ -154,13 +154,17 @@ if [ "$RIP_EXIT" -ne 0 ]; then
 fi
 
 # --- CHECK FOR FAILED TRACKS ---
-# Extract session ID from streamrip's "rip resume <id>" output
-SESSION_ID=$(grep -o 'rip resume [a-f0-9]*' "$RIP_LOG_FILE" | tail -1 | awk '{print $3}')
+# Extract session ID from streamrip's "rip resume <id>" output. Rich wraps at
+# the terminal width it probes from stdin even when stdout is piped, and its
+# log table interleaves a file:line column — flatten whitespace and drop the
+# location tokens so matching never depends on the rendered line layout.
+FLAT_LOG=$(tr -s '[:space:]' ' ' < "$RIP_LOG_FILE" | sed 's/[a-zA-Z_]*\.py:[0-9]* //g')
+SESSION_ID=$(printf "%s\n" "$FLAT_LOG" | grep -o 'rip resume [a-f0-9]*' | tail -1 | awk '{print $3}')
 
 if [ -n "$SESSION_ID" ]; then
   printf "\n"
   printf "%s\n" "Failed tracks:"
-  grep "Persistent error downloading track" "$RIP_LOG_FILE" | sed "s/.*Persistent error downloading track '\([^']*\)'.*/  - \1/" | sort -u
+  printf "%s\n" "$FLAT_LOG" | grep -o "Persistent error downloading track '[^']*'" | sed "s/Persistent error downloading track '\(.*\)'/  - \1/" | sort -u
   printf "\n"
 
   # Keep partial download for resume — don't delete it
