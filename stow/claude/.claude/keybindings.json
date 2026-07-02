@@ -7,7 +7,7 @@
       "bindings": {
         "enter": "chat:newline",
         "cmd+enter": "chat:submit",
-        "ctrl+j": "chat:submit"
+        "ctrl+s": "chat:submit"
       }
     }
   ]
