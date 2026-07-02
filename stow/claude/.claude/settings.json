@@ -54,6 +54,16 @@
           }
         ]
       }
+    ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$HOME/.claude/hooks/comment-policy-inject.sh\" SubagentStart"
+          }
+        ]
+      }
     ]
   },
   "enabledPlugins": {

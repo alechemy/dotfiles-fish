@@ -15,6 +15,7 @@ Never:
 - restate in words what the code already says (`// loop over users`);
 - put ticket numbers, PR links, author names, dates, or changelog history in a comment;
 - add or rewrite comments on code you did not change;
+- describe a fix by contrast with the previous version — when fixing a reported bug, leave the code as though the correct solution were written the first time;
 - pad a WHY note into multi-sentence narration where one line would do, or add a doc block where the project's precedent doesn't use one.
 
 Prefer deleting a borderline comment over keeping it.
