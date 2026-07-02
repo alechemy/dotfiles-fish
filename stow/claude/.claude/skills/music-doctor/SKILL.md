@@ -93,11 +93,11 @@ Parse the JSON object on stdout. Engine logs go to stderr; ignore them in the pa
 
 Variants:
 - `--deep` fully decodes every track with `ffmpeg`. Catches truncation and mid-file corruption that mutagen (and header-only probes) read happily. Adds significant time over SMB; only suggest when the user is plugged in or specifically asking for thoroughness.
-- `--kind <k>` (repeatable) restricts to a subset of checks. Use when the user asks for a targeted scan ("just duplicates").
+- `--kind <k>` (repeatable) filters which findings are *recorded/reported* — the engine still runs the full scan, so it saves no time. For a targeted question against fresh-enough data, prefer `report --kind <k>` on the last run (free) over a rescan.
 - `--workers N` (default 8). Raise to 16 on a fast machine, lower if the SMB share is sluggish.
 
 Battery / time awareness:
-- A full scan of ~10k+ tracks over SMB typically takes 2–5 minutes. Don't pre-emptively offer the gate (`~/.local/bin/should-run-background-job`); this is user-invoked work. If the user mentions being on battery and on a flight or similar, suggest deferring or using `--kind` to narrow.
+- A full scan of ~10k+ tracks over SMB typically takes 2–5 minutes. Don't pre-emptively offer the gate (`~/.local/bin/should-run-background-job`); this is user-invoked work. If the user mentions being on battery and on a flight or similar, suggest deferring the scan (`--kind` doesn't reduce cost — it only filters output).
 
 ## Step 2: Present the report
 
@@ -162,7 +162,7 @@ Fixable kinds (engine knows how to repair them):
 
 For everything else (`duplicate_album`, `wrong_filename`, `path_tag_mismatch`, etc.), the engine does NOT auto-fix. These need human judgment and usually map to existing tooling:
 - `duplicate_album` → user decides which to keep based on quality; remove the other via the Finder or `rm -rf`.
-- `quality_low` / `quality_upgrade_candidate` → re-download flow via `riptag --replaces=<path>`. The local music-redownload-queue (`~/.local/share/batch_rip/downloads.json`) is the staging point.
+- `quality_low` / `quality_upgrade_candidate` → re-download flow via `riptag --replaces=<path>`. For batches, stage candidates in `~/.dotfiles/batch-rip-work/redownload/input.json`, review with `/batch-review`, then run `batch_rip ~/.dotfiles/batch-rip-work/redownload/downloads.json`.
 - `path_tag_mismatch` → fix the tag with `tagger.py`, or move the folder to match. Don't blanket-rename without showing the user.
 - `wrong_filename` → fix manually or re-import via `import-album.py` to get canonical names back.
 
@@ -284,4 +284,4 @@ music-doctor.py history --limit 20
 - `~/.local/bin/tagger.py` — m4a genre / cpil / cover unifier. Use for one-off retag fixes.
 - `~/.local/bin/import-album.py` — bridges external folders into the library; auto-detects compilation status.
 - `riptag` (fish function) — Qobuz download + tag + organize. `--replaces=PATH` enables the guarded re-download path used to upgrade quality.
-- `batch_rip` (fish function) — runs the re-download queue at `~/.local/share/batch_rip/downloads.json`.
+- `batch_rip` (fish function) — runs a downloads queue; pass the reviewed queue path (e.g. `batch-rip-work/redownload/downloads.json`), else it defaults to `~/.local/share/batch_rip/downloads.json`.

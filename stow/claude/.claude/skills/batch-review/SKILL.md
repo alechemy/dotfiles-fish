@@ -22,7 +22,7 @@ Every file path below is relative to `<workdir>`.
 - **Output queue:** `<workdir>/downloads.json` — validated/corrected entries ready for `batch_rip`. You append to this file. Create it as `[]` if it doesn't exist.
 - **Reviewed log:** `<workdir>/reviewed.json` — flat JSON array of album IDs the skill has already processed (any outcome). You append to this file. Create it as `[]` if it doesn't exist.
 - **Rejection log:** `<workdir>/not_found_library.md` — human-readable log of albums that can't be downloaded. You append to this file.
-- **Search command:** `fish -c 'rip search -o <output.json> -n <count> qobuz album "<query>"'` (must use `-o` flag; must be invoked via `fish -c` as `rip` is a fish function)
+- **Search command:** `~/Developer/streamrip/.venv/bin/rip search -o <output.json> -n <count> qobuz album "<query>"` (must use `-o` flag; `rip` is the streamrip venv binary — there is no `rip` fish function)
 
 ## Determining what to process
 

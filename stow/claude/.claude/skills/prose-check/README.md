@@ -7,8 +7,10 @@ Rule set derived from the [slop-cop](https://github.com/awnist/slop-cop) detecto
 ## Install
 
 ```bash
-cd ~/.dotfiles/stow && stow --restow --no-folding --ignore='.DS_Store' --target="$HOME" devonthink
+cd ~/.dotfiles/stow && stow --restow --no-folding --ignore='.DS_Store' --target="$HOME" claude
 ```
+
+The DEVONthink-side helpers (`lint-markdown-file`, `prose-check-on-demand.applescript`) live in the `devonthink` package — restow that too if you use them (it's opt-in).
 
 Then use `/prose-check` in Claude Code.
 
@@ -61,17 +63,6 @@ Create an on-demand smart rule in DEVONthink:
   - `pandoc` — DOCX/EPUB conversion
 - The Lorebook database with `00_INBOX` group (standard pipeline setup)
 
-## Rule sync
+## Rule maintenance
 
-The skill's rule list is regenerated from `src/rules.ts` in the [slop-cop](https://github.com/awnist/slop-cop) repo:
-
-```bash
-cd ~/Developer/slop-cop
-pnpm tsx scripts/sync-prose-check-rules.ts
-```
-
-The script writes to the installed skill at `~/.claude/skills/prose-check/SKILL.md`. After running, copy the updated file back into this stow package and commit:
-
-```bash
-cp ~/.claude/skills/prose-check/SKILL.md ~/.dotfiles/stow/claude/.claude/skills/prose-check/SKILL.md
-```
+The rule tiers and list in `SKILL.md` originated from `src/rules.ts` in [slop-cop](https://github.com/awnist/slop-cop), imported by a one-off sync script that no longer exists. They are now maintained by editing `SKILL.md` directly; if slop-cop grows rules worth adopting, port them by hand.

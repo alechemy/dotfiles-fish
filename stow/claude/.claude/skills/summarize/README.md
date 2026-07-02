@@ -7,7 +7,7 @@ Adapted from [reysu/ai-life-skills](https://github.com/reysu/ai-life-skills) for
 ## Install
 
 ```bash
-cd ~/.dotfiles/stow && stow --restow --no-folding --ignore='.DS_Store' --target="$HOME" devonthink
+cd ~/.dotfiles/stow && stow --restow --no-folding --ignore='.DS_Store' --target="$HOME" claude
 ```
 
 Then use `/summarize` in Claude Code.
