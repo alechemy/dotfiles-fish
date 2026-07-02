@@ -211,6 +211,10 @@ Pick a script's shebang from this three-tier rule:
 
 For tier 1 scripts, even when the launchd plist provides the interpreter explicitly (`/usr/bin/python3 /path/to/script.py`), still write the shebang as `#!/usr/bin/python3` so direct invocation during testing uses the same interpreter as production rather than mise's.
 
+### tmux: test config on an isolated socket
+
+Never run `tmux kill-server` (or `kill-session`) on the default socket for verification — a live server may be hosting a remote (Moshi) session, and killing it drops that client. Test config changes on a throwaway socket instead: `tmux -L test new -d && tmux -L test show -g <option> && tmux -L test kill-server`. Also note a running server never re-reads `tmux.conf`; if options look half-applied (e.g. `mouse on` but default `history-limit`), you attached to a pre-existing server rather than starting a fresh one.
+
 ### Audio tagging with mutagen
 
 When writing MP4/m4a boolean atoms (`cpil`, `pgap`) with mutagen, assign a **bare bool** — `audio["cpil"] = True` — never a list. mutagen renders a list by truthiness, so `audio["cpil"] = [False]` silently writes `True`. `tagger.py` sets the compilation flag this way.
