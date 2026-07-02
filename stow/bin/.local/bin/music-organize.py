@@ -354,6 +354,10 @@ def organize_source(source, library_root, policy, dry_run, manifest, stats,
                 dry_run,
             )
 
+    incoming_by_dir = {}
+    for _, d, filename in plan:
+        incoming_by_dir.setdefault(d, set()).add(filename.casefold())
+
     # album-level collision handling
     skipped = set()
     for d in album_dirs:
@@ -374,6 +378,21 @@ def organize_source(source, library_root, policy, dry_run, manifest, stats,
                     file=sys.stderr,
                 )
                 skipped.add(d)
+                continue
+            # A replace must never drop tracks (e.g. organizing a resumed
+            # session that holds only the previously failed tracks).
+            existing = {os.path.basename(f).casefold() for f in iter_audio(d)}
+            dropped = existing - incoming_by_dir.get(d, set())
+            if dropped:
+                if existing & incoming_by_dir.get(d, set()):
+                    print(
+                        f"  -> ERROR: refusing to replace {d}: the incoming files "
+                        f"overlap existing tracks but would drop {len(dropped)} other(s)",
+                        file=sys.stderr,
+                    )
+                    skipped.add(d)
+                else:
+                    print(f"  -> merging into existing album: {d}")
                 continue
             if archive_root:
                 arch = archive_folder(d, archive_root, dry_run)
@@ -471,7 +490,10 @@ def main():
         "--on-collision",
         choices=["replace", "skip", "counter"],
         default="replace",
-        help="What to do when the destination album already exists (default: replace).",
+        help="What to do when the destination album already exists (default: replace). "
+        "Replace deletes the existing folder only when the incoming files cover every "
+        "track already in it; an incoming set with all-new filenames merges in, and a "
+        "partial overlap that would drop tracks is refused.",
     )
     parser.add_argument(
         "--dry-run",
