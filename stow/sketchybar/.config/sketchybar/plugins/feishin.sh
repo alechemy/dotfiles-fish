@@ -3,7 +3,8 @@
 # If Feishin is not running, show "nothing playing"
 if ! pgrep -xq "Feishin"; then
   sketchybar --set "$NAME" icon="" label=" Nothing playing" \
-    label.font="Helvetica Neue:Regular:14.0"
+    label.font="Helvetica Neue:Regular:14.0" \
+    icon.color="0xffffffff" label.color="0xffffffff"
   exit 0
 fi
 
@@ -28,24 +29,19 @@ if ! "$HOME/.local/bin/should-run-background-job" >/dev/null 2>&1; then
       label.font="Helvetica Neue:Bold:14.0" \
       icon.color="0x80ffffff" label.color="0x80ffffff"
   else
-    sketchybar --set "$NAME" icon=" Battery" label=""
+    sketchybar --set "$NAME" icon=" Battery" label="" icon.color="0xffffffff" label.color="0xffffffff"
   fi
   exit 0
 fi
 
 NAVIDROME_ENV="$HOME/.config/navidrome/env"
 if [ ! -f "$NAVIDROME_ENV" ]; then
-  sketchybar --set "$NAME" icon=" No config" label=""
+  sketchybar --set "$NAME" icon=" No config" label="" icon.color="0xffffffff" label.color="0xffffffff"
   exit 0
 fi
 source "$NAVIDROME_ENV"
 
 USERNAME="${NAVIDROME_USERNAME:-alec}"
-PASSWORD=$(security find-generic-password -s 'Navidrome' -a "$USERNAME" -w 2>/dev/null)
-if [ -z "$PASSWORD" ]; then
-  sketchybar --set "$NAME" icon=" No keychain" label=""
-  exit 0
-fi
 
 # Fast reachability gate: when Navidrome is unreachable (off home network or
 # NAS down), skip the curl block entirely. Without this, the plugin pays a
@@ -54,9 +50,13 @@ ND_HOSTPORT="${NAVIDROME_URL#*://}"   # strip scheme
 ND_HOSTPORT="${ND_HOSTPORT%%/*}"      # strip any path
 ND_HOST="${ND_HOSTPORT%:*}"
 ND_PORT="${ND_HOSTPORT##*:}"
-[ "$ND_HOST" = "$ND_PORT" ] && ND_PORT=80
+case "$NAVIDROME_URL" in
+  https://*) ND_PORT_DEFAULT=443 ;;
+  *) ND_PORT_DEFAULT=80 ;;
+esac
+[ "$ND_HOST" = "$ND_PORT" ] && ND_PORT=$ND_PORT_DEFAULT
 if ! /usr/bin/nc -zw1 "$ND_HOST" "$ND_PORT" >/dev/null 2>&1; then
-  sketchybar --set "$NAME" icon=" Offline" label=""
+  sketchybar --set "$NAME" icon=" Offline" label="" icon.color="0xffffffff" label.color="0xffffffff"
   exit 0
 fi
 
@@ -70,12 +70,20 @@ fi
 
 # Authenticate if no cached token
 if [ -z "$SUBSONIC_TOKEN" ] || [ -z "$SUBSONIC_SALT" ]; then
-  AUTH_INFO=$(curl -s --max-time 3 "$NAVIDROME_URL/auth/login" \
-    -H "Content-Type: application/json" \
-    -d "{\"username\":\"$USERNAME\",\"password\":\"$PASSWORD\"}" 2>/dev/null)
+  # Keychain lookup only here: the token cache satisfies every other tick,
+  # and credentials go to curl via stdin so they never appear on argv.
+  PASSWORD=$(security find-generic-password -s 'Navidrome' -a "$USERNAME" -w 2>/dev/null)
+  if [ -z "$PASSWORD" ]; then
+    sketchybar --set "$NAME" icon=" No keychain" label="" icon.color="0xffffffff" label.color="0xffffffff"
+    exit 0
+  fi
+  AUTH_INFO=$(printf '{"username":"%s","password":"%s"}' "$USERNAME" "$PASSWORD" |
+    curl -s --max-time 3 "$NAVIDROME_URL/auth/login" \
+      -H "Content-Type: application/json" \
+      --data @- 2>/dev/null)
 
   if [ -z "$AUTH_INFO" ] || [ "$AUTH_INFO" = "null" ]; then
-    sketchybar --set "$NAME" icon=" Offline" label=""
+    sketchybar --set "$NAME" icon=" Offline" label="" icon.color="0xffffffff" label.color="0xffffffff"
     exit 0
   fi
 
@@ -83,7 +91,7 @@ if [ -z "$SUBSONIC_TOKEN" ] || [ -z "$SUBSONIC_SALT" ]; then
   SUBSONIC_SALT=$(echo "$AUTH_INFO" | jq -r '.subsonicSalt // empty' 2>/dev/null)
 
   if [ -z "$SUBSONIC_TOKEN" ]; then
-    sketchybar --set "$NAME" icon=" Auth failed" label=""
+    sketchybar --set "$NAME" icon=" Auth failed" label="" icon.color="0xffffffff" label.color="0xffffffff"
     exit 0
   fi
 
@@ -98,13 +106,9 @@ if [ -z "$SUBSONIC_TOKEN" ] || [ -z "$SUBSONIC_SALT" ]; then
 fi
 
 # Get now playing
-CURRENT_SONG=$(curl -s --max-time 3 "$NAVIDROME_URL/rest/getNowPlaying" \
-  -d "u=$USERNAME" \
-  -d "t=$SUBSONIC_TOKEN" \
-  -d "s=$SUBSONIC_SALT" \
-  -d "v=1.8.0" \
-  -d "c=SketchyBar" \
-  -d "f=json" 2>/dev/null |
+CURRENT_SONG=$(printf 'u=%s&t=%s&s=%s&v=1.8.0&c=SketchyBar&f=json' \
+    "$USERNAME" "$SUBSONIC_TOKEN" "$SUBSONIC_SALT" |
+  curl -s --max-time 3 "$NAVIDROME_URL/rest/getNowPlaying" --data @- 2>/dev/null |
   jq -r '.["subsonic-response"].nowPlaying.entry[0] // empty' 2>/dev/null)
 
 PLAYBACK_RATE=$(/opt/homebrew/bin/nowplaying-cli get playbackRate 2>/dev/null)
@@ -136,6 +140,6 @@ else
     TITLE=$(cut -f2 "$LAST_SONG_FILE")
     set_track "" "$ARTIST" "$TITLE"
   else
-    sketchybar --set "$NAME" icon=" Not playing" label=""
+    sketchybar --set "$NAME" icon=" Not playing" label="" icon.color="0xffffffff" label.color="0xffffffff"
   fi
 fi

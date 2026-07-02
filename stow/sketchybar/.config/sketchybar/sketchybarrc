@@ -39,7 +39,7 @@ sketchybar --add item battery right \
   label.drawing=off \
   click_script="$PLUGIN_DIR/battery_click.sh" \
   script="$PLUGIN_DIR/battery.sh" \
-  --subscribe battery display_change system_woke
+  --subscribe battery power_source_change display_change system_woke
 
 # Wi-Fi — only drawn on the MacBook display (undocked) and only when offline, as
 # a "you have no connection" reminder; invisible whenever Wi-Fi is up or docked.
@@ -56,7 +56,7 @@ sketchybar --add item wifi right \
 # idle on the MacBook display (see plugins/vpn.sh).
 sketchybar --add event proxy_toggle
 sketchybar --add item vpn right \
-  --set vpn update_freq=10 \
+  --set vpn update_freq=30 \
   click_script="$PLUGIN_DIR/vpn_click.sh" \
   script="$PLUGIN_DIR/vpn.sh" \
   --subscribe vpn proxy_toggle display_change
