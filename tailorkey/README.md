@@ -117,7 +117,7 @@ Layer 0. Both thumb clusters repurposed for the trackball above the right cluste
 |-----|---------|-------------|-------------|-------------|
 | 52  | Left    | `&kp LSHFT` | `&mkp LCLK` | Left click  |
 | 53  | Left    | `&kp LGUI`  | `&mkp RCLK` | Right click |
-| 55  | Left    | `&kp LCTRL` | `&mkp RCLK` | Right click |
+| 55  | Right   | `&kp LCTRL` | `&mkp RCLK` | Right click |
 | 72  | Right   | `&kp RALT`  | `&mkp LCLK` | Left click  |
 
 Modifier access still flows through home-row mods on both hands (left: `A`=Ctrl, `S`=Option, `D`=CMD, `F`=Shift; right: `J`=Shift, `K`=CMD, `L`=Option, `;`=Ctrl). `RSHFT` at pos 57 stays intact, pos 54 (`&lower`) on the left is untouched, and pos 56 stays stock `&kp RGUI` (used by the Shyper combo in Tweak 6). No middle click is bound anywhere on Layer 0; the Mouse layers (14–17) still provide `MCLK` if needed.
@@ -134,8 +134,8 @@ Layer 0 (HRM_macOS) top row, positions 2–7:
 | 3   | `F4`     | `C_PP`   | Media transport.                                   |
 | 4   | `F5`     | `C_NEXT` | Media transport.                                   |
 | 5   | `F6`     | `C_MUTE` | System mute. Kept as consumer code (m1ddc has no `chg mute`). |
-| 6   | `F7`     | `F11`    | Karabiner routes to `m1ddc chg volume -10`.        |
-| 7   | `F8`     | `F12`    | Karabiner routes to `m1ddc chg volume +10`.        |
+| 6   | `F7`     | `F11`    | Karabiner routes to `m1ddc chg volume -5` + a SketchyBar `volume_change` trigger. |
+| 7   | `F8`     | `F12`    | Karabiner routes to `m1ddc chg volume +5` + a SketchyBar `volume_change` trigger. |
 
 Positions 0 and 1 already send `F1` / `F2` upstream. Karabiner routes both to `m1ddc chg luminance -10` / `+10`.
 
@@ -156,7 +156,7 @@ Layer 18 (Lower) top row, all positions remapped to `F1`–`F10` to recover acce
 
 End-to-end behavior:
 
-- **Docked mode** (external display active): pos 0 emits `F1`. Karabiner sees `:f1` and runs `/opt/homebrew/bin/m1ddc chg luminance -10` plus an `:f1` passthrough that macOS no-ops on an external keyboard. Net effect: external monitor brightness goes down. Same pattern for `F2`, `F11`, `F12`.
+- **Docked mode** (external display active): pos 0 emits `F1`. Karabiner sees `:f1` and runs `/opt/homebrew/bin/m1ddc chg luminance -10` plus an `:f1` passthrough that macOS no-ops on an external keyboard. Net effect: external monitor brightness goes down. Same pattern for `F2`; the `F11`/`F12` volume rules use ±5 and also chain `sketchybar --trigger volume_change` so the bar refreshes immediately.
 - **Portable mode** (built-in MacBook keyboard): Apple's firmware converts `F1`/`F2`/`F11`/`F12` to consumer codes (`display_brightness_decrement` etc.) before Karabiner sees them. The DDC rules don't match, and native macOS brightness and volume continue to work as before.
 
 Paired files outside this directory:
@@ -175,7 +175,7 @@ right_hyper_ACSG_v1_TKZ
   layers:       [0, 2]
 ```
 
-Parallels the stock `right_meh_ACS_v1_TKZ` (Meh = Alt+Ctrl+Shift, on RGUI + Enter). Hyper is the standard macOS power-user modifier, paired with rules in Karabiner / AeroSpace / Hammerspoon elsewhere in this repo.
+Parallels the stock `right_meh_ACS_v1_TKZ` (Meh = Alt+Ctrl+Shift, on RGUI + Enter). Hyper is the standard macOS power-user modifier, paired with rules in Karabiner / AeroSpace elsewhere in this repo.
 
 #### Tweak 4: `left_alt_tab_switcher_v1_TKZ` combo positions
 
@@ -198,18 +198,18 @@ right_shyper_RGUI_v1_TKZ
 
 Held alongside the Hyper combo (Tweak 3), the next keypress is stamped with `LA + LC + LS + LGUI + RGUI`, a five-modifier set distinct from Hyper alone. Karabiner matches this as `:!CTOSQ<key>` and shells out to AeroSpace (move-to-workspace, paste-by-typing). See `stow/karabiner/.config/karabiner.edn` for the rule pairings.
 
-#### Tweak 7: middle-click chord across thumb clusters
+#### Tweak 7: middle-click chord on the right thumb cluster's inner keys
 
 Third combo beyond stock TailorKey:
 
 ```
 middle_click_chord_v1_TKZ
   binding:      &mkp MCLK
-  keyPositions: [55, 72]               (LCTRL-keycap RCLK on left thumb + RALT-keycap LCLK on right thumb)
+  keyPositions: [55, 72]               (the right cluster's two inner keys: back-row RCLK + front-row LCLK)
   layers:       [0, 2]
 ```
 
-Recovers middle click without dedicating a key to it. Pressing the left-cluster right-click (pos 55) and the right-cluster left-click (pos 72) at the same time fires `MCLK`. Single-key behavior is unchanged: each position alone still produces its individual mouse button.
+Recovers middle click without dedicating a key to it. Pressing the right cluster's two inner keys together — back-row right-click (pos 55) and front-row left-click (pos 72), one thumb — fires `MCLK`. Single-key behavior is unchanged: each position alone still produces its individual mouse button.
 
 #### Tweak 8: second Hyper trigger on Space + Enter (displaces right caps-word)
 
@@ -321,7 +321,7 @@ The same combos now chord the *number-row + top-alpha-row* keys at column N–1 
 
 #### Tweak C: Hyper combo moved to the thumb cluster
 
-`sticky_hyp_rght_v1_TKZ` `keyPositions` moved from upstream `[43, 51]` (M + End, on the bottom alpha row and nav row) to `[58, 59]` (Enter + Space, the two rightmost keys of the right thumb cluster). Much friendlier chord, and a muscle-memory mate for the Glove80's Space + Enter hyper trigger (see Glove80 Tweak 8). The Go60 has only a single-row thumb cluster, so the two rightmost thumb keys are the natural chord; the Glove80 reaches the same gesture from its front-row thumb keys.
+`sticky_hyp_rght_v1_TKZ` `keyPositions` moved from upstream `[43, 51]` (M + Up, on the bottom alpha row and nav row) to `[58, 59]` (Enter + Space, the two rightmost keys of the right thumb cluster). Much friendlier chord, and a muscle-memory mate for the Glove80's Space + Enter hyper trigger (see Glove80 Tweak 8). The Go60 has only a single-row thumb cluster, so the two rightmost thumb keys are the natural chord; the Glove80 reaches the same gesture from its front-row thumb keys.
 
 #### Tweak D: touchpad scroll speed reduced
 
