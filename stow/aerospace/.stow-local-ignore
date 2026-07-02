@@ -5,3 +5,4 @@
 # gap scripts handle bootstrap from source on first run, and setup.sh seeds
 # the runtime on fresh installs.
 \.aerospace\.toml$
+.*\.template

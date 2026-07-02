@@ -417,6 +417,7 @@ EOF
     # in the opt-in block below.
     load_launch_agent "$HOME/Library/LaunchAgents/com.user.mount-nas.plist" "NAS auto-mount"
     load_launch_agent "$HOME/Library/LaunchAgents/com.user.check-stale-dev-servers.plist" "stale-dev-servers"
+    load_launch_agent "$HOME/Library/LaunchAgents/com.user.aerospace-gaps-heartbeat.plist" "aerospace-gaps heartbeat"
 
     # Chromium -> Safari bookmark bridge for Alfred. Only load where the Chromium
     # profile exists; on a non-Chromium machine the watcher would exit and

@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>com.user.aerospace-gaps-heartbeat</string>
+	<!-- Safety net for window-count changes that fire no AeroSpace callback
+	     (click-through close/minimize of a background window, AX-element
+	     death): bounds gap staleness to one interval. The gap script fast-
+	     exits unless the DELL is connected (docked ⇒ AC), and is a no-op
+	     unless the gap actually changed. -->
+	<key>ProgramArguments</key>
+	<array>
+		<string>/bin/bash</string>
+		<string>-c</string>
+		<string>"__HOME__/.local/bin/should-run-background-job" || exit 0; exec "__HOME__/.dotfiles/scripts/aerospace-auto-gaps.sh" heartbeat</string>
+	</array>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>StartInterval</key>
+	<integer>30</integer>
+	<key>StandardOutPath</key>
+	<string>/tmp/aerospace-gaps-heartbeat.log</string>
+	<key>StandardErrorPath</key>
+	<string>/tmp/aerospace-gaps-heartbeat.log</string>
+</dict>
+</plist>
