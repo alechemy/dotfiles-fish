@@ -1,2 +1,3 @@
-#!/usr/bin/env fish
-alias code='codium'
+if status is-interactive
+    alias code='codium'
+end

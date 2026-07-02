@@ -1,13 +1,13 @@
-#!/usr/bin/env fish
+if status is-interactive
+    abbr -a -- glog 'git log -n10 --oneline'
+    abbr -a -- unpop 'git reset --merge'
 
-abbr -a -- glog 'git log -n10 --oneline'
-abbr -a -- unpop 'git reset --merge'
+    abbr -a dotfiles "$HOME/.dotfiles"
 
-abbr -a dotfiles "$HOME/.dotfiles"
+    abbr -a -- copilot 'copilot --allow-all'
 
-abbr -a -- copilot 'copilot --allow-all'
-
-# Kill the process listening on a given port
-# Usage: > killport 8081
-abbr -a killport 'ports kill'
-abbr -a -- rwm reload_wm
+    # Kill the process listening on a given port
+    # Usage: > killport 8081
+    abbr -a killport 'ports kill'
+    abbr -a -- rwm reload_wm
+end

@@ -2,11 +2,14 @@ set -gx DOTFILES ~/.dotfiles
 set -gx PROJECTS ~/Developer
 fish_add_path ~/.local/bin
 
-# Homebrew — must be early so brew-installed tools (starship, mise, etc.) are in PATH
-if test -x /opt/homebrew/bin/brew
-    eval (/opt/homebrew/bin/brew shellenv)
-else if test -x /usr/local/bin/brew
-    eval (/usr/local/bin/brew shellenv)
+# Homebrew — must be early so brew-installed tools (starship, mise, etc.) are
+# in PATH. Nested shells inherit HOMEBREW_PREFIX, so skip the ~20 ms subprocess.
+if not set -q HOMEBREW_PREFIX
+    if test -x /opt/homebrew/bin/brew
+        eval (/opt/homebrew/bin/brew shellenv)
+    else if test -x /usr/local/bin/brew
+        eval (/usr/local/bin/brew shellenv)
+    end
 end
 
 # pnpm — declaratively replaces what `pnpm setup` would write into this file.
