@@ -3,7 +3,7 @@
   email = alcuster@icloud.com
   signingkey = ~/.ssh/id_signing.pub
 [core]
-  excludesfile = ~/.gitignore
+  excludesfile = ~/.config/git/ignore
   editor = nano
   pager = hunk pager
 	# Watch filesystem changes so Git status/diff avoid full tree scans in large repos.
