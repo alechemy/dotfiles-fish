@@ -6,13 +6,6 @@ set -euo pipefail
 # settings we’re about to change
 osascript -e 'tell application "System Settings" to quit' || true
 
-# Ask for the administrator password upfront. Touch ID for sudo (enabled by
-# setup.sh:0b) means later prompts inside this script are a fingerprint tap,
-# so we deliberately do not background a `sudo -nv` keep-alive loop here —
-# that pattern has been linked to intermittent SIGTTIN suspensions on
-# macOS 26 (see the same removal in setup.sh:78-84).
-sudo -v
-
 ###############################################################################
 # General UI/UX                                                               #
 ###############################################################################
@@ -158,23 +151,6 @@ fi
 # pressure, which defeats the purpose of running it.
 if [ -d "/Applications/App Tamer.app" ]; then
     defaults write com.stclairsoft.apptamer NSSupportsAutomaticTermination -bool NO
-fi
-
-###############################################################################
-# File Operations                                                             #
-###############################################################################
-
-# Create symlink from Chromium bookmarks to Chrome so Alfred can see them.
-# Bookmarks is a regular file (Chromium's JSON bookmark store), not a directory.
-APP_SUPPORT="$HOME/Library/Application Support"
-CHROME_HOME="$APP_SUPPORT/Google/Chrome/Default"
-CHROMIUM_HOME="$APP_SUPPORT/Chromium/Default"
-if [ -f "$CHROMIUM_HOME/Bookmarks" ] && [ -d "$CHROME_HOME" ]; then
-    echo "Linking Chromium bookmarks to Chrome..."
-    if [ -e "$CHROME_HOME/Bookmarks" ] && [ ! -L "$CHROME_HOME/Bookmarks" ]; then
-        mv "$CHROME_HOME/Bookmarks" "$CHROME_HOME/Bookmarks.bak.$(date +%s)"
-    fi
-    ln -sf "$CHROMIUM_HOME/Bookmarks" "$CHROME_HOME/Bookmarks"
 fi
 
 ###############################################################################

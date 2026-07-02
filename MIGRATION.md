@@ -32,6 +32,7 @@ If `setup.sh` halts early, fix the reported issue and re-run — it's idempotent
 ## 3. Manual app installs (not in Brewfile)
 
 - [ ] **DEVONthink 4** — paid download from devontechnologies.com. Open the app once and let it create its database before the launchd agents fire.
+- [ ] **Marked 2** — direct download from marked2app.com (deliberately not in the Brewfile: the `marked-app` cask now ships Marked 3, a separate unlicensed major version).
 - [ ] **Operator Mono SSm Lig** — paid font from typography.com. Used by Ghostty and Zed. Drop the `.otf` files into `~/Library/Fonts/`. Without this, both apps fall back to a system monospace.
 - [ ] **SingleFile browser extension** — install in Chromium (`ungoogled-chromium`, installed via Brewfile):
   - From the Chrome Web Store (or load unpacked from the SingleFile repo).
