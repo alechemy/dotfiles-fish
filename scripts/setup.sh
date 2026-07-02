@@ -53,6 +53,22 @@ prompt_read() {
     read "$@"
 }
 
+# True when the plist's content was rewritten by this run's build step
+# (CHANGED_PLISTS is filled after build-launchd-plists.sh runs). launchd's
+# "already loaded" keeps the OLD definition running, so changed agents must
+# be booted out and re-bootstrapped to pick up the new file.
+plist_changed() {
+    local base
+    base=$(basename "$1")
+    printf '%s\n' "${CHANGED_PLISTS:-}" | grep -q "/${base}\$"
+}
+
+reload_agent() {
+    local plist=$1
+    launchctl bootout "gui/$(id -u)" "$plist" 2>/dev/null || true
+    launchctl bootstrap "gui/$(id -u)" "$plist" 2>&1
+}
+
 # Bootstrap an always-on user LaunchAgent, treating "already loaded" as a
 # no-op and logging a warning (not a hard failure) on other errors. The
 # DEVONthink opt-in block has its own stricter loader that fails hard.
@@ -70,7 +86,16 @@ load_launch_agent() {
     fi
     case "$err" in
         *"Bootstrap failed: 17"*|*"already loaded"*)
-            info "$display agent already loaded" ;;
+            if plist_changed "$plist"; then
+                if err=$(reload_agent "$plist"); then
+                    success "$display agent reloaded (definition changed)"
+                else
+                    info "WARNING: failed to reload $display agent: $err"
+                fi
+            else
+                info "$display agent already loaded"
+            fi
+            ;;
         *)
             info "WARNING: failed to load $display agent: $err" ;;
     esac
@@ -322,7 +347,10 @@ fi
 chmod +x "$DOTFILES/scripts/build-vscode-config.sh"
 "$DOTFILES/scripts/build-vscode-config.sh"
 chmod +x "$DOTFILES/scripts/build-launchd-plists.sh"
-"$DOTFILES/scripts/build-launchd-plists.sh"
+CHANGED_PLISTS_FILE=$(mktemp)
+"$DOTFILES/scripts/build-launchd-plists.sh" --changed-file "$CHANGED_PLISTS_FILE"
+CHANGED_PLISTS=$(cat "$CHANGED_PLISTS_FILE" 2>/dev/null || true)
+rm -f "$CHANGED_PLISTS_FILE"
 
 # streamrip is opt-in (single-machine; Qobuz creds aren't useful elsewhere).
 # The build script pulls the Qobuz token from 1Password and would fail loudly
@@ -581,7 +609,15 @@ EOF
                 err=$(launchctl bootstrap "gui/$(id -u)" "$path" 2>&1) && return 0
                 case "$err" in
                     *"Bootstrap failed: 17"*|*"already loaded"*)
-                        info "  $name already loaded"
+                        if plist_changed "$path"; then
+                            if err=$(reload_agent "$path"); then
+                                info "  $name reloaded (definition changed)"
+                            else
+                                fail "Failed to reload $name: $err"
+                            fi
+                        else
+                            info "  $name already loaded"
+                        fi
                         ;;
                     *)
                         fail "Failed to load $name: $err"
