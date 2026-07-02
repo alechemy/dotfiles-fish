@@ -362,11 +362,15 @@ def organize_source(source, library_root, policy, dry_run, manifest, stats,
         if not os.path.exists(d):
             continue
         if policy == "replace":
-            if is_dir and os.path.abspath(source).startswith(
-                os.path.abspath(d) + os.sep
+            sd = os.path.realpath(source)
+            dd = os.path.realpath(d)
+            if is_dir and (
+                sd == dd
+                or sd.startswith(dd + os.sep)
+                or dd.startswith(sd + os.sep)
             ):
                 print(
-                    f"  -> ERROR: refusing to replace {d} (it contains the source)",
+                    f"  -> ERROR: refusing to replace {d} (it overlaps the source)",
                     file=sys.stderr,
                 )
                 skipped.add(d)

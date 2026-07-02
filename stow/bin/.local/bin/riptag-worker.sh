@@ -117,6 +117,12 @@ else
 fi
 
 # --- STEP 1: DOWNLOAD ---
+# Marker lives in the inbox so mtime comparison stays on one filesystem;
+# Step 2 uses it to find what THIS run downloaded (streamrip can exit 0
+# without creating anything, and stale partial downloads share the inbox).
+DOWNLOAD_MARKER=$(mktemp "$INBOX_DIR/.riptag-marker.XXXXXX") || exit 1
+trap 'rm -f "$DOWNLOAD_MARKER"' EXIT
+
 if [ -n "$RESUME_ID" ]; then
   printf "%s\n" "--> Step 1: Resuming download (session $RESUME_ID)..."
 else
@@ -175,10 +181,10 @@ fi
 
 # --- STEP 2: FIND THE NEW ALBUM ---
 printf "%s\n" "--> Step 2: Finding the newly downloaded album..."
-ALBUM_PATH=$(ls -td1 "$INBOX_DIR"/*/ | head -n 1)
+ALBUM_PATH=$(find "$INBOX_DIR" -mindepth 1 -maxdepth 1 -type d -newer "$DOWNLOAD_MARKER" | head -n 1)
 
 if [ -z "$ALBUM_PATH" ]; then
-  printf "%s\n" "ERROR: Could not find a newly downloaded album in $INBOX_DIR"
+  printf "%s\n" "ERROR: The rip downloaded nothing new into $INBOX_DIR (skipped URL or already-fetched album?)"
   exit 1
 fi
 
@@ -202,6 +208,11 @@ if [ $PLAYLIST_MODE -eq 1 ]; then
     --album-artist "Various Artists" --unify-cover "$ALBUM_PATH"
 else
   "$PYTHON_CMD" "$TAGGER_SCRIPT" --genre "$GENRE" $COMPILATION_FLAG $YEAR_ARGS "$ALBUM_PATH"
+fi
+TAG_EXIT=$?
+if [ "$TAG_EXIT" -ne 0 ]; then
+  printf "%s\n" "ERROR: Tagging failed; files left at: $ALBUM_PATH"
+  exit 1
 fi
 
 # --- STEP 4: ORGANIZE INTO THE LIBRARY ---

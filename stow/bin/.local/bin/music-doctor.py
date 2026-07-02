@@ -290,27 +290,39 @@ def read_one(path: str) -> FileInfo:
                         read_error=f"{type(e).__name__}: {e}")
 
 
-def ffprobe_check(path: str) -> Optional[str]:
-    """Return error message if ffprobe can't fully decode the stream, else None."""
+def decode_check(path: str) -> Optional[str]:
+    """Return error message if ffmpeg can't fully decode the audio, else None."""
     try:
         proc = subprocess.run(
-            ["ffprobe", "-v", "error", "-show_streams", "-of", "json", path],
-            capture_output=True, text=True, timeout=30,
+            ["ffmpeg", "-v", "error", "-xerror", "-i", path, "-f", "null", "-"],
+            capture_output=True, text=True, timeout=120,
         )
     except (FileNotFoundError, subprocess.TimeoutExpired) as e:
-        return f"ffprobe failed: {e}"
-    if proc.returncode != 0:
-        msg = proc.stderr.strip().splitlines()[-1] if proc.stderr else "non-zero exit"
-        return f"ffprobe: {msg}"
-    try:
-        data = json.loads(proc.stdout or "{}")
-    except json.JSONDecodeError as e:
-        return f"ffprobe output unparseable: {e}"
-    streams = data.get("streams") or []
-    audio = [s for s in streams if s.get("codec_type") == "audio"]
-    if not audio:
-        return "ffprobe: no audio stream"
+        return f"ffmpeg failed: {e}"
+    # ffmpeg exits 0 on some decode errors, so treat any stderr as failure too.
+    stderr = proc.stderr.strip()
+    if proc.returncode != 0 or stderr:
+        msg = stderr.splitlines()[-1] if stderr else "non-zero exit"
+        return f"decode: {msg}"
     return None
+
+
+def decode_check_parallel(paths: list[str], workers: int) -> dict[str, str]:
+    """Full-decode many files in parallel; returns path -> error for failures."""
+    errors: dict[str, str] = {}
+    if not paths:
+        return errors
+    with ThreadPoolExecutor(max_workers=max(1, workers)) as ex:
+        futures = {ex.submit(decode_check, p): p for p in paths}
+        for fut in as_completed(futures):
+            p = futures[fut]
+            try:
+                err = fut.result()
+            except Exception as e:  # noqa: BLE001
+                err = f"worker: {e}"
+            if err:
+                errors[p] = err
+    return errors
 
 
 # ----------------------------------------------------------------- walking
@@ -460,8 +472,15 @@ def nfc(s: str) -> str:
 
 
 def check_files(albums: list[AlbumInfo], files: dict[str, FileInfo],
-                deep: bool) -> list[Finding]:
+                deep: bool, workers: int = 8) -> list[Finding]:
     findings: list[Finding] = []
+
+    decode_errors: dict[str, str] = {}
+    if deep:
+        decode_errors = decode_check_parallel(
+            [fi.path for fi in files.values() if not fi.read_error and fi.size > 0],
+            workers,
+        )
 
     # Build an album-grouped view for downstream album-level checks.
     by_album: dict[str, list[FileInfo]] = defaultdict(list)
@@ -566,13 +585,13 @@ def check_files(albums: list[AlbumInfo], files: dict[str, FileInfo],
                 details={"salient": str(fi.sample_rate),
                          "sample_rate": fi.sample_rate})
 
-        # --- deep ffprobe decode check ---
-        if deep and not fi.read_error:
-            err = ffprobe_check(fi.path)
+        # --- deep full-decode check ---
+        if deep:
+            err = decode_errors.get(fi.path)
             if err:
-                add(findings, kind="ffprobe_error", severity=ERROR,
+                add(findings, kind="decode_error", severity=ERROR,
                     target_kind="file", targets=[fi.path],
-                    message=err, details={"salient": "ffprobe_error"})
+                    message=err, details={"salient": "decode_error"})
 
     # --- per-album checks ---
     for alb in albums:
@@ -1147,7 +1166,7 @@ def cmd_scan(args, conn: sqlite3.Connection) -> int:
     files = read_files_parallel(all_audio, args.workers)
     print(f"  read tags in {time.time() - t0:.1f}s", file=sys.stderr)
 
-    findings = check_files(albums, files, deep=args.deep)
+    findings = check_files(albums, files, deep=args.deep, workers=args.workers)
     findings.extend(check_library(albums, files, empty_artists, stray))
 
     if args.kind:
@@ -1447,7 +1466,7 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--workers", type=int, default=8,
                    help="Parallel tag-read workers (default: 8).")
     s.add_argument("--deep", action="store_true",
-                   help="Run ffprobe on every track (slow; catches truncation).")
+                   help="Fully decode every track with ffmpeg (slow; catches truncation).")
     s.add_argument("--kind", action="append",
                    help="Only run / record these kinds of findings. "
                         "Repeat to allow multiple kinds.")

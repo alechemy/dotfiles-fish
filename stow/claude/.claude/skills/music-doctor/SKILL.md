@@ -49,8 +49,8 @@ ls /Volumes/Media/Music >/dev/null 2>&1 || echo "MOUNT MISSING"
 # Engine present
 test -x ~/.local/bin/music-doctor.py || echo "ENGINE MISSING"
 
-# Deep mode requires ffprobe (optional)
-command -v ffprobe >/dev/null 2>&1 || echo "NO FFPROBE"
+# Deep mode requires ffmpeg (optional)
+command -v ffmpeg >/dev/null 2>&1 || echo "NO FFMPEG"
 ```
 
 If the SMB share isn't mounted, ask the user to mount it before scanning. If the engine is missing, the dotfiles aren't fully stowed — run `cd ~/.dotfiles/stow && stow --restow --no-folding --target="$HOME" bin`.
@@ -93,7 +93,7 @@ Parse the JSON object on stdout. Engine logs go to stderr; ignore them in the pa
 ```
 
 Variants:
-- `--deep` runs `ffprobe` on every track. Catches truncation that mutagen reads happily. Adds significant time over SMB (~10× longer); only suggest when the user is plugged in or specifically asking for thoroughness.
+- `--deep` fully decodes every track with `ffmpeg`. Catches truncation and mid-file corruption that mutagen (and header-only probes) read happily. Adds significant time over SMB; only suggest when the user is plugged in or specifically asking for thoroughness.
 - `--kind <k>` (repeatable) restricts to a subset of checks. Use when the user asks for a targeted scan ("just duplicates").
 - `--workers N` (default 8). Raise to 16 on a fast machine, lower if the SMB share is sluggish.
 
@@ -199,7 +199,7 @@ Errors:
 - `unreadable` — mutagen raised; file is corrupt or in an unsupported format.
 - `zero_byte_file` — empty file.
 - `zero_duration` — file parses but reports zero-length audio.
-- `ffprobe_error` (deep mode only) — ffprobe can't decode the stream.
+- `decode_error` (deep mode only) — ffmpeg can't fully decode the stream.
 
 Warnings:
 - `empty_field` — missing title / album / artist / albumartist tag.
