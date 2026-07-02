@@ -35,9 +35,13 @@ SUPPRESSION_ENABLED=true
 
 SOURCE_FILE="$HOME/.dotfiles/stow/aerospace/.aerospace.toml"
 RUNTIME_FILE="$HOME/.aerospace.toml"
-SUPPRESS_FILE="/tmp/aerospace-gaps-suppressed-workspace"
-PENDING_FILE="/tmp/aerospace-gaps.pending"
-LOG_FILE="/tmp/aerospace-gaps.log"
+# Per-user state dir, not /tmp: fixed names in world-writable /tmp are
+# symlink-squat targets, and $TMPDIR isn't guaranteed in aerospace callbacks.
+STATE_DIR="$HOME/.cache/aerospace-gaps"
+mkdir -p "$STATE_DIR"
+SUPPRESS_FILE="$STATE_DIR/suppressed-workspace"
+PENDING_FILE="$STATE_DIR/pending"
+LOG_FILE="$STATE_DIR/gaps.log"
 TRIGGER="${1:-unlabeled}"
 
 . "$HOME/.dotfiles/scripts/aerospace-gaps-lib.sh"
@@ -64,7 +68,7 @@ fi
 if ! jq -e --arg m 'DELL U4025QW' 'any(.[]; ."monitor-name" | contains($m))' \
         <<<"$mons_json" >/dev/null 2>&1; then
     if [ ! -f "$RUNTIME_FILE" ] || [ -L "$RUNTIME_FILE" ] || [ "$SOURCE_FILE" -nt "$RUNTIME_FILE" ]; then
-        exec 9>/tmp/aerospace-gaps.lock
+        exec 9>"$STATE_DIR/lock"
         flock 9
         TMP=$(mktemp "$RUNTIME_FILE.XXXXXX")
         trap 'rm -f "$TMP"' EXIT
@@ -81,7 +85,7 @@ fi
 # window where the holder's final pending check completes before the mark
 # lands, dropping the event. The winner clears its own self-set flag at the
 # top of pass 1.
-exec 9>/tmp/aerospace-gaps.lock
+exec 9>"$STATE_DIR/lock"
 : >"$PENDING_FILE"
 if ! flock -n 9; then
     exit 0

@@ -19,7 +19,9 @@ dir="${1:-grow}"
 
 SOURCE_FILE="$HOME/.dotfiles/stow/aerospace/.aerospace.toml"
 RUNTIME_FILE="$HOME/.aerospace.toml"
-SUPPRESS_FILE="/tmp/aerospace-gaps-suppressed-workspace"
+STATE_DIR="$HOME/.cache/aerospace-gaps"
+mkdir -p "$STATE_DIR"
+SUPPRESS_FILE="$STATE_DIR/suppressed-workspace"
 
 . "$HOME/.dotfiles/scripts/aerospace-gaps-lib.sh"
 
@@ -63,7 +65,7 @@ fi
 # Single tiled window: adjust the outer gaps instead of resizing. Block on the
 # same lock as auto-gaps/cycle-gaps so a manual resize and an automatic rebuild
 # can't race.
-exec 9>/tmp/aerospace-gaps.lock
+exec 9>"$STATE_DIR/lock"
 flock 9
 
 compute_gap_presets || { native_resize; exit 0; }

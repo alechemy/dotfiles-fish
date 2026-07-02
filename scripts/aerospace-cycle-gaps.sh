@@ -10,6 +10,8 @@ set -e
 # aerospace invokes this via exec-and-forget; ensure Homebrew is on PATH for flock.
 export PATH="/opt/homebrew/bin:$PATH"
 
+STATE_DIR="$HOME/.cache/aerospace-gaps"
+mkdir -p "$STATE_DIR"
 SOURCE_FILE="$HOME/.dotfiles/stow/aerospace/.aerospace.toml"
 RUNTIME_FILE="$HOME/.aerospace.toml"
 
@@ -35,7 +37,7 @@ fi
 
 # Block on the same lock as auto-gaps so a manual cycle and an automatic
 # rebuild can't race each other.
-exec 9>/tmp/aerospace-gaps.lock
+exec 9>"$STATE_DIR/lock"
 flock 9
 
 if ! compute_gap_presets; then
@@ -82,4 +84,4 @@ aerospace reload-config
 # Mark this workspace as manually overridden so auto-gaps backs off until
 # you leave the workspace. Honored only when SUPPRESSION_ENABLED=true in
 # aerospace-auto-gaps.sh.
-aerospace list-workspaces --focused > /tmp/aerospace-gaps-suppressed-workspace
+aerospace list-workspaces --focused > "$STATE_DIR/suppressed-workspace"
