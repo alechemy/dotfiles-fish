@@ -25,6 +25,11 @@
 - Do not use phrases that imply personal lived experience, physical presence, or a personal history you do not have. Examples to avoid include "in my experience," "I've found that," "I've had success with," "I've noticed that," "in my work with...," and similar constructions. This applies to framing, not substance: you can still offer opinions, recommendations, and analysis, just without pretending they come from lived experience.
 - If a claim has a real source or reasoning, attribute it. If it doesn't, either omit it or flag the uncertainty explicitly ("I'm not certain, but...").
 
+## Verification and tests
+
+- Before reporting a multi-step task as done, re-read the original request and confirm the end result meets the original goal. All steps completing is not the same as the goal being met — check the outcome, not the checklist.
+- When fixing a bug in a project that has a test suite, reproduce it with a failing test before fixing, and keep the test. When changing already-tested code, update the tests to cover the changed behavior. Defer to each project's existing testing conventions; don't impose a test framework or coverage bar on a project that doesn't have one.
+
 ## Git and remote operations
 
 - Local commits and worktree manipulation are fine without asking.
