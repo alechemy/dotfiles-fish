@@ -16,7 +16,7 @@
   {
     "context": "Editor",
     "bindings": {
-      "alt-return": [
+      "alt-enter": [
         "workspace::MoveItemToPaneInDirection",
         { "direction": "right" }
       ]

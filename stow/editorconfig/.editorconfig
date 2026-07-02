@@ -9,3 +9,11 @@ indent_size = 2
 insert_final_newline = true
 quote_type = single
 trim_trailing_whitespace = true
+
+# trailing double-space is a significant hard line break in Markdown
+[*.{md,markdown,mdx}]
+trim_trailing_whitespace = false
+
+# make requires tab indentation
+[{Makefile,makefile,GNUmakefile,*.mk}]
+indent_style = tab
