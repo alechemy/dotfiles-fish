@@ -117,15 +117,7 @@ for pass in 1 2 3 4 5; do
         rm -f "$SUPPRESS_FILE"
     fi
 
-    # Count tiled windows from the tree view (--all): when an app's AX window
-    # dies without the window closing (Chromium drops its accessibility tree
-    # sporadically), AeroSpace keeps the node in the layout tree — still
-    # rendering its slot — while omitting it from --workspace listings. The
-    # tiler follows the tree, so the gap must too.
-    count=$(aerospace list-windows --all --format "%{workspace}|%{window-layout}" \
-        | awk -F'|' -v ws="$ws" '$1 == ws && $2 ~ /^(h|v)_(tiles|accordion)$/' \
-        | wc -l \
-        | tr -d ' ')
+    count=$(count_tiled_windows "$ws")
 
     listed=$(aerospace list-windows --workspace "$ws" --format "%{window-layout}" \
         | grep -cE '^(h|v)_(tiles|accordion)$' || true)

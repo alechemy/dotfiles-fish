@@ -22,8 +22,11 @@ RUNTIME_FILE="$HOME/.aerospace.toml"
 STATE_DIR="$HOME/.cache/aerospace-gaps"
 mkdir -p "$STATE_DIR"
 SUPPRESS_FILE="$STATE_DIR/suppressed-workspace"
+LOG_FILE="$STATE_DIR/gaps.log"
 
 . "$HOME/.dotfiles/scripts/aerospace-gaps-lib.sh"
+
+log() { printf '%s %s\n' "$(date '+%F %T')" "$*" >>"$LOG_FILE"; }
 
 # Per-side gap delta. Both sides move, so a step of 50 changes window width by
 # ~100 pt, matching the `resize smart +/-100` this key used to run.
@@ -50,11 +53,7 @@ fi
 
 ws=$(aerospace list-workspaces --focused)
 
-# Count tiled windows (exclude floating and hidden-app placeholders).
-count=$(aerospace list-windows --workspace "$ws" --format "%{window-layout}" \
-    | grep -vE '^(floating|macos_native_window_of_hidden_app)$' \
-    | wc -l \
-    | tr -d ' ')
+count=$(count_tiled_windows "$ws")
 
 [ "$count" -lt 1 ] && exit 0
 if [ "$count" -gt 1 ]; then
@@ -100,6 +99,7 @@ chmod 0644 "$TMP"
 mv "$TMP" "$RUNTIME_FILE"
 
 aerospace reload-config
+log "resize ws=$ws gap=$current->$gap dir=$dir"
 
 # Back auto-gaps off this workspace until you leave it (honored only when
 # SUPPRESSION_ENABLED=true in aerospace-auto-gaps.sh).

@@ -1,4 +1,4 @@
-# Shared gap math for aerospace-auto-gaps.sh and aerospace-cycle-gaps.sh.
+# Shared gap math and window counting for the aerospace gap scripts.
 # Sourced, not executed. Caller must set $SOURCE_FILE first.
 #
 # Constant-width scheme: every tiled window keeps the same width
@@ -12,6 +12,18 @@
 # 110 Hz, wider on machines that drive the panel harder). The query is
 # in-process AppKit via JXA: no AppleEvents, no TCC prompt, ~140 ms.
 #
+# Tiled-window count for workspace $1, taken from the tree view (--all): when
+# an app's AX window dies without the window closing (Chromium drops its
+# accessibility tree sporadically), AeroSpace keeps the node in the layout
+# tree — still rendering its slot — while omitting it from --workspace
+# listings. The tiler follows the tree, so anything sizing gaps must too.
+count_tiled_windows() {
+    aerospace list-windows --all --format "%{workspace}|%{window-layout}" \
+        | awk -F'|' -v ws="$1" '$1 == ws && $2 ~ /^(h|v)_(tiles|accordion)$/' \
+        | wc -l \
+        | tr -d ' '
+}
+
 # Sets gap_full (>=3 windows), gap_split (2), gap_centered (0-1).
 # Returns non-zero if the screen width cannot be determined.
 compute_gap_presets() {

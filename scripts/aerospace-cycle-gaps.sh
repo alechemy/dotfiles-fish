@@ -14,8 +14,11 @@ STATE_DIR="$HOME/.cache/aerospace-gaps"
 mkdir -p "$STATE_DIR"
 SOURCE_FILE="$HOME/.dotfiles/stow/aerospace/.aerospace.toml"
 RUNTIME_FILE="$HOME/.aerospace.toml"
+LOG_FILE="$STATE_DIR/gaps.log"
 
 . "$HOME/.dotfiles/scripts/aerospace-gaps-lib.sh"
+
+log() { printf '%s %s\n' "$(date '+%F %T')" "$*" >>"$LOG_FILE"; }
 
 # Skip when more than one monitor is connected. See aerospace-auto-gaps.sh
 # for the rationale; the TOML's named-monitor rule keeps the built-in panel
@@ -81,7 +84,10 @@ mv "$TMP" "$RUNTIME_FILE"
 
 aerospace reload-config
 
+ws=$(aerospace list-workspaces --focused)
+log "cycle ws=$ws gap=$current_gap->$gap preset=$label"
+
 # Mark this workspace as manually overridden so auto-gaps backs off until
 # you leave the workspace. Honored only when SUPPRESSION_ENABLED=true in
 # aerospace-auto-gaps.sh.
-aerospace list-workspaces --focused > "$STATE_DIR/suppressed-workspace"
+echo "$ws" > "$STATE_DIR/suppressed-workspace"
