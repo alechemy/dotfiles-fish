@@ -7,10 +7,7 @@ abbr -a dotfiles "$HOME/.dotfiles"
 
 abbr -a -- copilot 'copilot --allow-all'
 
-# Kill a process running on a given port
-# Usage: > kill_port 8081
-function kill_port
-    kill -9 (lsof -ti tcp:$argv)
-end
-abbr -a killport --function kill_port
+# Kill the process listening on a given port
+# Usage: > killport 8081
+abbr -a killport 'ports kill'
 abbr -a -- rwm reload_wm
