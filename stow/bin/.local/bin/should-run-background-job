@@ -50,7 +50,8 @@ for arg in "$@"; do
     esac
 done
 
-power_source=$(/usr/bin/pmset -g batt | /usr/bin/awk -F\' 'NR==1 {print $2; exit}')
+# Tolerate pmset itself failing so it routes to the fail-open branch below.
+power_source=$(/usr/bin/pmset -g batt | /usr/bin/awk -F\' 'NR==1 {print $2; exit}') || power_source=""
 
 case "$power_source" in
     "AC Power")

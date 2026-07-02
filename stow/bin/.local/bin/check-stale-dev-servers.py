@@ -61,7 +61,10 @@ def should_notify(hits):
     fingerprint = hashlib.sha1(",".join(str(h[0]) for h in sorted(hits)).encode()).hexdigest()
     now = time.time()
     if STATE.exists():
-        prev = json.loads(STATE.read_text())
+        try:
+            prev = json.loads(STATE.read_text())
+        except (OSError, json.JSONDecodeError):
+            prev = {}
         if prev.get("fp") == fingerprint and now - prev.get("ts", 0) < RENOTIFY_AFTER_SEC:
             return False
     STATE.parent.mkdir(parents=True, exist_ok=True)
@@ -84,9 +87,8 @@ def notify(hits):
 
 def main():
     run_silent([str(HOME / ".local/bin/pipeline-record-run"), "com.user.check-stale-dev-servers", "3600"])
-    gate = run_silent([str(HOME / ".local/bin/should-run-background-job")])
-    if gate is not None and gate.returncode != 0:
-        return 0
+    # No battery gate: the check is one ps listing (lighter than the gate), and
+    # a stale dev server is most worth flagging while on battery.
     hits = find_matches()
     if hits and should_notify(hits):
         notify(hits)
