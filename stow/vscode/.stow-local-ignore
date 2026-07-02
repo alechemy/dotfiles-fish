@@ -12,17 +12,19 @@ extensions\.txt
 settings\.template\.json
 
 # Defensive deny-list for VSCodium runtime state in case anything gets written
-# into the package directory in the future.
-^Library/Application Support/VSCodium/CachedData
-^Library/Application Support/VSCodium/Code Cache
-^Library/Application Support/VSCodium/Cookies
-^Library/Application Support/VSCodium/Crashpad
-^Library/Application Support/VSCodium/GPUCache
-^Library/Application Support/VSCodium/Local Storage
-^Library/Application Support/VSCodium/Session Storage
-^Library/Application Support/VSCodium/logs
-^Library/Application Support/VSCodium/User/globalStorage
-^Library/Application Support/VSCodium/User/workspaceStorage
-^Library/Application Support/VSCodium/User/History
-^Library/Application Support/VSCodium/User/sync
-\.sock$
+# into the package directory in the future. Stow wraps slash-containing
+# patterns as (^|/)(pattern)(/|$) and matches against /<target>, so a leading
+# ^ can never match — rely on the implicit anchoring instead.
+Library/Application Support/VSCodium/CachedData
+Library/Application Support/VSCodium/Code Cache
+Library/Application Support/VSCodium/Cookies
+Library/Application Support/VSCodium/Crashpad
+Library/Application Support/VSCodium/GPUCache
+Library/Application Support/VSCodium/Local Storage
+Library/Application Support/VSCodium/Session Storage
+Library/Application Support/VSCodium/logs
+Library/Application Support/VSCodium/User/globalStorage
+Library/Application Support/VSCodium/User/workspaceStorage
+Library/Application Support/VSCodium/User/History
+Library/Application Support/VSCodium/User/sync
+.*\.sock
