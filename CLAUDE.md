@@ -79,7 +79,7 @@ codium --list-extensions | sort > ~/.dotfiles/stow/vscode/extensions.txt
 
 Each directory under `stow/` must mirror the path relative to `$HOME`. For example, a file that should live at `~/.config/ghostty/config` goes at `stow/ghostty/.config/ghostty/config`. Stow creates symlinks from `$HOME` back into this repo.
 
-`setup.sh` runs `stow --restow --no-folding` for every directory in `stow/` automatically. The `--no-folding` flag prevents Stow from symlinking entire directories (it creates individual file symlinks instead), which avoids conflicts with tools that write new files into their config directories.
+`setup.sh` runs `stow --restow --no-folding` for every directory in `stow/` automatically, except the opt-in packages (`devonthink`, `streamrip`), which are prompted for separately. The `--no-folding` flag prevents Stow from symlinking entire directories (it creates individual file symlinks instead), which avoids conflicts with tools that write new files into their config directories.
 
 ### Auto-restow on pull (git hooks)
 
@@ -114,6 +114,7 @@ Current consumers:
 - `stow/streamrip/` — op inject + `${HOME}` (`scripts/build-streamrip-config.sh`)
 - `stow/vscode/` — `${HOME}` only (`scripts/build-vscode-config.sh`)
 - `stow/fish/.config/fish/conf.d/context7.fish` — op read (`scripts/build-context7-config.sh`); exports `CONTEXT7_API_KEY` so terminal-launched Context7 MCP authenticates instead of using the anonymous rate limit. Consumed by Claude Code (reads the env var natively) and Copilot CLI (the Copilot user MCP file references it as `${CONTEXT7_API_KEY}`; Copilot forwards only `PATH` + the `env` block to MCP servers, so the reference is required there). Copilot reads a single user MCP file (`~/.copilot/mcp-config.json`), and a work-only server shares it, so that file lives in `stow-work/work/.copilot/mcp-config.json` — context7 in Copilot is therefore present only on machines with the work package stowed
+- `~/.zshenv` — op read (`scripts/build-things-config.sh`); exports `THINGS_AUTH_TOKEN` for the Things URL-scheme automation. Output lives outside the stow tree, so there is no package; the script chmods it 600.
 
 A separate `__HOME__` expansion pattern exists for launch-agent plist templates under `stow/*/Library/LaunchAgents/*.plist.template`, handled by `scripts/build-launchd-plists.sh`.
 

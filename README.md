@@ -24,43 +24,61 @@ cd ~/.dotfiles
 ./scripts/setup.sh
 ```
 
-This installs Homebrew + all dependencies from `Brewfile`, builds generated configs (injecting secrets via 1Password CLI), symlinks all stow packages to `$HOME`, and sets Fish as the default shell.
+This installs Homebrew + all dependencies from `Brewfile`, builds generated configs (injecting secrets via 1Password CLI), symlinks the stow packages to `$HOME` (DEVONthink and streamrip are opt-in prompts), and sets Fish as the default shell.
 
 ## Structure
 
 ```
 .dotfiles/
 ├── Brewfile                 # Homebrew dependencies
+├── homebrew/                # Local-only tap (casks with no upstream cask)
+├── devonthink/              # DEVONthink pipeline docs
+├── drafts/                  # Drafts action scripts (repo is canonical)
+├── keyboard-maestro/        # Scripts referenced by KM macros
+├── hrm/                     # Glove80 keyboard layout + README
+├── tailorkey/               # Glove80 TailorKey layout
 ├── scripts/
 │   ├── setup.sh                  # Main bootstrap script
+│   ├── restow-changed.sh         # Auto-restow worker (git post-merge/-rewrite/-commit hooks)
+│   ├── git-hooks/                # Tracked hooks wired via core.hooksPath
 │   ├── build-zed-config.sh       # Inject 1Password secrets into Zed config
 │   ├── build-streamrip-config.sh # Inject 1Password secrets into streamrip config
+│   ├── build-context7-config.sh  # op read → fish conf.d Context7 key export
+│   ├── build-things-config.sh    # op read → ~/.zshenv Things auth token
 │   ├── build-vscode-config.sh    # Expand ${HOME} in VSCodium settings.json
 │   ├── build-launchd-plists.sh   # Expand __HOME__ in launch-agent plist templates
-│   ├── lint-launchd-plists.sh    # Enforce TCC-stable interpreters in plist templates
+│   ├── lint-launchd-plists.sh    # Enforce TCC-stable interpreters in launch agents
+│   ├── seed-devonthink-config.sh # Copy-if-absent DEVONthink seed plists
 │   ├── setup-vscode.sh           # VSCodium extension install
+│   ├── aerospace-*.sh|py         # AeroSpace gap/window helpers
 │   └── macos.sh                  # macOS system defaults
-├── stow/                    # Stow packages (auto-linked by setup.sh)
+├── stow/                    # Stow packages (auto-linked by setup.sh; devonthink + streamrip opt-in)
 │   ├── aerospace/           # Tiling window manager
 │   ├── bin/                 # ~/.local/bin scripts
 │   ├── borders/             # JankyBorders window borders
-│   ├── devonthink/          # DEVONthink automation
+│   ├── chromium-bookmarks/  # Chromium → Safari bookmark bridge for Alfred
+│   ├── claude/              # Claude Code global config, skills, hooks
+│   ├── copilot/             # Copilot CLI config
+│   ├── devonthink/          # DEVONthink automation (opt-in)
+│   ├── dropzone/            # Dropzone action bundles
 │   ├── editorconfig/        # ~/.editorconfig
 │   ├── espanso/             # Text expansion
 │   ├── fish/                # Fish shell config, functions, plugins
 │   ├── ghostty/             # Terminal emulator
-│   ├── git/                 # Git config + global gitignore
-│   ├── karabiner/           # Keyboard remapping
+│   ├── git/                 # Git config + global excludes
+│   ├── karabiner/           # Keyboard remapping (goku EDN source)
 │   ├── mise/                # Runtime version manager
 │   ├── nas-mount/           # Auto-mount NAS SMB shares (launch agent)
 │   ├── navidrome/           # Navidrome client env
 │   ├── sketchybar/          # Menu bar
+│   ├── ssh/                 # SSH client config
 │   ├── starship/            # Shell prompt theme
-│   ├── streamrip/           # Music downloader config (1Password op inject)
+│   ├── streamrip/           # Music downloader config (opt-in, op inject)
+│   ├── tmux/                # Phone-friendly tmux config
 │   ├── vscode/              # VSCodium settings (${HOME} expansion)
 │   └── zed/                 # Zed editor (1Password op inject)
-└── stow-work/               # Opt-in work config (not auto-linked)
-    └── work/                # Work-specific fish abbreviations
+├── stow-work/               # Work config (gitignored; auto-stowed when populated by file-copy)
+└── stow-local/              # Machine-local config (gitignored)
 ```
 
 Each directory under `stow/` mirrors the path relative to `$HOME`. Stow creates symlinks from `$HOME` back into this repo. Editing stowed files requires no action since symlinks already point here -- only restow when adding or removing files.
@@ -83,16 +101,17 @@ mise unuse -g <tool>             # remove the declaration from config.toml
 
 ## Generated configs (template → build → stow)
 
-Some configs are generated from a tracked template at install time. Two flavors:
+Some configs are generated from a tracked template at install time. Three flavors:
 
 - **1Password secret injection** (`stow/zed/`, `stow/streamrip/`): the template has `op://Vault/Item/Field` references which `op inject` resolves into the real config (gitignored). Both also do `${HOME}` expansion.
+- **1Password single-value fetch** (`build-context7-config.sh` → fish conf.d Context7 key; `build-things-config.sh` → `~/.zshenv` Things token): `op read` fetches one secret and the script writes the output directly — no template file, used where a template sibling would be harmful (fish auto-sources everything in conf.d) or the output lives outside the stow tree.
 - **Path expansion only** (`stow/vscode/`): the template has `${HOME}` placeholders that get expanded into absolute paths. Used where the target tool requires absolute paths and doesn't honor its own variable substitution (e.g., `be5invis.vscode-custom-css` reads `file://` URIs literally).
 
 Each follows the same pattern: tracked `*.template.{json,toml}`, generated output gitignored, build script run before stow, and a `.stow-local-ignore` entry that excludes the template from being symlinked. See `scripts/build-zed-config.sh` as the canonical example.
 
 ## Work Config
 
-Work-specific config in `stow-work/` is not auto-linked. Opt in on a work machine:
+`stow-work/` holds work-specific config (fish functions, sketchybar overlays, Copilot/Atlassian MCP setup, docs). It is gitignored apart from `.gitkeep`, so a fresh clone leaves it empty and nothing links. On a work machine, populate it by file-copy from another machine — `setup.sh` auto-stows it once it has content. To link without a full setup re-run:
 
 ```bash
 cd ~/.dotfiles/stow-work
