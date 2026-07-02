@@ -61,7 +61,7 @@ is_active() {
     done < <(
         find "$DOTFILES/$root/$pkg" -type f \
             -not -path '*/_seed/*' -not -name .stow-local-ignore -not -name .DS_Store
-        git -C "$DOTFILES" ls-tree -r --name-only "$OLD" -- "$root/$pkg" 2>/dev/null
+        git -C "$DOTFILES" -c core.quotePath=off ls-tree -r --name-only "$OLD" -- "$root/$pkg" 2>/dev/null
     )
     return 1
 }
@@ -75,7 +75,7 @@ restow_pkg() {
 
 # Package content always lives at root/pkg/file (depth >= 3); depth-2 entries
 # like stow-work/.gitkeep are not packages.
-changed="$(git -C "$DOTFILES" diff --name-only "$OLD" "$NEW" -- stow stow-work stow-local 2>/dev/null \
+changed="$(git -C "$DOTFILES" -c core.quotePath=off diff --name-only "$OLD" "$NEW" -- stow stow-work stow-local 2>/dev/null \
     | awk -F/ 'NF >= 3 { print $1, $2 }' | sort -u)"
 
 [ -n "$changed" ] || exit 0
@@ -113,7 +113,7 @@ EOF
 # Generated configs: outputs are gitignored, so a pull that changes a template
 # leaves the built file stale (restow is a no-op for it). Rebuild the affected
 # ones; failures warn but never abort the git operation.
-changed_files="$(git -C "$DOTFILES" diff --name-only "$OLD" "$NEW" 2>/dev/null)"
+changed_files="$(git -C "$DOTFILES" -c core.quotePath=off diff --name-only "$OLD" "$NEW" 2>/dev/null)"
 
 rebuild() {
     if "$DOTFILES/scripts/$1"; then

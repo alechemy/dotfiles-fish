@@ -11,4 +11,4 @@ java = "latest"
 # uncomment (goldziher/uncomment): AST/tree-sitter comment stripper, distributed
 # on npm as uncomment-cli. The deterministic half of the agent comment-noise
 # stack — invoked by the opt-in Stop/agentStop hooks and per-repo commit gates.
-"npm:uncomment-cli" = "latest"
+"npm:uncomment-cli" = "3.0.3"

@@ -693,7 +693,7 @@ if [ -n "$FISH_PATH" ]; then
     # Install fisher and plugins from fish_plugins
     if ! "$FISH_PATH" -c 'type -q fisher'; then
         info "Installing fisher..."
-        "$FISH_PATH" -c 'curl -sL https://git.io/fisher | source && fisher update'
+        "$FISH_PATH" -c 'curl -sL https://raw.githubusercontent.com/jorgebucaran/fisher/main/functions/fisher.fish | source && fisher update'
         success "Fisher and plugins installed"
     else
         info "Updating fisher plugins..."

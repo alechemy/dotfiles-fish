@@ -16,7 +16,7 @@ uncomment=""
 for c in \
   "$(command -v uncomment 2>/dev/null || true)" \
   "$HOME/.local/share/mise/shims/uncomment" \
-  "$HOME/.local/share/mise/installs/npm-uncomment-cli/latest/bin/uncomment"; do
+  "$HOME"/.local/share/mise/installs/npm-uncomment-cli/*/bin/uncomment; do
   if [ -n "$c" ] && [ -x "$c" ]; then uncomment=$c; break; fi
 done
 [ -n "$uncomment" ] || exit 0
