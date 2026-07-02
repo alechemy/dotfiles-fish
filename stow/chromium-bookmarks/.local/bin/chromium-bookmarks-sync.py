@@ -121,7 +121,11 @@ def load_safari():
         log(f"ERROR: Safari bookmarks not found at {SAFARI_BM}")
         return None, None
     fmt = plistlib.FMT_BINARY if raw[:6] == b"bplist" else plistlib.FMT_XML
-    return fmt, plistlib.loads(raw)
+    try:
+        return fmt, plistlib.loads(raw)
+    except Exception as e:
+        log(f"ERROR: Safari bookmarks unparseable (will retry on next event): {e}")
+        return None, None
 
 
 def backup_once():
@@ -160,7 +164,7 @@ def sync(force=False, dry_run=False):
         return
     try:
         chromium = json.loads(CHROMIUM_BM.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError) as e:
+    except (ValueError, OSError) as e:
         log(f"could not read Chromium bookmarks (will retry on next event): {e}")
         return
 
@@ -185,7 +189,11 @@ def sync(force=False, dry_run=False):
         return
 
     safari["Children"] = new_children
-    write_safari(safari, fmt)
+    try:
+        write_safari(safari, fmt)
+    except OSError as e:
+        log(f"ERROR: Safari bookmarks write failed (will retry on next event): {e}")
+        return
     if managed is None:
         log(f"removed empty managed folder {MANAGED_TITLE!r}")
     else:
@@ -202,8 +210,10 @@ def resolve_fswatch():
 def watch():
     fswatch = resolve_fswatch()
     if not fswatch:
-        log("ERROR: fswatch not found (brew install fswatch)")
-        sys.exit(1)
+        # Exit 0: with KeepAlive.SuccessfulExit=false a clean exit leaves the
+        # job dormant until the next login instead of respawning every 10s.
+        log("ERROR: fswatch not found (brew install fswatch); exiting until next load")
+        sys.exit(0)
     if not CHROMIUM_BM.exists():
         log(f"Chromium bookmarks not found at {CHROMIUM_BM}; exiting")
         sys.exit(0)
@@ -231,9 +241,14 @@ def watch():
         if now - last < DEBOUNCE:
             continue
         time.sleep(SETTLE)
-        sync()
+        try:
+            sync()
+        except Exception:
+            import traceback
+            log("ERROR: sync failed (watcher continues):\n" + traceback.format_exc())
         last = time.monotonic()
-    log("fswatch exited; stopping")
+    log("fswatch exited; restarting via KeepAlive")
+    sys.exit(1)
 
 
 def main():

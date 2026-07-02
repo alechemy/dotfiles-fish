@@ -14,7 +14,10 @@
 	<key>RunAtLoad</key>
 	<true/>
 	<key>KeepAlive</key>
-	<true/>
+	<dict>
+		<key>SuccessfulExit</key>
+		<false/>
+	</dict>
 	<key>StandardErrorPath</key>
 	<string>/tmp/chromium-bookmarks-sync.log</string>
 	<key>StandardOutPath</key>

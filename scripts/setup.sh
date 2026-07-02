@@ -439,12 +439,14 @@ EOF
     load_launch_agent "$HOME/Library/LaunchAgents/com.user.check-stale-dev-servers.plist" "stale-dev-servers"
     load_launch_agent "$HOME/Library/LaunchAgents/com.user.aerospace-gaps-heartbeat.plist" "aerospace-gaps heartbeat"
 
-    # Chromium -> Safari bookmark bridge for Alfred. Only load where the Chromium
-    # profile exists; on a non-Chromium machine the watcher would exit and
-    # KeepAlive would throttle-respawn it. Writing Safari's bookmarks is Full
-    # Disk Access-gated, so /usr/bin/python3 must be granted FDA (see CLAUDE.md);
-    # until then the agent runs but logs a permission error instead of syncing.
-    if [ -d "$HOME/Library/Application Support/Chromium/Default" ]; then
+    # Chromium -> Safari bookmark bridge for Alfred. Gate on the Bookmarks file
+    # (not the profile dir — a fresh profile has no Bookmarks until the first
+    # bookmark is made); the plist is stowed on every machine and launchd loads
+    # it at login regardless, but the watcher exits 0 when Bookmarks is absent
+    # and KeepAlive.SuccessfulExit=false leaves it dormant. Writing Safari's
+    # bookmarks is Full Disk Access-gated, so /usr/bin/python3 must be granted
+    # FDA (see CLAUDE.md); until then the agent logs a permission error.
+    if [ -f "$HOME/Library/Application Support/Chromium/Default/Bookmarks" ]; then
         load_launch_agent "$HOME/Library/LaunchAgents/com.user.chromium-bookmarks-sync.plist" "chromium-bookmarks sync"
         info "  Grant Full Disk Access to /usr/bin/python3 so the bookmark sync can write Safari's bookmarks"
     fi
