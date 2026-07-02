@@ -44,4 +44,4 @@ if [ "$(aerospace list-workspaces --focused)" != "$ws" ]; then
 fi
 
 # Recompute outer gaps for the now-correct workspace.
-"$HOME/.dotfiles/scripts/aerospace-auto-gaps.sh"
+"$HOME/.dotfiles/scripts/aerospace-auto-gaps.sh" hide

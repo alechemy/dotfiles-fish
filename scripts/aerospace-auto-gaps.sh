@@ -2,15 +2,27 @@
 # Recompute outer gaps from the tiled window count on the focused workspace so
 # every window keeps a constant width (one third of the monitor; see
 # aerospace-gaps-lib.sh for the math).
-# Triggered from AeroSpace callbacks: on-window-detected (new windows),
-# on-focus-changed (closing the focused window shifts focus, so this catches
-# cmd-W), and exec-on-workspace-change (workspace navigation).
+# Triggered from AeroSpace callbacks (on-window-detected, on-focus-changed,
+# exec-on-workspace-change), the SketchyBar front_app_switched hook, and
+# aerospace-hide.sh. $1 is an optional trigger label for the log.
+#
+# Single-flight worker. Callback bursts (cmd-W fires focus-changed +
+# front_app_switched + sometimes workspace-change within milliseconds) must
+# not be dropped: the invocation that loses the lock is usually the one
+# carrying the final state. So a losing invocation marks a pending flag and
+# exits, and the lock holder loops until the flag stays clear.
+#
+# Each pass sleeps briefly before sampling. AeroSpace's callbacks fire while
+# its window tree is still mutating — a closed window can outlive the focus
+# shift that announces it, and on-window-detected fires before the
+# move-node-to-workspace matchers have placed the new window — so an
+# immediate sample reads pre-transition state and bakes in a wrong gap that
+# nothing corrects until the next unrelated event.
 #
 # Source of truth: the dotfiles file. Runtime: a regenerated copy at
 # ~/.aerospace.toml with the active gap baked in. The runtime file is rebuilt
 # from source whenever source is newer or the gap target changes, so any edits
-# to the dotfiles config propagate on the next workspace event without manual
-# resync.
+# to the dotfiles config propagate on the next event without manual resync.
 
 set -e
 
@@ -24,8 +36,13 @@ SUPPRESSION_ENABLED=true
 SOURCE_FILE="$HOME/.dotfiles/stow/aerospace/.aerospace.toml"
 RUNTIME_FILE="$HOME/.aerospace.toml"
 SUPPRESS_FILE="/tmp/aerospace-gaps-suppressed-workspace"
+PENDING_FILE="/tmp/aerospace-gaps.pending"
+LOG_FILE="/tmp/aerospace-gaps.log"
+TRIGGER="${1:-unlabeled}"
 
 . "$HOME/.dotfiles/scripts/aerospace-gaps-lib.sh"
+
+log() { printf '%s %s\n' "$(date '+%F %T')" "$*" >>"$LOG_FILE"; }
 
 # Skip when more than one monitor is connected (e.g. clamshell + lid open) so
 # the manual + automatic gap states don't fight during transient configs.
@@ -45,35 +62,11 @@ if ! jq -e --arg m 'DELL U4025QW' 'any(.[]; ."monitor-name" | contains($m))' \
     exit 0
 fi
 
-# Serialize concurrent runs (AeroSpace's window/focus/workspace callbacks can
-# fire this script in rapid succession). Non-blocking: if another instance
-# holds the lock, exit and let the next event retrigger.
 exec 9>/tmp/aerospace-gaps.lock
-flock -n 9 || exit 0
-
-ws=$(aerospace list-workspaces --focused)
-
-if [ "$SUPPRESSION_ENABLED" = true ] && [ -f "$SUPPRESS_FILE" ]; then
-    suppressed_ws=$(cat "$SUPPRESS_FILE")
-    if [ "$suppressed_ws" = "$ws" ]; then
-        exit 0
-    fi
-    rm -f "$SUPPRESS_FILE"
+if ! flock -n 9; then
+    : >"$PENDING_FILE"
+    exit 0
 fi
-
-# Count tiled windows (exclude floating and hidden-app placeholders).
-count=$(aerospace list-windows --workspace "$ws" --format "%{window-layout}" \
-    | grep -vE '^(floating|macos_native_window_of_hidden_app)$' \
-    | wc -l \
-    | tr -d ' ')
-
-# Map count to the outer-left/right value that keeps window width constant.
-compute_gap_presets || exit 0
-case "$count" in
-    0|1) target=$gap_centered ;;
-    2)   target=$gap_split ;;
-    *)   target=$gap_full ;;
-esac
 
 read_gap() {
     # Extracts the gap integer assigned to the named monitor on outer.left,
@@ -85,28 +78,75 @@ read_gap() {
         | head -n1 || true
 }
 
-# Decide whether the runtime needs rebuilding from source.
-needs_rebuild=false
-if [ ! -f "$RUNTIME_FILE" ] || [ -L "$RUNTIME_FILE" ] || [ "$SOURCE_FILE" -nt "$RUNTIME_FILE" ]; then
-    needs_rebuild=true
+compute_gap_presets || exit 0
+
+for pass in 1 2 3 4 5; do
+    rm -f "$PENDING_FILE"
+    sleep 0.2
+
+    ws=$(aerospace list-workspaces --focused)
+
+    if [ "$SUPPRESSION_ENABLED" = true ] && [ -f "$SUPPRESS_FILE" ]; then
+        suppressed_ws=$(cat "$SUPPRESS_FILE")
+        if [ "$suppressed_ws" = "$ws" ]; then
+            break
+        fi
+        rm -f "$SUPPRESS_FILE"
+    fi
+
+    # Count tiled windows (exclude floating and hidden-app placeholders).
+    count=$(aerospace list-windows --workspace "$ws" --format "%{window-layout}" \
+        | grep -vE '^(floating|macos_native_window_of_hidden_app)$' \
+        | wc -l \
+        | tr -d ' ')
+
+    # Map count to the outer-left/right value that keeps window width constant.
+    case "$count" in
+        0|1) target=$gap_centered ;;
+        2)   target=$gap_split ;;
+        *)   target=$gap_full ;;
+    esac
+
+    # Decide whether the runtime needs rebuilding from source.
+    needs_rebuild=false
+    if [ ! -f "$RUNTIME_FILE" ] || [ -L "$RUNTIME_FILE" ] || [ "$SOURCE_FILE" -nt "$RUNTIME_FILE" ]; then
+        needs_rebuild=true
+    fi
+
+    current=$(read_gap "$RUNTIME_FILE")
+    [ -z "$current" ] && current=$(read_gap "$SOURCE_FILE")
+
+    if [ "$needs_rebuild" = true ] || [ "$current" != "$target" ]; then
+        # Stage to a sibling temp file and atomically rename into place. mv on
+        # the same filesystem uses rename(2), so $RUNTIME_FILE never appears
+        # truncated even if a process is killed mid-write.
+        TMP=$(mktemp "$RUNTIME_FILE.XXXXXX")
+        trap 'rm -f "$TMP"' EXIT
+        cp "$SOURCE_FILE" "$TMP"
+        sed -i '' "s/outer\.left = \[{ monitor\.\"DELL U4025QW\" = [0-9]* }/outer.left = [{ monitor.\"DELL U4025QW\" = $target }/" "$TMP"
+        sed -i '' "s/outer\.right = \[{ monitor\.\"DELL U4025QW\" = [0-9]* }/outer.right = [{ monitor.\"DELL U4025QW\" = $target }/" "$TMP"
+        chmod 0644 "$TMP"
+        mv "$TMP" "$RUNTIME_FILE"
+
+        aerospace reload-config
+        log "apply ws=$ws count=$count gap=$current->$target trigger=$TRIGGER pass=$pass"
+    fi
+
+    # Re-sample: if focus moved while we worked, or an event queued behind the
+    # lock, this pass's decision may already be stale.
+    [ "$(aerospace list-workspaces --focused)" != "$ws" ] && continue
+    [ -f "$PENDING_FILE" ] && continue
+    break
+done
+
+if [ "$pass" = 5 ] && [ -f "$PENDING_FILE" ]; then
+    log "pass budget exhausted with work pending trigger=$TRIGGER"
 fi
 
-current=$(read_gap "$RUNTIME_FILE")
-[ -z "$current" ] && current=$(read_gap "$SOURCE_FILE")
-
-if [ "$needs_rebuild" = false ] && [ "$current" = "$target" ]; then
-    exit 0
+# An event landing between the last pending check and lock release would set
+# the flag with no worker left to see it; release and hand off to a fresh
+# instance, which either takes the lock or re-marks pending for whoever holds it.
+flock -u 9
+if [ -f "$PENDING_FILE" ]; then
+    exec "$0" retrigger
 fi
-
-# Stage to a sibling temp file and atomically rename into place. mv on the
-# same filesystem uses rename(2), so $RUNTIME_FILE never appears truncated
-# even if concurrent invocations race or a process is killed mid-write.
-TMP=$(mktemp "$RUNTIME_FILE.XXXXXX")
-trap 'rm -f "$TMP"' EXIT
-cp "$SOURCE_FILE" "$TMP"
-sed -i '' "s/outer\.left = \[{ monitor\.\"DELL U4025QW\" = [0-9]* }/outer.left = [{ monitor.\"DELL U4025QW\" = $target }/" "$TMP"
-sed -i '' "s/outer\.right = \[{ monitor\.\"DELL U4025QW\" = [0-9]* }/outer.right = [{ monitor.\"DELL U4025QW\" = $target }/" "$TMP"
-chmod 0644 "$TMP"
-mv "$TMP" "$RUNTIME_FILE"
-
-aerospace reload-config

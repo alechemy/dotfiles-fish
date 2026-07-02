@@ -15,5 +15,5 @@
 # already handles) safe and cheap.
 
 if [ "$SENDER" = "front_app_switched" ]; then
-  ( sleep 0.5; "$HOME/.dotfiles/scripts/aerospace-auto-gaps.sh" ) >/dev/null 2>&1 &
+  ( sleep 0.5; "$HOME/.dotfiles/scripts/aerospace-auto-gaps.sh" front-app-switched ) >/dev/null 2>&1 &
 fi

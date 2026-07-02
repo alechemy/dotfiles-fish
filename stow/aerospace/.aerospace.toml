@@ -44,11 +44,11 @@ on-focused-monitor-changed = ['move-mouse monitor-lazy-center']
 # closures via cmd-W, since closing the focused window shifts focus to a
 # sibling). Paired with the catch-all on-window-detected below (new windows)
 # and exec-on-workspace-change above (workspace switches).
-on-focus-changed = ['exec-and-forget bash -c "$HOME/.dotfiles/scripts/aerospace-auto-gaps.sh"']
+on-focus-changed = ['exec-and-forget bash -c "$HOME/.dotfiles/scripts/aerospace-auto-gaps.sh focus-changed"']
 
 # Notify SketchyBar about workspace changes
 exec-on-workspace-change = ['/bin/bash', '-c',
-    'sketchybar --trigger aerospace_workspace_change FOCUSED_WORKSPACE=$AEROSPACE_FOCUSED_WORKSPACE; "$HOME/.dotfiles/scripts/aerospace-auto-gaps.sh" &'
+    'sketchybar --trigger aerospace_workspace_change FOCUSED_WORKSPACE=$AEROSPACE_FOCUSED_WORKSPACE; "$HOME/.dotfiles/scripts/aerospace-auto-gaps.sh" workspace-change &'
 ]
 
 # You can effectively turn off macOS "Hide application" (cmd-h) feature by toggling this flag
@@ -190,7 +190,7 @@ on-mode-changed = [
 # default).
 [[on-window-detected]]
 check-further-callbacks = true
-run = ['exec-and-forget bash -c "$HOME/.dotfiles/scripts/aerospace-auto-gaps.sh"']
+run = ['exec-and-forget bash -c "$HOME/.dotfiles/scripts/aerospace-auto-gaps.sh window-detected"']
 
 # Workspace Assignments
 [[on-window-detected]]
