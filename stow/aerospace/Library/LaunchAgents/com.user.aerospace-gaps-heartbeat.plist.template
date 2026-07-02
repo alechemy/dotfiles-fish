@@ -12,8 +12,7 @@
 	<key>ProgramArguments</key>
 	<array>
 		<string>/bin/bash</string>
-		<string>-c</string>
-		<string>"__HOME__/.local/bin/should-run-background-job" || exit 0; exec "__HOME__/.dotfiles/scripts/aerospace-auto-gaps.sh" heartbeat</string>
+		<string>__HOME__/.local/bin/aerospace-gaps-heartbeat.sh</string>
 	</array>
 	<key>RunAtLoad</key>
 	<true/>
