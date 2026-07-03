@@ -49,8 +49,11 @@ on performSmartRule(theRecords)
 				if recURL is not "" and recURL is not missing value then
 					set dupeUUID to my findArchivedDuplicate(recURL, recUUID)
 					if dupeUUID is not "" then
-						my pipelineLog("Extract: Web Content", "INFO", "deleting duplicate bookmark (existing=" & dupeUUID & ")", recName, recUUID)
-						delete record theRecord
+						my pipelineLog("Extract: Web Content", "INFO", "trashing duplicate bookmark (existing=" & dupeUUID & ")", recName, recUUID)
+						-- Trash, not delete record: delete is a hard delete
+						-- (verified — no Trash stop), and this is a heuristic
+						-- match on user-created content.
+						move record theRecord to trash group of database "Lorebook"
 						-- raise a sentinel so the outer try skips the remaining
 						-- per-record work and the outer loop moves to the next record
 						error "__DUPE_SKIPPED__"

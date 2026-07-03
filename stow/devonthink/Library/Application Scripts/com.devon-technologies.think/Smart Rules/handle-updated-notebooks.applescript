@@ -61,8 +61,10 @@ on performSmartRule(theRecords)
 					end try
 
 					if identicalReimport then
-						log message "Handle Updated Notebooks: identical re-export of " & recordKey & ", discarding new copy" info recordKey
-						delete record currentRecord
+						log message "Handle Updated Notebooks: identical re-export of " & recordKey & ", trashing new copy" info recordKey
+						-- Trash, not delete record: delete is a hard delete, and
+						-- the hash match is a heuristic on user-created content.
+						move record currentRecord to trash group of targetDatabase
 					else
 						-- Replace existing: overwrite file at the filesystem level, re-index
 						do shell script "cp " & quoted form of newPath & " " & quoted form of existingPath
@@ -79,8 +81,10 @@ on performSmartRule(theRecords)
 						set inboxGroup to get record at "/00_INBOX" in targetDatabase
 						move record existingMatch to inboxGroup
 
-						-- Clean up the temporary import
-						delete record currentRecord
+						-- Trash the temporary import (its content now lives in
+						-- existingMatch); trash rather than hard-delete so a bad
+						-- SourceFile match is recoverable
+						move record currentRecord to trash group of targetDatabase
 					end if
 
 					set survivingRecord to existingMatch
