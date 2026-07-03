@@ -60,34 +60,53 @@ on performSmartRule(theRecords)
 						if newHash is oldHash then set identicalReimport to true
 					end try
 
+					set replaceOK to true
 					if identicalReimport then
 						log message "Handle Updated Notebooks: identical re-export of " & recordKey & ", trashing new copy" info recordKey
 						-- Trash, not delete record: delete is a hard delete, and
 						-- the hash match is a heuristic on user-created content.
 						move record currentRecord to trash group of targetDatabase
 					else
-						-- Replace existing: overwrite file at the filesystem level, re-index
-						do shell script "cp " & quoted form of newPath & " " & quoted form of existingPath
-						synchronize record existingMatch
+						-- Replace existing at the filesystem level, then re-index.
+						-- Stage + atomic mv (same volume) so the backing file inside
+						-- the database package is always either the old or the new
+						-- content — a direct cp truncates in place, and a mid-write
+						-- failure would corrupt the record with no undo.
+						try
+							do shell script "cp " & quoted form of newPath & " " & quoted form of (existingPath & ".dt-replace-tmp") & " && /bin/mv -f " & quoted form of (existingPath & ".dt-replace-tmp") & " " & quoted form of existingPath
+						on error errMsg
+							set replaceOK to false
+							do shell script "rm -f " & quoted form of (existingPath & ".dt-replace-tmp")
+							log message "Handle Updated Notebooks: content replace failed for " & recordKey & ": " & errMsg info recordKey
+							my pipelineLog("Handle Updated Notebooks", "ERROR", "content replace failed, leaving new import in inbox for retry: " & errMsg, currentName, uuid of currentRecord)
+						end try
 
-						-- Reset pipeline flags so Extract Boox Handwritten criteria will match again
-						add custom meta data 0 for "Recognized" to existingMatch
-						add custom meta data 0 for "Commented" to existingMatch
-						add custom meta data 0 for "AIEnriched" to existingMatch
-						add custom meta data 1 for "NameLocked" to existingMatch
-						add custom meta data 1 for "NeedsProcessing" to existingMatch
+						if replaceOK then
+							synchronize record existingMatch
 
-						-- Move back to 00_INBOX so the Extract and Format processing rules can see it
-						set inboxGroup to get record at "/00_INBOX" in targetDatabase
-						move record existingMatch to inboxGroup
+							-- Reset pipeline flags so Extract Boox Handwritten criteria will match again
+							add custom meta data 0 for "Recognized" to existingMatch
+							add custom meta data 0 for "Commented" to existingMatch
+							add custom meta data 0 for "AIEnriched" to existingMatch
+							add custom meta data 1 for "NameLocked" to existingMatch
+							add custom meta data 1 for "NeedsProcessing" to existingMatch
 
-						-- Trash the temporary import (its content now lives in
-						-- existingMatch); trash rather than hard-delete so a bad
-						-- SourceFile match is recoverable
-						move record currentRecord to trash group of targetDatabase
+							-- Move back to 00_INBOX so the Extract and Format processing rules can see it
+							set inboxGroup to get record at "/00_INBOX" in targetDatabase
+							move record existingMatch to inboxGroup
+
+							-- Trash the temporary import (its content now lives in
+							-- existingMatch); trash rather than hard-delete so a bad
+							-- SourceFile match is recoverable
+							move record currentRecord to trash group of targetDatabase
+						end if
 					end if
 
-					set survivingRecord to existingMatch
+					if replaceOK then
+						set survivingRecord to existingMatch
+					else
+						set survivingRecord to currentRecord
+					end if
 				else
 					-- New document: set source key, let the normal pipeline continue
 					add custom meta data recordKey for "SourceFile" to currentRecord
@@ -100,3 +119,17 @@ on performSmartRule(theRecords)
 		end repeat
 	end tell
 end performSmartRule
+
+-- Forward an event to the centralized pipeline log. Fails silently if
+-- the helper isn't present, so scripts remain functional before the
+-- stow/setup step that puts it in place.
+on pipelineLog(component, level, msg, recName, recUUID)
+	try
+		do shell script "$HOME/.local/bin/pipeline-log " & ¬
+			quoted form of component & " " & ¬
+			quoted form of level & " " & ¬
+			quoted form of msg & " " & ¬
+			quoted form of (recName as string) & " " & ¬
+			quoted form of (recUUID as string)
+	end try
+end pipelineLog
