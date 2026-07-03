@@ -630,6 +630,15 @@ done
 - **Cloud sync** — After creating a note, the script calls `synchronize database` to push it to DEVONthink's configured sync store. If sync fails for any reason (e.g., no network), the note is still created locally and will sync on the next automatic or manual sync cycle.
 - **Logging** — Check `~/Library/Logs/dt-daily-note.log` for creation results and `/tmp/dt-daily-note.log` for any launchd-level stdout/stderr.
 
+## Database Backup & Recovery
+
+Nothing in this repo backs up `~/Databases/Lorebook.dtBase2` — the repo rebuilds the *machinery* (scripts, agents, seeded rules), not the data. The database survives via two independent channels:
+
+1. **CloudKit sync** — continuous, and the recovery path for a single-machine loss. Script-driven sync also runs after each daily-note creation.
+2. **Time Machine** — the package is included in the hourly backup (verified 2026-07-03; local destination `MacBookBackup`). Caveat: TM snapshots the package while DT may be mid-write, so a restored copy should get **Tools → Verify & Repair** before trusting it. For a consistency-guaranteed archive (e.g. before risky bulk operations), use **File → Export → Database Archive**, which verifies and zips the closed database.
+
+A *sync-store* loss plus a dead machine is the only scenario with no automated answer; the Time Machine copy is the fallback there.
+
 ## Integrations
 
 - [Granola Integration](docs/granola.md) — automated meeting notes import from Granola
