@@ -60,7 +60,7 @@ automatically-unhide-macos-hidden-apps = false
 # even when they are invisible.
 # This config version is only available since 'config-version = 2'
 # Fallback value (if you omit the key): persistent-workspaces = []
-persistent-workspaces = ["1", "2", "3", "4", "5", "6"]
+persistent-workspaces = ["1", "2", "3", "4"]
 
 # A callback that runs every time binding mode changes
 # See: https://nikitabobko.github.io/AeroSpace/guide#binding-modes
@@ -139,8 +139,6 @@ on-mode-changed = [
     cmd-alt-ctrl-shift-2 = 'workspace --auto-back-and-forth 2'
     cmd-alt-ctrl-shift-3 = 'workspace --auto-back-and-forth 3'
     cmd-alt-ctrl-shift-4 = 'workspace --auto-back-and-forth 4'
-    cmd-alt-ctrl-shift-5 = 'workspace --auto-back-and-forth 5'
-    cmd-alt-ctrl-shift-6 = 'workspace --auto-back-and-forth 6'
     # cmd-alt-ctrl-shift-7 = 'workspace 7'
     # cmd-alt-ctrl-shift-8 = 'workspace 8'
     # cmd-alt-ctrl-shift-9 = 'workspace 9'
@@ -179,8 +177,6 @@ on-mode-changed = [
     2 = ['move-node-to-workspace 2', 'run-callback on-focus-changed', 'mode main']
     3 = ['move-node-to-workspace 3', 'run-callback on-focus-changed', 'mode main']
     4 = ['move-node-to-workspace 4', 'run-callback on-focus-changed', 'mode main']
-    5 = ['move-node-to-workspace 5', 'run-callback on-focus-changed', 'mode main']
-    6 = ['move-node-to-workspace 6', 'run-callback on-focus-changed', 'mode main']
     tab = ['exec-and-forget bash -c "aerospace workspace-back-and-forth && prev=\$(aerospace list-workspaces --focused) && aerospace workspace-back-and-forth && aerospace move-node-to-workspace --focus-follows-window \$prev"', 'mode main']
     backtick = ['exec-and-forget bash -c "$HOME/.dotfiles/scripts/aerospace-cycle-window.sh prev"', 'mode main']
 
@@ -214,10 +210,6 @@ if.app-name-regex-substring = 'Teams'
 run = 'move-node-to-workspace 2'
 
 [[on-window-detected]]
-if.app-id = 'com.apple.Safari.WebApp.5353ED03-6BF4-40DB-A16D-2146FB4CD7A3'
-run = 'move-node-to-workspace 2'
-
-[[on-window-detected]]
 if.app-id = 'com.granola.app'
 run = 'move-node-to-workspace 2'
 
@@ -234,24 +226,16 @@ if.app-id = 'ru.keepcoder.Telegram'
 run = 'move-node-to-workspace 3'
 
 [[on-window-detected]]
-if.app-id = 'com.devon-technologies.think'
-run = 'move-node-to-workspace 5'
-
-[[on-window-detected]]
-if.app-id = 'com.culturedcode.ThingsMac'
-run = 'move-node-to-workspace 5'
-
-[[on-window-detected]]
 if.app-name-regex-substring = 'Qobuz'
-run = 'move-node-to-workspace 6'
+run = 'move-node-to-workspace 4'
 
 [[on-window-detected]]
 if.app-name-regex-substring = 'Feishin'
-run = 'move-node-to-workspace 6'
+run = 'move-node-to-workspace 4'
 
 [[on-window-detected]]
 if.app-id = 'com.apple.Music'
-run = 'move-node-to-workspace 6'
+run = 'move-node-to-workspace 4'
 
 # Floating Windows
 [[on-window-detected]]

@@ -36,7 +36,7 @@
                  [:f11 [:f11 "/opt/homebrew/bin/m1ddc chg volume -5 && /opt/homebrew/bin/sketchybar --trigger volume_change"]]
                  [:f12 [:f12 "/opt/homebrew/bin/m1ddc chg volume +5 && /opt/homebrew/bin/sketchybar --trigger volume_change"]]]}
 
-        {:des "SUPER-HYPER (a.k.a. 'SHYPER') KEY! AeroSpace: Shyper => move focused window to workspace (1-6 only: 7-9 have no focus bindings, so a window moved there is stranded). move-node-to-workspace fires no on-focus-changed, so run the callback by hand or the origin workspace's gaps stay stale."
+        {:des "SUPER-HYPER (a.k.a. 'SHYPER') KEY! AeroSpace: Shyper => move focused window to workspace (1-4 only: 5-9 have no focus bindings, so a window moved there is stranded). move-node-to-workspace fires no on-focus-changed, so run the callback by hand or the origin workspace's gaps stay stale."
          :rules [[:!CQWER1 "/opt/homebrew/bin/aerospace move-node-to-workspace 1 && /opt/homebrew/bin/aerospace run-callback on-focus-changed"]
                  [:!CTOSQ1 "/opt/homebrew/bin/aerospace move-node-to-workspace 1 && /opt/homebrew/bin/aerospace run-callback on-focus-changed"]
                  [:!CQWER2 "/opt/homebrew/bin/aerospace move-node-to-workspace 2 && /opt/homebrew/bin/aerospace run-callback on-focus-changed"]
@@ -44,11 +44,7 @@
                  [:!CQWER3 "/opt/homebrew/bin/aerospace move-node-to-workspace 3 && /opt/homebrew/bin/aerospace run-callback on-focus-changed"]
                  [:!CTOSQ3 "/opt/homebrew/bin/aerospace move-node-to-workspace 3 && /opt/homebrew/bin/aerospace run-callback on-focus-changed"]
                  [:!CQWER4 "/opt/homebrew/bin/aerospace move-node-to-workspace 4 && /opt/homebrew/bin/aerospace run-callback on-focus-changed"]
-                 [:!CTOSQ4 "/opt/homebrew/bin/aerospace move-node-to-workspace 4 && /opt/homebrew/bin/aerospace run-callback on-focus-changed"]
-                 [:!CQWER5 "/opt/homebrew/bin/aerospace move-node-to-workspace 5 && /opt/homebrew/bin/aerospace run-callback on-focus-changed"]
-                 [:!CTOSQ5 "/opt/homebrew/bin/aerospace move-node-to-workspace 5 && /opt/homebrew/bin/aerospace run-callback on-focus-changed"]
-                 [:!CQWER6 "/opt/homebrew/bin/aerospace move-node-to-workspace 6 && /opt/homebrew/bin/aerospace run-callback on-focus-changed"]
-                 [:!CTOSQ6 "/opt/homebrew/bin/aerospace move-node-to-workspace 6 && /opt/homebrew/bin/aerospace run-callback on-focus-changed"]]}
+                 [:!CTOSQ4 "/opt/homebrew/bin/aerospace move-node-to-workspace 4 && /opt/homebrew/bin/aerospace run-callback on-focus-changed"]]}
 
         ;; Claude Code: terminal-resize wrap-fix chord. Exits the foreground
         ;; Claude session and resumes the latest --continue. Ghostty-scoped so
