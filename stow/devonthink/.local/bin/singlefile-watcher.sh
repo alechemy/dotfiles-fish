@@ -31,12 +31,19 @@ warn() {
 "$HOME/.local/bin/pipeline-record-run" singlefile-watcher 86400 || true
 
 # Poll a file's size until it has stayed identical for 5 consecutive samples
-# (~2.5s of quiescence), capped at 30s total. Echoes "stable" on success or
-# "unstable:<last-size>" if the cap is reached without the file going quiet.
+# (~2.5s of quiescence), capped at 30s total. Echoes "stable", "gone" if the
+# file vanished mid-wait, or "unstable:<last-size>" if the cap is reached
+# without the file going quiet. Always returns 0: under set -e a non-zero
+# return through the callers' command-substitution assignment would kill the
+# watcher, and KeepAlive would loop it against the same file forever.
 wait_for_stable_size() {
     local path=$1
     local prev=-1 stable=0 cur
     for _ in $(seq 1 60); do
+        if [[ ! -e "$path" ]]; then
+            echo "gone"
+            return 0
+        fi
         cur=$(stat -f%z "$path" 2>/dev/null || echo 0)
         if [[ "$cur" == "$prev" && "$cur" -gt 0 ]]; then
             stable=$((stable + 1))
@@ -51,7 +58,7 @@ wait_for_stable_size() {
         sleep 0.5
     done
     echo "unstable:$prev"
-    return 1
+    return 0
 }
 
 # Ingest one .html file: wait for quiescence, then hand off to the ingester.
@@ -59,6 +66,10 @@ wait_for_stable_size() {
 ingest_html() {
     local path=$1 origin=$2 stability
     stability=$(wait_for_stable_size "$path")
+    if [[ "$stability" == "gone" ]]; then
+        log "file disappeared before ingest, skipping: $path ($origin)"
+        return 0
+    fi
     if [[ "$stability" != "stable" ]]; then
         local size=${stability#unstable:}
         warn "file size never stabilized after 30s, skipping: $path (last size=$size, origin=$origin)"
