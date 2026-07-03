@@ -31,7 +31,7 @@ The following custom metadata fields must be created in DEVONthink before the pi
 | PreviousDailyNotes  | Multi-line Text | Stores a newline-separated list of extracted daily notes to prevent duplicates on notebook updates                                                                                                                                                                                           |
 | NeedsSingleFile     | Boolean         | Set on bookmarks by Extract: Web Content when the URL's hostname is NOT on the skip list. Signals to `capture-bookmarks-batch.py` that the bookmark still needs a browser-driven HTML snapshot. Cleared by `ingest-singlefile-html.py` once the bookmark has been captured                   |
 | SkipSingleFile      | Boolean         | Set on bookmarks by Extract: Web Content when the URL's hostname matches `~/.config/devonthink-pipeline/singlefile-skip-domains.txt` (e.g. youtube, spotify), or manually by the user to opt a single bookmark out. The queue-drain path of `capture-bookmarks-batch.py` filters these out; the selection path (--uuid) bypasses the check so explicit user selection always captures. **Skip wins:** the hourly `Util: Metadata Cleanup` rule clears `NeedsSingleFile` whenever `SkipSingleFile` is also set, so the two flags are never simultaneously true |
-| SingleFileTooLarge  | Boolean         | Set on a bookmark by `ingest-singlefile-html.py` when the captured HTML exceeds `MAX_INGEST_BYTES` (25 MB post-compression). The ingester clears `NeedsSingleFile`, deletes the staging HTML, and flags the bookmark so the user can review / re-capture manually instead of the pipeline retrying indefinitely |
+| SingleFileTooLarge  | Boolean         | Set on a bookmark by `ingest-singlefile-html.py` when the captured HTML exceeds `MAX_INGEST_BYTES` (25 MB post-compression). The ingester clears `NeedsSingleFile`, deletes the staging HTML, and flags the bookmark so the user can review / re-capture manually instead of the pipeline retrying indefinitely. A desktop capture with no bookmark record (Scenario 1) is instead moved to `~/Desktop/DT_Import_Errors/` — deleting it would destroy the only copy of a deliberate capture with no trace in DT |
 | WebClipSource       | Item Link       | Points back to the source bookmark from a derived record. Set on the HTML and markdown by `ingest-singlefile-html.py` during a single atomic AppleScript pass                                                                                                                                |
 | WebClipMarkdown     | Item Link       | Set on the bookmark and HTML by `ingest-singlefile-html.py`; points to the readable markdown record                                                                                                                                                                                          |
 | WebClipSnapshot     | Item Link       | Set on the bookmark by `ingest-singlefile-html.py`; points to the HTML snapshot record                                                                                                                                                                                                       |
@@ -321,7 +321,9 @@ Default blocklist is `youtube.com`, `youtu.be`, `spotify.com`. Edit the file to 
 
 ### Logs
 
-All pipeline components — smart rules, Python scripts, shell watchers — write to a single central log at `~/Library/Logs/devonthink-pipeline.log`. See the [Pipeline Logging](#pipeline-logging) section for the format and how to grep it. The SingleFile watcher's raw stdout/stderr also lands at `/tmp/singlefile-watcher.log` (launchd's capture) in case the pipeline log itself fails to write.
+Most pipeline components — the ingest smart rules, Python scripts, shell watchers — write to a single central log at `~/Library/Logs/devonthink-pipeline.log`. See the [Pipeline Logging](#pipeline-logging) section for the format and how to grep it. Exceptions: `import-granola.py` and `import-github-stars.py` keep their own log files (see their integration docs), `create-daily-note.sh` writes to `~/Library/Logs/dt-daily-note.log`, and the Util/formatting rules (`Process: Jots`, `Format: Boox Comments`, `Handle Updated Notebooks`, `Lint Markdown`, H1 sync) log only to DT's Log window. The SingleFile watcher's raw stdout/stderr also lands at `/tmp/singlefile-watcher.log` (launchd's capture) in case the pipeline log itself fails to write.
+
+`dt-watchdog.sh` (every 5 minutes) is the consumer that makes failures visible: it scans the newly-written regions of the central log, `dt-daily-note.log`, and `github-stars-import.log` for `ERROR`/`WARN`/`ALERT` lines and raises a macOS notification per new failure signature (digit-stripped, re-notified at most daily; state in `~/.local/state/devonthink/watchdog-scan/`). It also verifies the two fswatch watcher agents have live processes (kickstarting and alerting when not) and flags `.html` files stuck in `~/Downloads/SingleFile/` for more than 15 minutes.
 
 ## Pipeline Logging
 
@@ -451,7 +453,7 @@ This consolidates the previous Extract: Action Items, Process: Daily Notes, and 
 
 ### Process: Jots
 
-Handles jot documents created from the Drafts **Quick Jot** action on iOS. Each jot arrives as a small markdown document tagged `jot`, with the body already formatted as a timestamped bullet (e.g. `- 7:19am: Look into Fyxer AI`). The rule inserts the jot into the matching daily note's body (before `## Today's Notes`), deduplicates by content, and trashes the jot document.
+Handles jot documents created from the Drafts **Quick Jot** action on iOS. Each jot arrives as a small markdown document matched by `IsJot=1` custom metadata or a `Jot ` name prefix (DTTG's `x-callback-url` scheme can't set custom metadata, so iOS jots carry the prefix instead), with the body already formatted as a timestamped bullet (e.g. `- 7:19am: Look into Fyxer AI`). The rule inserts the jot into the matching daily note's body (before `## Today's Notes`), deduplicates by content, and trashes the jot document.
 
 On macOS the Drafts action modifies the daily note directly via AppleScript, so this rule only fires for jots created on iOS via DEVONthink To Go's `x-callback-url` scheme and synced back.
 
@@ -519,7 +521,7 @@ Reverts a document's filename to the value stored in `PreviousName` (the name it
 - Trigger
   - On Demand
 - Actions
-  - Execute Script (AppleScript, embedded) — see [`utils/util-restore-previous-name.applescript`](utils/util-restore-previous-name.applescript)
+  - Execute Script (AppleScript, embedded) — see [`util-restore-previous-name.applescript`](../stow/devonthink/Library/Application%20Scripts/com.devon-technologies.think/Smart%20Rules/util-restore-previous-name.applescript)
 
 > **Hardening Note — Why an AppleScript instead of declarative move actions**
 >
@@ -550,11 +552,11 @@ The schedule is set to a daytime wake-hour rather than the small hours: `StartCa
 The primary DEVONthink smart rule pipeline integrates directly with daily notes via the **Process: Daily Notes** step:
 
 - **Extracting Daily Logs:** For handwritten notes, the pipeline searches for headers like "Daily Notes", "Today", "Journal", or "Log". If found, it extracts the content beneath them and automatically appends it to today's daily note. Deduplication ensures that repeated notebook updates don't result in duplicated entries.
-- **Linking Temporal Events:** For any document processed by the pipeline, if the AI enrichment step identified a specific `EventDate` (e.g., from meeting notes), the pipeline automatically appends a wikilink to that document on the daily note corresponding to that specific date. If the target note doesn't exist yet — a past/future `EventDate`, or a morning where the 6:15 AM `create-daily-note.sh` run was missed — Post-Enrich & Archive creates it on demand (matching `create-daily-note.sh`'s heading and `Daily Note` tag) rather than dropping the link.
+- **Linking Temporal Events:** For any document processed by the pipeline, if the AI enrichment step identified a specific `EventDate` (e.g., from meeting notes), the pipeline automatically appends a wikilink to that document on the daily note corresponding to that specific date. If the target note doesn't exist yet — a past/future `EventDate`, or a morning where the 6:15 AM `create-daily-note.sh` run was missed — Post-Enrich & Archive creates it on demand (matching `create-daily-note.sh`'s heading and `Daily Note` tag) rather than dropping the link. Extract: Web Content and `ingest-singlefile-html.py` create today's note on demand the same way, so captures landing between midnight and the 06:15 seeder keep their daily-note entry.
 
 ### Template Format
 
-Each daily note follows this structure (see `Daily Note.md` for a standalone DEVONthink template):
+Each daily note follows this structure (generated by `create-daily-note.sh`, and by the rules that create a missing note on demand):
 
 ```
 # Wednesday, January 21, 2026

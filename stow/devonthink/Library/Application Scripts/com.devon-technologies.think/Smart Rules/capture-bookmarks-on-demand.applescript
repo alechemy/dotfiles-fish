@@ -11,8 +11,10 @@
 -- of bookmarks with NeedsSingleFile=1.
 --
 -- Runs in the background — per-URL navigation + SingleFile save + defuddle
--- + DT import takes a while. Progress is written to
--- ~/Library/Logs/singlefile-ingest.log.
+-- + DT import takes a while. Progress is written to the central pipeline
+-- log (~/Library/Logs/devonthink-pipeline.log); the nohup redirect below
+-- catches only uncaught tracebacks (pipeline-log echoes to stdout on a TTY
+-- only, so singlefile-ingest.log stays empty in normal operation).
 
 on performSmartRule(theRecords)
 	set batchPath to (POSIX path of (path to home folder)) & ".local/bin/capture-bookmarks-batch.py"
