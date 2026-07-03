@@ -3,9 +3,10 @@
 import-github-stars.py — Import GitHub starred repos into DEVONthink.
 
 Polls the GitHub API for newly starred repositories and creates bookmark
-records in DEVONthink's 00_INBOX. The existing Extract: Web Content smart
-rule then downloads the README as markdown and archives an HTML snapshot.
-Documents flow through the standard pipeline (AI enrichment, etc.).
+records in DEVONthink's 00_INBOX, pre-flagged Recognized/Commented so
+Extract: Web Content skips them (the repo description in the Finder comment
+is the content; no README download or HTML snapshot is wanted). Records
+flow through the standard pipeline (AI enrichment, etc.).
 
 Idempotent: tracks imported repo full names in a local state file.
 

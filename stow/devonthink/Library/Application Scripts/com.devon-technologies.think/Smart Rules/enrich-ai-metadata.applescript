@@ -65,14 +65,15 @@ on performSmartRule(theRecords)
 
       -- Unified text extraction. Handwritten records store their LLM-readable
       -- text in comment (the formatted OCR output); everything else uses
-      -- plain text. This lets the filter+truncate step below cover PDFs,
-      -- HTMLs, etc. — previously those went through a record-based LLM call
-      -- that couldn't be truncated or cached.
+      -- plain text, falling back to comment when that is empty — bookmarks
+      -- have no plain text, and sources like GitHub stars stage the repo
+      -- description in the Finder comment precisely so enrichment can use it.
       set isHandwritten to (get custom meta data for "Handwritten" from theRecord)
       if isHandwritten is 1 then
         set docText to comment of theRecord
       else
         set docText to plain text of theRecord
+        if docText is missing value or docText is "" then set docText to comment of theRecord
       end if
       if docText is missing value then set docText to ""
       set theMode to "text"
