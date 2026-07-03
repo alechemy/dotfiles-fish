@@ -31,6 +31,7 @@ Usage:
 import argparse
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path.home() / ".local" / "bin"))
@@ -213,6 +214,37 @@ def capture_one(url: str) -> Path | None:
     return Path(first_line)
 
 
+def stage_out_of_watched_dir(html_path: Path, staging_dir: Path) -> Path:
+    """Move a fresh capture out of the watcher's folder before ingesting.
+
+    The always-on singlefile-watcher ingests every .html that appears in
+    ~/Downloads/SingleFile as a brand-new bookmark; leaving the file there
+    while this batch ingests it with --bookmark races the two ingesters on
+    the same path (duplicate triad, concurrent in-place mutation). /bin/mv
+    is Apple-signed, so the move out of TCC-protected Downloads is safe
+    regardless of which python runs this script. On failure the original
+    path is returned and the (pre-existing) race window stays open.
+    """
+    dest = staging_dir / html_path.name
+    n = 1
+    while dest.exists():
+        dest = staging_dir / f"{html_path.stem} ({n}){html_path.suffix}"
+        n += 1
+    result = subprocess.run(
+        ["/bin/mv", str(html_path), str(dest)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        log.warning(
+            "could not move capture out of watched folder, ingesting in place: %s",
+            result.stderr.strip(),
+        )
+        return html_path
+    return dest
+
+
 def ingest_one(html_path: Path, bookmark_uuid: str, force: bool) -> bool:
     cmd = [str(INGEST_SINGLEFILE), str(html_path), "--bookmark", bookmark_uuid]
     if force:
@@ -272,6 +304,7 @@ def main() -> int:
     succeeded = 0
     skipped: list[str] = []
     failed: list[str] = []
+    staging_dir = Path(tempfile.mkdtemp(prefix="dt-batch-capture-"))
     for i, (uuid, url) in enumerate(pending, start=1):
         # Pre-filter: if another bookmark with this URL already has a
         # WebClipSnapshot set, skip the browser hijack entirely and just
@@ -297,10 +330,16 @@ def main() -> int:
         if html_path is None:
             failed.append(url)
             continue
+        html_path = stage_out_of_watched_dir(html_path, staging_dir)
         if not ingest_one(html_path, uuid, args.force):
             failed.append(url)
             continue
         succeeded += 1
+
+    try:
+        staging_dir.rmdir()
+    except OSError:
+        log.info("failed captures left for inspection in %s", staging_dir)
 
     log.info(
         "done: %d succeeded, %d skipped (dup), %d failed",
