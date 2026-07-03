@@ -127,11 +127,14 @@ CREATE_APPLESCRIPT
 # ---------------------------------------------------------------------------
 # Helper: sync the database once (called after note creation completes)
 # ---------------------------------------------------------------------------
+# synchronize's database parameter takes a database object; passing the bare
+# name string fails with -1700 (can't coerce to type database).
 sync_database() {
-  if /usr/bin/osascript -e "tell application id \"DNtp\" to synchronize database \"${DATABASE_NAME}\"" >/dev/null 2>&1; then
+  local out
+  if out=$(/usr/bin/osascript -e "tell application id \"DNtp\" to synchronize database (get database \"${DATABASE_NAME}\")" 2>&1); then
     log "Synchronized database ${DATABASE_NAME}"
   else
-    log "WARNING: synchronize database failed"
+    log "WARNING: synchronize database failed: ${out}"
   fi
 }
 
@@ -146,13 +149,16 @@ create_note_for_date() {
   heading_date=$(date -j -f "%Y%m%d" "$date_arg" "+%A, %B %-d, %Y")
   note_filename="${date_str}.md"
 
-  as_output=$(/usr/bin/osascript "$CREATE_SCRIPT" \
+  if as_output=$(/usr/bin/osascript "$CREATE_SCRIPT" \
     "$DATABASE_NAME" \
     "$GROUP_PATH" \
     "$date_str" \
     "$note_filename" \
-    "$heading_date")
-  exit_code=$?
+    "$heading_date" 2>&1); then
+    exit_code=0
+  else
+    exit_code=$?
+  fi
 
   log "${as_output}"
 
@@ -169,15 +175,18 @@ create_note_for_date() {
 if [[ ${1:-} =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
   # Explicit date argument: create that single note (original behaviour)
   log "Creating note for ${1}"
-  create_note_for_date "$1"
-  rc=$?
+  rc=0
+  create_note_for_date "$1" || rc=$?
   sync_database
   exit $rc
 fi
 
 # No argument: backfill from last existing note through today.
 log "Querying last daily note in ${GROUP_PATH}"
-LAST_DATE=$(/usr/bin/osascript "$FIND_SCRIPT" "$DATABASE_NAME" "$GROUP_PATH")
+if ! LAST_DATE=$(/usr/bin/osascript "$FIND_SCRIPT" "$DATABASE_NAME" "$GROUP_PATH" 2>&1); then
+  log "AppleScript error from find script: ${LAST_DATE}"
+  exit 1
+fi
 
 if [[ "$LAST_DATE" == error:* ]]; then
   log "AppleScript error from find script: ${LAST_DATE}"
@@ -188,8 +197,8 @@ TODAY=$(date "+%Y-%m-%d")
 
 if [[ "$LAST_DATE" == "none" ]]; then
   log "No prior daily note found; seeding today (${TODAY})"
-  create_note_for_date "$TODAY"
-  rc=$?
+  rc=0
+  create_note_for_date "$TODAY" || rc=$?
   sync_database
   exit $rc
 fi
