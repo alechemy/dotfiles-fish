@@ -16,7 +16,7 @@ on performSmartRule(theRecords)
 		repeat with currentRecord in theRecords
 			-- Only process records flagged as handwritten Boox notes (set by the Boox import watcher)
 			set isHandwritten to (get custom meta data for "Handwritten" from currentRecord)
-			if isHandwritten is 1 then
+			if my flagIsSet(isHandwritten) then
 				set currentName to name of currentRecord as string
 				-- Extract the key by stripping the extension
 				set recordKey to do shell script "echo " & quoted form of currentName & " | sed 's/\\.[^.]*$//'"
@@ -133,3 +133,15 @@ on pipelineLog(component, level, msg, recName, recUUID)
 			quoted form of (recUUID as string)
 	end try
 end pipelineLog
+
+-- Boolean custom metadata reads back as integer 1 when set by script but
+-- boolean true when ticked in the GUI's Info panel, and `true is 1` is
+-- false in AppleScript — compare via integer coercion so both forms match.
+on flagIsSet(v)
+	try
+		if v is missing value then return false
+		return (v as integer) is 1
+	on error
+		return false
+	end try
+end flagIsSet

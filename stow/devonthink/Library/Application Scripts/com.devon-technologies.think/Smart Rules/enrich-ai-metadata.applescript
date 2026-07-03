@@ -69,7 +69,7 @@ on performSmartRule(theRecords)
       -- have no plain text, and sources like GitHub stars stage the repo
       -- description in the Finder comment precisely so enrichment can use it.
       set isHandwritten to (get custom meta data for "Handwritten" from theRecord)
-      if isHandwritten is 1 then
+      if my flagIsSet(isHandwritten) then
         set docText to comment of theRecord
       else
         set docText to plain text of theRecord
@@ -244,7 +244,7 @@ on performSmartRule(theRecords)
         -- Apply title unless NameLocked
         if theTitle is not "" then
           set nameLocked to (get custom meta data for "NameLocked" from theRecord)
-          if nameLocked is not 1 then
+          if not my flagIsSet(nameLocked) then
             -- Sanitize title: strip characters illegal in HFS+/APFS filenames,
             -- collapse duplicate separators, trim whitespace
             set sanitized to do shell script "export THE_TITLE=" & quoted form of theTitle & " && /usr/bin/python3 -c \"import os,re; t=os.environ['THE_TITLE']; t=re.sub(r'[/:]',' - ',t); t=re.sub(r'( - ){2,}',' - ',t); print(t.strip(),end='')\""
@@ -300,7 +300,7 @@ on performSmartRule(theRecords)
         end if
 
         -- Apply document type (force "Handwritten Note" for handwritten records)
-        if isHandwritten is 1 then
+        if my flagIsSet(isHandwritten) then
           add custom meta data "Handwritten Note" for "DocumentType" to theRecord
         else if theType is not "" then
           add custom meta data theType for "DocumentType" to theRecord
@@ -414,3 +414,15 @@ on pipelineLog(component, level, msg, recName, recUUID)
       quoted form of (recUUID as string)
   end try
 end pipelineLog
+
+-- Boolean custom metadata reads back as integer 1 when set by script but
+-- boolean true when ticked in the GUI's Info panel, and `true is 1` is
+-- false in AppleScript — compare via integer coercion so both forms match.
+on flagIsSet(v)
+  try
+    if v is missing value then return false
+    return (v as integer) is 1
+  on error
+    return false
+  end try
+end flagIsSet

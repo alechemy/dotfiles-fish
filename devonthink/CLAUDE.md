@@ -13,6 +13,7 @@ This directory documents and stores scripts for a DEVONthink 4 document-processi
 - LLM calls use DEVONthink's built-in `get chat response for message … role … mode … thinking … tool calls` command — no external API calls
 - Pass `as "JSON"` (or `mode "auto"/"text"`) to control how DT returns the response
 - Custom metadata is read with `get custom meta data for "FieldName" from theRecord` and written with `add custom meta data value for "FieldName" to theRecord`
+- **Never compare a boolean custom-metadata read against `1` directly.** A flag set by script reads back as integer `1`, but the same flag ticked in the GUI's Info panel reads back as boolean `true`, and `true is 1` is **false** in AppleScript — an `is 1` check silently ignores GUI-set flags (DT-level rule *criteria* match both forms, so the rule fires but the script no-ops). Use the shared `flagIsSet(v)` handler (integer coercion inside a try) that every flag-reading rule script now carries.
 - **Never write a Unix epoch integer into a Date-typed custom metadata field.** DEVONthink interprets a number assigned to a Date field against its 2001 Cocoa reference epoch, not Unix's 1970 — a Unix timestamp lands ~31 years in the future (a May 2026 stamp renders as May 2057). Write timestamps as a native `current date`; the read side can subtract dates directly. This bit `EnrichStartedAt` in `enrich-ai-metadata.applescript` and silently disabled the enrich timeout.
 - Errors should be logged with `log message "…" info recName` (visible in DT's Log window)
 

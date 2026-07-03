@@ -50,9 +50,9 @@ tell application id "DNtp"
     repeat with r in foundItems
         try
             set needsValue to (get custom meta data for "NeedsSingleFile" from r)
-            if needsValue is 1 then
+            if my flagIsSet(needsValue) then
                 set skipValue to (get custom meta data for "SkipSingleFile" from r)
-                if skipValue is not 1 then
+                if not my flagIsSet(skipValue) then
                     set recURL to URL of r
                     if recURL is not "" and recURL is not missing value then
                         set end of pendingList to (uuid of r) & tabChar & recURL
@@ -66,6 +66,18 @@ tell application id "DNtp"
     set AppleScript's text item delimiters to ""
     return outputText
 end tell
+
+-- Boolean custom metadata reads back as integer 1 when set by script but
+-- boolean true when ticked in the GUI's Info panel, and `true is 1` is
+-- false in AppleScript — compare via integer coercion so both forms match.
+on flagIsSet(v)
+    try
+        if v is missing value then return false
+        return (v as integer) is 1
+    on error
+        return false
+    end try
+end flagIsSet
 """
 
 

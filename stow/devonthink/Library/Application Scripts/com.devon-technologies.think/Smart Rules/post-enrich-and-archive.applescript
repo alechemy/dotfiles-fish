@@ -60,7 +60,7 @@ on performSmartRule(theRecords)
 
 			-- Get document text (used by both action items and daily notes)
 			set isHandwritten to (get custom meta data for "Handwritten" from theRecord)
-			if isHandwritten is 1 then
+			if my flagIsSet(isHandwritten) then
 				set docText to comment of theRecord
 			else
 				set docText to plain text of theRecord
@@ -88,7 +88,7 @@ on performSmartRule(theRecords)
 				-- =============================================
 				-- Gated on Handwritten so meeting-notes imports (e.g. Granola)
 				-- don't dump every "Tasks" / "Action Items" bullet into Things.
-				if isHandwritten is 1 then
+				if my flagIsSet(isHandwritten) then
 					try
 						if docText is not "" then
 							set pyScript to "import sys, re\ntext = sys.stdin.read()\nin_tasks = False\nfor line in text.splitlines():\n    if re.match(r'^\\s*#*\\s*(Action Items|Todos|To-Dos|To Do|Tasks):?\\s*$', line, re.IGNORECASE):\n        in_tasks = True\n        continue\n    if in_tasks:\n        if re.match(r'^\\s*#+\\s', line):\n            break\n        m = re.match(r'^\\s*[-*•]\\s*(?:\\[\\s?[xX]?\\]\\s*)?(.+)', line.strip())\n        if m:\n            print(m.group(1).strip())"
@@ -167,7 +167,7 @@ on performSmartRule(theRecords)
 				-- =============================================
 
 				-- 2a. Extract daily notes sections (handwritten only)
-				if destGroup is not missing value and isHandwritten is 1 and docText is not "" then
+				if destGroup is not missing value and my flagIsSet(isHandwritten) and docText is not "" then
 					try
 						set pyScript to "import sys, re\ntext = sys.stdin.read()\nin_section = False\nfor line in text.splitlines():\n    if re.match(r'^\\s*#*\\s*(Daily Notes?|Today|Journal|Log|Update):?\\s*$', line, re.IGNORECASE):\n        in_section = True\n        continue\n    if in_section:\n        if re.match(r'^\\s*#+\\s', line):\n            break\n        if line.strip() != '':\n            print(line)\n"
 
@@ -250,7 +250,7 @@ on performSmartRule(theRecords)
 				-- 2b. Append wikilink to daily note (all non-web-clip documents)
 				if destGroup is not missing value then
 					set isLinked to (get custom meta data for "DailyNoteLinked" from theRecord)
-					if isLinked is not 1 then
+					if not my flagIsSet(isLinked) then
 						try
 							if hasValidEventDate then
 								set targetDate to eventDate
@@ -267,7 +267,7 @@ on performSmartRule(theRecords)
 							if targetNote is not missing value then
 								-- Determine emoji by document type
 								set docType to type of theRecord
-								if isHandwritten is 1 then
+								if my flagIsSet(isHandwritten) then
 									set emoji to "✏️"
 								else if hasValidEventDate then
 									set emoji to "📅"
@@ -392,7 +392,7 @@ on performSmartRule(theRecords)
 						set bmRecord to get record with uuid bmUUID
 						if bmRecord is not missing value then
 							set isLinked to (get custom meta data for "DailyNoteLinked" from bmRecord)
-							if isLinked is not 1 then
+							if not my flagIsSet(isLinked) then
 								set bmCreated to creation date of bmRecord
 								set cYear to year of bmCreated as text
 								set cMonth to text -2 thru -1 of ("0" & ((month of bmCreated) as integer))
@@ -459,6 +459,18 @@ on pipelineLog(component, level, msg, recName, recUUID)
 			quoted form of (recUUID as string)
 	end try
 end pipelineLog
+
+-- Boolean custom metadata reads back as integer 1 when set by script but
+-- boolean true when ticked in the GUI's Info panel, and `true is 1` is
+-- false in AppleScript — compare via integer coercion so both forms match.
+on flagIsSet(v)
+	try
+		if v is missing value then return false
+		return (v as integer) is 1
+	on error
+		return false
+	end try
+end flagIsSet
 
 -- Strip the "x-devonthink-item://" prefix off an item link, returning
 -- just the UUID. Used by the web clip name propagation step.

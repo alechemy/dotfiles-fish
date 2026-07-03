@@ -140,7 +140,7 @@ on logBookmarkToDailyNote(theRecord)
 	tell application id "DNtp"
 		try
 			set isLinked to (get custom meta data for "DailyNoteLinked" from theRecord)
-			if isLinked is 1 then return
+			if my flagIsSet(isLinked) then return
 
 			set cDate to current date
 			set cYear to year of cDate as text
@@ -233,3 +233,15 @@ on pipelineLog(component, level, msg, recName, recUUID)
 			quoted form of (recUUID as string)
 	end try
 end pipelineLog
+
+-- Boolean custom metadata reads back as integer 1 when set by script but
+-- boolean true when ticked in the GUI's Info panel, and `true is 1` is
+-- false in AppleScript — compare via integer coercion so both forms match.
+on flagIsSet(v)
+	try
+		if v is missing value then return false
+		return (v as integer) is 1
+	on error
+		return false
+	end try
+end flagIsSet
