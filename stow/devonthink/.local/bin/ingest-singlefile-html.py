@@ -59,6 +59,7 @@ TRANSFORM_TIMEOUT_SECS = 240
 AI_CHAT_HOSTS = {
     "claude.ai": "Claude",
     "gemini.google.com": "Gemini",
+    "chatgpt.com": "ChatGPT",
 }
 
 # Filename stems that SingleFile (or our cleaner) can leave when a page has no
@@ -816,8 +817,11 @@ def clear_needs_singlefile(bookmark_uuid: str) -> None:
 
 def compress_images(html_path: Path) -> None:
     try:
+        # /usr/bin/python3 explicitly: compress opens the staging file inside
+        # TCC-protected Downloads, so it must run under the Apple-signed
+        # interpreter even when this script is invoked from a mise shell.
         result = subprocess.run(
-            ["python3", str(COMPRESS_IMAGES), str(html_path)],
+            ["/usr/bin/python3", str(COMPRESS_IMAGES), str(html_path)],
             check=False,
             capture_output=True,
             text=True,
@@ -964,10 +968,25 @@ def main() -> int:
         )
         if args.bookmark:
             mark_too_large(args.bookmark)
+            try:
+                html_path.unlink()
+            except OSError:
+                pass
+            return 0
+        # No bookmark means a deliberate desktop capture with no trace in DT;
+        # deleting it here would silently destroy the user's only copy.
+        quarantine_dir = Path.home() / "Desktop" / "DT_Import_Errors"
         try:
-            html_path.unlink()
-        except OSError:
-            pass
+            quarantine_dir.mkdir(parents=True, exist_ok=True)
+            dest = quarantine_dir / html_path.name
+            n = 1
+            while dest.exists():
+                dest = quarantine_dir / f"{html_path.stem} ({n}){html_path.suffix}"
+                n += 1
+            shutil.move(str(html_path), str(dest))
+            log.warning("moved oversized capture to %s", dest)
+        except OSError as e:
+            log.error("quarantine move failed, leaving in place: %s", e)
         return 0
 
     ai_chat_platform = is_ai_chat_url(source_url)

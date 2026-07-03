@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/python3
 """Compress base64-embedded images in a SingleFile HTML file.
 
 Finds base64 data URIs, decodes each image, recompresses as JPEG via
