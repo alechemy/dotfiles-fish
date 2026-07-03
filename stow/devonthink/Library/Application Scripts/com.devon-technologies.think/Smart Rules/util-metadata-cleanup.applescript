@@ -52,13 +52,25 @@ on cleanupSkipVsNeeds(theRecord)
 		try
 			set skipVal to (get custom meta data for "SkipSingleFile" from theRecord)
 			set needsVal to (get custom meta data for "NeedsSingleFile" from theRecord)
-			if skipVal is 1 and needsVal is 1 then
+			if my flagIsSet(skipVal) and my flagIsSet(needsVal) then
 				add custom meta data 0 for "NeedsSingleFile" to theRecord
 				my pipelineLog("Util: Metadata Cleanup", "INFO", "cleared NeedsSingleFile (SkipSingleFile=1)", name of theRecord as string, uuid of theRecord)
 			end if
 		end try
 	end tell
 end cleanupSkipVsNeeds
+
+-- Boolean custom metadata reads back as integer 1 when set by script but
+-- boolean true when ticked in the GUI's Info panel, and `true is 1` is
+-- false in AppleScript — compare via integer coercion so both forms match.
+on flagIsSet(v)
+	try
+		if v is missing value then return false
+		return (v as integer) is 1
+	on error
+		return false
+	end try
+end flagIsSet
 
 on pipelineLog(component, level, msg, recName, recUUID)
 	try
