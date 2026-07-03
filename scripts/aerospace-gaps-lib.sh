@@ -13,10 +13,11 @@
 # in-process AppKit via JXA: no AppleEvents, no TCC prompt, ~140 ms.
 #
 # Tiled-window count for workspace $1, taken from the tree view (--all): when
-# an app's AX window dies without the window closing (Chromium drops its
-# accessibility tree sporadically), AeroSpace keeps the node in the layout
-# tree — still rendering its slot — while omitting it from --workspace
-# listings. The tiler follows the tree, so anything sizing gaps must too.
+# an app stops answering AX requests without the window closing (e.g. App
+# Tamer's background CPU cap duty-cycling the process), AeroSpace keeps the
+# node in the layout tree — still rendering its slot — while omitting it from
+# --workspace listings. The tiler follows the tree, so anything sizing gaps
+# must too.
 count_tiled_windows() {
     aerospace list-windows --all --format "%{workspace}|%{window-layout}" \
         | awk -F'|' -v ws="$1" '$1 == ws && $2 ~ /^(h|v)_(tiles|accordion)$/' \

@@ -5,10 +5,11 @@
 	<key>Label</key>
 	<string>com.user.aerospace-gaps-heartbeat</string>
 	<!-- Safety net for window-count changes that fire no AeroSpace callback
-	     (click-through close/minimize of a background window, AX-element
-	     death): bounds gap staleness to one interval. The gap script fast-
-	     exits unless the DELL is connected (docked ⇒ AC), and is a no-op
-	     unless the gap actually changed. -->
+	     (click-through close/minimize of a background window, an app whose
+	     stalled AX responses drop it from listings): bounds gap staleness
+	     to one interval. The gap script fast-exits unless the DELL is
+	     connected (docked ⇒ AC), and is a no-op unless the gap actually
+	     changed. -->
 	<key>ProgramArguments</key>
 	<array>
 		<string>/bin/bash</string>
