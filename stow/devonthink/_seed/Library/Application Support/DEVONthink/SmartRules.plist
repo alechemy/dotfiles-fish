@@ -269,7 +269,7 @@
 		<key>IndexOffset</key>
 		<integer>0</integer>
 		<key>LastExecution</key>
-		<real>804802541.32600105</real>
+		<real>804803681.55660903</real>
 		<key>UseUUIDKey</key>
 		<true/>
 		<key>data</key>
@@ -307,7 +307,7 @@
 		<key>IndexOffset</key>
 		<integer>0</integer>
 		<key>LastExecution</key>
-		<real>804802541.32601202</real>
+		<real>804803681.55662501</real>
 		<key>UseUUIDKey</key>
 		<true/>
 		<key>data</key>
@@ -349,7 +349,7 @@
 		<key>IndexOffset</key>
 		<integer>0</integer>
 		<key>LastExecution</key>
-		<real>804802541.326015</real>
+		<real>804803681.55662799</real>
 		<key>UseUUIDKey</key>
 		<true/>
 		<key>data</key>
@@ -385,7 +385,7 @@
 		<key>IndexOffset</key>
 		<integer>0</integer>
 		<key>LastExecution</key>
-		<real>804802541.32601905</real>
+		<real>804803681.556633</real>
 		<key>UseUUIDKey</key>
 		<true/>
 		<key>data</key>
@@ -424,7 +424,7 @@
 		<key>IndexOffset</key>
 		<integer>0</integer>
 		<key>LastExecution</key>
-		<real>804802541.32602096</real>
+		<real>804803681.55663502</real>
 		<key>UseUUIDKey</key>
 		<true/>
 		<key>data</key>
@@ -472,7 +472,7 @@
 		<key>IndexOffset</key>
 		<integer>0</integer>
 		<key>LastExecution</key>
-		<real>804802541.32602298</real>
+		<real>804803681.556638</real>
 		<key>UseUUIDKey</key>
 		<true/>
 		<key>data</key>
@@ -513,7 +513,7 @@
 		<key>IndexOffset</key>
 		<integer>0</integer>
 		<key>LastExecution</key>
-		<real>804802541.84994304</real>
+		<real>804803682.05862701</real>
 		<key>UseUUIDKey</key>
 		<true/>
 		<key>data</key>
@@ -557,7 +557,7 @@
 		<key>IndexOffset</key>
 		<integer>0</integer>
 		<key>LastExecution</key>
-		<real>804802541.84994495</real>
+		<real>804803682.05863404</real>
 		<key>UseUUIDKey</key>
 		<true/>
 		<key>data</key>
@@ -597,7 +597,7 @@
 		<key>IndexOffset</key>
 		<integer>0</integer>
 		<key>LastExecution</key>
-		<real>804802541.90306997</real>
+		<real>804803682.21065295</real>
 		<key>UseUUIDKey</key>
 		<true/>
 		<key>data</key>
@@ -643,7 +643,7 @@
 		<key>IndexOffset</key>
 		<integer>0</integer>
 		<key>LastExecution</key>
-		<real>804802545.86631405</real>
+		<real>804803686.05664396</real>
 		<key>UseUUIDKey</key>
 		<true/>
 		<key>data</key>
@@ -684,7 +684,7 @@
 		<key>IndexOffset</key>
 		<integer>0</integer>
 		<key>LastExecution</key>
-		<real>804802541.84998202</real>
+		<real>804803682.05875599</real>
 		<key>UseUUIDKey</key>
 		<true/>
 		<key>data</key>
@@ -723,7 +723,7 @@
 		<key>IndexOffset</key>
 		<integer>0</integer>
 		<key>LastExecution</key>
-		<real>804802546.70089102</real>
+		<real>804803686.91230905</real>
 		<key>UseUUIDKey</key>
 		<true/>
 		<key>data</key>
@@ -756,6 +756,46 @@
 			<string>E7458CD5-AD85-4DFA-AC35-84F5B57FD3FD</string>
 			<key>date</key>
 			<date>2026-05-25T22:58:07Z</date>
+		</dict>
+	</dict>
+	<dict>
+		<key>Enabled</key>
+		<true/>
+		<key>IndexOffset</key>
+		<integer>0</integer>
+		<key>LastExecution</key>
+		<real>804803372.18710196</real>
+		<key>UseUUIDKey</key>
+		<true/>
+		<key>data</key>
+		<data>
+		AAAAAAAOAAH///8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+		AAAAAP////////8AAERCSUQAAAAkAEEAMwAxADEAOQBEADEAQQAtADEAOQAx
+		ADIALQA0ADEAOAA4AC0AQQBFADYANQAtADkARgAwAEYARQA5ADIARgAyADAA
+		NwBFVVVJRAAAACQAQQAzADEAMQA5AEQAMQBBAC0AMQA5ADEAMgAtADQAMQA4
+		ADgALQBBAEUANgA1AC0AOQBGADAARgBFADkAMgBGADIAMAA3AEVYVFJBIwD/
+		////Af//AAAAAAAAAAD//wD/AP8AAAAA//8AAAAA////a01EPwAAAIFicGxp
+		c3QwMNIBAgMJXxARbWRuZWVkc3NpbmdsZWZpbGVfEBBtZHNraXBzaW5nbGVm
+		aWxloQTSBQYHCFV2YWx1ZVhvcGVyYXRvcgkQBKEK0gUGBwgJCA0hNDY7QUpL
+		TU9UAAAAAAAAAQEAAAAAAAAADAAAAAAAAAAAAAAAAAAAAFVLU1RQS0VWRQAA
+		AAAAACAAS0FDVENMQVMAAAAHAEsAQQBjAHQAaQBvAG5STEFUAAAA6VRFWFQA
+		AABoAH4ALwBMAGkAYgByAGEAcgB5AC8AQQBwAHAAbABpAGMAYQB0AGkAbwBu
+		ACAAUwBjAHIAaQBwAHQAcwAvAGMAbwBtAC4AZABlAHYAbwBuAC0AdABlAGMA
+		aABuAG8AbABvAGcAaQBlAHMALgB0AGgAaQBuAGsALwBTAG0AYQByAHQAIABS
+		AHUAbABlAHMALwB1AHQAaQBsAC0AbQBlAHQAYQBkAGEAdABhAC0AYwBsAGUA
+		YQBuAHUAcAAuAGEAcABwAGwAZQBzAGMAcgBpAHAAdFhUUkEIBgAAAAAAAABL
+		U1RQS1NUUEtTVFA=
+		</data>
+		<key>name</key>
+		<string>Util: Metadata Cleanup</string>
+		<key>settings</key>
+		<dict/>
+		<key>sync</key>
+		<dict>
+			<key>UUID</key>
+			<string>AEA9825D-4C13-4831-8841-6811D0AB89D2</string>
+			<key>date</key>
+			<date>2026-07-03T20:29:18Z</date>
 		</dict>
 	</dict>
 	<dict>
