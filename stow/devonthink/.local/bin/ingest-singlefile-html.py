@@ -145,7 +145,7 @@ on run argv
         -- Import the HTML snapshot directly into 99_ARCHIVE. The Python
         -- caller pre-renamed the staging copy to <safeTitle>.html, so DT
         -- names the imported record correctly without us issuing a `set
-        -- name` rename event (which would fire Util: Lock Name on Rename
+        -- name` rename event (which would fire After Renaming, Lock Name
         -- and force NameLocked=1 even in the untitled-page fallback path).
         -- Keep the `set name` as a defensive no-op only if DT somehow
         -- normalized the name during import.
@@ -1035,7 +1035,7 @@ def main() -> int:
         #    the generic "No title" case, since we augment with a URL
         #    suffix), importing the raw staging file would land with the
         #    wrong name and require a `set name` rename event to fix it. That
-        #    rename fires Util: Lock Name on Rename, which would force
+        #    rename fires After Renaming, Lock Name, which would force
         #    NameLocked=1 and defeat the untitled-page fallback. The
         #    properly-named twin makes import land with the right name from
         #    the start.

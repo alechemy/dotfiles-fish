@@ -474,7 +474,7 @@ end uuidFromItemLink
 
 -- Replace a record's name only if it currently matches the ingester's
 -- "No title" placeholder. Sets NameLocked=1 before the rename so
--- Util: Lock Name on Rename (which matches NameLocked is Off) doesn't
+-- After Renaming, Lock Name (which matches NameLocked is Off) doesn't
 -- race against this propagation; the sibling ends up in the same
 -- protected state Enrich: AI Metadata gives the markdown.
 on replaceIfPlaceholder(theRecord, newName)

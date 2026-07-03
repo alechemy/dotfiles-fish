@@ -128,6 +128,7 @@ The pattern:
 2. The package's `.stow-local-ignore` lists `_seed` so the directory is never symlinked.
 3. A `scripts/seed-<pkg>-config.sh` walks `_seed/` and `cp`s each file to `$HOME` if the destination does not already exist. It is idempotent and safe to run with the app open.
 4. `setup.sh` calls the seed script after stowing the package.
+5. The seed is the **only carrier** of state the app keeps in these plists (e.g. smart-rule criteria/actions are opaque blobs no repo script can reconstruct), so it goes stale the moment the config is edited in the app's GUI. After any such edit, refresh it with `scripts/dump-devonthink-seed.sh` (the reverse copy; quit the app first, or `--force`) and commit the diff.
 
 Only genuinely portable, user-authored config belongs in a seed. Do **not** seed app-shipped defaults (DEVONthink repopulates its built-in AI templates and Smart Rules example `.scpt`s from the app bundle on launch) or machine-specific state (window geometry, the preferences plist, licenses) — verify against the app bundle before adding a file.
 

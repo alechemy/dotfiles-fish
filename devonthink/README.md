@@ -411,7 +411,7 @@ A single LLM call per document generates a title, event date, document type, tag
 
 The script reads each field from the record and applies it:
 
-- **Title** — If the document already has a clear, descriptive title (from its filename or a heading within the content), the AI preserves it as-is. A new title is only generated when the existing name is generic (e.g. "Untitled", "IMG_0042"). The `NameLocked` flag prevents the rename from overwriting names that were set intentionally (see [#util-lock-name-on-rename](##util-lock-name-on-rename---lock-name-on-rename)).
+- **Title** — If the document already has a clear, descriptive title (from its filename or a heading within the content), the AI preserves it as-is. A new title is only generated when the existing name is generic (e.g. "Untitled", "IMG_0042"). The `NameLocked` flag prevents the rename from overwriting names that were set intentionally (see [#after-renaming-lock-name](##after-renaming-lock-name---lock-name-on-rename)).
 - **Event Date** (`eventDate`) — Set if and only if the document is anchored to a single specific calendar date (e.g. a receipt, a bill, a meeting, a call, a journal entry, an appointment). Not set for documents that span a period or have no specific date (e.g. W-2, annual report, manual, walkthrough, bookmark, contract). The AI will not construct or infer a date from a referenced period. The date comes from content; the file creation/modification date is used as a fallback only when the content doesn't state it explicitly. The date is prepended to the title by the script (not the AI) and stored in the `EventDate` custom metadata field.
 - **Type** — A document type label (e.g. "Receipt", "Manual", "Meeting Notes") stored in the `DocumentType` custom metadata field, separate from topical tags.
 - **Tags** — 1–3 topical/thematic tags, deduplicated against existing tags before appending.
@@ -437,7 +437,7 @@ Runs after AI enrichment completes. Performs five steps in a single pass:
 1. **Action Items** — Parses the document for sections titled "Action Items", "Todos", or similar, and sends any bulleted tasks to Things 3 via AppleScript. Deduplication is handled via `PreviousTasks`. Skipped for web clip records (those with `WebClipSource` set).
 2. **Daily Notes** — Extracts "Daily Notes", "Today", "Journal", or "Log" sections from handwritten documents and appends them to today's daily note. Also appends a wikilink for any document with an `EventDate` to the respective date's daily note. Deduplication is handled via `PreviousDailyNotes` and `DailyNoteLinked`. Skipped for web clip records.
 3. **Sync H1** — For markdown documents, ensures the first `# Heading` matches the record's filename (minus extension). If the H1 differs it's replaced; if absent it's injected after any YAML frontmatter. This guarantees the AI-enriched title is reflected in the document body.
-4. **Web clip name propagation** — For markdown web clips (records with `WebClipSource` set), if the linked bookmark or HTML snapshot still carries a `"No title"` placeholder name, propagate the markdown's (post-enrichment) name to it. See [Untitled-page fallback](#untitled-page-fallback). `NameLocked` is set on the sibling _before_ the rename so `Util: Lock Name on Rename` doesn't double-fire.
+4. **Web clip name propagation** — For markdown web clips (records with `WebClipSource` set), if the linked bookmark or HTML snapshot still carries a `"No title"` placeholder name, propagate the markdown's (post-enrichment) name to it. See [Untitled-page fallback](#untitled-page-fallback). `NameLocked` is set on the sibling _before_ the rename so `After Renaming, Lock Name` doesn't double-fire.
 5. **Archive** — Moves the record to `99_ARCHIVE` and clears `NeedsProcessing`. The move happens first; the flag is only cleared on success to prevent silent data loss.
 
 This consolidates the previous Extract: Action Items, Process: Daily Notes, and Archive: Processed Items rules into one script, eliminating two "Every Minute" polling rules.
@@ -471,7 +471,7 @@ On macOS the Drafts action modifies the daily note directly via AppleScript, so 
 - Actions
   - Execute Script (AppleScript, embedded) — see [`process-jots.applescript`](../stow/devonthink/Library/Application%20Scripts/com.devon-technologies.think/Smart%20Rules/process-jots.applescript)
 
-### Util: Lock Name on Rename
+### After Renaming, Lock Name
 
 Automatically sets `NameLocked` whenever a document is renamed outside the pipeline (e.g. by the user in DEVONthink or Finder). This prevents Enrich: AI Metadata from overwriting an intentional name the next time the document is processed.
 
@@ -510,7 +510,7 @@ Current cleanups:
 
 > **Adding a new cleanup case.** Add an `OR` group to the DT criteria covering the new case's preconditions (DT 4 supports nested AND/OR groups), then add a new `my cleanupX(theRecord)` call inside `performSmartRule` plus the corresponding handler in the script. The handler should re-check preconditions defensively so it's safe even if DT yields a record that matches a different case's criteria.
 
-### Util: Restore Previous Name
+### Restore Previous Name
 
 Reverts a document's filename to the value stored in `PreviousName` (the name it had just before the most recent AI rename). After restoring, it clears `PreviousName` so the rule no longer matches the record. `NameLocked` stays **On** so Enrich: AI Metadata won't overwrite the restored name.
 
@@ -529,6 +529,23 @@ Reverts a document's filename to the value stored in `PreviousName` (the name it
 > **Hardening Note — Why an AppleScript instead of declarative move actions**
 >
 > An earlier version used two declarative actions: `Change NeedsProcessing to 0` followed by `Move to 99_ARCHIVE`. If the move failed silently, the flag was already cleared, so the rule would never re-match. The AppleScript replacement moves **first**, then clears the flag only on success.
+
+### Other utility rules
+
+The remaining seeded rules are small conveniences. Most use embedded scripts or declarative actions whose definitions travel only in the seeded `SmartRules.plist`, so the notes here are intent-level — open the rule in DT for exact criteria. To refresh the seed after editing any rule, run `scripts/dump-devonthink-seed.sh` and commit.
+
+- **Add/Update H1** (on demand) and **After Renaming Markdown, Add/Update H1** (automatic) — insert or refresh a markdown record's H1 from its name; the automatic variant fires after a rename so the body heading tracks the new name.
+- **After Saving Markdown, Sync H1 and Filename** (automatic) — the bidirectional H1↔name sync: renames the record to match its first H1, or inserts/updates the H1 from the filename, skipping YAML frontmatter. External script: [`sync-h1-and-filename.applescript`](../stow/devonthink/Library/Application%20Scripts/com.devon-technologies.think/Smart%20Rules/sync-h1-and-filename.applescript).
+- **After Labelling, Move to 99_ARCHIVE** (automatic) — declarative: putting a label on a record archives it.
+- **Skip SingleFile (On Demand)** — flips selected bookmarks to `SkipSingleFile=1`, the manual opt-out described in the `SkipSingleFile` metadata row.
+- **Prepare for Re-Enrichment** (on demand) — clears enrichment state on the selection so Enrich: AI Metadata takes a fresh pass (the workflow the `EnrichInputHash` row describes).
+- **Markdownify Text** (on demand) — converts the selected records to markdown.
+- **Convert User-AI Conversation to Reference** (on demand) — reshapes a captured user↔AI conversation record into a reference document.
+- **Lint Markdown (On Demand)** — manual invocation of the markdown lint pass ([`lint-markdown.applescript`](../stow/devonthink/Library/Application%20Scripts/com.devon-technologies.think/Smart%20Rules/lint-markdown.applescript)).
+- **Prose Check** and **Summarize** (on demand) — front doors to the Claude Code skills; they hand the selection to the skill in the background ([`prose-check-on-demand.applescript`](../stow/devonthink/Library/Application%20Scripts/com.devon-technologies.think/Smart%20Rules/prose-check-on-demand.applescript), [`summarize-on-demand.applescript`](../stow/devonthink/Library/Application%20Scripts/com.devon-technologies.think/Smart%20Rules/summarize-on-demand.applescript); see [docs/summarize.md](docs/summarize.md)).
+- **Capture Bookmarks Batch (On Demand)** — documented under [Invoking the batch from DT](#invoking-the-batch-from-dt-optional).
+
+DT-stock rules (Reminders, Filter Duplicates, Bates Numbering, chat-suggestion helpers, etc.) are not part of the pipeline and aren't documented here.
 
 ## Handle Updated Notebooks AppleScript
 
