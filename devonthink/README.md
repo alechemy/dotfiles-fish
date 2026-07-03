@@ -667,7 +667,7 @@ State the repo can't stow or seed — reproduce by hand (or with the noted one-l
   ```
 
 - **AI engine configuration** (Settings → AI): provider + model selection; API keys live in the macOS Keychain and are never captured by the repo.
-- **Keyboard Maestro macros** — the AppleScripts they run are tracked in [`../keyboard-maestro/`](../keyboard-maestro/), but the macro wrappers (hotkey triggers → Execute AppleScript) are KM GUI state. Recreate by binding a hotkey to each script, or import the exported `.kmmacros` if one is tracked alongside them.
+- **Keyboard Maestro macros** — the AppleScripts they run are tracked in [`../keyboard-maestro/`](../keyboard-maestro/); the macro wrappers (hotkey triggers → Execute AppleScript) sync via KM's own iCloud syncing (`~/Library/Mobile Documents/com~apple~CloudDocs/Keyboard Maestro/Keyboard Maestro Macros.kmsync`), so a fresh machine gets them by signing into iCloud and enabling KM sync.
 
 ## Database Backup & Recovery
 
