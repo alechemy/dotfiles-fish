@@ -512,6 +512,22 @@
         ]
       },
       {
+        "value": "&kp",
+        "params": [
+          {
+            "value": "LSHFT"
+          }
+        ]
+      },
+      {
+        "value": "&kp",
+        "params": [
+          {
+            "value": "LGUI"
+          }
+        ]
+      },
+      {
         "value": "&mkp",
         "params": [
           {
@@ -520,23 +536,7 @@
         ]
       },
       {
-        "value": "&mkp",
-        "params": [
-          {
-            "value": "RCLK"
-          }
-        ]
-      },
-      {
         "value": "&lower"
-      },
-      {
-        "value": "&mkp",
-        "params": [
-          {
-            "value": "RCLK"
-          }
-        ]
       },
       {
         "value": "&kp",
@@ -657,18 +657,18 @@
         ]
       },
       {
-        "value": "&kp",
+        "value": "&mkp",
         "params": [
           {
-            "value": "LALT"
+            "value": "RCLK"
           }
         ]
       },
       {
-        "value": "&mkp",
+        "value": "&kp",
         "params": [
           {
-            "value": "LCLK"
+            "value": "RALT"
           }
         ]
       },
@@ -13322,26 +13322,6 @@
       "keyPositions": [
         56,
         73
-      ],
-      "layers": [
-        0,
-        2
-      ]
-    },
-    {
-      "name": "middle_click_chord_v1_TKZ",
-      "description": "GE - middle click chord (LCTRL-keycap RCLK + RALT-keycap LCLK)",
-      "binding": {
-        "value": "&mkp",
-        "params": [
-          {
-            "value": "MCLK"
-          }
-        ]
-      },
-      "keyPositions": [
-        55,
-        72
       ],
       "layers": [
         0,
