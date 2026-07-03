@@ -23,11 +23,11 @@ warn() {
     "$PIPELINE_LOG" boox-import-watcher WARN "$*"
 }
 
-# Record startup time + alert if the watcher hasn't been (re)started in more
-# than 2 days. The plist is KeepAlive=true so this should normally only fire on
-# bootstrap or after a crash; long gaps indicate launchd disabled the job or
-# the laptop was offline for a long stretch.
-"$HOME/.local/bin/pipeline-record-run" boox-import-watcher 86400 || true
+# Record startup time, never alert (interval 0): this only runs on
+# (re)start, so the recorded gap is the previous instance's healthy uptime
+# and any threshold would false-alert after every multi-day run. A watcher
+# that dies and stays dead is caught by dt-watchdog's liveness check.
+"$HOME/.local/bin/pipeline-record-run" boox-import-watcher 0 || true
 
 # Poll a file's size until it has stayed identical for 5 consecutive samples
 # (~2.5s of quiescence), capped at 30s total. Echoes "stable", "gone" if the

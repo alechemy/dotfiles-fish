@@ -6,6 +6,11 @@
 # Designed to surface missed runs on a laptop where launchd's StartInterval
 # does not fire while the machine is asleep.
 #
+# An interval of 0 records the run without ever alerting — for KeepAlive
+# jobs that only call this at startup, where the gap since the previous
+# call is just their (healthy) uptime, so any threshold false-alerts on
+# every restart; dt-watchdog checks their liveness instead.
+#
 # Called as the first non-trivial action by each pipeline entry point.
 # Writes timestamps to ~/.local/state/devonthink/<job>.last-run.
 
@@ -22,7 +27,7 @@ mkdir -p "$STATE_DIR"
 
 NOW=$(date +%s)
 
-if [[ -f "$STATE_FILE" ]]; then
+if [[ "$INTERVAL" -gt 0 && -f "$STATE_FILE" ]]; then
     LAST=$(cat "$STATE_FILE" 2>/dev/null || echo 0)
     if [[ "$LAST" =~ ^[0-9]+$ ]] && [[ "$LAST" -gt 0 ]]; then
         GAP=$((NOW - LAST))
