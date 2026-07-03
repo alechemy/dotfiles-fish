@@ -647,6 +647,28 @@ done
 - **Cloud sync** — After creating a note, the script calls `synchronize database` to push it to DEVONthink's configured sync store. If sync fails for any reason (e.g., no network), the note is still created locally and will sync on the next automatic or manual sync cycle.
 - **Logging** — Check `~/Library/Logs/dt-daily-note.log` for creation results and `/tmp/dt-daily-note.log` for any launchd-level stdout/stderr.
 
+## Live-only GUI state (fresh-machine checklist)
+
+State the repo can't stow or seed — reproduce by hand (or with the noted one-liners) when standing up a new machine. Current values verified 2026-07-03.
+
+- **Markdown stylesheet + JavaScript assignment** — the CSS/JS files are stowed, but the *selection* lives in DT's preferences. Restore with:
+
+  ```bash
+  defaults write com.devon-technologies.think MarkdownStyleSheet "$HOME/Library/Application Support/DEVONthink/StyleSheets/Readable-Universal.css"
+  defaults write com.devon-technologies.think MarkdownJavaScript "$HOME/Library/Application Support/DEVONthink/StyleSheets/theme-toggle.js"
+  ```
+
+  (or pick both in Settings → Media. DT must be quit when writing defaults directly.)
+- **WikiLinks settings** (Settings → WikiLinks): automatic WikiLinks on, Names & Aliases mode, square-bracket auto-update on. Defaults keys if scripting: `AutomaticWikiLinks=1`, `WikiLinkNamesAndAliases=1`, `WikiLinkMode=1`, `WikiLinkOptions=2`, `UpdateSquareBracketWikiLinksAutomatically=1`.
+- **`10_DAILY` is excluded from AI chat** (`excludeFromChat=true`), so daily notes never enter LLM context. This is database-level state and syncs with the database; after a from-scratch rebuild re-apply with:
+
+  ```bash
+  osascript -e 'tell application id "DNtp" to set exclude from chat of (get record at "/10_DAILY" in database "Lorebook") to true'
+  ```
+
+- **AI engine configuration** (Settings → AI): provider + model selection; API keys live in the macOS Keychain and are never captured by the repo.
+- **Keyboard Maestro macros** — the AppleScripts they run are tracked in [`../keyboard-maestro/`](../keyboard-maestro/), but the macro wrappers (hotkey triggers → Execute AppleScript) are KM GUI state. Recreate by binding a hotkey to each script, or import the exported `.kmmacros` if one is tracked alongside them.
+
 ## Database Backup & Recovery
 
 Nothing in this repo backs up `~/Databases/Lorebook.dtBase2` — the repo rebuilds the *machinery* (scripts, agents, seeded rules), not the data. The database survives via two independent channels:
