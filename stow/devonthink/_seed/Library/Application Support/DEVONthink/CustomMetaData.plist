@@ -4,7 +4,9 @@
 <array>
 	<dict>
 		<key>date</key>
-		<real>792129907.24726605</real>
+		<real>804568442.99987304</real>
+		<key>disabled</key>
+		<integer>1</integer>
 		<key>identifier</key>
 		<string>mddate</string>
 		<key>index</key>
@@ -13,10 +15,12 @@
 		<string>Date</string>
 		<key>type</key>
 		<string>date</string>
+		<key>values</key>
+		<array/>
 	</dict>
 	<dict>
 		<key>date</key>
-		<real>801072115.40510404</real>
+		<real>804801971.84934604</real>
 		<key>identifier</key>
 		<string>mdcompany</string>
 		<key>index</key>
@@ -25,10 +29,14 @@
 		<string>Company</string>
 		<key>type</key>
 		<string>string</string>
+		<key>values</key>
+		<array/>
 	</dict>
 	<dict>
 		<key>date</key>
-		<real>792129907.24747396</real>
+		<real>804568442.99991405</real>
+		<key>disabled</key>
+		<integer>1</integer>
 		<key>identifier</key>
 		<string>mdauthor</string>
 		<key>index</key>
@@ -37,10 +45,12 @@
 		<string>Author</string>
 		<key>type</key>
 		<string>string</string>
+		<key>values</key>
+		<array/>
 	</dict>
 	<dict>
 		<key>date</key>
-		<real>801072115.40510798</real>
+		<real>804801971.84934902</real>
 		<key>identifier</key>
 		<string>mdabstract</string>
 		<key>index</key>
@@ -49,6 +59,8 @@
 		<string>Abstract</string>
 		<key>type</key>
 		<string>text</string>
+		<key>values</key>
+		<array/>
 	</dict>
 	<dict>
 		<key>date</key>
@@ -74,7 +86,7 @@
 	</dict>
 	<dict>
 		<key>date</key>
-		<real>787858273.39201903</real>
+		<real>804568443.00000596</real>
 		<key>disabled</key>
 		<integer>1</integer>
 		<key>identifier</key>
@@ -90,7 +102,7 @@
 	</dict>
 	<dict>
 		<key>date</key>
-		<real>787858506.816921</real>
+		<real>804568443.00002003</real>
 		<key>disabled</key>
 		<integer>1</integer>
 		<key>identifier</key>
@@ -345,20 +357,254 @@
 		<array/>
 	</dict>
 	<dict>
+		<key>date</key>
+		<real>799533112.43449497</real>
 		<key>identifier</key>
-		<string>mdai-tagged</string>
+		<string>mdaichattranscript</string>
 		<key>index</key>
-		<integer>22</integer>
+		<integer>52</integer>
+		<key>title</key>
+		<string>AIChatTranscript</string>
 		<key>type</key>
 		<string>bool</string>
 	</dict>
 	<dict>
+		<key>date</key>
+		<real>794620376.91737401</real>
 		<key>identifier</key>
-		<string>mdai-renamed</string>
+		<string>mdaienriched</string>
 		<key>index</key>
-		<integer>23</integer>
+		<integer>40</integer>
+		<key>title</key>
+		<string>AIEnriched</string>
 		<key>type</key>
 		<string>bool</string>
+	</dict>
+	<dict>
+		<key>date</key>
+		<real>792271894.62605</real>
+		<key>identifier</key>
+		<string>mdcommented</string>
+		<key>index</key>
+		<integer>27</integer>
+		<key>title</key>
+		<string>Commented</string>
+		<key>type</key>
+		<string>bool</string>
+	</dict>
+	<dict>
+		<key>date</key>
+		<real>793679907.18682694</real>
+		<key>identifier</key>
+		<string>mddailynotelinked</string>
+		<key>index</key>
+		<integer>45</integer>
+		<key>title</key>
+		<string>DailyNoteLinked</string>
+		<key>type</key>
+		<string>bool</string>
+	</dict>
+	<dict>
+		<key>date</key>
+		<real>793381047.80678594</real>
+		<key>identifier</key>
+		<string>mddocumenttype</string>
+		<key>index</key>
+		<integer>36</integer>
+		<key>title</key>
+		<string>DocumentType</string>
+		<key>type</key>
+		<string>string</string>
+	</dict>
+	<dict>
+		<key>date</key>
+		<real>798676097.64124298</real>
+		<key>identifier</key>
+		<string>mdenrichinputhash</string>
+		<key>index</key>
+		<integer>50</integer>
+		<key>title</key>
+		<string>EnrichInputHash</string>
+		<key>type</key>
+		<string>string</string>
+	</dict>
+	<dict>
+		<key>date</key>
+		<real>793212362.09710598</real>
+		<key>identifier</key>
+		<string>mdenrichstartedat</string>
+		<key>index</key>
+		<integer>34</integer>
+		<key>title</key>
+		<string>EnrichStartedAt</string>
+		<key>type</key>
+		<string>date</string>
+	</dict>
+	<dict>
+		<key>date</key>
+		<real>793237590.90473199</real>
+		<key>identifier</key>
+		<string>mderrorcount</string>
+		<key>index</key>
+		<integer>54</integer>
+		<key>title</key>
+		<string>ErrorCount</string>
+		<key>type</key>
+		<string>int</string>
+	</dict>
+	<dict>
+		<key>date</key>
+		<real>793381124.50053501</real>
+		<key>identifier</key>
+		<string>mdeventdate</string>
+		<key>index</key>
+		<integer>39</integer>
+		<key>title</key>
+		<string>EventDate</string>
+		<key>type</key>
+		<string>string</string>
+	</dict>
+	<dict>
+		<key>date</key>
+		<real>797296728.29808497</real>
+		<key>identifier</key>
+		<string>mdgranolaid</string>
+		<key>index</key>
+		<integer>47</integer>
+		<key>title</key>
+		<string>GranolaID</string>
+		<key>type</key>
+		<string>string</string>
+	</dict>
+	<dict>
+		<key>date</key>
+		<real>792216197.993976</real>
+		<key>identifier</key>
+		<string>mdhandwritten</string>
+		<key>index</key>
+		<integer>26</integer>
+		<key>type</key>
+		<string>bool</string>
+	</dict>
+	<dict>
+		<key>date</key>
+		<real>798040559.307989</real>
+		<key>identifier</key>
+		<string>mdisjot</string>
+		<key>index</key>
+		<integer>59</integer>
+		<key>title</key>
+		<string>IsJot</string>
+		<key>type</key>
+		<string>bool</string>
+	</dict>
+	<dict>
+		<key>date</key>
+		<real>797296710.76672494</real>
+		<key>identifier</key>
+		<string>mdgranolaparticipants</string>
+		<key>index</key>
+		<integer>58</integer>
+		<key>title</key>
+		<string>GranolaParticipants</string>
+		<key>type</key>
+		<string>text</string>
+	</dict>
+	<dict>
+		<key>date</key>
+		<real>793381061.24650002</real>
+		<key>identifier</key>
+		<string>mdlowconfidence</string>
+		<key>index</key>
+		<integer>57</integer>
+		<key>title</key>
+		<string>LowConfidence</string>
+		<key>type</key>
+		<string>bool</string>
+	</dict>
+	<dict>
+		<key>date</key>
+		<real>792611738.13634098</real>
+		<key>identifier</key>
+		<string>mdnamelocked</string>
+		<key>index</key>
+		<integer>30</integer>
+		<key>title</key>
+		<string>NameLocked</string>
+		<key>type</key>
+		<string>bool</string>
+	</dict>
+	<dict>
+		<key>date</key>
+		<real>792265414.34870803</real>
+		<key>identifier</key>
+		<string>mdneedsprocessing</string>
+		<key>index</key>
+		<integer>32</integer>
+		<key>title</key>
+		<string>NeedsProcessing</string>
+		<key>type</key>
+		<string>bool</string>
+	</dict>
+	<dict>
+		<key>date</key>
+		<real>797967411.77411306</real>
+		<key>identifier</key>
+		<string>mdneedssinglefile</string>
+		<key>index</key>
+		<integer>49</integer>
+		<key>title</key>
+		<string>NeedsSingleFile</string>
+		<key>type</key>
+		<string>bool</string>
+	</dict>
+	<dict>
+		<key>date</key>
+		<real>793679916.92847395</real>
+		<key>identifier</key>
+		<string>mdpreviousdailynotes</string>
+		<key>index</key>
+		<integer>37</integer>
+		<key>title</key>
+		<string>PreviousDailyNotes</string>
+		<key>type</key>
+		<string>text</string>
+	</dict>
+	<dict>
+		<key>date</key>
+		<real>792688364.02971399</real>
+		<key>identifier</key>
+		<string>mdpreviousname</string>
+		<key>index</key>
+		<integer>31</integer>
+		<key>title</key>
+		<string>PreviousName</string>
+		<key>type</key>
+		<string>string</string>
+	</dict>
+	<dict>
+		<key>date</key>
+		<real>793249155.44135797</real>
+		<key>identifier</key>
+		<string>mdprevioustasks</string>
+		<key>index</key>
+		<integer>53</integer>
+		<key>title</key>
+		<string>PreviousTasks</string>
+		<key>type</key>
+		<string>text</string>
+	</dict>
+	<dict>
+		<key>date</key>
+		<real>793164414.35727799</real>
+		<key>identifier</key>
+		<string>mdrecognizedat</string>
+		<key>index</key>
+		<integer>33</integer>
+		<key>title</key>
+		<string>RecognizedAt</string>
+		<key>type</key>
+		<string>date</string>
 	</dict>
 	<dict>
 		<key>date</key>
@@ -375,6 +621,38 @@
 		<string>bool</string>
 		<key>values</key>
 		<array/>
+	</dict>
+	<dict>
+		<key>identifier</key>
+		<string>mdrewritesource</string>
+		<key>index</key>
+		<integer>60</integer>
+		<key>type</key>
+		<string>crosslink</string>
+	</dict>
+	<dict>
+		<key>date</key>
+		<real>798760401.93952703</real>
+		<key>identifier</key>
+		<string>mdsinglefiletoolarge</string>
+		<key>index</key>
+		<integer>61</integer>
+		<key>title</key>
+		<string>SingleFileTooLarge</string>
+		<key>type</key>
+		<string>bool</string>
+	</dict>
+	<dict>
+		<key>date</key>
+		<real>798763038.36489999</real>
+		<key>identifier</key>
+		<string>mdskipsinglefile</string>
+		<key>index</key>
+		<integer>51</integer>
+		<key>title</key>
+		<string>SkipSingleFile</string>
+		<key>type</key>
+		<string>bool</string>
 	</dict>
 	<dict>
 		<key>date</key>
@@ -394,28 +672,6 @@
 	</dict>
 	<dict>
 		<key>date</key>
-		<real>792216197.993976</real>
-		<key>identifier</key>
-		<string>mdhandwritten</string>
-		<key>index</key>
-		<integer>26</integer>
-		<key>type</key>
-		<string>bool</string>
-	</dict>
-	<dict>
-		<key>date</key>
-		<real>792271894.62605</real>
-		<key>identifier</key>
-		<string>mdcommented</string>
-		<key>index</key>
-		<integer>27</integer>
-		<key>title</key>
-		<string>Commented</string>
-		<key>type</key>
-		<string>bool</string>
-	</dict>
-	<dict>
-		<key>date</key>
 		<real>792619303.649598</real>
 		<key>identifier</key>
 		<string>mdsummary</string>
@@ -428,147 +684,15 @@
 	</dict>
 	<dict>
 		<key>date</key>
-		<real>792612437.99565494</real>
+		<real>797799962.30274498</real>
 		<key>identifier</key>
-		<string>mdai-enriched</string>
+		<string>mdsummarysource</string>
 		<key>index</key>
-		<integer>29</integer>
+		<integer>48</integer>
 		<key>title</key>
-		<string>AI-Enriched</string>
+		<string>SummarySource</string>
 		<key>type</key>
-		<string>bool</string>
-	</dict>
-	<dict>
-		<key>date</key>
-		<real>792611738.13634098</real>
-		<key>identifier</key>
-		<string>mdnamelocked</string>
-		<key>index</key>
-		<integer>30</integer>
-		<key>title</key>
-		<string>NameLocked</string>
-		<key>type</key>
-		<string>bool</string>
-	</dict>
-	<dict>
-		<key>date</key>
-		<real>792688364.02971399</real>
-		<key>identifier</key>
-		<string>mdpreviousname</string>
-		<key>index</key>
-		<integer>31</integer>
-		<key>title</key>
-		<string>PreviousName</string>
-		<key>type</key>
-		<string>string</string>
-	</dict>
-	<dict>
-		<key>date</key>
-		<real>792265414.34870803</real>
-		<key>identifier</key>
-		<string>mdneedsprocessing</string>
-		<key>index</key>
-		<integer>32</integer>
-		<key>title</key>
-		<string>NeedsProcessing</string>
-		<key>type</key>
-		<string>bool</string>
-	</dict>
-	<dict>
-		<key>date</key>
-		<real>793164414.35727799</real>
-		<key>identifier</key>
-		<string>mdrecognizedat</string>
-		<key>index</key>
-		<integer>33</integer>
-		<key>title</key>
-		<string>RecognizedAt</string>
-		<key>type</key>
-		<string>date</string>
-	</dict>
-	<dict>
-		<key>date</key>
-		<real>793212362.09710598</real>
-		<key>identifier</key>
-		<string>mdenrichstartedat</string>
-		<key>index</key>
-		<integer>34</integer>
-		<key>title</key>
-		<string>EnrichStartedAt</string>
-		<key>type</key>
-		<string>date</string>
-	</dict>
-	<dict>
-		<key>date</key>
-		<real>793248216.45192206</real>
-		<key>identifier</key>
-		<string>mdtasksextracted</string>
-		<key>index</key>
-		<integer>35</integer>
-		<key>title</key>
-		<string>TasksExtracted</string>
-		<key>type</key>
-		<string>bool</string>
-	</dict>
-	<dict>
-		<key>date</key>
-		<real>793381047.80678594</real>
-		<key>identifier</key>
-		<string>mddocumenttype</string>
-		<key>index</key>
-		<integer>36</integer>
-		<key>title</key>
-		<string>DocumentType</string>
-		<key>type</key>
-		<string>string</string>
-	</dict>
-	<dict>
-		<key>date</key>
-		<real>793679916.92847395</real>
-		<key>identifier</key>
-		<string>mdpreviousdailynotes</string>
-		<key>index</key>
-		<integer>37</integer>
-		<key>title</key>
-		<string>PreviousDailyNotes</string>
-		<key>type</key>
-		<string>text</string>
-	</dict>
-	<dict>
-		<key>date</key>
-		<real>793680248.91483295</real>
-		<key>identifier</key>
-		<string>mddailynotesprocessed</string>
-		<key>index</key>
-		<integer>38</integer>
-		<key>title</key>
-		<string>DailyNotesProcessed</string>
-		<key>type</key>
-		<string>bool</string>
-	</dict>
-	<dict>
-		<key>date</key>
-		<real>793381124.50053501</real>
-		<key>identifier</key>
-		<string>mdeventdate</string>
-		<key>index</key>
-		<integer>39</integer>
-		<key>title</key>
-		<string>EventDate</string>
-		<key>type</key>
-		<string>string</string>
-	</dict>
-	<dict>
-		<key>date</key>
-		<real>794620376.91737401</real>
-		<key>identifier</key>
-		<string>mdaienriched</string>
-		<key>index</key>
-		<integer>40</integer>
-		<key>title</key>
-		<string>AIEnriched</string>
-		<key>type</key>
-		<string>bool</string>
+		<string>crosslink</string>
 	</dict>
 	<dict>
 		<key>date</key>
@@ -605,194 +729,6 @@
 		<string>WebClipSource</string>
 		<key>type</key>
 		<string>crosslink</string>
-	</dict>
-	<dict>
-		<key>identifier</key>
-		<string>mditemlink</string>
-		<key>index</key>
-		<integer>44</integer>
-		<key>type</key>
-		<string>crosslink</string>
-	</dict>
-	<dict>
-		<key>date</key>
-		<real>793679907.18682694</real>
-		<key>identifier</key>
-		<string>mddailynotelinked</string>
-		<key>index</key>
-		<integer>45</integer>
-		<key>title</key>
-		<string>DailyNoteLinked</string>
-		<key>type</key>
-		<string>bool</string>
-	</dict>
-	<dict>
-		<key>date</key>
-		<real>797296728.29808497</real>
-		<key>identifier</key>
-		<string>mdgranolaid</string>
-		<key>index</key>
-		<integer>47</integer>
-		<key>title</key>
-		<string>GranolaID</string>
-		<key>type</key>
-		<string>string</string>
-	</dict>
-	<dict>
-		<key>date</key>
-		<real>797799962.30274498</real>
-		<key>identifier</key>
-		<string>mdsummarysource</string>
-		<key>index</key>
-		<integer>48</integer>
-		<key>title</key>
-		<string>SummarySource</string>
-		<key>type</key>
-		<string>crosslink</string>
-	</dict>
-	<dict>
-		<key>date</key>
-		<real>797967411.77411306</real>
-		<key>identifier</key>
-		<string>mdneedssinglefile</string>
-		<key>index</key>
-		<integer>49</integer>
-		<key>title</key>
-		<string>NeedsSingleFile</string>
-		<key>type</key>
-		<string>bool</string>
-	</dict>
-	<dict>
-		<key>date</key>
-		<real>798676097.64124298</real>
-		<key>identifier</key>
-		<string>mdenrichinputhash</string>
-		<key>index</key>
-		<integer>50</integer>
-		<key>title</key>
-		<string>EnrichInputHash</string>
-		<key>type</key>
-		<string>string</string>
-	</dict>
-	<dict>
-		<key>date</key>
-		<real>798763038.36489999</real>
-		<key>identifier</key>
-		<string>mdskipsinglefile</string>
-		<key>index</key>
-		<integer>51</integer>
-		<key>title</key>
-		<string>SkipSingleFile</string>
-		<key>type</key>
-		<string>bool</string>
-	</dict>
-	<dict>
-		<key>date</key>
-		<real>799533112.43449497</real>
-		<key>identifier</key>
-		<string>mdaichattranscript</string>
-		<key>index</key>
-		<integer>52</integer>
-		<key>title</key>
-		<string>AIChatTranscript</string>
-		<key>type</key>
-		<string>bool</string>
-	</dict>
-	<dict>
-		<key>date</key>
-		<real>793249155.44135797</real>
-		<key>identifier</key>
-		<string>mdprevioustasks</string>
-		<key>index</key>
-		<integer>53</integer>
-		<key>title</key>
-		<string>PreviousTasks</string>
-		<key>type</key>
-		<string>text</string>
-	</dict>
-	<dict>
-		<key>date</key>
-		<real>793237590.90473199</real>
-		<key>identifier</key>
-		<string>mderrorcount</string>
-		<key>index</key>
-		<integer>54</integer>
-		<key>title</key>
-		<string>ErrorCount</string>
-		<key>type</key>
-		<string>int</string>
-	</dict>
-	<dict>
-		<key>identifier</key>
-		<string>mdisdailynote</string>
-		<key>index</key>
-		<integer>55</integer>
-		<key>type</key>
-		<string>bool</string>
-	</dict>
-	<dict>
-		<key>identifier</key>
-		<string>mdreturnlinks</string>
-		<key>index</key>
-		<integer>56</integer>
-		<key>type</key>
-		<string>richtext</string>
-	</dict>
-	<dict>
-		<key>date</key>
-		<real>793381061.24650002</real>
-		<key>identifier</key>
-		<string>mdlowconfidence</string>
-		<key>index</key>
-		<integer>57</integer>
-		<key>title</key>
-		<string>LowConfidence</string>
-		<key>type</key>
-		<string>bool</string>
-	</dict>
-	<dict>
-		<key>date</key>
-		<real>797296710.76672494</real>
-		<key>identifier</key>
-		<string>mdgranolaparticipants</string>
-		<key>index</key>
-		<integer>58</integer>
-		<key>title</key>
-		<string>GranolaParticipants</string>
-		<key>type</key>
-		<string>text</string>
-	</dict>
-	<dict>
-		<key>date</key>
-		<real>798040559.307989</real>
-		<key>identifier</key>
-		<string>mdisjot</string>
-		<key>index</key>
-		<integer>59</integer>
-		<key>title</key>
-		<string>IsJot</string>
-		<key>type</key>
-		<string>bool</string>
-	</dict>
-	<dict>
-		<key>identifier</key>
-		<string>mdrewritesource</string>
-		<key>index</key>
-		<integer>60</integer>
-		<key>type</key>
-		<string>crosslink</string>
-	</dict>
-	<dict>
-		<key>date</key>
-		<real>798760401.93952703</real>
-		<key>identifier</key>
-		<string>mdsinglefiletoolarge</string>
-		<key>index</key>
-		<integer>61</integer>
-		<key>title</key>
-		<string>SingleFileTooLarge</string>
-		<key>type</key>
-		<string>bool</string>
 	</dict>
 </array>
 </plist>
