@@ -319,6 +319,21 @@ def main():
             log(gate.stderr.strip() or "skipping: not on AC power")
             return
 
+    # Role gate: setup.sh skips loading this agent on follower machines, but
+    # a follower bootstrapped before the role split can still have it loaded —
+    # importing there against the synced database with an independent local
+    # state file produces duplicates. User-invoked runs bypass, matching
+    # should-run-dt-driver's own --force semantics.
+    if not user_invoked:
+        gate = subprocess.run(
+            [os.path.expanduser("~/.local/bin/should-run-dt-driver")],
+            capture_output=True,
+            text=True,
+        )
+        if gate.returncode != 0:
+            log("skipping: this Mac is a pipeline follower (should-run-dt-driver)")
+            return
+
     # Verify gh CLI is authenticated
     try:
         auth_check = subprocess.run(

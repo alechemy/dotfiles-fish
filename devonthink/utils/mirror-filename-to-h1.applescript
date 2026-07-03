@@ -3,6 +3,11 @@ use scripting additions
 
 -- add_h1_from_filename.applescript
 --
+-- Manual one-shot tool for the current selection. The installed pipeline
+-- handles this bidirectionally via the "After Saving Markdown, Sync H1 and
+-- Filename" rule (sync-h1-and-filename.applescript); keep this only for
+-- ad-hoc batch repairs outside the rule's criteria.
+--
 -- Purpose:
 -- - Intended for use in a DEVONthink Smart Rule triggered "On Rename".
 -- - Updates the Markdown H1 header to match the filename.

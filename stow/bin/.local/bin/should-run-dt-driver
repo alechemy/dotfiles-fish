@@ -4,8 +4,11 @@
 # Role gate for the DEVONthink pipeline. Exit 0 if this Mac is the pipeline
 # DRIVER (run document-mutating work); exit 1 if it is a FOLLOWER (skip).
 #
-# Mirrors should-run-background-job. Two consumers:
-#   - the launchd ingest agents (gate before importing), and
+# Mirrors should-run-background-job. Consumers:
+#   - setup.sh, which skips loading the ingest agents entirely on followers,
+#   - the two network importers (import-github-stars.py, import-granola.py),
+#     as a runtime backstop for a follower that still has the agents loaded
+#     from a bootstrap that predates the role split, and
 #   - a guard at the top of each auto-firing, mutating smart rule, via
 #     `do shell script "$HOME/.local/bin/should-run-dt-driver"` wrapped in a
 #     try/on-error-return, so a follower's rule engine fires-then-no-ops while

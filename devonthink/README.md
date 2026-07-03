@@ -278,8 +278,10 @@ The `%if-empty<{page-title}|No title>` pattern in SingleFile's filename template
 2. In SingleFile → Options → File name, use:
 
     ```
-    SingleFile/%if-empty<{page-title}|No title>.{filename-extension}
+    SingleFile/%if-empty<{page-title}|No title> ({date-iso} {time-locale}).{filename-extension}
     ```
+
+    (This matches `singlefile-extension-settings.json`, the canonical settings file. The date-time suffix keeps repeat captures of the same page from colliding; `derive_title` strips it on ingest.)
 
 3. Bind SingleFile's keyboard shortcut to `Cmd+D` in `chrome://extensions/shortcuts`. (Used by `capture-with-singlefile` for Scenario 2 and by the user directly for Scenario 1.)
 4. Ensure `~/Downloads/SingleFile/` exists as a real folder (not a symlink to DT's inbox — that's what the pre-refactor setup used, and what this architecture explicitly avoids).

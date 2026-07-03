@@ -3,6 +3,11 @@ use scripting additions
 
 -- rename_record_from_h1.applescript
 --
+-- Manual one-shot tool for the current selection. The installed pipeline
+-- handles this bidirectionally via the "After Saving Markdown, Sync H1 and
+-- Filename" rule (sync-h1-and-filename.applescript); keep this only for
+-- ad-hoc batch repairs outside the rule's criteria.
+--
 -- Purpose:
 -- - Rename DEVONthink Markdown records based on the first non-empty H1 in their content.
 -- - H1 is defined as a line that matches: ^#\s+(.+)$ (i.e., "# " followed by non-empty text).

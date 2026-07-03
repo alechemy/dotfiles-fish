@@ -95,9 +95,15 @@ import_pdf() {
     fi
 }
 
+# Wait for the watch dir instead of exiting: KeepAlive relaunches on any
+# exit status, so an early exit here churns through launchd's throttle loop
+# (observed: 22 warns in ~3.5 minutes) until Maestral creates the folder.
 if [[ ! -d "$WATCH_DIR" ]]; then
-    warn "watch directory not found, exiting (is Maestral set up?): $WATCH_DIR"
-    exit 0
+    warn "watch directory not found, waiting for it to appear (is Maestral set up?): $WATCH_DIR"
+    until [[ -d "$WATCH_DIR" ]]; do
+        sleep 60
+    done
+    log "watch directory appeared: $WATCH_DIR"
 fi
 
 log "starting, watching $WATCH_DIR"

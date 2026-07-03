@@ -160,7 +160,7 @@ This means a broken Granola version (schema drift, key-derivation regression, et
 ## Notes
 
 - **No API calls.** The pipeline reads `~/Library/Application Support/Granola/IndexedDB/...` and `granola.db` directly. Granola does not need to be running.
-- **DEVONthink must be running.** The sender uses `osascript` to create records. If DT is quit, the call fails and gets reported as a pipeline error per the dedup logic above.
+- **DEVONthink must be running.** The sender uses `osascript` to create records. If DT is quit, each meeting's import fails, is logged as `FAILED:`, and is retried on the next run (a meeting only enters the state file on success); only unhandled importer exceptions become pipeline-error inbox records per the dedup logic above.
 - **uv must be installed.** The parser shebang is `#!/usr/bin/env -S uv run --script`. uv resolves and caches the PEP 723 deps on first run. uv is in `Brewfile`.
 - **Idempotency.** Meetings are tracked by UUID in the state file. Running the script multiple times is safe, as is kickstarting the LaunchAgent.
 - **Brittle points** (in approximate order of likelihood to break): Granola's IndexedDB origin path, SQLCipher schema, IDB key entry names, cipher params. `~/.local/share/granola-import/NOTES.md` enumerates each case and how to debug it.

@@ -36,7 +36,7 @@ function run(argv) {
     errorExit(`Invariant: dateStr "${dateStr}" must be yyyy-mm-dd`);
   }
 
-  const dt = Application("DEVONthink");
+  const dt = Application("com.devon-technologies.think");
 
   let db;
   try {

@@ -215,7 +215,7 @@ Summary length must be **proportional** to the source material. A 10-minute vide
 
 **For short content (<3000 source words):** spawn a single **Opus** subagent to summarize the full content directly.
 
-**When dispatching any subagent**, pass `model: "claude-opus-4-6"` to ensure Opus handles all summarization. **NEVER use Haiku or Sonnet.**
+**When dispatching any subagent**, pass `model: "opus"` (the un-versioned alias, so the pin survives model releases) to ensure Opus handles all summarization. **NEVER use Haiku or Sonnet.**
 
 ## Step 4: Assemble and import the summary note
 
