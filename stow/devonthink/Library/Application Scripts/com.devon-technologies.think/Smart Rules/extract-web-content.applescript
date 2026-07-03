@@ -129,8 +129,10 @@ end findArchivedDuplicate
 
 -- Append a wikilink to today's daily note under "## Today's Notes".
 -- Idempotent via DailyNoteLinked and a UUID-in-note check. Non-fatal —
--- if the daily note doesn't exist or the append fails, the record is
--- still archived normally.
+-- if the append fails, the record is still archived normally. The note is
+-- created on demand: bookmarks processed between midnight and the 06:15
+-- seeder would otherwise drop the link permanently (archived with
+-- NeedsProcessing=0, nothing ever retries).
 on logBookmarkToDailyNote(theRecord)
 	tell application id "DNtp"
 		try
@@ -141,8 +143,11 @@ on logBookmarkToDailyNote(theRecord)
 			set cYear to year of cDate as text
 			set cMonth to text -2 thru -1 of ("0" & ((month of cDate) as integer))
 			set cDay to text -2 thru -1 of ("0" & (day of cDate))
-			set todayFilename to cYear & "-" & cMonth & "-" & cDay & ".md"
-			set targetNote to get record at ("/10_DAILY/" & todayFilename) in database "Lorebook"
+			set todayStr to cYear & "-" & cMonth & "-" & cDay
+			set targetDB to database "Lorebook"
+			set dailyGroup to get record at "/10_DAILY" in targetDB
+			if dailyGroup is missing value then return
+			set targetNote to my getOrCreateDailyNote(targetDB, dailyGroup, "/10_DAILY", todayStr)
 			if targetNote is missing value then return
 
 			set docUUID to uuid of theRecord
@@ -188,6 +193,29 @@ on logBookmarkToDailyNote(theRecord)
 		end try
 	end tell
 end logBookmarkToDailyNote
+
+-- Returns the daily note for dateStr (YYYY-MM-DD), creating it in destGroup
+-- if it doesn't exist yet. The 6:15 AM launchd job (create-daily-note.sh)
+-- normally seeds these, but bookmarks arriving between midnight and 06:15
+-- hit this rule before the note exists; creating on demand keeps the
+-- wikilink from being dropped. Mirrors create-daily-note.sh's content and
+-- "Daily Note" tag so an on-demand note is indistinguishable from a seeded
+-- one. Same handler as Post-Enrich & Archive's.
+on getOrCreateDailyNote(targetDB, destGroup, groupPath, dateStr)
+	tell application id "DNtp"
+		set noteFilename to dateStr & ".md"
+		set existingNote to get record at (groupPath & "/" & noteFilename) in targetDB
+		if existingNote is not missing value then return existingNote
+
+		set headingDate to do shell script "date -j -f '%Y-%m-%d' " & quoted form of dateStr & " '+%A, %B %-d, %Y'"
+		set noteContent to "# " & headingDate & return & return & "- " & return
+
+		set newNote to create record with {name:dateStr, type:markdown} in destGroup
+		set plain text of newNote to noteContent
+		set tags of newNote to {"Daily Note"}
+		return newNote
+	end tell
+end getOrCreateDailyNote
 
 -- Forward an event to the centralized pipeline log. Fails silently if
 -- the helper isn't present, so scripts remain functional before the
