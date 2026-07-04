@@ -155,8 +155,10 @@ the prose is just a rendering.
 `~/.config/dt-pipeline/entities.conf` (KEY=VALUE, all optional):
 
 ```
-TRANSPORT=ollama      # auto | ollama | dtchat | off
-OLLAMA_MODEL=qwen3:30b-a3b
+TRANSPORT=local       # auto | local | omlx | ollama | dtchat | off
+OMLX_MODEL=Qwen3.5-35B-A3B-4bit
+OMLX_URL=http://127.0.0.1:8000
+OLLAMA_MODEL=qwen3.5:35b-a3b
 OLLAMA_URL=http://127.0.0.1:11434
 FILING_MODE=suggest   # suggest | auto
 MAX_PER_RUN=3
@@ -173,12 +175,20 @@ the model's ~22 GB right after each batch instead of Ollama's 5-minute
 default. Once the backlog drains, inference happens only when a new
 meeting/handwritten/daily note appears — a few short runs a day.
 
-The deployed posture is **local-first**: `qwen3.5:35b-a3b` (35B MoE, ~3B
-active, ~23 GB, ~30–90 s per extraction on this machine) via Ollama, kept
-resident by `brew services start ollama`. With `TRANSPORT=ollama`,
-extraction *waits* when the model is unavailable rather than falling back to
-a cloud provider; `auto` restores the DT-chat fallback for meeting/
-handwritten notes if availability ever matters more than consistency.
+The deployed posture is **local-only** (`TRANSPORT=local`): extraction
+prefers **oMLX** (`Qwen3.5-35B-A3B-4bit`, MLX backend, ~5–10 s per
+extraction), falls back to **Ollama** (`qwen3.5:35b-a3b`, same weights on
+llama.cpp, ~30–90 s) when oMLX is down, and *waits* rather than ever
+falling back to a cloud provider; `auto` restores the DT-chat fallback for
+meeting/handwritten notes if availability ever matters more than
+consistency. oMLX serves an OpenAI-compatible API on :8000
+(`extract_omlx` uses `response_format: json_schema` +
+`chat_template_kwargs: {enable_thinking: false}`); models are MLX builds
+from HuggingFace in `~/.omlx/models/`. The oMLX app (menu-bar,
+auto-updating; the Homebrew formula does not build on macOS 27) manages the
+server across reboots once its first-run setup has been completed in the
+GUI; set a per-model idle TTL in the admin panel
+(`http://localhost:8000/admin`) so weights unload between batches.
 
 The model was picked by a three-way bake-off on real notes (same production
 prompt/schema): Qwen3.5 was the only candidate with correct per-person fact

@@ -30,8 +30,11 @@ notes already flow through DT chat for enrichment, so either transport is
 acceptable for them.
 
 Config (~/.config/dt-pipeline/entities.conf, KEY=VALUE):
-  TRANSPORT=auto|ollama|dtchat|off   default auto: ollama when the
-                                     configured model responds, else dtchat
+  TRANSPORT=auto|local|omlx|ollama|dtchat|off
+                                     auto: omlx, else ollama, else dtchat.
+                                     local: omlx, else ollama, never dtchat
+  OMLX_MODEL=<name>                  model id as listed by /v1/models
+  OMLX_URL=http://127.0.0.1:8000
   OLLAMA_MODEL=<name>                required for the ollama transport
   OLLAMA_URL=http://127.0.0.1:11434
   FILING_MODE=suggest|auto           default suggest
@@ -187,6 +190,8 @@ EXTRACTION_SCHEMA = {
 def load_config():
     config = {
         "TRANSPORT": "auto",
+        "OMLX_MODEL": "",
+        "OMLX_URL": "http://127.0.0.1:8000",
         "OLLAMA_MODEL": "",
         "OLLAMA_URL": "http://127.0.0.1:11434",
         "FILING_MODE": "suggest",
@@ -285,19 +290,76 @@ def user_idle_seconds():
     return None
 
 
+_availability_cache = {}
+
+
 def ollama_available(config):
-    if not config["OLLAMA_MODEL"]:
-        return False
-    try:
-        with urllib.request.urlopen(
-            config["OLLAMA_URL"] + "/api/tags", timeout=3
-        ) as resp:
-            tags = json.load(resp)
-    except (urllib.error.URLError, OSError, json.JSONDecodeError):
-        return False
-    names = {m.get("name", "") for m in tags.get("models", [])}
-    model = config["OLLAMA_MODEL"]
-    return model in names or f"{model}:latest" in names
+    if "ollama" in _availability_cache:
+        return _availability_cache["ollama"]
+    ok = False
+    if config["OLLAMA_MODEL"]:
+        try:
+            with urllib.request.urlopen(
+                config["OLLAMA_URL"] + "/api/tags", timeout=3
+            ) as resp:
+                tags = json.load(resp)
+            names = {m.get("name", "") for m in tags.get("models", [])}
+            model = config["OLLAMA_MODEL"]
+            ok = model in names or f"{model}:latest" in names
+        except (urllib.error.URLError, OSError, json.JSONDecodeError):
+            ok = False
+    _availability_cache["ollama"] = ok
+    return ok
+
+
+def omlx_available(config):
+    if "omlx" in _availability_cache:
+        return _availability_cache["omlx"]
+    ok = False
+    if config["OMLX_MODEL"]:
+        try:
+            with urllib.request.urlopen(
+                config["OMLX_URL"] + "/v1/models", timeout=3
+            ) as resp:
+                models = json.load(resp)
+            ok = config["OMLX_MODEL"] in {
+                m.get("id", "") for m in models.get("data", [])
+            }
+        except (urllib.error.URLError, OSError, json.JSONDecodeError):
+            ok = False
+    _availability_cache["omlx"] = ok
+    return ok
+
+
+def extract_omlx(config, prompt):
+    payload = json.dumps({
+        "model": config["OMLX_MODEL"],
+        "messages": [
+            {"role": "system", "content": CHAT_ROLE},
+            {"role": "user", "content": prompt},
+        ],
+        "temperature": 0,
+        "max_tokens": 4096,
+        "response_format": {
+            "type": "json_schema",
+            "json_schema": {
+                "name": "extraction",
+                "strict": True,
+                "schema": EXTRACTION_SCHEMA,
+            },
+        },
+        # Qwen3.5 thinks by default; constrained extraction neither needs
+        # nor wants a reasoning phase.
+        "chat_template_kwargs": {"enable_thinking": False},
+    }).encode()
+    req = urllib.request.Request(
+        config["OMLX_URL"] + "/v1/chat/completions",
+        data=payload,
+        headers={"Content-Type": "application/json"},
+    )
+    with urllib.request.urlopen(req, timeout=600) as resp:
+        out = json.load(resp)
+    return out["choices"][0]["message"]["content"]
 
 
 def extract_ollama(config, prompt):
@@ -625,19 +687,31 @@ def cap_words(text, head=6000, tail=1000):
     return " ".join(words[:head]) + "\n[...truncated...]\n" + " ".join(words[-tail:])
 
 
+LOCAL_TRANSPORTS = ("omlx", "ollama")
+
+
 def pick_transport(config, kind):
     transport = config["TRANSPORT"]
     if transport == "off":
         return None
-    ollama_ok = ollama_available(config)
+
+    def local_pick(allowed):
+        if "omlx" in allowed and omlx_available(config):
+            return "omlx"
+        if "ollama" in allowed and ollama_available(config):
+            return "ollama"
+        return None
+
+    if transport in LOCAL_TRANSPORTS:
+        return local_pick((transport,))
+    if transport == "local":
+        return local_pick(LOCAL_TRANSPORTS)
     if kind == "daily":
         # /10_DAILY is excluded from DT chat by design; local model only.
-        return "ollama" if ollama_ok and transport in ("auto", "ollama") else None
-    if transport == "ollama":
-        return "ollama" if ollama_ok else None
+        return local_pick(LOCAL_TRANSPORTS) if transport == "auto" else None
     if transport == "dtchat":
         return "dtchat"
-    return "ollama" if ollama_ok else "dtchat"
+    return local_pick(LOCAL_TRANSPORTS) or "dtchat"
 
 
 def scan(config, state, dry_run, force_uuid, user_invoked):
@@ -712,7 +786,7 @@ def scan(config, state, dry_run, force_uuid, user_invoked):
         transport = pick_transport(config, source["kind"])
         if transport is None:
             continue  # no eligible transport (e.g. daily note without Ollama)
-        if transport == "ollama" and not idle_ok:
+        if transport in LOCAL_TRANSPORTS and not idle_ok:
             # Local inference is deferrable by design; never spin fans while
             # the user is actively working. Candidates wait for an idle run.
             if not idle_skip_logged:
@@ -739,8 +813,12 @@ def scan(config, state, dry_run, force_uuid, user_invoked):
                  extra={"record_name": source["name"],
                         "record_uuid": source["uuid"]})
         try:
-            raw = (extract_ollama(config, prompt) if transport == "ollama"
-                   else extract_dtchat(prompt))
+            if transport == "omlx":
+                raw = extract_omlx(config, prompt)
+            elif transport == "ollama":
+                raw = extract_ollama(config, prompt)
+            else:
+                raw = extract_dtchat(prompt)
             extracted_people, extracted_events = parse_extraction(raw)
         except Exception as exc:
             state["attempts"][source["uuid"]] = attempts + 1

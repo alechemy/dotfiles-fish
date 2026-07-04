@@ -154,8 +154,8 @@ over days of normal breaks. To speed that up, run
 a few times — manual runs bypass the battery and idle gates, and each pass
 extracts 3 notes (fish: `for i in (seq 10); ~/.local/bin/entity-filing.py
 --scan-only; end`). Stop whenever; there's no penalty for leaving the rest
-to the schedule. Expect fans for ~a minute per note; the model frees its
-RAM about a minute after each pass.
+to the schedule. Each note takes a few seconds on the oMLX backend (~a
+minute if it's fallen back to Ollama).
 
 Everything logs to `~/Library/Logs/devonthink-pipeline.log` (components
 `morning-brief` and `entity-filing`). Preview commands:
