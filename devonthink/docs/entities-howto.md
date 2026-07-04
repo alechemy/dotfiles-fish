@@ -51,14 +51,18 @@ You have three moves:
 
 ### Worked example: the graduation proposal
 
-The proposal currently sitting in `_Review` ("File: 2026-06-13 Maya's
-Graduation Weekend") proposes seven new Person records, several with
-one-line "attended the weekend" facts. It came from the first, noisier
-version of the extractor — treat it as practice. Things you might do to it:
+The proposal sitting in `_Review` ("File: 2026-06-13 Maya's Graduation
+Weekend") proposes one new Person record — Maya, with her graduation fact
+— and one Event record ("Maya's Graduation Weekend") carrying the date and
+six attendees. Things you might do to it:
 
-- **Drop a person entirely** (say you don't want an "Avi" record): delete
-  that person's whole `{"op": "ensure_person", ...}` object from the JSON
-  array. Mind the comma between array elements.
+- **Drop a person entirely:** delete their whole
+  `{"op": "ensure_person", ...}` object from the JSON array. Mind the comma
+  between array elements.
+- **Trim the event's attendee list:** remove names from the `attendees`
+  array — attendees who have Person records become links on the event's
+  `**Who:**` line, the rest stay plain text (which is fine; no records are
+  created for them).
 - **Fix a name before it becomes a record:** change `"name": "Maya"` to
   `"name": "Maya Chen"` (or whoever she is). The record is created under
   the name in the JSON, so fix it here, not after.

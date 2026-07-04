@@ -560,9 +560,9 @@ def proposal_body(source, source_date, plans, ops):
                     f"  - possible existing match: {cands} — if same person,"
                     " add this name as an alias there, delete this proposal,"
                     " and re-run `entity-filing.py --force <source-uuid>`")
-        for d, fact in plan["facts"]:
+        for d, fact in plan.get("facts", []):
             lines.append(f"  - {d} — {fact}")
-        for field, value in plan["updates"].items():
+        for field, value in plan.get("updates", {}).items():
             lines.append(f"  - {field} = {value}")
     lines += ["", "## Ops", "", "```json", json.dumps(ops, indent=2), "```", ""]
     return "\n".join(lines)
