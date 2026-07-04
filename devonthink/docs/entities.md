@@ -158,6 +158,7 @@ the prose is just a rendering.
 TRANSPORT=local       # auto | local | omlx | ollama | dtchat | off
 OMLX_MODEL=Qwen3.5-35B-A3B-4bit
 OMLX_URL=http://127.0.0.1:8000
+OMLX_API_KEY=…        # oMLX auth key (Settings → auth.api_key); conf is 600
 OLLAMA_MODEL=qwen3.5:35b-a3b
 OLLAMA_URL=http://127.0.0.1:11434
 FILING_MODE=suggest   # suggest | auto

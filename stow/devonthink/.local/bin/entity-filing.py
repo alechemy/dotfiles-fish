@@ -35,6 +35,8 @@ Config (~/.config/dt-pipeline/entities.conf, KEY=VALUE):
                                      local: omlx, else ollama, never dtchat
   OMLX_MODEL=<name>                  model id as listed by /v1/models
   OMLX_URL=http://127.0.0.1:8000
+  OMLX_API_KEY=<key>                 required when oMLX auth is enabled
+                                     (Settings -> auth.api_key)
   OLLAMA_MODEL=<name>                required for the ollama transport
   OLLAMA_URL=http://127.0.0.1:11434
   FILING_MODE=suggest|auto           default suggest
@@ -192,6 +194,7 @@ def load_config():
         "TRANSPORT": "auto",
         "OMLX_MODEL": "",
         "OMLX_URL": "http://127.0.0.1:8000",
+        "OMLX_API_KEY": "",
         "OLLAMA_MODEL": "",
         "OLLAMA_URL": "http://127.0.0.1:11434",
         "FILING_MODE": "suggest",
@@ -318,9 +321,11 @@ def omlx_available(config):
     ok = False
     if config["OMLX_MODEL"]:
         try:
-            with urllib.request.urlopen(
-                config["OMLX_URL"] + "/v1/models", timeout=3
-            ) as resp:
+            req = urllib.request.Request(
+                config["OMLX_URL"] + "/v1/models",
+                headers=_omlx_headers(config),
+            )
+            with urllib.request.urlopen(req, timeout=3) as resp:
                 models = json.load(resp)
             ok = config["OMLX_MODEL"] in {
                 m.get("id", "") for m in models.get("data", [])
@@ -329,6 +334,13 @@ def omlx_available(config):
             ok = False
     _availability_cache["omlx"] = ok
     return ok
+
+
+def _omlx_headers(config):
+    headers = {"Content-Type": "application/json"}
+    if config["OMLX_API_KEY"]:
+        headers["Authorization"] = "Bearer " + config["OMLX_API_KEY"]
+    return headers
 
 
 def extract_omlx(config, prompt):
@@ -355,7 +367,7 @@ def extract_omlx(config, prompt):
     req = urllib.request.Request(
         config["OMLX_URL"] + "/v1/chat/completions",
         data=payload,
-        headers={"Content-Type": "application/json"},
+        headers=_omlx_headers(config),
     )
     with urllib.request.urlopen(req, timeout=600) as resp:
         out = json.load(resp)
