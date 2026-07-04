@@ -43,6 +43,14 @@ Smart rule scripts live in `../stow/devonthink/Library/Application Scripts/com.d
 
 The **entity layer** (`/20_ENTITIES` — Person/Place/Event records, morning briefing, AI fact filing) sits outside the smart-rule state machine: two launchd-driven tier-1 Python orchestrators (`dt-morning-brief.py`, `entity-filing.py`) do all DEVONthink I/O through a single JXA gateway, `entity-dt-bridge.js`, invoked via `/usr/bin/osascript -l JavaScript` with a JSON ops file. Anything JSON-heavy that talks to DT should go through (or extend) that bridge rather than round-tripping JSON through AppleScript records. Design doc: `docs/entities.md`. JXA gotcha learned there: never probe speculative properties on a DT object specifier (`typeof rec.isNil`) — any property access fires an AppleEvent; commands return `null` for missing records, so null-check instead.
 
+## MCP server vs the automation bridges
+
+The DEVONthink MCP server is the **interactive** interface — use it freely from an AI session for searches, reads, and one-off record work. It is never a pipeline transport: launchd automation must not depend on a server process or session being alive, so runtime code talks to DT only via `/usr/bin/osascript` (AppleScript or `entity-dt-bridge.js`). Rules for sessions using the MCP tools:
+
+- `/20_ENTITIES/People` and `/20_ENTITIES/_Review` are excluded from AI access; MCP tools refuse their UUIDs ("Record is excluded from AI access") and omit them from results. This is by design, not breakage — operate on entity records via osascript/the bridge instead. Same applies to `/10_DAILY`.
+- Custom-metadata writes through MCP auto-create fields (typos become new fields) and can flip the flags the smart-rule state machine keys on (`NeedsProcessing`, `Recognized`, `Commented`, `AIEnriched`, …). Before setting any flag from the README's metadata table, understand which rule watches it.
+- The server's privacy posture (exposed databases, private-info redaction — currently enabled) lives in DT's Settings → AI on the machine, not in this repo; see the README fresh-machine checklist.
+
 ## Key design decisions
 
 - **AI enrichment is one LLM call** returning a JSON object with `title`, `eventDate`, `type`, `tags`, `summary`, `lowConfidence`. The script passes `as "JSON"` so DT returns a native AppleScript record — no string parsing.
