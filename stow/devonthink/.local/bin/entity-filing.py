@@ -40,6 +40,10 @@ Config (~/.config/dt-pipeline/entities.conf, KEY=VALUE):
   SKIP_SOURCE_TITLES=<regex>         sources whose name matches are never
                                      extracted (recurring standups etc.);
                                      case-insensitive, unanchored
+  IDLE_MINUTES=<n>                   run local (Ollama) extraction only when
+                                     the user has been idle this long, so
+                                     inference never spins fans mid-work;
+                                     default 10, 0 disables the gate
 
 Usage:
     entity-filing.py                 # launchd-driven scan + apply
@@ -189,6 +193,7 @@ def load_config():
         "MAX_PER_RUN": "3",
         "SELF_NAME": "",
         "SKIP_SOURCE_TITLES": "",
+        "IDLE_MINUTES": "10",
     }
     if os.path.exists(CONFIG_FILE):
         with open(CONFIG_FILE) as f:
@@ -268,6 +273,18 @@ def run_bridge(ops, timeout=300):
     return out["results"]
 
 
+def user_idle_seconds():
+    try:
+        out = subprocess.check_output(
+            ["/usr/sbin/ioreg", "-c", "IOHIDSystem"], text=True)
+        for line in out.splitlines():
+            if "HIDIdleTime" in line:
+                return int(line.split("=")[-1].strip()) / 1_000_000_000
+    except Exception:
+        pass
+    return None
+
+
 def ollama_available(config):
     if not config["OLLAMA_MODEL"]:
         return False
@@ -292,6 +309,9 @@ def extract_ollama(config, prompt):
         ],
         "stream": False,
         "format": EXTRACTION_SCHEMA,
+        # keep_alive: return the ~22 GB of unified memory promptly after a
+        # batch instead of Ollama's 5-minute default residency.
+        "keep_alive": "1m",
         # num_ctx: Ollama's default silently truncates the head of long
         # prompts (capped note + roster can reach ~12k tokens).
         # presence_penalty: some tags ship nonzero defaults, which degrade
@@ -670,6 +690,12 @@ def scan(config, state, dry_run, force_uuid):
 
     limit = int(config["MAX_PER_RUN"])
     filing_mode = config["FILING_MODE"]
+    idle_min = float(config["IDLE_MINUTES"])
+    idle_ok = True
+    if idle_min > 0 and not force_uuid and not dry_run:
+        idle = user_idle_seconds()
+        idle_ok = idle is None or idle >= idle_min * 60
+    idle_skip_logged = False
     extracted_count = 0
     for source in candidates:
         if extracted_count >= limit:
@@ -686,6 +712,13 @@ def scan(config, state, dry_run, force_uuid):
         transport = pick_transport(config, source["kind"])
         if transport is None:
             continue  # no eligible transport (e.g. daily note without Ollama)
+        if transport == "ollama" and not idle_ok:
+            # Local inference is deferrable by design; never spin fans while
+            # the user is actively working. Candidates wait for an idle run.
+            if not idle_skip_logged:
+                log.info("user active, deferring local extraction to an idle run")
+                idle_skip_logged = True
+            continue
 
         source_date = source_date_of(source)
         text = run_bridge([{"op": "get_text", "uuid": source["uuid"]}])[0]["text"]

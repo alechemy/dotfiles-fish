@@ -161,7 +161,16 @@ FILING_MODE=suggest   # suggest | auto
 MAX_PER_RUN=3
 SELF_NAME=            # extra self-alias to exclude from extraction
 SKIP_SOURCE_TITLES=Round ?Table|Standup|…   # sources never extracted
+IDLE_MINUTES=10       # local extraction waits for user inactivity; 0 = off
 ```
+
+Resource behavior: a run with nothing to extract never loads the model (the
+availability check is a tags ping), local extraction runs only after
+`IDLE_MINUTES` of user inactivity (HIDIdleTime; `--dry-run`/`--force` bypass)
+so it can't spin fans or take memory mid-work, and `keep_alive: 1m` returns
+the model's ~22 GB right after each batch instead of Ollama's 5-minute
+default. Once the backlog drains, inference happens only when a new
+meeting/handwritten/daily note appears — a few short runs a day.
 
 The deployed posture is **local-first**: `qwen3.5:35b-a3b` (35B MoE, ~3B
 active, ~23 GB, ~30–90 s per extraction on this machine) via Ollama, kept

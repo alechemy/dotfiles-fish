@@ -141,7 +141,7 @@ never rewrites what's there.
 | When | What |
 | --- | --- |
 | 06:40 daily | Briefing into the daily note; LastContact bumps from yesterday's calendar; Reconnect on Mondays |
-| Every 30 min | Apply anything in `_Review/Approved`, then extract up to 3 unprocessed notes (local model, on AC power only) |
+| Every 30 min | Apply anything in `_Review/Approved`, then extract up to 3 unprocessed notes — local model, on AC power, and only after ~10 min of user inactivity, so it never competes with active work |
 
 Everything logs to `~/Library/Logs/devonthink-pipeline.log` (components
 `morning-brief` and `entity-filing`). Preview commands:
