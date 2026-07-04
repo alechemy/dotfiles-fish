@@ -640,7 +640,7 @@ def pick_transport(config, kind):
     return "ollama" if ollama_ok else "dtchat"
 
 
-def scan(config, state, dry_run, force_uuid):
+def scan(config, state, dry_run, force_uuid, user_invoked):
     people, sources = run_bridge([
         {"op": "dump_people", "include_bodies": False},
         {"op": "list_sources"},
@@ -692,7 +692,7 @@ def scan(config, state, dry_run, force_uuid):
     filing_mode = config["FILING_MODE"]
     idle_min = float(config["IDLE_MINUTES"])
     idle_ok = True
-    if idle_min > 0 and not force_uuid and not dry_run:
+    if idle_min > 0 and not user_invoked:
         idle = user_idle_seconds()
         idle_ok = idle is None or idle >= idle_min * 60
     idle_skip_logged = False
@@ -850,7 +850,7 @@ def main():
     if not scan_only:
         apply_approved(dry_run)
     if not apply_only:
-        scan(config, state, dry_run, force_uuid)
+        scan(config, state, dry_run, force_uuid, user_invoked)
 
 
 if __name__ == "__main__":

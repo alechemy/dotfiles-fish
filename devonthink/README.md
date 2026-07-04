@@ -707,7 +707,7 @@ State the repo can't stow or seed — reproduce by hand (or with the noted one-l
 - **Keyboard Maestro macros** — the AppleScripts they run are tracked in [`../keyboard-maestro/`](../keyboard-maestro/); the macro wrappers (hotkey triggers → Execute AppleScript) sync via KM's own iCloud syncing (`~/Library/Mobile Documents/com~apple~CloudDocs/Keyboard Maestro/Keyboard Maestro Macros.kmsync`), so a fresh machine gets them by signing into iCloud and enabling KM sync.
 - **Calendars access for osascript** — the morning brief reads EventKit from `/usr/bin/osascript`; the TCC grant can only be created interactively. Run `osascript -l JavaScript ~/.local/bin/calendar-events-json.js` once in a terminal and approve the prompt (or toggle osascript under System Settings → Privacy & Security → Calendars).
 - **Entity metadata display titles** — the entity fields were created by script, so DT shows their identifiers (`entitytype`, `lastcontact`, …) rather than CamelCase titles in the Info inspector. Cosmetic only; add display names in Settings → Data if it grates.
-- **Work calendar in macOS Calendar** — the brief only sees calendars added to macOS Calendar. This machine currently has iCloud calendars only; add the work Google account in Settings → Internet Accounts for work-meeting briefs.
+- **Work calendar in macOS Calendar** — the brief only sees calendars added to macOS Calendar. Add your company email account with Calendars enabled in Settings → Internet Accounts for work-meeting briefs.
 
 ## Database Backup & Recovery
 

@@ -99,9 +99,10 @@ because a completed day can't have its meetings cancelled out from under the
 bump; and bumps only ever raise the date, so re-runs are harmless.
 
 Note: only calendars in macOS Calendar are visible. Work meetings appear in
-the brief only if the work Google account is added to macOS Calendar
-(Settings → Internet Accounts); Granola reads Google Calendar directly and is
-unaffected.
+the brief because your company email account is
+added in Settings → Internet Accounts — re-add it on a fresh machine.
+Granola reads the work calendar through its own integration and is
+unaffected either way.
 
 ### Filing (extract → resolve → file)
 
@@ -245,6 +246,11 @@ plus fence-stripping and strict validation in Python.
 
 # apply approved proposals right now
 ~/.local/bin/entity-filing.py --apply-only
+
+# drain the extraction backlog by hand — manual runs bypass the battery and
+# idle gates entirely; each pass extracts MAX_PER_RUN sources, so repeat (or
+# loop) until the log stops saying "extracting"
+~/.local/bin/entity-filing.py --scan-only
 
 # logs
 rg 'entity-filing|morning-brief' ~/Library/Logs/devonthink-pipeline.log

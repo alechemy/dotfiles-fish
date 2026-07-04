@@ -143,6 +143,20 @@ never rewrites what's there.
 | 06:40 daily | Briefing into the daily note; LastContact bumps from yesterday's calendar; Reconnect on Mondays |
 | Every 30 min | Apply anything in `_Review/Approved`, then extract up to 3 unprocessed notes — local model, on AC power, and only after ~10 min of user inactivity, so it never competes with active work |
 
+**Draining the backlog by hand.** The scheduled runs only extract while
+you're on power *and* away from the keyboard, so the initial backlog clears
+over days of normal breaks. To speed that up, run
+
+```
+~/.local/bin/entity-filing.py --scan-only
+```
+
+a few times — manual runs bypass the battery and idle gates, and each pass
+extracts 3 notes (fish: `for i in (seq 10); ~/.local/bin/entity-filing.py
+--scan-only; end`). Stop whenever; there's no penalty for leaving the rest
+to the schedule. Expect fans for ~a minute per note; the model frees its
+RAM about a minute after each pass.
+
 Everything logs to `~/Library/Logs/devonthink-pipeline.log` (components
 `morning-brief` and `entity-filing`). Preview commands:
 `dt-morning-brief.py --dry-run`, `entity-filing.py --dry-run`.

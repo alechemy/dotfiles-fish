@@ -71,6 +71,11 @@ RECONNECT_LIMIT = 10
 # Calendars that never contain meetings worth briefing on.
 SKIP_CALENDARS = {"Birthdays", "Siri Suggestions", "US Holidays", "Holidays"}
 
+# Unmatched attendees are listed individually (they prompt record creation)
+# only up to this many; past it, one summary line — a 38-person CAB meeting
+# must not dump 38 noise lines into the daily note.
+UNMATCHED_LIST_MAX = 8
+
 
 def run_osascript(script, args, timeout=120):
     result = subprocess.run(
@@ -191,6 +196,7 @@ def build_brief(events, people, today):
             continue
         lines = [f"### {fmt_time(ev['start'])} — {ev['title']}", ""]
         seen = set()
+        unmatched = []
         for a in others:
             ident = a["email"] or norm(a["name"])
             if ident in seen:
@@ -198,19 +204,25 @@ def build_brief(events, people, today):
             seen.add(ident)
             p = match_person(index, a["name"], a["email"])
             if p:
+                if p["uuid"] in seen:
+                    continue
                 seen.add(p["uuid"])
                 lines.append(person_summary_line(p))
                 lines.extend(recent_log_bullets(p))
             else:
                 who = a["name"] or a["email"]
                 detail = f" ({a['email']})" if a["name"] and a["email"] else ""
-                lines.append(f"- {who}{detail} — no entity record yet")
+                unmatched.append(f"- {who}{detail} — no entity record yet")
         for p in by_title:
             if p["uuid"] in seen:
                 continue
             seen.add(p["uuid"])
             lines.append(person_summary_line(p))
             lines.extend(recent_log_bullets(p))
+        if len(unmatched) <= UNMATCHED_LIST_MAX:
+            lines.extend(unmatched)
+        else:
+            lines.append(f"- {len(unmatched)} attendees without entity records")
         blocks.append("\n".join(lines))
     if not blocks:
         return None
