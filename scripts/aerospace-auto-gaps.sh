@@ -121,8 +121,13 @@ for pass in 1 2 3 4 5; do
 
     listed=$(aerospace list-windows --workspace "$ws" --format "%{window-layout}" \
         | grep -cE '^(h|v)_(tiles|accordion)$' || true)
+    # count and listed tally the same tiled windows two ways (list-windows --all
+    # filtered by workspace vs --workspace); they diverge only on an unreliable
+    # sample — a window mid-appear/close, straddling workspaces, or a phantom
+    # slot from AX starvation — so skip it rather than bake a wrong gap and churn.
     if [ "$count" != "$listed" ]; then
-        log "tree/listing mismatch ws=$ws tree=$count listed=$listed trigger=$TRIGGER"
+        log "tree/listing mismatch ws=$ws tree=$count listed=$listed trigger=$TRIGGER pass=$pass"
+        continue
     fi
 
     # Map count to the outer-left/right value that keeps window width constant.
