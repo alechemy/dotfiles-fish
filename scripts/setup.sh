@@ -638,23 +638,33 @@ EOF
             info "DEVONthink pipeline role: $DT_ROLE"
 
             # dt-watchdog runs on every machine (keeps DT + sync alive; mutating
-            # rules self-skip on a follower). The five ingest agents run only on
-            # the driver. com.user.granola-import.plist is built from a gitignored
-            # template; load_plist logs and skips if it's absent.
+            # rules self-skip on a follower). The ingest + entity agents run only
+            # on the driver. com.user.granola-import.plist is built from a
+            # gitignored template; load_plist logs and skips if it's absent.
             dt_agents=(com.user.dt-watchdog)
             if [ "$DT_ROLE" = driver ]; then
                 dt_agents+=(com.user.dt-daily-note \
                             com.user.singlefile-watcher \
                             com.user.boox-import-watcher \
                             com.user.granola-import \
-                            com.user.github-stars-import)
+                            com.user.github-stars-import \
+                            com.user.dt-morning-brief \
+                            com.user.entity-filing)
             else
-                info "  Follower: loading dt-watchdog only; the five ingest agents stay disabled."
+                info "  Follower: loading dt-watchdog only; the ingest and entity agents stay disabled."
             fi
             for plist in "${dt_agents[@]}"; do
                 load_plist "$HOME/Library/LaunchAgents/${plist}.plist"
             done
             success "DEVONthink pipeline installed"
+
+            # The morning brief reads the calendar through EventKit under
+            # /usr/bin/osascript; the Calendars TCC grant can only be created
+            # interactively. One manual run answers the prompt for good.
+            if [ "$DT_ROLE" = driver ]; then
+                info "If this machine hasn't granted osascript Calendar access yet, run once:"
+                info "  osascript -l JavaScript ~/.local/bin/calendar-events-json.js"
+            fi
         else
             info "Skipping DEVONthink pipeline."
         fi

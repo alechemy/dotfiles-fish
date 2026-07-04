@@ -41,6 +41,15 @@ The following custom metadata fields must be created in DEVONthink before the pi
 | IsJot               | Boolean         | Set by the Drafts Quick Jot action on iOS. Gates the Process: Jots smart rule, which inserts the jot into the matching daily note                                                                                                                                                            |
 | AIChatTranscript    | Boolean         | Set on markdown records that came from an AI chat snapshot (claude.ai, gemini.google.com, chatgpt.com). The defuddle output is rewritten as a topic-organized writeup by `ingest-singlefile-html.py` before import (see [SingleFile Ingestion Pipeline](#singlefile-ingestion-pipeline) → "AI chat transcript rewrite"). Useful for filtering / re-running the rewrite if the prompt is tweaked |
 | RewriteSource       | Item Link       | Set on rewrite records created by the prose-check skill; item link pointing back to the source record that was rewritten. The Prose Check (On Demand) rule passes the source UUID to the skill, which sets this on the output record it creates in `00_INBOX`                                |
+| EntityType          | Text            | Entity-layer record class: `Person` / `Place` / `Event`. Set by `entity-dt-bridge.js` when a Person record is created; robust to records being moved out of their home group                                                                                                                 |
+| EntityStatus        | Text            | Entity-layer lifecycle: `active` / `dormant` / `archived` / `deceased`. Non-`active` people are excluded from the Reconnect digest                                                                                                                                                           |
+| City                | Text            | Person's home city — the reverse-lookup key (`mdcity:Chicago` answers "who do I know in Chicago")                                                                                                                                                                                            |
+| Employer            | Text            | Person's current employer. Changes are mirrored into the Biographical Log with the previous value                                                                                                                                                                                           |
+| Role                | Text            | Person's current job title. Changes logged like Employer                                                                                                                                                                                                                                     |
+| Relationship        | Text            | `family` / `close-friend` / `friend` / `colleague` / `acquaintance`. Sets the Reconnect digest threshold (30/30/60/90 days; acquaintances never surface)                                                                                                                                     |
+| Email               | Text            | Person's email — the strongest calendar-attendee matching key for the morning brief                                                                                                                                                                                                          |
+| LastContact         | Text            | yyyy-mm-dd of last interaction. Bumped by `entity-filing.py` from meeting attendance and filed facts; only ever raised, never lowered                                                                                                                                                        |
+| EntityFiled         | Boolean         | Set on source documents (meeting notes, handwritten notes, daily notes) once the entity-filing step has extracted them (or a proposal was applied). Authoritative gate is the state file; this flag is the in-DT audit trail                                                                 |
 
 > **Migration Note — `AI-Renamed` retired.** The earlier `AI-Renamed` boolean flag has been replaced by `NameLocked`. If any existing records still carry `AI-Renamed` metadata, you can safely ignore or batch-clear it; it is no longer referenced by any rule or script.
 
@@ -647,6 +656,26 @@ done
 - **Cloud sync** — After creating a note, the script calls `synchronize database` to push it to DEVONthink's configured sync store. If sync fails for any reason (e.g., no network), the note is still created locally and will sync on the next automatic or manual sync cycle.
 - **Logging** — Check `~/Library/Logs/dt-daily-note.log` for creation results and `/tmp/dt-daily-note.log` for any launchd-level stdout/stderr.
 
+## Entity Layer (Lorebook Memory)
+
+A person/place/event memory layer under `/20_ENTITIES`: Person records
+accumulate dated, provenance-linked facts in a `## Biographical Log`; a 06:40
+launchd agent (`com.user.dt-morning-brief`) writes a "who am I about to meet"
+`## Briefing` section into today's daily note from the calendar + Person
+records (plus a Monday `## Reconnect` digest sorted on `LastContact`); a
+30-minute agent (`com.user.entity-filing`) extracts people-facts from meeting
+notes, handwritten notes, and past daily notes, and files them — in suggest
+mode by default: proposals land in `/20_ENTITIES/_Review`, and moving one into
+`_Review/Approved` applies it on the next run.
+
+Division of labor: the LLM only converts messy text to structured JSON;
+deterministic scripts do all matching and writing through a single JXA
+gateway (`entity-dt-bridge.js`). Daily notes are only ever extracted through a
+local Ollama model, honoring `/10_DAILY`'s exclusion from AI chat; meeting and
+handwritten notes may use DT's built-in chat (the same transport that already
+enriches them). Full design, config (`~/.config/dt-pipeline/entities.conf`),
+operations, and failure modes: [docs/entities.md](docs/entities.md).
+
 ## Live-only GUI state (fresh-machine checklist)
 
 State the repo can't stow or seed — reproduce by hand (or with the noted one-liners) when standing up a new machine. Current values verified 2026-07-03.
@@ -668,6 +697,9 @@ State the repo can't stow or seed — reproduce by hand (or with the noted one-l
 
 - **AI engine configuration** (Settings → AI): provider + model selection; API keys live in the macOS Keychain and are never captured by the repo.
 - **Keyboard Maestro macros** — the AppleScripts they run are tracked in [`../keyboard-maestro/`](../keyboard-maestro/); the macro wrappers (hotkey triggers → Execute AppleScript) sync via KM's own iCloud syncing (`~/Library/Mobile Documents/com~apple~CloudDocs/Keyboard Maestro/Keyboard Maestro Macros.kmsync`), so a fresh machine gets them by signing into iCloud and enabling KM sync.
+- **Calendars access for osascript** — the morning brief reads EventKit from `/usr/bin/osascript`; the TCC grant can only be created interactively. Run `osascript -l JavaScript ~/.local/bin/calendar-events-json.js` once in a terminal and approve the prompt (or toggle osascript under System Settings → Privacy & Security → Calendars).
+- **Entity metadata display titles** — the entity fields were created by script, so DT shows their identifiers (`entitytype`, `lastcontact`, …) rather than CamelCase titles in the Info inspector. Cosmetic only; add display names in Settings → Data if it grates.
+- **Work calendar in macOS Calendar** — the brief only sees calendars added to macOS Calendar. This machine currently has iCloud calendars only; add the work Google account in Settings → Internet Accounts for work-meeting briefs.
 
 ## Database Backup & Recovery
 
@@ -683,3 +715,4 @@ A *sync-store* loss plus a dead machine is the only scenario with no automated a
 - [Granola Integration](docs/granola.md) — automated meeting notes import from Granola
 - [GitHub Stars Integration](docs/github-stars.md) — automated bookmark import for starred repos
 - [Summarize Skill](docs/summarize.md) — on-demand content summarization via Claude Code
+- [Entity Layer](docs/entities.md) — person/place/event memory: morning briefings, reconnect digests, AI fact filing
