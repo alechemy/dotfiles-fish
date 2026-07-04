@@ -1,6 +1,6 @@
 font-family = Operator Mono SSm Lig
 font-size = 14.0
-background-opacity = .90
+background-opacity = 1.0
 background-blur = true
 alpha-blending = linear-corrected
 theme = Catppuccin Macchiato
