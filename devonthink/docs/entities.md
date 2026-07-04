@@ -159,7 +159,7 @@ TRANSPORT=local       # auto | local | omlx | ollama | dtchat | off
 OMLX_MODEL=Qwen3.5-35B-A3B-4bit
 OMLX_URL=http://127.0.0.1:8000
 OMLX_API_KEY=…        # oMLX auth key (Settings → auth.api_key); conf is 600
-OLLAMA_MODEL=qwen3.5:35b-a3b
+OLLAMA_MODEL=         # optional fallback server; empty = not installed
 OLLAMA_URL=http://127.0.0.1:11434
 FILING_MODE=suggest   # suggest | auto
 MAX_PER_RUN=3
@@ -176,13 +176,15 @@ the model's ~22 GB right after each batch instead of Ollama's 5-minute
 default. Once the backlog drains, inference happens only when a new
 meeting/handwritten/daily note appears — a few short runs a day.
 
-The deployed posture is **local-only** (`TRANSPORT=local`): extraction
-prefers **oMLX** (`Qwen3.5-35B-A3B-4bit`, MLX backend, ~5–10 s per
-extraction), falls back to **Ollama** (`qwen3.5:35b-a3b`, same weights on
-llama.cpp, ~30–90 s) when oMLX is down, and *waits* rather than ever
-falling back to a cloud provider; `auto` restores the DT-chat fallback for
-meeting/handwritten notes if availability ever matters more than
-consistency. oMLX serves an OpenAI-compatible API on :8000
+The deployed posture is **local-only** (`TRANSPORT=local`): extraction runs
+on **oMLX** (`Qwen3.5-35B-A3B-4bit`, MLX backend, ~2–10 s per extraction)
+and *waits* when the server is down rather than ever falling back to a
+cloud provider — filing is latency-tolerant by design, so an outage costs
+nothing but delay. The code also carries an Ollama transport (same `local`
+chain, tried after oMLX); it is currently uninstalled — reinstate with
+`brew install ollama`, a model pull, and `OLLAMA_MODEL=` in the conf.
+`auto` restores the DT-chat fallback for meeting/handwritten notes if
+availability ever matters more than consistency. oMLX serves an OpenAI-compatible API on :8000
 (`extract_omlx` uses `response_format: json_schema` +
 `chat_template_kwargs: {enable_thinking: false}`); models are MLX builds
 from HuggingFace in `~/.omlx/models/`. The oMLX app (menu-bar,
