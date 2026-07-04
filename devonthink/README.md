@@ -564,13 +564,13 @@ See [`handle-updated-notebooks.applescript`](../stow/devonthink/Library/Applicat
 
 ## Daily Notes (Scheduled)
 
-A daily note is automatically created in the **10_DAILY** group of the Lorebook database every morning at 6:15 AM local. The mechanism uses `launchd` (macOS's native scheduler) to run a shell script that talks to DEVONthink via AppleScript.
+A daily note is automatically created in the **10_DAILY** group of the Lorebook database every morning at 5:00 AM local. The mechanism uses `launchd` (macOS's native scheduler) to run a shell script that talks to DEVONthink via AppleScript.
 
 The schedule is set to a daytime wake-hour rather than the small hours: `StartCalendarInterval` does not fire while the Mac is asleep (and `WakeFromSleep` is not reliable when the lid is closed in standby), so an early-morning trigger that the user is consistently around for is more reliable than a 03:00 trigger that gets silently skipped. If the trigger is still missed (rare), the script's no-arg backfill path seeds today's note the next time it runs.
 
 ### How It Works
 
-1. `launchd` fires the job at 06:15 every day.
+1. `launchd` fires the job at 05:00 every day.
 2. The shell script computes today's date, builds the markdown content from an embedded template, and calls `osascript`.
 3. The AppleScript block checks whether a note with today's filename already exists in 10_DAILY — if so it exits cleanly (idempotent). Otherwise it creates the new markdown record.
 4. If a note was created, the script triggers a DEVONthink cloud sync (`synchronize database`) so the note is available on other devices immediately.
@@ -581,7 +581,7 @@ The schedule is set to a daytime wake-hour rather than the small hours: `StartCa
 The primary DEVONthink smart rule pipeline integrates directly with daily notes via the **Process: Daily Notes** step:
 
 - **Extracting Daily Logs:** For handwritten notes, the pipeline searches for headers like "Daily Notes", "Today", "Journal", or "Log". If found, it extracts the content beneath them and automatically appends it to today's daily note. Deduplication ensures that repeated notebook updates don't result in duplicated entries.
-- **Linking Temporal Events:** For any document processed by the pipeline, if the AI enrichment step identified a specific `EventDate` (e.g., from meeting notes), the pipeline automatically appends a wikilink to that document on the daily note corresponding to that specific date. If the target note doesn't exist yet — a past/future `EventDate`, or a morning where the 6:15 AM `create-daily-note.sh` run was missed — Post-Enrich & Archive creates it on demand (matching `create-daily-note.sh`'s heading and `Daily Note` tag) rather than dropping the link. Extract: Web Content and `ingest-singlefile-html.py` create today's note on demand the same way, so captures landing between midnight and the 06:15 seeder keep their daily-note entry.
+- **Linking Temporal Events:** For any document processed by the pipeline, if the AI enrichment step identified a specific `EventDate` (e.g., from meeting notes), the pipeline automatically appends a wikilink to that document on the daily note corresponding to that specific date. If the target note doesn't exist yet — a past/future `EventDate`, or a morning where the 5:00 AM `create-daily-note.sh` run was missed — Post-Enrich & Archive creates it on demand (matching `create-daily-note.sh`'s heading and `Daily Note` tag) rather than dropping the link. Extract: Web Content and `ingest-singlefile-html.py` create today's note on demand the same way, so captures landing between midnight and the 05:00 seeder keep their daily-note entry.
 
 ### Template Format
 
@@ -651,7 +651,7 @@ done
 ### Notes
 
 - **Idempotency** — The script checks for an existing note with the same filename before creating. Running it twice for the same date is harmless.
-- **Sleep/wake** — `StartCalendarInterval` does *not* fire while the Mac is asleep, and it does not catch up on wake unless `WakeFromSleep` is set (which is unreliable in clamshell/S5 standby). The 06:15 schedule is chosen so the user is typically around. If the trigger is still missed, the script's no-arg backfill path will create today's note the next time it runs (idempotent).
+- **Sleep/wake** — `StartCalendarInterval` does *not* fire while the Mac is asleep, and it does not catch up on wake unless `WakeFromSleep` is set (which is unreliable in clamshell/S5 standby). The 05:00 schedule targets a ready note before the 6am workday. If the trigger is missed in standby, the morning brief's `get_or_create_daily` (which retries at 05:15/05:45/06:30/08:00) or the script's own no-arg backfill creates today's note on the next opportunity (idempotent).
 - **DEVONthink must be running** — The AppleScript targets `application id "DNtp"`. DEVONthink does not need to be frontmost, but it must be launched. The `dt-watchdog` launchd job (fires every 5 minutes) keeps DT and Maestral running, so this is generally not something to worry about.
 - **Cloud sync** — After creating a note, the script calls `synchronize database` to push it to DEVONthink's configured sync store. If sync fails for any reason (e.g., no network), the note is still created locally and will sync on the next automatic or manual sync cycle.
 - **Logging** — Check `~/Library/Logs/dt-daily-note.log` for creation results and `/tmp/dt-daily-note.log` for any launchd-level stdout/stderr.
@@ -659,7 +659,7 @@ done
 ## Entity Layer (Lorebook Memory)
 
 A person/place/event memory layer under `/20_ENTITIES`: Person records
-accumulate dated, provenance-linked facts in a `## Biographical Log`; a 06:40
+accumulate dated, provenance-linked facts in a `## Biographical Log`; a ~05:15
 launchd agent (`com.user.dt-morning-brief`) writes a "who am I about to meet"
 `## Briefing` section into today's daily note from the calendar + Person
 records (plus a Monday `## Reconnect` digest sorted on `LastContact`); a

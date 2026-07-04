@@ -526,7 +526,7 @@ on appendToSection(theNote, sectionHeader, contentBlock)
 end appendToSection
 
 -- Returns the daily note for dateStr (YYYY-MM-DD), creating it in destGroup
--- if it doesn't exist yet. The 6:15 AM launchd job (create-daily-note.sh)
+-- if it doesn't exist yet. The 5:00 AM launchd job (create-daily-note.sh)
 -- normally seeds these, but an EventDate in the past or future, or a missed
 -- run, can leave the target note absent; creating on demand keeps the
 -- wikilink from being dropped. Mirrors create-daily-note.sh's content and

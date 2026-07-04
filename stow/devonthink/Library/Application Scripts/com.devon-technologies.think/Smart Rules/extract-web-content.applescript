@@ -133,7 +133,7 @@ end findArchivedDuplicate
 -- Append a wikilink to today's daily note under "## Today's Notes".
 -- Idempotent via DailyNoteLinked and a UUID-in-note check. Non-fatal —
 -- if the append fails, the record is still archived normally. The note is
--- created on demand: bookmarks processed between midnight and the 06:15
+-- created on demand: bookmarks processed between midnight and the 05:00
 -- seeder would otherwise drop the link permanently (archived with
 -- NeedsProcessing=0, nothing ever retries).
 on logBookmarkToDailyNote(theRecord)
@@ -198,8 +198,8 @@ on logBookmarkToDailyNote(theRecord)
 end logBookmarkToDailyNote
 
 -- Returns the daily note for dateStr (YYYY-MM-DD), creating it in destGroup
--- if it doesn't exist yet. The 6:15 AM launchd job (create-daily-note.sh)
--- normally seeds these, but bookmarks arriving between midnight and 06:15
+-- if it doesn't exist yet. The 5:00 AM launchd job (create-daily-note.sh)
+-- normally seeds these, but bookmarks arriving between midnight and 05:00
 -- hit this rule before the note exists; creating on demand keeps the
 -- wikilink from being dropped. Mirrors create-daily-note.sh's content and
 -- "Daily Note" tag so an on-demand note is indistinguishable from a seeded

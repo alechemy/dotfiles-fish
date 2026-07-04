@@ -17,7 +17,7 @@ attendees; nothing is created or changed until you approve it.
 
 ## Your daily rhythm
 
-- **Morning:** the daily note has a `## Briefing` section by ~6:40. Read it.
+- **Morning:** the daily note has a `## Briefing` section by ~5:15 (or moments after the Mac wakes). Read it.
   That's the whole habit.
 - **During the day:** jot like you always have. The one adjustment: name
   names. "Bob's new role is X, Alice expecting in March" files itself;
@@ -140,7 +140,7 @@ never rewrites what's there.
 
 | When | What |
 | --- | --- |
-| 06:40 daily | Briefing into the daily note; LastContact bumps from yesterday's calendar; Reconnect on Mondays |
+| ~05:15 daily (retries 05:45/06:30/08:00 if asleep) | Briefing into the daily note; LastContact bumps from yesterday's calendar; Reconnect on Mondays |
 | Every 30 min | Apply anything in `_Review/Approved`, then extract up to 3 unprocessed notes — local model, on AC power, and only after ~10 min of user inactivity, so it never competes with active work |
 
 **Draining the backlog by hand.** The scheduled runs only extract while
