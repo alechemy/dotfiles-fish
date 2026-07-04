@@ -270,9 +270,11 @@ def extract_ollama(config, prompt):
         ],
         "stream": False,
         "format": EXTRACTION_SCHEMA,
-        # Ollama's default num_ctx silently truncates the head of long
-        # prompts; the capped note + roster can reach ~12k tokens.
-        "options": {"temperature": 0, "num_ctx": 16384},
+        # num_ctx: Ollama's default silently truncates the head of long
+        # prompts (capped note + roster can reach ~12k tokens).
+        # presence_penalty: some tags ship nonzero defaults, which degrade
+        # repetitive JSON keys.
+        "options": {"temperature": 0, "num_ctx": 16384, "presence_penalty": 0},
     }).encode()
     req = urllib.request.Request(
         config["OLLAMA_URL"] + "/api/chat",

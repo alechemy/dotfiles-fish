@@ -149,15 +149,25 @@ SELF_NAME=            # extra self-alias to exclude from extraction
 SKIP_SOURCE_TITLES=Round ?Table|Standup|…   # sources never extracted
 ```
 
-The deployed posture is **local-first**: `qwen3:30b-a3b` (30B MoE, ~18 GB,
-~30–45 s per extraction on this machine) via Ollama, kept resident by
-`brew services start ollama`. With `TRANSPORT=ollama`, extraction *waits*
-when the model is unavailable rather than falling back to a cloud provider;
-`auto` restores the DT-chat fallback for meeting/handwritten notes if
-availability ever matters more than consistency. Swapping models is a
-one-line change (`OLLAMA_MODEL=` + `ollama pull`); the requirements a
-replacement must meet are: instruction-tuned, strict JSON-schema adherence
-under Ollama structured outputs, ≥16k usable context, ≤~25 GB quantized.
+The deployed posture is **local-first**: `qwen3.5:35b-a3b` (35B MoE, ~3B
+active, ~23 GB, ~30–90 s per extraction on this machine) via Ollama, kept
+resident by `brew services start ollama`. With `TRANSPORT=ollama`,
+extraction *waits* when the model is unavailable rather than falling back to
+a cloud provider; `auto` restores the DT-chat fallback for meeting/
+handwritten notes if availability ever matters more than consistency.
+
+The model was picked by a three-way bake-off on real notes (same production
+prompt/schema): Qwen3.5 was the only candidate with correct per-person fact
+attribution (the baseline `qwen3:30b-a3b`, still installed as rollback,
+merged one person's fact onto another — the most dangerous failure class);
+`gemma4:26b` was disqualified outright (extracted the author with workflow
+trivia, and hard-failed JSON generation under Ollama's constrained decoding).
+Swapping models is a one-line change (`OLLAMA_MODEL=` + `ollama pull`), but
+any replacement must pass the same gate: run a few `--force --dry-run`
+extractions on known notes and check attribution, omissions, and schema
+validity before trusting it unattended. Requirements: instruction-tuned,
+strict JSON-schema adherence under Ollama structured outputs, ≥16k usable
+context, ≤~25 GB quantized.
 
 Boundaries hard-coded regardless of config:
 
