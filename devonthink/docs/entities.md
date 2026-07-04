@@ -70,7 +70,7 @@ stay stdlib-only (tier-1 `/usr/bin/python3`, stable TCC identity):
 | `dt-morning-brief.py` | Daily 06:40 (`com.user.dt-morning-brief`): calendar + Person records → `## Briefing` section in today's daily note; Mondays also `## Reconnect` |
 | `entity-filing.py` | Every 30 min (`com.user.entity-filing`): applies approved proposals, then extracts facts from unprocessed sources and files them (suggest mode by default) |
 
-### Morning brief (read-only resurfacing)
+### Morning brief (resurfacing + contact tracking)
 
 For each timed, non-declined calendar event, attendees are matched against
 Person records by email, name, or alias — and person names are also matched
@@ -84,6 +84,13 @@ Sections are appended *after* `## Today's Notes` (created if missing) because
 `insert-jot-into-daily-note.py` targets the last bullet *before* that header —
 a briefing above it would swallow incoming jots. Each section carries an
 HTML-comment marker (`<!-- brief:YYYY-MM-DD -->`) making re-runs no-ops.
+
+The brief also bumps `LastContact` for everyone matched in **yesterday's**
+calendar (attendees or title). This keeps the Reconnect digest honest for
+people whose contact is calendared rather than jotted — calls with family,
+social plans — without waiting for a filed fact. Yesterday, not today,
+because a completed day can't have its meetings cancelled out from under the
+bump; and bumps only ever raise the date, so re-runs are harmless.
 
 Note: only calendars in macOS Calendar are visible. Work meetings appear in
 the brief only if the work Google account is added to macOS Calendar
@@ -106,7 +113,16 @@ re-verifies every claimed match deterministically:
   suggest mode proposes it)
 - multiple hits → flagged AMBIGUOUS, always a proposal
 - no hit → new-person plan, always a proposal (single-word names are flagged
-  for extra scrutiny)
+  for extra scrutiny, and any roster person sharing a name token is listed as
+  a possible existing match — usually the fix is adding an alias to that
+  record rather than approving a duplicate)
+
+Recurring low-biography meetings (standups, roundtables, retros) are excluded
+from extraction entirely via the `SKIP_SOURCE_TITLES` regex — their yield is
+workplace-workflow trivia, and a review queue full of trivia is how the
+review habit dies. `--force <uuid>` bypasses the skip for a specific record.
+The extraction prompt itself also sets a high bar: biographical changes only,
+no working-style observations, and "an empty list is a good answer".
 
 Meeting attendance is deterministic and LLM-free: any `GranolaParticipants`
 name that uniquely matches a Person record bumps its `LastContact` on every
@@ -124,32 +140,42 @@ the prose is just a rendering.
 `~/.config/dt-pipeline/entities.conf` (KEY=VALUE, all optional):
 
 ```
-TRANSPORT=auto        # auto | ollama | dtchat | off
-OLLAMA_MODEL=         # e.g. qwen3:32b — required for the ollama transport
+TRANSPORT=ollama      # auto | ollama | dtchat | off
+OLLAMA_MODEL=qwen3:30b-a3b
 OLLAMA_URL=http://127.0.0.1:11434
 FILING_MODE=suggest   # suggest | auto
 MAX_PER_RUN=3
 SELF_NAME=            # extra self-alias to exclude from extraction
+SKIP_SOURCE_TITLES=Round ?Table|Standup|…   # sources never extracted
 ```
 
-`auto` prefers a local Ollama model when the configured one responds, else
-falls back to DEVONthink's built-in chat (whatever provider DT is configured
-with — currently a cloud model). Two boundaries are hard-coded regardless of
-config:
+The deployed posture is **local-first**: `qwen3:30b-a3b` (30B MoE, ~18 GB,
+~30–45 s per extraction on this machine) via Ollama, kept resident by
+`brew services start ollama`. With `TRANSPORT=ollama`, extraction *waits*
+when the model is unavailable rather than falling back to a cloud provider;
+`auto` restores the DT-chat fallback for meeting/handwritten notes if
+availability ever matters more than consistency. Swapping models is a
+one-line change (`OLLAMA_MODEL=` + `ollama pull`); the requirements a
+replacement must meet are: instruction-tuned, strict JSON-schema adherence
+under Ollama structured outputs, ≥16k usable context, ≤~25 GB quantized.
 
-- **Daily notes are local-only.** `/10_DAILY` is excluded from DT's AI chat by
-  design, and the filing step honors that: daily notes are only extracted
-  through Ollama. With no local model configured they simply wait — configure
-  `OLLAMA_MODEL` (64 GB RAM comfortably runs a 32B instruct model;
-  `brew services start ollama && ollama pull qwen3:32b`) and the backlog
-  drains at `MAX_PER_RUN` per half hour.
-- Meeting notes and handwritten notes already flow through DT chat for
-  enrichment, so DT chat is an acceptable transport for them (status quo, not
-  an expansion).
+Boundaries hard-coded regardless of config:
 
-Extraction runs at temperature 0 with a JSON schema (`format` parameter) on
-the Ollama path; the DT-chat path uses a JSON-only role prompt plus
-fence-stripping and strict validation in Python.
+- **Daily notes are local-only.** `/10_DAILY` is excluded from DT's AI chat
+  by design, and the filing step honors that: daily notes are only ever
+  extracted through Ollama, never DT chat.
+- **`/20_ENTITIES/People` and `_Review` are excluded from DT's AI chat**
+  (`excludeFromChat`), because Person records are distilled dossiers — more
+  sensitive than any single source note. The automation is unaffected
+  (AppleScript/JXA reads aren't gated), but DT chat and the DT MCP server
+  cannot read them. Revert deliberately if conversational retrieval over the
+  graph is ever wanted:
+  `osascript -e 'tell application id "DNtp" to set exclude from chat of (get record at "/20_ENTITIES/People" in database "Lorebook") to false'`
+
+Extraction runs at temperature 0 with a JSON schema (`format`) and
+`num_ctx=16384` (Ollama's default context would silently truncate long
+prompts) on the Ollama path; the DT-chat path uses a JSON-only role prompt
+plus fence-stripping and strict validation in Python.
 
 ## Failure modes and their mitigations
 

@@ -37,6 +37,9 @@ Config (~/.config/dt-pipeline/entities.conf, KEY=VALUE):
   FILING_MODE=suggest|auto           default suggest
   MAX_PER_RUN=<n>                    extraction budget per run, default 3
   SELF_NAME=<name>                   extra self-alias to exclude
+  SKIP_SOURCE_TITLES=<regex>         sources whose name matches are never
+                                     extracted (recurring standups etc.);
+                                     case-insensitive, unanchored
 
 Usage:
     entity-filing.py                 # launchd-driven scan + apply
@@ -92,9 +95,15 @@ Rules:
   companies, no product or project names.
 - Resolve pronouns and nicknames to one canonical person before extracting.
 - Record durable biographical or relationship facts: job or role changes,
-  moves, partner and family news, health, notable plans, strong preferences,
-  how the author met them, significant things discussed WITH them. Skip
-  meeting logistics, task assignments, and technical minutiae.
+  moves, partner and family news, health, notable plans, how the author met
+  them, significant personal things discussed WITH them. Skip meeting
+  logistics, task assignments, and technical minutiae.
+- Do NOT record workplace working style: tool preferences, how someone uses
+  AI, how they run meetings, opinions on process, or what they said in a
+  work discussion. A work fact belongs only when it changes their biography
+  (new job, new role, promotion, leaving, relocation).
+- When unsure whether a fact is durable and personally meaningful, omit it.
+  Fewer, better facts. An empty list is a good answer for a technical note.
 - Set an "updates" value only when the note states that person's CURRENT
   employer, job role, home city, or email address; otherwise leave it null.
 - If the note contains no such facts, return {{"people": []}}.
@@ -157,6 +166,7 @@ def load_config():
         "FILING_MODE": "suggest",
         "MAX_PER_RUN": "3",
         "SELF_NAME": "",
+        "SKIP_SOURCE_TITLES": "",
     }
     if os.path.exists(CONFIG_FILE):
         with open(CONFIG_FILE) as f:
@@ -260,7 +270,9 @@ def extract_ollama(config, prompt):
         ],
         "stream": False,
         "format": EXTRACTION_SCHEMA,
-        "options": {"temperature": 0},
+        # Ollama's default num_ctx silently truncates the head of long
+        # prompts; the capped note + roster can reach ~12k tokens.
+        "options": {"temperature": 0, "num_ctx": 16384},
     }).encode()
     req = urllib.request.Request(
         config["OLLAMA_URL"] + "/api/chat",
@@ -359,7 +371,24 @@ def fact_line(d, fact, source_uuid):
     return f"- {d} — {fact} ([source](x-devonthink-item://{source_uuid}))"
 
 
-def build_person_plans(extracted, index, selves, source, source_date):
+def near_matches(name, people, limit=3):
+    """Roster people sharing a name token with an unmatched extraction —
+    surfaces likely alias gaps ("Robert Carter" vs an existing "Bob Carter")
+    in the proposal so dedup is a checkbox, not detective work."""
+    toks = {t for t in norm(name).split() if len(t) >= 3}
+    if not toks:
+        return []
+    out = []
+    for p in people:
+        ptoks = set()
+        for n in [p["name"]] + p.get("aliases", "").split(","):
+            ptoks.update(t for t in norm(n).split() if len(t) >= 3)
+        if toks & ptoks:
+            out.append(p["name"])
+    return out[:limit]
+
+
+def build_person_plans(extracted, index, selves, people, source_date):
     """Deterministic resolution: LLM output in, per-person op plans out."""
     plans = []
     for person in extracted:
@@ -403,6 +432,7 @@ def build_person_plans(extracted, index, selves, source, source_date):
                 "kind": "new",
                 "name": name,
                 "single_token": len(name.split()) < 2,
+                "near": near_matches(name, people),
                 "facts": facts,
                 "updates": updates,
             })
@@ -464,6 +494,12 @@ def proposal_body(source, source_date, plans, ops):
             flag = " — single-word name, verify before approving" \
                 if plan.get("single_token") else ""
             lines.append(f"- **{plan['name']}** (new Person record){flag}")
+            if plan.get("near"):
+                cands = ", ".join(plan["near"])
+                lines.append(
+                    f"  - possible existing match: {cands} — if same person,"
+                    " add this name as an alias there, delete this proposal,"
+                    " and re-run `entity-filing.py --force <source-uuid>`")
         for d, fact in plan["facts"]:
             lines.append(f"  - {d} — {fact}")
         for field, value in plan["updates"].items():
@@ -552,13 +588,24 @@ def scan(config, state, dry_run, force_uuid):
     if bump_ops and not dry_run:
         run_bridge(bump_ops)
 
+    skip_re = None
+    if config["SKIP_SOURCE_TITLES"]:
+        try:
+            skip_re = re.compile(config["SKIP_SOURCE_TITLES"], re.IGNORECASE)
+        except re.error as exc:
+            log.warning("bad SKIP_SOURCE_TITLES regex, ignoring: %s", exc)
+
     if force_uuid:
         candidates = [s for s in sources if s["uuid"] == force_uuid]
         if not candidates:
             log.error("--force uuid %s not found among sources", force_uuid)
             return
     else:
-        candidates = [s for s in sources if s["uuid"] not in processed]
+        candidates = [
+            s for s in sources
+            if s["uuid"] not in processed
+            and not (skip_re and skip_re.search(s["name"]))
+        ]
         candidates.sort(key=source_date_of, reverse=True)
 
     limit = int(config["MAX_PER_RUN"])
@@ -611,7 +658,7 @@ def scan(config, state, dry_run, force_uuid):
                              "record_uuid": source["uuid"]})
             continue
 
-        plans = build_person_plans(extracted, index, selves, source, source_date)
+        plans = build_person_plans(extracted, index, selves, people, source_date)
         file_source(config, state, source, source_date, plans, filing_mode,
                     dry_run)
 

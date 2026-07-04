@@ -8,10 +8,15 @@ daily note as a `## Briefing` section. On Mondays (or with --weekly) it
 also appends a `## Reconnect` section listing people whose LastContact
 has drifted past their relationship tier's threshold.
 
-The brief reads live from the records, so it is never stale; nothing here
-mutates entity records. The only mutation is the daily-note section
-insert, which is idempotent via an HTML comment marker per section per
-day.
+The brief reads live from the records, so it is never stale. Two mutations
+only: the daily-note section insert (idempotent via an HTML comment marker
+per section per day), and a LastContact bump for every person matched in
+YESTERDAY's calendar — yesterday because the day is complete, so a
+meeting that was cancelled after the morning run never counts as contact.
+This keeps the Reconnect digest honest for people whose contact happens
+on the calendar rather than in filed facts (calls with family, social
+events); bump_lastcontact only ever raises the date, so re-runs are
+harmless.
 
 Section placement: jots are inserted relative to the `## Today's Notes`
 header (see insert-jot-into-daily-note.py), targeting the last content
@@ -38,7 +43,7 @@ import subprocess
 import sys
 import tempfile
 import unicodedata
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 sys.path.insert(0, str(Path.home() / ".local" / "bin"))
@@ -212,6 +217,29 @@ def build_brief(events, people, today):
     return f"<!-- brief:{today} -->\n\n" + "\n\n".join(blocks)
 
 
+def contact_bumps(events, people, day):
+    index = person_index(people)
+    ops = []
+    seen = set()
+    for ev in events:
+        if ev["all_day"] or ev["declined"] or ev["calendar"] in SKIP_CALENDARS:
+            continue
+        matched = []
+        for a in ev["attendees"]:
+            if a["is_self"] or not a["is_person"]:
+                continue
+            p = match_person(index, a["name"], a["email"])
+            if p:
+                matched.append(p)
+        matched.extend(title_matches(people, ev["title"]))
+        for p in matched:
+            if p["uuid"] in seen:
+                continue
+            seen.add(p["uuid"])
+            ops.append({"op": "bump_lastcontact", "uuid": p["uuid"], "date": day})
+    return ops
+
+
 def build_reconnect(people, today):
     today_d = date.fromisoformat(today)
     overdue = []
@@ -298,6 +326,23 @@ def main():
 
     people = run_bridge([{"op": "dump_people"}])[0]
     log.info("loaded %d people, %d events", len(people), len(events))
+
+    yesterday = (date.fromisoformat(today) - timedelta(days=1)).isoformat()
+    try:
+        ycal = run_osascript(CALENDAR, [yesterday], timeout=60)
+        bumps = contact_bumps(ycal["events"], people, yesterday) \
+            if ycal.get("ok") else []
+    except Exception as exc:
+        log.warning("yesterday's calendar query failed: %s", exc)
+        bumps = []
+    if bumps:
+        if dry_run:
+            print(f"[dry-run] would bump LastContact to {yesterday} for "
+                  f"{len(bumps)} people")
+        else:
+            run_bridge(bumps)
+            log.info("bumped LastContact for %d people from %s calendar",
+                     len(bumps), yesterday)
 
     sections = []
     brief = build_brief(events, people, today)

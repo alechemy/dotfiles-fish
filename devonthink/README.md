@@ -670,11 +670,13 @@ mode by default: proposals land in `/20_ENTITIES/_Review`, and moving one into
 
 Division of labor: the LLM only converts messy text to structured JSON;
 deterministic scripts do all matching and writing through a single JXA
-gateway (`entity-dt-bridge.js`). Daily notes are only ever extracted through a
-local Ollama model, honoring `/10_DAILY`'s exclusion from AI chat; meeting and
-handwritten notes may use DT's built-in chat (the same transport that already
-enriches them). Full design, config (`~/.config/dt-pipeline/entities.conf`),
-operations, and failure modes: [docs/entities.md](docs/entities.md).
+gateway (`entity-dt-bridge.js`). Extraction is local-first (`qwen3:30b-a3b`
+via Ollama, `TRANSPORT=ollama`); recurring standup-class meetings are skipped
+by title regex; the brief also bumps `LastContact` from yesterday's completed
+calendar so the reconnect digest doesn't depend on jot discipline. Person and
+proposal groups are excluded from DT's AI chat. Full design, config
+(`~/.config/dt-pipeline/entities.conf`), operations, and failure modes:
+[docs/entities.md](docs/entities.md).
 
 ## Live-only GUI state (fresh-machine checklist)
 
@@ -694,6 +696,8 @@ State the repo can't stow or seed — reproduce by hand (or with the noted one-l
   ```bash
   osascript -e 'tell application id "DNtp" to set exclude from chat of (get record at "/10_DAILY" in database "Lorebook") to true'
   ```
+
+- **`20_ENTITIES/People` and `20_ENTITIES/_Review` are excluded from AI chat** for the same reason, applied the same way — Person records are distilled dossiers, more sensitive than any single note. Entity-layer automation reads them via AppleScript/JXA and is unaffected; DT chat and the DT MCP server cannot.
 
 - **AI engine configuration** (Settings → AI): provider + model selection; API keys live in the macOS Keychain and are never captured by the repo.
 - **Keyboard Maestro macros** — the AppleScripts they run are tracked in [`../keyboard-maestro/`](../keyboard-maestro/); the macro wrappers (hotkey triggers → Execute AppleScript) sync via KM's own iCloud syncing (`~/Library/Mobile Documents/com~apple~CloudDocs/Keyboard Maestro/Keyboard Maestro Macros.kmsync`), so a fresh machine gets them by signing into iCloud and enabling KM sync.
