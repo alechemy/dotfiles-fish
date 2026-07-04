@@ -17,7 +17,7 @@ Groups (all in Lorebook):
 | --- | --- |
 | `/20_ENTITIES/People` | One Markdown record per person. Filename = canonical name; DT record **aliases** carry nicknames ("Bob, Bobby") for matching and WikiLinks |
 | `/20_ENTITIES/Places` | Hand-authored place records (backlinks answer "who/what is connected to Chicago") |
-| `/20_ENTITIES/Events` | Hand-authored event records (trips, gatherings; recurring meetings stay ordinary meeting notes) |
+| `/20_ENTITIES/Events` | Event records for trips, gatherings, milestones — proposed automatically by filing when a note documents a distinct occasion, or hand-authored; recurring meetings stay ordinary meeting notes |
 | `/20_ENTITIES/_Review` | Filing proposals awaiting review |
 | `/20_ENTITIES/_Review/Approved` | Drop zone: move a proposal here and the next filing run applies it |
 
@@ -48,6 +48,12 @@ Rules the automation enforces:
   updated *and* a `Employer: old → new` line is logged, so history survives.
 - **Idempotent by provenance.** A log line whose source link already appears
   in the body is skipped, so re-running filing never duplicates facts.
+- **Known entities are auto-linked.** When a log line is filed, the bridge
+  wraps the first mention of any *existing* Person/Place/Event name or alias
+  in an item link (longest name wins, never inside an existing link, never
+  the record linking to itself). Creating a Place or Event record is
+  therefore all it takes for future facts to start feeding its backlinks —
+  linking is deterministic and never creates records.
 - **Volatile values are computed, not stored** — record kids as names + birth
   years in the body, never an "age" field.
 - Reverse lookup: `mdcity:Chicago` in DT search (or a saved smart group)
@@ -116,6 +122,14 @@ re-verifies every claimed match deterministically:
   for extra scrutiny, and any roster person sharing a name token is listed as
   a possible existing match — usually the fix is adding an alias to that
   record rather than approving a duplicate)
+
+Extraction also carries an `events` channel: when a note documents a
+distinct occasion (trip, celebration, milestone — never a routine meeting or
+call), filing proposes an Event record with the date, location, and attendee
+list; `ensure_event` links attendees who have Person records and leaves the
+rest as plain names, and Event creation is always a proposal, even in auto
+mode. Attendance lands on the event's `**Who:**` line rather than as
+per-person log spam — backlinks give the person→event view for free.
 
 Recurring low-biography meetings (standups, roundtables, retros) are excluded
 from extraction entirely via the `SKIP_SOURCE_TITLES` regex — their yield is

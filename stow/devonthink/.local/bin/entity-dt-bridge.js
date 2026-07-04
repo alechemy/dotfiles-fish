@@ -21,6 +21,8 @@
 //   set_text           {uuid,text}                      -> {uuid}
 //   chat               {prompt,role}                    -> {text}
 //   ensure_person      {name,aliases?,fields?,log_lines?} -> {uuid,created}
+//   ensure_event       {name,date,location?,attendees?,summary?,source_uuid}
+//                                                       -> {uuid,created}
 //   append_log         {uuid,lines}                     -> {uuid,appended,skipped}
 //   set_field          {uuid,field,value}               -> {uuid,changed,previous}
 //   bump_lastcontact   {uuid,date}                      -> {uuid,changed}
@@ -34,11 +36,16 @@ ObjC.import('Foundation')
 const DB_NAME = 'Lorebook'
 const ENTITIES_PATH = '/20_ENTITIES'
 const PEOPLE_PATH = ENTITIES_PATH + '/People'
+const PLACES_PATH = ENTITIES_PATH + '/Places'
+const EVENTS_PATH = ENTITIES_PATH + '/Events'
 const DAILY_PATH = '/10_DAILY'
 const LOG_SECTION = '## Biographical Log'
-const PERSON_TEMPLATE =
+const EVENT_LOG_SECTION = '## Log'
+const TEMPLATE_DIR =
   $.NSHomeDirectory().js +
-  '/Library/Application Support/DEVONthink/Templates.noindex/Entities/Person.md'
+  '/Library/Application Support/DEVONthink/Templates.noindex/Entities/'
+const PERSON_TEMPLATE = TEMPLATE_DIR + 'Person.md'
+const EVENT_TEMPLATE = TEMPLATE_DIR + 'Event.md'
 
 function readFile(path) {
   const s = $.NSString.stringWithContentsOfFileEncodingError(
@@ -101,19 +108,77 @@ function insertUnderSection(body, header, lines) {
   return bodyLines.join('\n')
 }
 
-// Drop lines whose source item-link already appears in the body, then insert
-// the remainder under the Biographical Log section. Returns counts.
-function appendLogLines(rec, lines) {
-  let body = rec.plainText()
+// Set by run(); lets module-level helpers reach the DT session.
+let bridgeCtx = null
+let entityIndex = null
+
+function escapeRe(s) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+// Names/aliases of every existing entity record, longest first so
+// "Maya Chen" wins over "Maya". Rebuilt after any create.
+function buildEntityIndex() {
+  const entries = []
+  for (const path of [PEOPLE_PATH, PLACES_PATH, EVENTS_PATH]) {
+    let group
+    try { group = bridgeCtx.groupAt(path) } catch (e) { continue }
+    for (const rec of group.children()) {
+      if (String(rec.type()) !== 'markdown') continue
+      const uuid = rec.uuid()
+      const names = [rec.name()].concat(String(rec.aliases() || '').split(','))
+      for (const n of names) {
+        const t = n.trim()
+        if (t.length >= 3) entries.push({ name: t, uuid: uuid })
+      }
+    }
+  }
+  entries.sort((a, b) => b.name.length - a.name.length)
+  return entries
+}
+
+// Markdown-link spans land at odd indices after a capture-group split.
+const LINK_SPLIT_RE = /(\[[^\]]*\]\([^)]*\))/
+
+// Wrap the first mention of each known entity in an item link so hand-
+// authored Places/Events (and other People) accrue backlinks from every
+// filed fact. Never links inside an existing link, never links the target
+// record to itself, skips entities the line already links to.
+function linkEntities(line, excludeUuid) {
+  if (entityIndex === null) entityIndex = buildEntityIndex()
+  let out = line
+  for (const e of entityIndex) {
+    if (e.uuid === excludeUuid || out.indexOf(e.uuid) !== -1) continue
+    const re = new RegExp(
+      '(^|[^\\w\\[])(' + escapeRe(e.name) + ')(?![\\w\\]])', 'i')
+    const parts = out.split(LINK_SPLIT_RE)
+    for (let i = 0; i < parts.length; i += 2) {
+      const m = parts[i].match(re)
+      if (m) {
+        parts[i] = parts[i].replace(
+          re, m[1] + '[' + m[2] + '](x-devonthink-item://' + e.uuid + ')')
+        out = parts.join('')
+        break
+      }
+    }
+  }
+  return out
+}
+
+// Drop lines whose source item-link already appears in the body, link known
+// entities in the remainder, then insert under the given section header.
+function appendLogLines(rec, lines, section) {
+  const body = rec.plainText()
+  const uuid = rec.uuid()
   const fresh = []
   let skipped = 0
   for (const line of lines || []) {
     const src = (line.match(/x-devonthink-item:\/\/([0-9A-Fa-f-]+)/) || [])[1]
     if (src && body.indexOf(src) !== -1) { skipped++; continue }
-    fresh.push(line)
+    fresh.push(linkEntities(line, uuid))
   }
   if (fresh.length) {
-    rec.plainText = insertUnderSection(body, LOG_SECTION, fresh)
+    rec.plainText = insertUnderSection(body, section || LOG_SECTION, fresh)
   }
   return { appended: fresh.length, skipped: skipped }
 }
@@ -140,13 +205,27 @@ function run(argv) {
     return r
   }
 
-  function findPerson(name) {
+  bridgeCtx = { groupAt: groupAt }
+
+  function findByNameOrAlias(path, name) {
     const want = normName(name)
     const hits = []
-    for (const rec of groupAt(PEOPLE_PATH).children()) {
+    for (const rec of groupAt(path).children()) {
       if (personKeys(rec).indexOf(want) !== -1) hits.push(rec)
     }
     return hits
+  }
+
+  function findPerson(name) {
+    return findByNameOrAlias(PEOPLE_PATH, name)
+  }
+
+  function personLink(name) {
+    const hits = findPerson(name)
+    if (hits.length === 1) {
+      return '[' + hits[0].name() + '](x-devonthink-item://' + hits[0].uuid() + ')'
+    }
+    return name
   }
 
   function personSkeleton(name) {
@@ -248,6 +327,7 @@ function run(argv) {
           { name: op.name, type: 'markdown' }, { in: groupAt(PEOPLE_PATH) })
         rec.plainText = personSkeleton(op.name)
         created = true
+        entityIndex = null
         dt.addCustomMetaData('Person', { for: 'entitytype', to: rec })
         dt.addCustomMetaData('active', { for: 'entitystatus', to: rec })
       }
@@ -259,6 +339,49 @@ function run(argv) {
         appendLogLines(rec, op.log_lines)
       }
       return { uuid: rec.uuid(), created: created }
+    },
+
+    ensure_event(op) {
+      const hits = findByNameOrAlias(EVENTS_PATH, op.name)
+      if (hits.length > 0) {
+        const rec = hits[0]
+        if (op.summary && op.source_uuid) {
+          appendLogLines(rec, [
+            '- ' + op.date + ' — ' + op.summary +
+            ' ([source](x-devonthink-item://' + op.source_uuid + '))',
+          ], EVENT_LOG_SECTION)
+        }
+        return { uuid: rec.uuid(), created: false }
+      }
+      let tpl = readFile(EVENT_TEMPLATE)
+      if (tpl === null) {
+        tpl = '# Event Name\n\n**Date:** —\n**Where:** —\n**Who:** —\n\n' +
+          EVENT_LOG_SECTION + '\n'
+      }
+      const attendees = (op.attendees || []).map(personLink)
+      const lines = tpl.split('\n')
+      for (let i = 0; i < lines.length; i++) {
+        if (/^#\s/.test(lines[i])) lines[i] = '# ' + op.name
+        else if (/^\*\*Date:\*\*/.test(lines[i])) lines[i] = '**Date:** ' + op.date
+        else if (/^\*\*Where:\*\*/.test(lines[i]) && op.location) {
+          lines[i] = '**Where:** ' + linkEntities(op.location, null)
+        } else if (/^\*\*Who:\*\*/.test(lines[i]) && attendees.length) {
+          lines[i] = '**Who:** ' + attendees.join(', ')
+        }
+      }
+      const rec = dt.createRecordWith(
+        { name: op.name, type: 'markdown' }, { in: groupAt(EVENTS_PATH) })
+      rec.plainText = lines.join('\n')
+      entityIndex = null
+      dt.addCustomMetaData('Event', { for: 'entitytype', to: rec })
+      dt.addCustomMetaData(op.date, { for: 'eventdate', to: rec })
+      if (op.summary && op.source_uuid) {
+        appendLogLines(rec, [
+          '- ' + op.date + ' — ' + op.summary +
+          ' ([source](x-devonthink-item://' + op.source_uuid + '))',
+        ], EVENT_LOG_SECTION)
+      }
+      return { uuid: rec.uuid(), created: true }
     },
 
     append_log(op) {

@@ -666,7 +666,11 @@ records (plus a Monday `## Reconnect` digest sorted on `LastContact`); a
 30-minute agent (`com.user.entity-filing`) extracts people-facts from meeting
 notes, handwritten notes, and past daily notes, and files them — in suggest
 mode by default: proposals land in `/20_ENTITIES/_Review`, and moving one into
-`_Review/Approved` applies it on the next run.
+`_Review/Approved` applies it on the next run. Notes documenting a distinct
+occasion (trip, celebration, gathering) additionally propose an Event record
+with date/place/attendees, and every filed fact auto-links the first mention
+of any existing Person/Place/Event name or alias, so hand-authored records
+accrue backlinks without any extra effort.
 
 Division of labor: the LLM only converts messy text to structured JSON;
 deterministic scripts do all matching and writing through a single JXA

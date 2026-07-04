@@ -87,7 +87,10 @@ exactly this shape:
 {{"people": [{{"name": "<canonical full name>",
   "match": "<exact name from KNOWN PEOPLE, or null>",
   "facts": [{{"date": "yyyy-mm-dd or null", "fact": "<one concise sentence>"}}],
-  "updates": {{"employer": null, "role": null, "city": null, "email": null}}}}]}}
+  "updates": {{"employer": null, "role": null, "city": null, "email": null}}}}],
+ "events": [{{"name": "<short reusable title>", "date": "yyyy-mm-dd or null",
+  "location": "<place name or null>", "attendees": ["<name>"],
+  "summary": "<one sentence or null>"}}]}}
 
 Rules:
 - Only real individual humans the note's author personally interacted with or
@@ -104,6 +107,11 @@ Rules:
   (new job, new role, promotion, leaving, relocation).
 - When unsure whether a fact is durable and personally meaningful, omit it.
   Fewer, better facts. An empty list is a good answer for a technical note.
+- "events" is for a distinct real-world occasion the note documents: a trip,
+  celebration, milestone, or one-off gathering. Routine or recurring work
+  meetings, standups, syncs, and 1:1 calls are NEVER events. Give it a short
+  reusable title (e.g. "Portland Hiking Trip"). Most notes have no event —
+  an empty "events" list is the normal answer.
 - Set an "updates" value only when the note states that person's CURRENT
   employer, job role, home city, or email address; otherwise leave it null.
 - If the note contains no such facts, return {{"people": []}}.
@@ -147,9 +155,23 @@ EXTRACTION_SCHEMA = {
                 },
                 "required": ["name", "facts"],
             },
-        }
+        },
+        "events": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string"},
+                    "date": {"type": ["string", "null"]},
+                    "location": {"type": ["string", "null"]},
+                    "attendees": {"type": "array", "items": {"type": "string"}},
+                    "summary": {"type": ["string", "null"]},
+                },
+                "required": ["name"],
+            },
+        },
     },
-    "required": ["people"],
+    "required": ["people", "events"],
 }
 
 
@@ -300,7 +322,8 @@ def parse_extraction(raw):
     data = json.loads(text)
     if not isinstance(data, dict) or not isinstance(data.get("people"), list):
         raise ValueError("extraction JSON missing 'people' array")
-    return data["people"]
+    events = data.get("events")
+    return data["people"], events if isinstance(events, list) else []
 
 
 # ---------------------------------------------------------------------------
@@ -441,8 +464,36 @@ def build_person_plans(extracted, index, selves, people, source_date):
     return plans
 
 
+def build_event_plans(events_raw, selves, source_date):
+    plans = []
+    for ev in events_raw[:4]:
+        name = str(ev.get("name", "")).strip()
+        if not name or len(name) > 80:
+            continue
+        attendees = []
+        for a in (ev.get("attendees") or [])[:20]:
+            a = str(a).strip()
+            if a and norm(a) not in selves and a not in attendees:
+                attendees.append(a)
+        summary = str(ev.get("summary") or "").strip()[:300]
+        plans.append({
+            "kind": "event",
+            "name": name,
+            "date": valid_date(ev.get("date")) or source_date,
+            "location": str(ev.get("location") or "").strip()[:80],
+            "attendees": attendees,
+            "summary": summary,
+        })
+    return plans
+
+
 def ops_for_plan(plan, source, source_date):
     src = source["uuid"]
+    if plan["kind"] == "event":
+        return [{"op": "ensure_event", "name": plan["name"],
+                 "date": plan["date"], "location": plan["location"],
+                 "attendees": plan["attendees"], "summary": plan["summary"],
+                 "source_uuid": src}]
     lines = [fact_line(d, fact, src) for d, fact in plan["facts"]]
     ops = []
     if plan["kind"] == "existing":
@@ -486,7 +537,14 @@ def proposal_body(source, source_date, plans, ops):
         "",
     ]
     for plan in plans:
-        if plan["kind"] == "existing":
+        if plan["kind"] == "event":
+            who = ", ".join(plan["attendees"]) or "—"
+            where = f" at {plan['location']}" if plan["location"] else ""
+            lines.append(f"- **EVENT: {plan['name']}** ({plan['date']}{where})"
+                         f" — who: {who}")
+            if plan["summary"]:
+                lines.append(f"  - {plan['summary']}")
+        elif plan["kind"] == "existing":
             lines.append(f"- **{plan['name']}** (existing record)")
         elif plan["kind"] == "ambiguous":
             cands = ", ".join(plan["candidates"])
@@ -650,7 +708,7 @@ def scan(config, state, dry_run, force_uuid):
         try:
             raw = (extract_ollama(config, prompt) if transport == "ollama"
                    else extract_dtchat(prompt))
-            extracted = parse_extraction(raw)
+            extracted_people, extracted_events = parse_extraction(raw)
         except Exception as exc:
             state["attempts"][source["uuid"]] = attempts + 1
             if not dry_run:
@@ -660,7 +718,9 @@ def scan(config, state, dry_run, force_uuid):
                              "record_uuid": source["uuid"]})
             continue
 
-        plans = build_person_plans(extracted, index, selves, people, source_date)
+        plans = build_person_plans(extracted_people, index, selves, people,
+                                   source_date)
+        plans += build_event_plans(extracted_events, selves, source_date)
         file_source(config, state, source, source_date, plans, filing_mode,
                     dry_run)
 

@@ -11,8 +11,9 @@ accumulates dated facts with links back to the note each fact came from. A
 morning agent writes a briefing into today's daily note — who you're meeting,
 what you know about them — and a Monday digest lists people you've lost touch
 with. A filing agent reads your meeting notes, handwritten notes, and daily
-jots through a local LLM and *proposes* new facts; nothing touches a Person
-record until you approve it.
+jots through a local LLM and *proposes* new facts — and, when a note
+documents a trip, celebration, or gathering, an Event record with its
+attendees; nothing is created or changed until you approve it.
 
 ## Your daily rhythm
 
@@ -77,6 +78,24 @@ version of the extractor — treat it as practice. Things you might do to it:
 Then drag to `Approved`. If the JSON you left behind is malformed, nothing
 is lost — the run logs a warning and leaves the proposal in place for
 another edit.
+
+**Event proposals** (`EVENT: …` lines) work the same way: approving an
+`ensure_event` op creates a record in `20_ENTITIES/Events` with the date,
+place, and attendee list. Attendees who have Person records become links;
+the rest stay plain names — and that's fine. Trim the attendee list or fix
+the title in the JSON just like anything else.
+
+## Places, events, and automatic linking
+
+Whenever a fact is filed, the first mention of any *existing* entity's name
+or alias gets wrapped in a link — "Moved to Chicago" links to your Chicago
+record the moment one exists. Linking never creates records, so Places work
+on a simple rule: **create a Place record when you first care about a
+place** (Data → New from Template → Entities → Place), and every future
+filed fact that mentions it feeds its backlinks automatically. Open the
+record and check the Mentions/Incoming Links inspector to see everything
+connected to it. Events accrue the same way, plus the filing agent proposes
+them for you when a note describes a distinct occasion.
 
 ## Correcting things after the fact
 
