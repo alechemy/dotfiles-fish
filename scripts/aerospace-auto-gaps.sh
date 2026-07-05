@@ -48,6 +48,15 @@ TRIGGER="${1:-unlabeled}"
 
 log() { printf '%s %s\n' "$(date '+%F %T')" "$*" >>"$LOG_FILE"; }
 
+# App-name snapshot of workspace $1 from the tree view, e.g.
+# "Ghostty(h_tiles),Finder(floating)". Logged with every apply/mismatch so a
+# flapping window can be identified from the log alone (a phantom count change
+# names its app here; the count fields alone can't say which window moved).
+ws_apps() {
+    aerospace list-windows --all --format '%{workspace}|%{app-name}|%{window-layout}' 2>/dev/null \
+        | awk -F'|' -v ws="$1" '$1 == ws {printf "%s%s(%s)", s, $2, $3; s=","} END {print ""}'
+}
+
 # Skip when more than one monitor is connected (e.g. clamshell + lid open) so
 # the manual + automatic gap states don't fight during transient configs.
 # The TOML's named-monitor gap rule already keeps the laptop's built-in panel
@@ -126,7 +135,7 @@ for pass in 1 2 3 4 5; do
     # sample — a window mid-appear/close, straddling workspaces, or a phantom
     # slot from AX starvation — so skip it rather than bake a wrong gap and churn.
     if [ "$count" != "$listed" ]; then
-        log "tree/listing mismatch ws=$ws tree=$count listed=$listed trigger=$TRIGGER pass=$pass"
+        log "tree/listing mismatch ws=$ws tree=$count listed=$listed trigger=$TRIGGER pass=$pass apps=$(ws_apps "$ws")"
         continue
     fi
 
@@ -147,6 +156,7 @@ for pass in 1 2 3 4 5; do
     [ -z "$current" ] && current=$(read_gap "$SOURCE_FILE")
 
     if [ "$needs_rebuild" = true ] || [ "$current" != "$target" ]; then
+        apps=$(ws_apps "$ws")
         # Stage to a sibling temp file and atomically rename into place. mv on
         # the same filesystem uses rename(2), so $RUNTIME_FILE never appears
         # truncated even if a process is killed mid-write.
@@ -159,7 +169,7 @@ for pass in 1 2 3 4 5; do
         mv "$TMP" "$RUNTIME_FILE"
 
         aerospace reload-config
-        log "apply ws=$ws count=$count gap=$current->$target trigger=$TRIGGER pass=$pass"
+        log "apply ws=$ws count=$count gap=$current->$target trigger=$TRIGGER pass=$pass apps=$apps"
     fi
 
     # Re-sample: if focus moved while we worked, or an event queued behind the
