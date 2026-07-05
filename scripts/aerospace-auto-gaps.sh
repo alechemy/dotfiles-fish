@@ -112,6 +112,7 @@ read_gap() {
 
 compute_gap_presets || exit 0
 
+reload_pending=false
 for pass in 1 2 3 4 5; do
     rm -f "$PENDING_FILE"
     sleep 0.2
@@ -155,7 +156,7 @@ for pass in 1 2 3 4 5; do
     current=$(read_gap "$RUNTIME_FILE")
     [ -z "$current" ] && current=$(read_gap "$SOURCE_FILE")
 
-    if [ "$needs_rebuild" = true ] || [ "$current" != "$target" ]; then
+    if [ "$needs_rebuild" = true ] || [ "$current" != "$target" ] || [ "$reload_pending" = true ]; then
         apps=$(ws_apps "$ws")
         # Stage to a sibling temp file and atomically rename into place. mv on
         # the same filesystem uses rename(2), so $RUNTIME_FILE never appears
@@ -167,6 +168,21 @@ for pass in 1 2 3 4 5; do
         sed -i '' "s/outer\.right = \[{ monitor\.\"DELL U4025QW\" = [0-9]* }/outer.right = [{ monitor.\"DELL U4025QW\" = $target }/" "$TMP"
         chmod 0644 "$TMP"
         mv "$TMP" "$RUNTIME_FILE"
+
+        # reload-config re-syncs the visible workspace to the focused window's
+        # workspace; fired mid-transition it yanks the user back, whose
+        # workspace-change event then applies the opposite gap — a visible
+        # ping-pong between two workspaces with different counts. Reload only
+        # while focus still matches the sampled workspace; otherwise leave the
+        # runtime file staged and let the next pass reload with settled focus
+        # (reload_pending forces that reload even if the staged gap already
+        # matches the new workspace's target).
+        if [ "$(aerospace list-workspaces --focused)" != "$ws" ]; then
+            reload_pending=true
+            log "defer-reload ws=$ws count=$count gap=$current->$target trigger=$TRIGGER pass=$pass"
+            continue
+        fi
+        reload_pending=false
 
         aerospace reload-config
         log "apply ws=$ws count=$count gap=$current->$target trigger=$TRIGGER pass=$pass apps=$apps"
