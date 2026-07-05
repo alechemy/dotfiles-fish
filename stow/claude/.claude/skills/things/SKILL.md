@@ -31,10 +31,18 @@ drop or wedge writes. Follow these rules; for any bulk add, **use the bundled he
    `attributes.items[]` lists the headings (`{"type":"heading","attributes":{"title":…}}`).
    (Appending headings to an existing project via `json` `update`+`items` is unreliable on
    some builds — prefer create-with-items, or the helper's per-heading fallback.)
-3. **Never bulk-fire a big `json` import.** Long URLs (>~4 KB) get **truncated** into a
-   modal *"There is a problem with the provided JSON"* sheet, and **a stuck sheet blocks
-   ALL further URL processing** until dismissed. Instead add **one to-do per `add`
-   command** — short URLs can't truncate.
+3. **Big `json` imports truncate — batch under a size guard.** A json URL over ~4 KB gets
+   **truncated** into a modal *"There is a problem with the provided JSON"* sheet, and **a
+   stuck sheet blocks ALL further URL processing** until dismissed. So bulk writes go either
+   one-per-`add` (short URLs can't truncate) or, much faster, as **`json` batches each kept
+   under ~3.5 KB** — the helper does the latter: it packs to-dos into batches, measuring the
+   encoded URL length before every `open`, and DB-confirms each batch. Two JSON-create
+   gotchas the helper encodes (both cost a wedged sheet to learn): **omit the `operation`
+   field on a create** (it belongs only on an `update`; including it on a create rejects the
+   whole batch), and **checklist items must be objects**
+   `{"type":"checklist-item","attributes":{"title":…}}` — the plain-string form the `add`
+   command accepts is silently dropped in `json`. A single to-do whose own json URL would
+   still exceed the guard (e.g. a huge note) falls back to the compact `add` command.
 4. **Confirm every write by reading the Things SQLite DB**, and compute "what's missing"
    from the DB before each write, so retries are **idempotent (no duplicates)**. Do NOT
    trust that a fired `open` landed. DB:
@@ -58,8 +66,9 @@ drop or wedge writes. Follow these rules; for any bulk add, **use the bundled he
 ## Don't burst opens
 
 macOS coalesces rapid `open` calls to an already-running app, so firing many in a tight
-loop drops most. The helper avoids this by firing one `add`, then polling the DB until it
-lands, before the next — naturally serialized, never bursted.
+loop drops most. The helper never bursts: the json-batch pass fires **one `open` per batch**
+(a handful total for dozens of to-dos) and the single-`add` sweep fires one at a time, each
+followed by a DB-confirm poll before the next — naturally serialized.
 
 ## The helper: `things_fill.py`
 
@@ -92,8 +101,11 @@ python3 ~/.claude/skills/things/things_fill.py spec.json --dry-run  # show what'
 }
 ```
 `project` is a uuid or exact title. It ensures Things is running (in the background, never
-foregrounded), ensures headings exist, then adds each missing to-do via the `add` command
-(`open -g`), DB-confirming each. Re-run anytime — it only adds what's absent.
+foregrounded), ensures headings exist, then fills missing to-dos in two passes: with a token
+present it creates them in size-guarded **`json` batches** (a handful of `open`s for dozens
+of to-dos), then an idempotent **single-`add` sweep** (`open -g`) mops up any straggler and
+is the sole path when no token is set. Every write is DB-confirmed. Re-run anytime — it only
+adds what's absent (~2 s for two dozen to-dos, vs. ~17 s pre-batching).
 
 The helper is **project-scoped** — every to-do gets a `list-id`, so it can't place a
 project-less to-do into Inbox/Anytime/Someday. For a one-off unfiled to-do, don't

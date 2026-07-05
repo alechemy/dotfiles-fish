@@ -127,6 +127,54 @@ def add_todo(project, heading_id, item):
     url = "things:///add?" + "&".join(f"{k}={urllib.parse.quote(str(v), safe='')}" for k, v in p.items())
     _open(url)
 
+# Stay well under the ~4 KB point where Things truncates a json URL into a modal
+# error sheet that wedges all further writes.
+JSON_URL_LIMIT = 3500
+
+def _todo_json(project, heading_id, item):
+    a = {"title": item["title"], "list-id": project}
+    if heading_id: a["heading-id"] = heading_id
+    if item.get("notes"): a["notes"] = item["notes"]
+    if item.get("tags"): a["tags"] = item["tags"]
+    if item.get("checklist"):
+        a["checklist-items"] = [{"type": "checklist-item", "attributes": {"title": c}} for c in item["checklist"]]
+    return {"type": "to-do", "attributes": a}
+
+def _json_url(token, data):
+    return ("things:///json?auth-token=" + urllib.parse.quote(token, safe='')
+            + "&data=" + urllib.parse.quote(json.dumps(data, ensure_ascii=False), safe=''))
+
+def _confirm(project, titles, tries=20, delay=0.25):
+    for _ in range(tries):
+        time.sleep(delay)
+        if titles <= existing_titles(project): return True
+    dismiss_sheets(); return False
+
+def add_todos_batched(project, items, hids, token):
+    """First pass: create missing to-dos in sub-JSON_URL_LIMIT json batches (one `open`
+    per batch, DB-confirmed), collapsing dozens of round-trips into a handful. A single
+    item whose own json URL would exceed the guard falls back to the compact `add`
+    command. Stragglers are left for fill()'s idempotent single-add sweep."""
+    batch = []  # (title, todo_json)
+    def flush():
+        if not batch: return
+        _open(_json_url(token, [j for _, j in batch]))
+        ok = _confirm(project, {t for t, _ in batch})
+        print(f"batch: {len(batch)} to-dos {'OK' if ok else 'MISS'}")
+        batch.clear()
+    for item in items:
+        j = _todo_json(project, hids.get(item.get("heading", "")), item)
+        if len(_json_url(token, [j])) > JSON_URL_LIMIT:      # too big even alone -> add command
+            flush()
+            add_todo(project, hids.get(item.get("heading", "")), item)
+            _confirm(project, {item["title"]}, tries=16, delay=0.2)
+            print(f"solo: {item['title'][:50]}")
+            continue
+        if batch and len(_json_url(token, [x for _, x in batch] + [j])) > JSON_URL_LIMIT:
+            flush()
+        batch.append((item["title"], j))
+    flush()
+
 def fill(project, todos, headings=None, token=None, dry_run=False):
     project = resolve_project(project)
     by = {t["title"]: t for t in todos}
@@ -140,6 +188,8 @@ def fill(project, todos, headings=None, token=None, dry_run=False):
         ensure_headings(project, headings, token)
     hids = heading_ids(project)
     ensure_running()
+    if token and missing:
+        add_todos_batched(project, [by[ti] for ti in missing], hids, token)
     for i in range(len(by) * 2 + 5):
         have = existing_titles(project)
         missing = [ti for ti in by if ti not in have]
@@ -148,9 +198,11 @@ def fill(project, todos, headings=None, token=None, dry_run=False):
         hid = hids.get(item.get("heading", ""))
         add_todo(project, hid, item)
         ok = False
-        for _ in range(10):
-            time.sleep(0.6)
+        delay = 0.12
+        for _ in range(16):
+            time.sleep(delay)
             if ti in existing_titles(project): ok = True; break
+            delay = min(delay + 0.08, 0.6)
         if not ok: dismiss_sheets()             # clear any stray error sheet, then retry next loop
         print(f"{'OK  ' if ok else 'MISS'} {ti[:60]}")
     left = [ti for ti in by if ti not in existing_titles(project)]
