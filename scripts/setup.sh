@@ -407,6 +407,16 @@ if command -v stow &> /dev/null; then
     # symlink), so seed it copy-if-absent rather than stow it.
     "$DOTFILES/scripts/seed-linearmouse-config.sh"
 
+    # hunk ships its Claude Code skill inside the formula; symlink it (via the
+    # version-stable opt prefix) instead of vendoring a copy that would drift on
+    # `brew upgrade hunk`.
+    if HUNK_PREFIX="$(brew --prefix hunk 2>/dev/null)" &&
+        [ -d "$HUNK_PREFIX/libexec/skills/hunk-review" ]; then
+        mkdir -p "$HOME/.claude/skills"
+        ln -sfn "$HUNK_PREFIX/libexec/skills/hunk-review" "$HOME/.claude/skills/hunk-review"
+        success "Linked hunk-review Claude skill"
+    fi
+
     # 4a. Opt-in work config (stow-work/work/).
     #
     # stow-work/ is gitignored apart from .gitkeep, so a fresh `git clone` has
