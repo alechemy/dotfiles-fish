@@ -132,7 +132,10 @@ The pattern:
 
 Only genuinely portable, user-authored config belongs in a seed. Do **not** seed app-shipped defaults (DEVONthink repopulates its built-in AI templates and Smart Rules example `.scpt`s from the app bundle on launch) or machine-specific state (window geometry, the preferences plist, licenses) — verify against the app bundle before adding a file.
 
-Current consumer: `stow/devonthink/_seed/` — DEVONthink smart rules, smart groups, custom metadata, and batch-processing presets (`scripts/seed-devonthink-config.sh`). DEVONthink AI keys live in the macOS Keychain, not these plists, so they are never captured here.
+Current consumers:
+
+- `stow/devonthink/_seed/` — DEVONthink smart rules, smart groups, custom metadata, and batch-processing presets (`scripts/seed-devonthink-config.sh`). DEVONthink AI keys live in the macOS Keychain, not these plists, so they are never captured here.
+- `stow/linearmouse/_seed/` — LinearMouse scroll config (`~/.config/linearmouse/linearmouse.json`), scoped to the Ploopy Knob (VID `0x5043` / PID `0x63C3`) (`scripts/seed-linearmouse-config.sh`).
 
 ### Local Homebrew tap (apps with no upstream cask)
 

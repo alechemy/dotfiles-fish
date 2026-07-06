@@ -36,7 +36,9 @@ This installs Homebrew + all dependencies from `Brewfile`, builds generated conf
 ├── drafts/                  # Drafts action scripts (repo is canonical)
 ├── keyboard-maestro/        # Scripts referenced by KM macros
 ├── hrm/                     # Glove80 keyboard layout + README
-├── tailorkey/               # Glove80 TailorKey layout
+├── firmware/                # Keyboard/device firmware + layouts
+│   ├── ploopy-knob/         # Ploopy Knob QMK keymap + build recipe
+│   └── tailorkey/           # Glove80/Go60 TailorKey layouts
 ├── scripts/
 │   ├── setup.sh                  # Main bootstrap script
 │   ├── restow-changed.sh         # Auto-restow worker (git post-merge/-rewrite/-commit hooks)
@@ -67,6 +69,7 @@ This installs Homebrew + all dependencies from `Brewfile`, builds generated conf
 │   ├── ghostty/             # Terminal emulator
 │   ├── git/                 # Git config + global excludes
 │   ├── karabiner/           # Keyboard remapping (goku EDN source)
+│   ├── linearmouse/         # Ploopy Knob scroll config (seeded, not stowed)
 │   ├── mise/                # Runtime version manager
 │   ├── nas-mount/           # Auto-mount NAS SMB shares (launch agent)
 │   ├── navidrome/           # Navidrome client env

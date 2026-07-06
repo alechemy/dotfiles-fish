@@ -403,6 +403,10 @@ if command -v stow &> /dev/null; then
     cd "$DOTFILES"
     success "Dotfiles stowed"
 
+    # LinearMouse's config is app-rewritten (an atomic-rename save de-stows a
+    # symlink), so seed it copy-if-absent rather than stow it.
+    "$DOTFILES/scripts/seed-linearmouse-config.sh"
+
     # 4a. Opt-in work config (stow-work/work/).
     #
     # stow-work/ is gitignored apart from .gitkeep, so a fresh `git clone` has

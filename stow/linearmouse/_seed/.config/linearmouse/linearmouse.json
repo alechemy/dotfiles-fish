@@ -1,0 +1,30 @@
+{
+  "$schema" : "https://schema.linearmouse.app/0.11.3-beta.6",
+  "schemes" : [
+    {
+      "if" : {
+        "device" : {
+          "productID" : "0x63c3",
+          "vendorID" : "0x5043"
+        }
+      },
+      "scrolling" : {
+        "distance" : {
+          "vertical" : 1
+        },
+        "smoothed" : {
+          "vertical" : {
+            "enabled" : false
+          }
+        },
+        "modifiers" : {
+          "vertical" : {
+            "shift" : {
+              "type" : "alterOrientation"
+            }
+          }
+        }
+      }
+    }
+  ]
+}
