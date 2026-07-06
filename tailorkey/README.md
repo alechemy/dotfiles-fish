@@ -338,12 +338,12 @@ The first keypress after the timeout is spent waking + reconnecting BLE (a beat 
 
 #### Tweak F: Mouse-layer hold-open lengthened after touchpad use
 
-Each Cirque listener (`&cirque_lh_listener`, `&cirque_rh_listener`) ends its `inputProcessors` chain with `&zip_temp_layer [layer, timeout-ms]`, which momentarily activates the Mouse layer (14) while the touchpad is in use and holds it that many ms after the last motion. Both were bumped from the stock `250` to `1000` so the layer stays live for a full second after you lift off — long enough to reach a click without the layer dropping. Kept the two listeners in sync.
+Each Cirque listener (`&cirque_lh_listener`, `&cirque_rh_listener`) ends its `inputProcessors` chain with `&zip_temp_layer [layer, timeout-ms]`, which momentarily activates the Mouse layer (14) while the touchpad is in use and holds it that many ms after the last motion. Both were bumped from the stock `250` to `500` so the layer stays live for half a second after you lift off — long enough to reach a click without the layer dropping. Kept the two listeners in sync.
 
-| Listener              | Upstream `&zip_temp_layer` | Yours       |
-|-----------------------|----------------------------|-------------|
-| `&cirque_lh_listener` | `[14, 250]`                | `[14, 1000]` |
-| `&cirque_rh_listener` | `[14, 250]`                | `[14, 1000]` |
+| Listener              | Upstream `&zip_temp_layer` | Yours      |
+|-----------------------|----------------------------|------------|
+| `&cirque_lh_listener` | `[14, 250]`                | `[14, 500]` |
+| `&cirque_rh_listener` | `[14, 250]`                | `[14, 500]` |
 
 ---
 

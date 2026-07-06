@@ -9629,7 +9629,7 @@
           "code": "&zip_temp_layer",
           "params": [
             14,
-            1000
+            500
           ]
         }
       ],
@@ -9743,7 +9743,7 @@
           "code": "&zip_temp_layer",
           "params": [
             14,
-            1000
+            500
           ]
         }
       ],
