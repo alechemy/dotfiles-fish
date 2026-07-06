@@ -6,7 +6,9 @@ Builds a "who am I about to meet" briefing from today's calendar plus the
 Person records in Lorebook/20_ENTITIES/People and appends it to today's
 daily note as a `## Briefing` section. On Mondays (or with --weekly) it
 also appends a `## Reconnect` section listing people whose LastContact
-has drifted past their relationship tier's threshold.
+has drifted past their relationship tier's threshold. Whenever filing
+proposals sit unreviewed in `/20_ENTITIES/_Review`, an `## Entity Review`
+line reports the backlog count.
 
 The brief reads live from the records, so it is never stale. Two mutations
 only: the daily-note section insert (idempotent via an HTML comment marker
@@ -56,6 +58,8 @@ CALENDAR = os.path.expanduser("~/.local/bin/calendar-events-json.js")
 NOTES_HEADER = "## Today's Notes"
 BRIEF_HEADER = "## Briefing"
 RECONNECT_HEADER = "## Reconnect"
+REVIEW_HEADER = "## Entity Review"
+REVIEW_PATH = "/20_ENTITIES/_Review"
 LOG_BULLET_RE = re.compile(r"^- \d{4}-\d{2}-\d{2} — ")
 
 # Days without contact before a person surfaces in the Reconnect digest,
@@ -261,8 +265,13 @@ def build_reconnect(people, today):
         if status != "active":
             continue
         threshold = RECONNECT_DAYS.get(md.get("mdrelationship", ""))
+        if not threshold:
+            continue
         last = md.get("mdlastcontact", "")
-        if not threshold or not last:
+        if not last:
+            # A tiered relationship with no contact ever logged is the most
+            # overdue case possible, not an exempt one.
+            overdue.append((float("inf"), None, p))
             continue
         try:
             days = (today_d - date.fromisoformat(last)).days
@@ -277,11 +286,34 @@ def build_reconnect(people, today):
     for _, days, p in overdue[:RECONNECT_LIMIT]:
         md = p.get("md", {})
         rel = md.get("mdrelationship", "")
-        lines.append(
-            f"- [{p['name']}](x-devonthink-item://{p['uuid']})"
-            f" — {rel} · last contact {md.get('mdlastcontact')} ({days} days)"
-        )
+        link = f"[{p['name']}](x-devonthink-item://{p['uuid']})"
+        if days is None:
+            lines.append(f"- {link} — {rel} · no recorded contact")
+        else:
+            lines.append(
+                f"- {link} — {rel} · last contact"
+                f" {md.get('mdlastcontact')} ({days} days)"
+            )
     return "\n".join(lines)
+
+
+def review_nudge(today):
+    """Surface the filing review backlog so proposals don't sit unseen —
+    the Approved subgroup is the apply drop-zone, so it isn't a backlog."""
+    try:
+        children = run_bridge([{"op": "list_group", "path": REVIEW_PATH}])[0]
+    except Exception as exc:
+        log.warning("could not count review proposals: %s", exc)
+        return None
+    pending = [c for c in children if c["name"] != "Approved"]
+    if not pending:
+        return None
+    noun = "proposal" if len(pending) == 1 else "proposals"
+    return (
+        f"<!-- review-nudge:{today} -->\n\n"
+        f"- {len(pending)} filing {noun} awaiting review in "
+        f"`20_ENTITIES/_Review`"
+    )
 
 
 def append_section(note_text, header, content):
@@ -366,6 +398,11 @@ def main():
             sections.append(
                 (RECONNECT_HEADER, reconnect, f"<!-- reconnect:{today} -->")
             )
+    nudge = review_nudge(today)
+    if nudge:
+        sections.append(
+            (REVIEW_HEADER, nudge, f"<!-- review-nudge:{today} -->")
+        )
 
     if not sections:
         log.info("nothing to write (no briefable meetings, no reconnects)")

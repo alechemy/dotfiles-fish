@@ -58,6 +58,7 @@ Usage:
     entity-filing.py --scan-only     # skip the apply phase
 """
 
+import fcntl
 import json
 import os
 import pwd
@@ -79,6 +80,7 @@ BRIDGE = os.path.expanduser("~/.local/bin/entity-dt-bridge.js")
 CONFIG_FILE = os.path.expanduser("~/.config/dt-pipeline/entities.conf")
 STATE_DIR = os.path.expanduser("~/.local/state/devonthink")
 STATE_FILE = os.path.join(STATE_DIR, "entity-filing-state.json")
+LOCK_FILE = os.path.join(STATE_DIR, "entity-filing.lock")
 STATE_SCHEMA_VERSION = 1
 REVIEW_PATH = "/20_ENTITIES/_Review"
 APPROVED_PATH = "/20_ENTITIES/_Review/Approved"
@@ -253,6 +255,22 @@ def save_state(state):
         except FileNotFoundError:
             pass
         raise
+
+
+def acquire_lock():
+    """Hold a non-blocking exclusive lock for the run's lifetime so a
+    hand-looped --scan-only never interleaves with the 30-minute launchd
+    tick — concurrent runs would duplicate proposals and drop each other's
+    processed_ids (the state file is last-writer-wins). Returns the open fd
+    (kept referenced to hold the lock) or None if another run holds it."""
+    os.makedirs(STATE_DIR, exist_ok=True)
+    fd = open(LOCK_FILE, "w")
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        fd.close()
+        return None
+    return fd
 
 
 # ---------------------------------------------------------------------------
@@ -682,7 +700,14 @@ def apply_approved(dry_run):
         if dry_run:
             log.info("[dry-run] would apply %d ops from %s", len(ops), rec["name"])
             continue
-        run_bridge(ops + [{"op": "trash", "uuid": rec["uuid"]}])
+        try:
+            run_bridge(ops + [{"op": "trash", "uuid": rec["uuid"]}])
+        except Exception as exc:
+            log.error("applying proposal failed (%s), leaving in Approved: %s",
+                      type(exc).__name__, exc,
+                      extra={"record_name": rec["name"],
+                             "record_uuid": rec["uuid"]})
+            continue
         log.info("applied %d ops", len(ops),
                  extra={"record_name": rec["name"], "record_uuid": rec["uuid"]})
 
@@ -764,8 +789,13 @@ def scan(config, state, dry_run, force_uuid, user_invoked):
     if force_uuid:
         candidates = [s for s in sources if s["uuid"] == force_uuid]
         if not candidates:
-            log.error("--force uuid %s not found among sources", force_uuid)
-            return
+            try:
+                candidates = [run_bridge(
+                    [{"op": "get_source", "uuid": force_uuid}])[0]]
+            except Exception as exc:
+                log.error("--force uuid %s could not be fetched: %s",
+                          force_uuid, exc)
+                return
     else:
         candidates = [
             s for s in sources
@@ -841,11 +871,20 @@ def scan(config, state, dry_run, force_uuid, user_invoked):
                              "record_uuid": source["uuid"]})
             continue
 
-        plans = build_person_plans(extracted_people, index, selves, people,
-                                   source_date)
-        plans += build_event_plans(extracted_events, selves, source_date)
-        file_source(config, state, source, source_date, plans, filing_mode,
-                    dry_run)
+        try:
+            plans = build_person_plans(extracted_people, index, selves, people,
+                                       source_date)
+            plans += build_event_plans(extracted_events, selves, source_date)
+            file_source(config, state, source, source_date, plans, filing_mode,
+                        dry_run)
+        except Exception as exc:
+            state["attempts"][source["uuid"]] = attempts + 1
+            if not dry_run:
+                save_state(state)
+            log.error("filing failed: %s: %s", type(exc).__name__, exc,
+                      extra={"record_name": source["name"],
+                             "record_uuid": source["uuid"]})
+            continue
 
 
 def file_source(config, state, source, source_date, plans, filing_mode, dry_run):
@@ -932,6 +971,13 @@ def main():
         )
         if gate.returncode != 0:
             log.info("skipping: follower machine")
+            return
+
+    lock_fd = None
+    if not dry_run:
+        lock_fd = acquire_lock()
+        if lock_fd is None:
+            log.info("another entity-filing run holds the lock, exiting")
             return
 
     config = load_config()

@@ -184,7 +184,11 @@ nothing but delay. The code also carries an Ollama transport (same `local`
 chain, tried after oMLX); it is currently uninstalled — reinstate with
 `brew install ollama`, a model pull, and `OLLAMA_MODEL=` in the conf.
 `auto` restores the DT-chat fallback for meeting/handwritten notes if
-availability ever matters more than consistency. oMLX serves an OpenAI-compatible API on :8000
+availability ever matters more than consistency — but the extraction prompt
+embeds the full People roster (every name and alias), so under `auto` each
+DT-chat extraction ships the whole roster to DT chat's configured provider,
+not just the note being extracted; the local-only posture keeps this moot
+today. oMLX serves an OpenAI-compatible API on :8000
 (`extract_omlx` uses `response_format: json_schema` +
 `chat_template_kwargs: {enable_thinking: false}`); models are MLX builds
 from HuggingFace in `~/.omlx/models/`. The oMLX app (menu-bar,

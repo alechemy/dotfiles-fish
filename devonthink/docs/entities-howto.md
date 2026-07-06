@@ -43,8 +43,8 @@ changes nothing.
 You have three moves:
 
 1. **Approve** — move the record into `_Review/Approved` (drag, or ⌃⌘M →
-   Approved). Within 30 minutes the ops run and the proposal deletes itself.
-   Immediately: run `entity-filing.py --apply-only` in a terminal.
+   Approved). Within 30 minutes the ops run and the proposal is moved to
+   Trash. Immediately: run `entity-filing.py --apply-only` in a terminal.
 2. **Reject** — delete the proposal. Nothing happens, ever. The source note
    is already marked processed, so it won't be re-proposed unless you ask.
 3. **Edit, then approve** — fix the JSON first. This is the interesting one.

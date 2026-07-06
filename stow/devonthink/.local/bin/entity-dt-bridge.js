@@ -16,6 +16,7 @@
 // Ops:
 //   dump_people        {include_bodies?}                -> [{uuid,name,aliases,md,body?}]
 //   list_sources       {}                               -> [{uuid,name,kind,eventdate}]
+//   get_source         {uuid}                            -> {uuid,name,kind,eventdate,...}
 //   list_group         {path}                           -> [{uuid,name}]
 //   get_text           {uuid}                           -> {uuid,text}
 //   set_text           {uuid,text}                      -> {uuid}
@@ -150,7 +151,7 @@ function linkEntities(line, excludeUuid) {
   for (const e of entityIndex) {
     if (e.uuid === excludeUuid || out.indexOf(e.uuid) !== -1) continue
     const re = new RegExp(
-      '(^|[^\\w\\[])(' + escapeRe(e.name) + ')(?![\\w\\]])', 'i')
+      '(^|[^\\w\\[])(' + escapeRe(e.name) + ')(?![\\w\\]])')
     const parts = out.split(LINK_SPLIT_RE)
     for (let i = 0; i < parts.length; i += 2) {
       const m = parts[i].match(re)
@@ -190,7 +191,7 @@ function run(argv) {
   }
   const ops = JSON.parse(opsRaw).ops || []
 
-  const dt = Application('DEVONthink')
+  const dt = Application('com.devon-technologies.think')
   const db = dt.databases.byName(DB_NAME)
 
   function groupAt(path) {
@@ -285,6 +286,29 @@ function run(argv) {
         }
       }
       return out
+    },
+
+    // Classify one record the same way list_sources buckets its hits, so
+    // --force can target a record the database sweep never surfaces.
+    get_source(op) {
+      const r = byUuid(op.uuid)
+      const hw = mdValue(r, 'handwritten')
+      let kind = 'other'
+      if (String(r.location() || '').indexOf(DAILY_PATH) === 0) kind = 'daily'
+      else if (hw === '1' || hw === 'true') kind = 'handwritten'
+      else if (mdValue(r, 'documenttype').indexOf('Meeting') !== -1) kind = 'meeting'
+      const added = r.additionDate()
+      return {
+        uuid: r.uuid(),
+        name: r.name(),
+        kind: kind,
+        eventdate: mdValue(r, 'eventdate'),
+        participants: mdValue(r, 'granolaparticipants'),
+        added: added
+          ? new Date(added.getTime() - added.getTimezoneOffset() * 60000)
+              .toISOString().slice(0, 10)
+          : '',
+      }
     },
 
     list_group(op) {
@@ -443,7 +467,7 @@ function run(argv) {
     },
 
     trash(op) {
-      dt.delete({ record: byUuid(op.uuid) })
+      dt.move({ record: byUuid(op.uuid), to: db.trashGroup() })
       return { uuid: op.uuid }
     },
   }
