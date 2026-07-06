@@ -1,0 +1,19 @@
+# Runnability scoring weights and gates, consumed by runnability.py.
+# Re-scoring after an edit is cheap (no audio re-analysis): runnability.py score
+
+[cadence]
+target_spm = 170
+sigma_spm = 8.0
+
+[weights]
+cadence = 0.25
+arousal = 0.15
+pulse = 0.20
+energy = 0.20
+danceability = 0.20
+
+[gates]
+# Substring match against the track's genre tag, case-insensitive.
+genres_exclude = ["classical", "soundtrack", "ambient", "spoken", "audiobook", "holiday", "christmas"]
+duration_min = 120
+duration_max = 600
