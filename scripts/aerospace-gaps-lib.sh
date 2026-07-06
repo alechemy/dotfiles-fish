@@ -12,17 +12,23 @@
 # 110 Hz, wider on machines that drive the panel harder). The query is
 # in-process AppKit via JXA: no AppleEvents, no TCC prompt, ~140 ms.
 #
-# Tiled-window count for workspace $1, taken from the tree view (--all): when
-# an app stops answering AX requests without the window closing (e.g. App
-# Tamer's background CPU cap duty-cycling the process), AeroSpace keeps the
-# node in the layout tree — still rendering its slot — while omitting it from
-# --workspace listings. The tiler follows the tree, so anything sizing gaps
-# must too.
+# Tree view (--all) of every window: "workspace|window-id|app-name|layout" per
+# line. The tree is the source of truth for counting: when an app stops
+# answering AX requests without the window closing (a SIGSTOPped or starved
+# process), AeroSpace keeps the node in the layout tree — still rendering its
+# slot — while omitting it from --workspace listings. The tiler follows the
+# tree, so anything sizing gaps must too.
+tree_snapshot() {
+    aerospace list-windows --all --format "%{workspace}|%{window-id}|%{app-name}|%{window-layout}"
+}
+
+# Filter a tree_snapshot on stdin to the tiled windows of workspace $1.
+tiled_in() {
+    awk -F'|' -v ws="$1" '$1 == ws && $4 ~ /^(h|v)_(tiles|accordion)$/'
+}
+
 count_tiled_windows() {
-    aerospace list-windows --all --format "%{workspace}|%{window-layout}" \
-        | awk -F'|' -v ws="$1" '$1 == ws && $2 ~ /^(h|v)_(tiles|accordion)$/' \
-        | wc -l \
-        | tr -d ' '
+    tree_snapshot | tiled_in "$1" | wc -l | tr -d ' '
 }
 
 # Sets gap_full (>=3 windows), gap_split (2), gap_centered (0-1).

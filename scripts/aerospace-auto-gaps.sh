@@ -48,13 +48,29 @@ TRIGGER="${1:-unlabeled}"
 
 log() { printf '%s %s\n' "$(date '+%F %T')" "$*" >>"$LOG_FILE"; }
 
-# App-name snapshot of workspace $1 from the tree view, e.g.
-# "Ghostty(h_tiles),Finder(floating)". Logged with every apply/mismatch so a
-# flapping window can be identified from the log alone (a phantom count change
-# names its app here; the count fields alone can't say which window moved).
+# App snapshot of workspace $1 from a tree_snapshot on stdin, e.g.
+# "Ghostty:12010(h_tiles),Finder:88(floating)". Logged with every
+# apply/mismatch so a flapping window can be identified from the log alone —
+# and, via the id, whether an episode was an AX dropout (same id returns) or a
+# recreated window (new id).
 ws_apps() {
-    aerospace list-windows --all --format '%{workspace}|%{app-name}|%{window-layout}' 2>/dev/null \
-        | awk -F'|' -v ws="$1" '$1 == ws {printf "%s%s(%s)", s, $2, $3; s=","} END {print ""}'
+    awk -F'|' -v ws="$1" '$1 == ws {printf "%s%s:%s(%s)", s, $3, $2, $4; s=","} END {print ""}'
+}
+
+# CG window numbers of all on-screen windows. AeroSpace window ids are CG
+# window numbers, and AeroSpace keeps parked (hidden-workspace) windows
+# technically on-screen — so a tiled window that left the tree but is still
+# here did not close; its app just stopped answering AX. Minimized and
+# native-fullscreen windows report on-screen false, so they classify as real
+# departures. Fails open to empty (= nothing phantom) on any bridge error.
+cg_onscreen_ids() {
+    osascript -l JavaScript -e '
+        ObjC.import("CoreGraphics");
+        ObjC.deepUnwrap(ObjC.castRefToObject($.CGWindowListCopyWindowInfo(0, 0)))
+            .filter(w => w.kCGWindowIsOnscreen)
+            .map(w => w.kCGWindowNumber)
+            .join("\n");
+    ' 2>/dev/null || true
 }
 
 # Skip when more than one monitor is connected (e.g. clamshell + lid open) so
@@ -127,7 +143,8 @@ for pass in 1 2 3 4 5; do
         rm -f "$SUPPRESS_FILE"
     fi
 
-    count=$(count_tiled_windows "$ws")
+    tree=$(tree_snapshot)
+    count=$(printf '%s\n' "$tree" | tiled_in "$ws" | wc -l | tr -d ' ')
 
     listed=$(aerospace list-windows --workspace "$ws" --format "%{window-layout}" \
         | grep -cE '^(h|v)_(tiles|accordion)$' || true)
@@ -136,9 +153,38 @@ for pass in 1 2 3 4 5; do
     # sample — a window mid-appear/close, straddling workspaces, or a phantom
     # slot from AX starvation — so skip it rather than bake a wrong gap and churn.
     if [ "$count" != "$listed" ]; then
-        log "tree/listing mismatch ws=$ws tree=$count listed=$listed trigger=$TRIGGER pass=$pass apps=$(ws_apps "$ws")"
+        log "tree/listing mismatch ws=$ws tree=$count listed=$listed trigger=$TRIGGER pass=$pass apps=$(printf '%s\n' "$tree" | ws_apps "$ws")"
         continue
     fi
+
+    # A tiled window that vanished from the whole tree but is still on-screen
+    # in CG did not close — its app stopped answering AX (starved or stopped
+    # process) and AeroSpace dropped it. The tiler thrash that follows is
+    # AeroSpace's; adapting the gap to the phantom count would add two more
+    # reloads (out and back). Freeze instead: skip the pass, keep the last
+    # known ids so healing is detected, and let the heartbeat retry.
+    IDS_FILE="$STATE_DIR/tree-ids-$ws"
+    cur_ids=$(printf '%s\n' "$tree" | tiled_in "$ws" | awk -F'|' '{print $2}' | sort -n)
+    if [ -f "$IDS_FILE" ]; then
+        vanished=""
+        while IFS= read -r id; do
+            [ -z "$id" ] && continue
+            printf '%s\n' "$tree" | awk -F'|' '{print $2}' | grep -qx "$id" \
+                || vanished="$vanished$id "
+        done <"$IDS_FILE"
+        if [ -n "$vanished" ]; then
+            cg_ids=$(cg_onscreen_ids)
+            phantom=""
+            for id in $vanished; do
+                printf '%s\n' "$cg_ids" | grep -qx "$id" && phantom="$phantom$id "
+            done
+            if [ -n "$phantom" ]; then
+                log "phantom-drop ws=$ws ids=${phantom% } trigger=$TRIGGER pass=$pass apps=$(printf '%s\n' "$tree" | ws_apps "$ws")"
+                continue
+            fi
+        fi
+    fi
+    printf '%s\n' "$cur_ids" >"$IDS_FILE"
 
     # Map count to the outer-left/right value that keeps window width constant.
     case "$count" in
@@ -157,7 +203,7 @@ for pass in 1 2 3 4 5; do
     [ -z "$current" ] && current=$(read_gap "$SOURCE_FILE")
 
     if [ "$needs_rebuild" = true ] || [ "$current" != "$target" ] || [ "$reload_pending" = true ]; then
-        apps=$(ws_apps "$ws")
+        apps=$(printf '%s\n' "$tree" | ws_apps "$ws")
         # Stage to a sibling temp file and atomically rename into place. mv on
         # the same filesystem uses rename(2), so $RUNTIME_FILE never appears
         # truncated even if a process is killed mid-write.
