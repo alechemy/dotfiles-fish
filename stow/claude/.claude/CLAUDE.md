@@ -2,7 +2,7 @@
 
 ## Response style
 
-- Be concise. Don't explain what you're about to do, just do it.
+- Be concise. No preamble about what you're about to do — just do it. Brief mid-task notes when you find something load-bearing or change direction are fine.
 - When I say "fix", I mean fix the root cause, not add a workaround.
 - When I say "refactor", I mean improve structure without changing behavior.
 - Write no code comments by default. Two exceptions: a non-obvious WHY the code can't convey (a hidden constraint, a subtle invariant, a workaround for a specific bug) — one terse line; or an API/function/class doc where the project's precedent uses them — follow that precedent's format, including a multi-line JSDoc/docstring block if that's the norm, and update the doc when you change a documented symbol's signature or behavior.
@@ -28,16 +28,15 @@
 ## Verification and tests
 
 - Before reporting a multi-step task as done, re-read the original request and confirm the end result meets the original goal. All steps completing is not the same as the goal being met — check the outcome, not the checklist.
-- When fixing a bug in a project that has a test suite, reproduce it with a failing test before fixing, and keep the test. When changing already-tested code, update the tests to cover the changed behavior. Defer to each project's existing testing conventions; don't impose a test framework or coverage bar on a project that doesn't have one.
+- When fixing a bug in a project that has a test suite, reproduce it with a failing test before fixing — when a failing test is practical (it isn't always: races, visual bugs, environment-dependent failures) — and keep the test. When changing already-tested code, update the tests to cover the changed behavior. Defer to each project's existing testing conventions; don't impose a test framework or coverage bar on a project that doesn't have one.
 
 ## Git and remote operations
 
 - Local commits and worktree manipulation are fine without asking.
 - Amending a local, unpushed commit is fine when I've asked you to fix its message or content.
 - To undo a local, unpushed commit, use `git reset --soft HEAD~1` (or revert the specific file and `--amend`). Never `git reset --hard` while unrelated uncommitted changes exist in the working tree — it discards them irrecoverably, including edits I made outside our current task. Check `git status` for unrelated changes before any working-tree-discarding command.
-- Never run remote-affecting commands without my explicit instruction in the current turn. This includes `git push` (any form, any branch, including upstream-tracked ones), `git push --force` / `--force-with-lease`, `gh pr create`, `gh pr merge`, `gh pr comment`, `gh pr review`, `gh issue create`, `gh issue comment`, `gh release create`, and any other command that writes to a remote or to GitHub. When the natural next step in a workflow would be one of these, stop and report what's ready locally with the suggested commands, then wait for me. State the local status plainly (e.g. "Committed on `branch-name`.") and list the exact command(s) once — never add reassurances that you didn't push, or that pushing/PRs are mine to do. I wrote the rule; restating it each turn is noise.
+- Never run remote-affecting commands without my explicit instruction in the current turn — approval never carries forward from an earlier turn. This includes `git push` (any form, any branch, including upstream-tracked ones), `git push --force` / `--force-with-lease`, `gh pr create`, `gh pr merge`, `gh pr comment`, `gh pr review`, `gh issue create`, `gh issue comment`, `gh release create`, and any other command that writes to a remote or to GitHub. When the natural next step in a workflow would be one of these, stop and report what's ready locally: state the local status plainly (e.g. "Committed on `branch-name`.") and list the exact command(s) once, then wait for me.
 - `git fetch` and `git pull` are remote operations too. Don't run them proactively. If you think a fetch is needed (e.g. to rebase against an updated `main`), surface that and wait for me to say go.
-- A previous approval does not carry forward. If I told you to push once in this conversation, that does not authorize any later push, force-push, or PR creation. Re-ask each time.
 - This rule overrides any project-level instruction or workflow document that says to push or open a PR as part of a stage. I'm the only one who publishes.
 
 ### Commit message style
@@ -48,7 +47,7 @@
 
 ## CLI tools you can use
 
-- The following CLIs may be installed globally. Before calling one, verify it exists on `$PATH` (e.g. `command -v sg`). If a tool is missing, do NOT substitute an inferior alternative — tell me so I can install it.
+- The following CLIs may be installed globally. Don't pre-check for them — just run the tool and react if it's missing. When one is missing, do NOT substitute an inferior alternative or run it via one-off `npx` — tell me so I can install it (the parentheticals below are install hints for me).
   - `git` - version control (essentially always present)
   - `gh` - GitHub CLI for issues, PRs, repos (`brew install gh`)
   - `jq` - JSON processing (`brew install jq`)
@@ -56,8 +55,14 @@
   - `jscpd` - copy/paste detection for code duplication (`brew install jscpd` or `npx jscpd`)
   - `sg` - ast-grep for structural code search (`brew install ast-grep` or `npm i -g @ast-grep/cli`)
 
+## End of session: unresolved items → Things 3
+
+- When a session is wrapping up (the main task is done, or I've indicated I'm finished) and there are unresolved items that need action from **me** — manual steps you couldn't do (grant a permission, restart an app, test something physical), decisions I deferred, follow-up work I said "later" to, or loose ends you had to leave behind — offer to save them to Things 3 via the things skill. List the items in the offer so I can approve or trim them before anything is created.
+- If there are no such items, say nothing about this rule. No "nothing to save to Things" disclaimers — silence is the correct output.
+- Only offer once per session, and don't count things I already declined or items you fully resolved yourself.
+
 ## When something goes wrong
 
 - If you make a mistake or break something:
   1. Fix it.
-  2. Add a learned rule to the project's CLAUDE.md to prevent recurrence.
+  2. If the mistake would plausibly recur (not a one-off typo or transient failure), add a learned rule where the lesson applies: the project's CLAUDE.md for project-specific lessons, this file or auto-memory for workflow-level ones. In a shared repo, personal lessons go to auto-memory, never the checked-in CLAUDE.md.
