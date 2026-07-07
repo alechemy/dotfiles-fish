@@ -269,7 +269,7 @@
 		<key>IndexOffset</key>
 		<integer>0</integer>
 		<key>LastExecution</key>
-		<real>804834432.69893205</real>
+		<real>805083242.80089402</real>
 		<key>UseUUIDKey</key>
 		<true/>
 		<key>data</key>
@@ -307,7 +307,7 @@
 		<key>IndexOffset</key>
 		<integer>0</integer>
 		<key>LastExecution</key>
-		<real>804834432.698946</real>
+		<real>805083277.10030198</real>
 		<key>UseUUIDKey</key>
 		<true/>
 		<key>data</key>
@@ -318,18 +318,12 @@
 		NwBFVVVJRAAAACQAQwAwADMAOABBAEUARAAzAC0ARQA0AEUAOAAtADQARAAy
 		AEUALQA4ADgAMAAyAC0AQwBBADUAMwBEADkAOABBAEMAMABCADJYVFJBIwD/
 		////Af//AAAAAAAAAAD//wD/AP8AAAAA//8AAAAA////S1NUUEtFVkUAAAAE
-		AIAACEtBQ1RDTEFTAAAABwBLAEEAYwB0AGkAbwBuUkxBVAAAAO9URVhUAAAA
-		awB+AC8ATABpAGIAcgBhAHIAeQAvAEEAcABwAGwAaQBjAGEAdABpAG8AbgAg
-		AFMAYwByAGkAcAB0AHMALwBjAG8AbQAuAGQAZQB2AG8AbgAtAHQAZQBjAGgA
-		bgBvAGwAbwBnAGkAZQBzAC4AdABoAGkAbgBrAC8AUwBtAGEAcgB0ACAAUgB1
-		AGwAZQBzAC8AaABhAG4AZABsAGUALQB1AHAAZABhAHQAZQBkAC0AbgBvAHQA
-		ZQBiAG8AbwBrAHMALgBhAHAAcABsAGUAcwBjAHIAaQBwAHRYVFJBCAYAAAAA
-		AAAAS1NUUENMQVMAAAAHAEsAQQBjAHQAaQBvAG5STEFUAAAARVRFWFQAAAAB
-		ADFYVFJBCCEAAAAAAAAASUROVAAAABEAbQBkAG4AZQBlAGQAcwBwAHIAbwBj
-		AGUAcwBzAGkAbgBnS1NUUENMQVMAAAAHAEsAQQBjAHQAaQBvAG5STEFUAAAA
-		YVRFWFQAAAAkAEUANgAxADgARQAzAEQAOAAtAEQAQgA5ADgALQA0ADgAMgAy
-		AC0AQgA1ADcANwAtADcANgA3ADMARgA4AEYANgA0ADcAQwBGWFRSQQgOAAAA
-		AAAAAEtTVFBLU1RQS1NUUA==
+		AIAACEtBQ1RDTEFTAAAABwBLAEEAYwB0AGkAbwBuUkxBVAAAAEVURVhUAAAA
+		AQAxWFRSQQghAAAAAAAAAElETlQAAAARAG0AZABuAGUAZQBkAHMAcAByAG8A
+		YwBlAHMAcwBpAG4AZ0tTVFBDTEFTAAAABwBLAEEAYwB0AGkAbwBuUkxBVAAA
+		AGFURVhUAAAAJABFADYAMQA4AEUAMwBEADgALQBEAEIAOQA4AC0ANAA4ADIA
+		MgAtAEIANQA3ADcALQA3ADYANwAzAEYAOABGADYANAA3AEMARlhUUkEIDgAA
+		AAAAAABLU1RQS1NUUEtTVFA=
 		</data>
 		<key>name</key>
 		<string>Sweep: Lorebook Inbox</string>
@@ -340,7 +334,7 @@
 			<key>UUID</key>
 			<string>C3F2896E-DC19-416A-BF17-1722468F2A36</string>
 			<key>date</key>
-			<date>2026-06-29T02:23:29Z</date>
+			<date>2026-07-07T02:10:21Z</date>
 		</dict>
 	</dict>
 	<dict>
@@ -349,7 +343,7 @@
 		<key>IndexOffset</key>
 		<integer>0</integer>
 		<key>LastExecution</key>
-		<real>804834432.69894803</real>
+		<real>805083242.80090106</real>
 		<key>UseUUIDKey</key>
 		<true/>
 		<key>data</key>
@@ -385,7 +379,7 @@
 		<key>IndexOffset</key>
 		<integer>0</integer>
 		<key>LastExecution</key>
-		<real>804834432.69895399</real>
+		<real>805083242.80090404</real>
 		<key>UseUUIDKey</key>
 		<true/>
 		<key>data</key>
@@ -424,7 +418,7 @@
 		<key>IndexOffset</key>
 		<integer>0</integer>
 		<key>LastExecution</key>
-		<real>804834432.69895506</real>
+		<real>805083243.451123</real>
 		<key>UseUUIDKey</key>
 		<true/>
 		<key>data</key>
@@ -472,7 +466,7 @@
 		<key>IndexOffset</key>
 		<integer>0</integer>
 		<key>LastExecution</key>
-		<real>804834432.69895804</real>
+		<real>805083251.153705</real>
 		<key>UseUUIDKey</key>
 		<true/>
 		<key>data</key>
@@ -513,7 +507,7 @@
 		<key>IndexOffset</key>
 		<integer>0</integer>
 		<key>LastExecution</key>
-		<real>804834438.170138</real>
+		<real>805083242.80090594</real>
 		<key>UseUUIDKey</key>
 		<true/>
 		<key>data</key>
@@ -557,7 +551,7 @@
 		<key>IndexOffset</key>
 		<integer>0</integer>
 		<key>LastExecution</key>
-		<real>804834438.17014301</real>
+		<real>805083242.80090702</real>
 		<key>UseUUIDKey</key>
 		<true/>
 		<key>data</key>
@@ -597,7 +591,7 @@
 		<key>IndexOffset</key>
 		<integer>0</integer>
 		<key>LastExecution</key>
-		<real>804834438.17014503</real>
+		<real>805083242.80090702</real>
 		<key>UseUUIDKey</key>
 		<true/>
 		<key>data</key>
@@ -643,7 +637,7 @@
 		<key>IndexOffset</key>
 		<integer>0</integer>
 		<key>LastExecution</key>
-		<real>804834438.17014599</real>
+		<real>805083247.15612197</real>
 		<key>UseUUIDKey</key>
 		<true/>
 		<key>data</key>
@@ -684,7 +678,7 @@
 		<key>IndexOffset</key>
 		<integer>0</integer>
 		<key>LastExecution</key>
-		<real>804834438.17022204</real>
+		<real>805083242.80098605</real>
 		<key>UseUUIDKey</key>
 		<true/>
 		<key>data</key>
@@ -723,7 +717,7 @@
 		<key>IndexOffset</key>
 		<integer>0</integer>
 		<key>LastExecution</key>
-		<real>804834438.17022395</real>
+		<real>805083246.76460898</real>
 		<key>UseUUIDKey</key>
 		<true/>
 		<key>data</key>
@@ -764,7 +758,7 @@
 		<key>IndexOffset</key>
 		<integer>0</integer>
 		<key>LastExecution</key>
-		<real>804832172.91462505</real>
+		<real>805082772.05516005</real>
 		<key>UseUUIDKey</key>
 		<true/>
 		<key>data</key>
@@ -2026,7 +2020,7 @@
 		<key>IndexOffset</key>
 		<integer>0</integer>
 		<key>LastExecution</key>
-		<real>801367558.91909206</real>
+		<real>805060866.75007606</real>
 		<key>UseUUIDKey</key>
 		<true/>
 		<key>data</key>

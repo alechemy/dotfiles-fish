@@ -10,12 +10,12 @@ The following custom metadata fields must be created in DEVONthink before the pi
 
 | Field               | Type            | Purpose                                                                                                                                                                                                                                                                                      |
 | ------------------- | --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Handwritten         | Boolean         | Set at import by the Boox import watcher for Boox handwritten notes. Gates OCR processing (Extract: Boox Handwritten) and notebook dedup (Handle Updated Notebooks)                                                                                                                          |
+| Handwritten         | Boolean         | Set at import by the Boox import watcher for Boox handwritten notes. Gates OCR processing (Extract: Boox Handwritten); notebook dedup keys on SourceFile at import (boox-import.sh)                                                                                                                          |
 | NeedsProcessing     | Boolean         | Tracks whether a record requires processing through the pipeline                                                                                                                                                                                                                             |
 | Recognized          | Boolean         | Tracks whether OCR/transcription has been run on a record                                                                                                                                                                                                                                    |
 | Commented           | Boolean         | Tracks whether text has been mirrored to comment field                                                                                                                                                                                                                                       |
 | AIEnriched          | Boolean         | Tracks whether the combined AI enrichment step (rename + tag + summarize) has been run on a record                                                                                                                                                                                           |
-| NameLocked          | Boolean         | When On, prevents Enrich: AI Metadata from overwriting the document's name. Set automatically by the on-rename guard rule, by Handle Updated Notebooks for intentionally-named Boox notes, and by Enrich: AI Metadata itself after a successful AI rename                                    |
+| NameLocked          | Boolean         | When On, prevents Enrich: AI Metadata from overwriting the document's name. Set automatically by the on-rename guard rule, by the Boox importer when it replaces an existing note in place, and by Enrich: AI Metadata itself after a successful AI rename                                    |
 | Summary             | Text            | Stores a brief AI-generated summary of the document's content                                                                                                                                                                                                                                |
 | DocumentType        | Text            | Stores the AI-assigned document type label (e.g. "Receipt", "Invoice", "Meeting Notes", "Manual")                                                                                                                                                                                            |
 | EventDate           | Text            | Stores the event date in yyyy-mm-dd format for time-bound documents (e.g. meeting notes, calls). Extracted from content when available, otherwise from document metadata                                                                                                                     |
@@ -66,14 +66,14 @@ New Boox PDF exports landing in the Maestral-synced "Notebooks" folder are impor
 | Component | Location | Role |
 | --- | --- | --- |
 | `boox-import-watcher.sh` | `~/.local/bin/` | `fswatch` loop on the Notebooks folder. On each new `.pdf` (`Created` or `Renamed` event, recursing into subfolders) it waits for the file size to settle, then invokes the importer. Untitled `Notebook-<n>` quick-note exports are deleted rather than imported. Sweeps the tree for a backlog on startup. Runs under the launchd agent. |
-| `boox-import.sh` | `~/.local/bin/` | Converts one PDF to a monochrome Group4 TIFF (`magick`, 300 DPI), imports it into Lorebook's inbox via AppleScript, and sets `Handwritten=1`. Deletes the source PDF on success. |
+| `boox-import.sh` | `~/.local/bin/` | Converts one PDF to a monochrome Group4 TIFF (`magick`, 300 DPI), then dedups by `SourceFile` before any record exists: a new note imports into `00_INBOX` stamped `Handwritten=1` + `SourceFile`; a re-export replaces the matching record's file in place (preserving UUID/name/tags/WikiLinks), resets its pipeline flags, and re-primes it; a byte-identical re-export is a no-op. Deletes the source PDF on success. |
 | `com.user.boox-import-watcher.plist` | `~/Library/LaunchAgents/` | Keeps the watcher alive. `RunAtLoad=true`, `KeepAlive=true`. |
 
 - **Watched folder:** `~/Dropbox (Maestral)/onyx/Go103/Notebooks`, including its category subfolders. Files arrive via Maestral sync; the watcher acts on both `Created` and `Renamed` fswatch events because a sync client can finalize a downloaded file by renaming it into place — `--event Created` alone would miss those.
 - **Quarantine:** a PDF that fails conversion, or whose TIFF exceeds 50 MB, is moved to `~/Desktop/DT_Import_Errors/` (with a macOS notification) so a bad export isn't retried forever. A failed *import* (e.g. DEVONthink not running) leaves the PDF in place — the next watcher restart's backlog sweep retries it.
-- **Untitled notes ignored:** an unnamed notebook exports as `Notebook-<n>.pdf` (the Boox's incrementing counter). These are throwaway quick notes, so the watcher deletes them instead of importing — titling a note on the device is the deliberate signal that it should enter DEVONthink. Because untitled notes never reach the database, a `SourceFile` match in [Handle Updated Notebooks](#handle-updated-notebooks-applescript) is always the same intentionally-named notebook being updated, not a name collision.
+- **Untitled notes ignored:** an unnamed notebook exports as `Notebook-<n>.pdf` (the Boox's incrementing counter). These are throwaway quick notes, so the watcher deletes them instead of importing — titling a note on the device is the deliberate signal that it should enter DEVONthink. Because untitled notes never reach the database, a `SourceFile` match at import (see [Boox Import Watcher](#boox-import-watcher)) is always the same intentionally-named notebook being updated, not a name collision.
 - **Ghostscript:** ImageMagick needs Ghostscript to decode PDFs. If you see a "no decode delegate" error, install it via `brew install ghostscript`.
-- From here, DEVONthink smart rules take over (`Sweep: Lorebook Inbox` → `Extract: Boox Handwritten` OCR, etc.).
+- New notes land in `00_INBOX` directly; from there the pipeline smart rules take over (`Extract: Boox Handwritten` OCR, etc.). Re-exports are deduplicated at import, so they never create a second record.
 
 ## DT Smart Rules
 
@@ -106,11 +106,10 @@ New Boox PDF exports landing in the Maestral-synced "Notebooks" folder are impor
   - On Import
   - On Moving
 - Actions
-  - Run AppleScript "Handle Updated Notebooks"
   - Change NeedsProcessing to 1
   - Move to 00_INBOX
 
-> See [Handle Updated Notebooks AppleScript](#handle-updated-notebooks-applescript). This script only runs in Sweep: Lorebook Inbox, where Boox TIFFs arrive with `Handwritten=1` already set by the Boox import watcher. If the incoming document is an update to an existing notebook, the script replaces the existing document's content, resets its pipeline state (`Recognized=0`, `Commented=0`, `AIEnriched=0`, `NeedsProcessing=1`) to generate a fresh AI summary, pins its name (`NameLocked=1`) to protect existing WikiLinks, and trashes the new import — so the remaining actions in the sweep rule are never reached. If the document is new, the script sets SourceFile metadata and allows the sweep to continue normally.
+> Routes non-Boox documents that land in Lorebook's built-in Inbox (manual drops, DTTG) into `00_INBOX`. Boox notes no longer pass through here — `boox-import.sh` imports them straight into `00_INBOX` and does its own `SourceFile` dedup at that point (see [Boox Import Watcher](#boox-import-watcher)).
 
 ### Sweep: Lorebook Root
 
@@ -333,7 +332,7 @@ Default blocklist is `youtube.com`, `youtu.be`, `spotify.com`. Edit the file to 
 
 ### Logs
 
-Most pipeline components — the ingest smart rules, Python scripts, shell watchers — write to a single central log at `~/Library/Logs/devonthink-pipeline.log`. See the [Pipeline Logging](#pipeline-logging) section for the format and how to grep it. Exceptions: `import-granola.py` and `import-github-stars.py` keep their own log files (see their integration docs), `create-daily-note.sh` writes to `~/Library/Logs/dt-daily-note.log`, and the Util/formatting rules (`Process: Jots`, `Format: Boox Comments`, `Handle Updated Notebooks`, `Lint Markdown`, H1 sync) log only to DT's Log window. The SingleFile watcher's raw stdout/stderr also lands at `/tmp/singlefile-watcher.log` (launchd's capture) in case the pipeline log itself fails to write.
+Most pipeline components — the ingest smart rules, Python scripts, shell watchers — write to a single central log at `~/Library/Logs/devonthink-pipeline.log`. See the [Pipeline Logging](#pipeline-logging) section for the format and how to grep it. Exceptions: `import-granola.py` and `import-github-stars.py` keep their own log files (see their integration docs), `create-daily-note.sh` writes to `~/Library/Logs/dt-daily-note.log`, and the Util/formatting rules (`Process: Jots`, `Format: Boox Comments`, `Lint Markdown`, H1 sync) log only to DT's Log window. The SingleFile watcher's raw stdout/stderr also lands at `/tmp/singlefile-watcher.log` (launchd's capture) in case the pipeline log itself fails to write.
 
 `dt-watchdog.sh` (every 5 minutes) is the consumer that makes failures visible: it scans the newly-written regions of the central log, `dt-daily-note.log`, and `github-stars-import.log` for `ERROR`/`WARN`/`ALERT` lines and raises a macOS notification per new failure signature (digit-stripped, re-notified at most daily; state in `~/.local/state/devonthink/watchdog-scan/`). It also verifies the two fswatch watcher agents have live processes (kickstarting and alerting when not) and flags `.html` files stuck in `~/Downloads/SingleFile/` for more than 15 minutes.
 
@@ -556,11 +555,11 @@ The remaining seeded rules are small conveniences. Most use embedded scripts or 
 
 DT-stock rules (Reminders, Filter Duplicates, Bates Numbering, chat-suggestion helpers, etc.) are not part of the pipeline and aren't documented here.
 
-## Handle Updated Notebooks AppleScript
+## Notebook Dedup (at import)
 
-Runs as the first action in Sweep: Lorebook Inbox. Only processes records where `Handwritten` is already set (by the Boox import watcher), so non-Boox documents pass through untouched. Handles the "same notebook, updated content" case by matching on SourceFile metadata. If an existing document is found, its content is replaced in-place (preserving UUID, name, tags, and links). The script then resets the document's state flags (`Recognized=0`, `Commented=0`, `AIEnriched=0`, `NeedsProcessing=1`) so it runs back through the pipeline for fresh OCR, formatted comments, and a new summary. Crucially, it sets `NameLocked=1` so the AI enrichment step doesn't overwrite its filename, preserving any existing WikiLinks. Finally, the new import is moved to the database Trash (recoverable if the SourceFile match was wrong). If no match is found, the document is tagged with SourceFile metadata and the sweep continues into the normal pipeline.
+Boox re-exports are deduplicated in `boox-import.sh` before any record is created, keyed on the `SourceFile` custom-metadata field (the original Boox filename, minus extension). A new notebook imports into `00_INBOX`. A re-export whose `SourceFile` matches an existing record replaces that record's backing file in place — preserving its UUID, name, tags, and WikiLinks — resets its pipeline flags (`Recognized=0`, `Commented=0`, `AIEnriched=0`, `NeedsProcessing=1`), pins `NameLocked=1`, and moves it back to `00_INBOX` for a fresh pass. A byte-identical re-export (the Boox re-emits unchanged notebooks on every device sync) is a no-op.
 
-See [`handle-updated-notebooks.applescript`](../stow/devonthink/Library/Application%20Scripts/com.devon-technologies.think/Smart%20Rules/handle-updated-notebooks.applescript).
+Doing this at import — rather than in a smart rule after the record exists — means it never depends on DEVONthink's smart-rule trash or action-ordering semantics. The earlier `Handle Updated Notebooks` rule did this from within *Sweep: Lorebook Inbox*: it soft-trashed the duplicate import and relied on the rule stopping, but the rule's later declarative `Move to 00_INBOX` action pulled the trashed record back into the pipeline as a second copy.
 
 ## Daily Notes (Scheduled)
 

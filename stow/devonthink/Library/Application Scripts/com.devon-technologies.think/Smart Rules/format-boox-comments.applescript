@@ -134,7 +134,7 @@ end performSmartRule
 
 -- Non-destructive fallback for the timeout / no-RecognizedAt branches above.
 -- Setting `comment` to "" on timeout was wiping comments that prior good passes
--- had populated (Handle Updated Notebooks resets Commented=0 on re-imports, so
+-- had populated (the Boox importer resets Commented=0 on re-imports, so
 -- Format runs again and the timeout can fire against an already-formatted note).
 -- New behavior: keep an existing comment as-is. If the comment is empty but
 -- plain text has populated by now (OCR finished just past the wait), use the

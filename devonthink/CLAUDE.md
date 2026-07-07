@@ -23,9 +23,7 @@ Documents flow through DEVONthink smart rules gated by boolean custom metadata f
 
 ```
 Boox device → Dropbox (via Boox export)
-  → boox-import-watcher.sh (launchd + fswatch on the Maestral-synced Notebooks folder; deletes untitled `Notebook-<n>` quick notes instead of importing) → boox-import.sh: PDF → TIFF, import to Lorebook inbox, set Handwritten=1
-  → Sweep rules: set NeedsProcessing=1, move to 00_INBOX
-  → Handle Updated Notebooks (for Boox re-imports): replace content in-place, reset flags, delete duplicate
+  → boox-import-watcher.sh (launchd + fswatch on the Maestral-synced Notebooks folder; deletes untitled `Notebook-<n>` quick notes instead of importing) → boox-import.sh: PDF → TIFF, then dedup by SourceFile at import — a new note imports to 00_INBOX (Handwritten=1, SourceFile set); a re-export replaces the matching record's file in place, resets flags, re-primes it; byte-identical re-exports are a no-op
   → Extract: Boox Handwritten (OCR) → sets Recognized=1
   → Format: Boox Comments (LLM markdown formatting → Finder Comment) → sets Commented=1
   → Extract: Scans & Images (standard OCR for non-handwritten images/PDFs with no text layer — Word Count 0) → sets Recognized=1, Commented=1
