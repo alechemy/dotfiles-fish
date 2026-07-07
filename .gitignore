@@ -20,6 +20,8 @@ stow/streamrip/Library/Application Support/streamrip/config.toml
 stow/vscode/Library/Application Support/VSCodium/User/settings.json
 stow/navidrome/.config/navidrome/env
 batch-rip-work
+# Local working/design docs (handoff briefs, audit notes) — not for the repo
+.context/
 stow/devonthink/.local/share/devonthink-capture/node_modules
 stow/devonthink/.local/share/devonthink-capture/package-lock.json
 # Generated launch-agent plists (built from *.plist.template by
