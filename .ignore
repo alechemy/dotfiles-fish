@@ -1,0 +1,6 @@
+# rg-only (not git): this repo is almost all dot-paths, so un-hide them for
+# ripgrep. Negations override rg's default hidden-file skip; re-exclude the
+# noise that un-hiding would otherwise surface. .gitignore is still honored.
+!.*
+.git/
+.DS_Store
