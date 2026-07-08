@@ -42,6 +42,9 @@ while IFS= read -r seed_file; do
   fi
   plutil -lint "$live" >/dev/null
   cp -p "$live" "$seed_file"
+  # cp -p copies DEVONthink's delete-protection ACL; git can't unlink such a
+  # file on the next pull. Strip it so the seed is always replaceable.
+  chmod -N "$seed_file"
   echo "  dumped $rel"
   updated=$((updated + 1))
 done < <(find "$SEED_ROOT" -type f ! -name '.DS_Store')
