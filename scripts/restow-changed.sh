@@ -80,6 +80,49 @@ changed="$(git -C "$DOTFILES" -c core.quotePath=off diff --name-only "$OLD" "$NE
 
 [ -n "$changed" ] || exit 0
 
+# Generated configs: outputs are gitignored, so a pull that changes a template
+# leaves the built file stale (restow is a no-op for it). Rebuild them BEFORE the
+# restow below so a newly generated output (e.g. a brand-new launch agent's
+# plist) is on disk when stow runs and gets linked; rebuilding after the restow
+# would leave it unlinked. Failures warn but never abort the git operation.
+changed_files="$(git -C "$DOTFILES" -c core.quotePath=off diff --name-only "$OLD" "$NEW" 2>/dev/null)"
+
+rebuild() {
+    if "$DOTFILES/scripts/$1"; then
+        echo "restow-changed: rebuilt via scripts/$1"
+    else
+        echo "restow-changed: scripts/$1 failed; re-run it by hand" >&2
+    fi
+}
+
+op_ok() { command -v op >/dev/null 2>&1 && op vault list >/dev/null 2>&1; }
+
+plist_changed=
+if grep -q '\.plist\.template$' <<<"$changed_files"; then
+    plist_changed=1
+    rebuild build-launchd-plists.sh
+fi
+if grep -q '^stow/vscode/.*settings\.template\.json$' <<<"$changed_files"; then
+    rebuild build-vscode-config.sh
+fi
+if grep -q '^stow/zed/.*settings\.template\.jsonc$' <<<"$changed_files"; then
+    if op_ok; then
+        rebuild build-zed-config.sh
+    else
+        echo "restow-changed: zed template changed but 1Password CLI is unavailable; run scripts/build-zed-config.sh by hand" >&2
+    fi
+fi
+if grep -q '^stow/streamrip/.*config\.template\.toml$' <<<"$changed_files"; then
+    if op_ok; then
+        rebuild build-streamrip-config.sh
+    else
+        echo "restow-changed: streamrip template changed but 1Password CLI is unavailable; run scripts/build-streamrip-config.sh by hand" >&2
+    fi
+fi
+if grep -q '^stow/navidrome/\.config/navidrome/env\.template$' <<<"$changed_files"; then
+    echo "restow-changed: navidrome env.template changed; update ~/.config/navidrome/env by hand" >&2
+fi
+
 while read -r root pkg; do
     [ -n "$root" ] || continue
 
@@ -110,44 +153,10 @@ done <<EOF
 $changed
 EOF
 
-# Generated configs: outputs are gitignored, so a pull that changes a template
-# leaves the built file stale (restow is a no-op for it). Rebuild the affected
-# ones; failures warn but never abort the git operation.
-changed_files="$(git -C "$DOTFILES" -c core.quotePath=off diff --name-only "$OLD" "$NEW" 2>/dev/null)"
-
-rebuild() {
-    if "$DOTFILES/scripts/$1"; then
-        echo "restow-changed: rebuilt via scripts/$1"
-    else
-        echo "restow-changed: scripts/$1 failed; re-run it by hand" >&2
-    fi
-}
-
-op_ok() { command -v op >/dev/null 2>&1 && op vault list >/dev/null 2>&1; }
-
-if grep -q '\.plist\.template$' <<<"$changed_files"; then
-    rebuild build-launchd-plists.sh
+# The rebuilt plists are linked now, but launchd keeps running the old in-memory
+# definitions until each changed label is reloaded.
+if [ -n "$plist_changed" ]; then
     echo "restow-changed: launchd still runs the old agent definition(s); bootout + bootstrap the affected label(s) or log out/in" >&2
-fi
-if grep -q '^stow/vscode/.*settings\.template\.json$' <<<"$changed_files"; then
-    rebuild build-vscode-config.sh
-fi
-if grep -q '^stow/zed/.*settings\.template\.jsonc$' <<<"$changed_files"; then
-    if op_ok; then
-        rebuild build-zed-config.sh
-    else
-        echo "restow-changed: zed template changed but 1Password CLI is unavailable; run scripts/build-zed-config.sh by hand" >&2
-    fi
-fi
-if grep -q '^stow/streamrip/.*config\.template\.toml$' <<<"$changed_files"; then
-    if op_ok; then
-        rebuild build-streamrip-config.sh
-    else
-        echo "restow-changed: streamrip template changed but 1Password CLI is unavailable; run scripts/build-streamrip-config.sh by hand" >&2
-    fi
-fi
-if grep -q '^stow/navidrome/\.config/navidrome/env\.template$' <<<"$changed_files"; then
-    echo "restow-changed: navidrome env.template changed; update ~/.config/navidrome/env by hand" >&2
 fi
 
 exit 0
