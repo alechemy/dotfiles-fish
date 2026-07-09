@@ -1,0 +1,120 @@
+#!/usr/bin/env python3
+"""Strip comments from TARGET, but only on the lines TARGET added over BASELINE.
+
+`uncomment` is whole-file: pointed at a file it deletes every non-preserved comment
+in it, including ones that predate the agent's edit. This wrapper runs the same
+strip on a scratch copy (via `uncomment-clean`, so the trailing-whitespace tidy
+still applies) and merges back only the removals that land on added lines. A line
+whose exact trimmed text already appears in BASELINE is never touched, so a comment
+that merely moved or was reindented survives too.
+
+The merge leans on uncomment rewriting each line in place: a comment-only line is
+blanked rather than deleted, nothing is reordered, and no line is ever added. Only a
+multi-line block comment collapses, so equal line counts prove a strict 1:1 mapping
+and every line can be judged on its own index. When the counts differ, the collapse
+has to be located by diff, which blank lines make ambiguous — so those hunks are taken
+only when every line under them is agent-authored, and any merge that grows the file
+is discarded rather than trusted.
+
+Usage: uncomment-scoped BASELINE TARGET [uncomment args...]
+BASELINE may be /dev/null or an empty file, meaning the whole of TARGET is new.
+"""
+
+import difflib
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+
+def clean_wrapper():
+    here = Path(__file__).resolve().parent / "uncomment-clean"
+    return here if here.is_file() else Path.home() / ".local/bin/uncomment-clean"
+
+
+def read(path):
+    try:
+        return Path(path).read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return None
+
+
+def added_lines(base, cur):
+    added = set()
+    for tag, _, _, j1, j2 in difflib.SequenceMatcher(None, base, cur, autojunk=False).get_opcodes():
+        if tag in ("insert", "replace"):
+            added.update(range(j1, j2))
+    return added
+
+
+def merge(cur, new, added, preexisting):
+    def authored(i):
+        return i in added and cur[i].strip() not in preexisting
+
+    if len(cur) == len(new):
+        return [new[i] if authored(i) else cur[i] for i in range(len(cur))]
+
+    opcodes = difflib.SequenceMatcher(None, cur, new, autojunk=False).get_opcodes()
+    touched = [i for tag, i1, i2, _, _ in opcodes if tag != "equal" for i in range(i1, i2)]
+    if all(authored(i) for i in touched):
+        return new
+
+    out = []
+    for tag, i1, i2, j1, j2 in opcodes:
+        if tag == "equal":
+            out.extend(cur[i1:i2])
+        elif tag == "insert":
+            out.extend(line for line in new[j1:j2] if line.strip())
+        elif tag == "delete":
+            out.extend(cur[i] for i in range(i1, i2) if not authored(i))
+        elif i2 - i1 == j2 - j1:
+            out.extend(new[j1 + k] if authored(i1 + k) else cur[i1 + k] for k in range(i2 - i1))
+        elif all(authored(i) for i in range(i1, i2)):
+            out.extend(new[j1:j2])
+        else:
+            out.extend(cur[i1:i2])
+    return cur if len(out) > len(cur) else out
+
+
+def main():
+    if len(sys.argv) < 3:
+        return 0
+    baseline_path, target_path, *args = sys.argv[1:]
+
+    target = read(target_path)
+    if target is None:
+        return 0
+    baseline = read(baseline_path) or ""
+
+    cur = target.split("\n")
+    base = baseline.split("\n")
+
+    with tempfile.TemporaryDirectory() as td:
+        scratch = Path(td) / Path(target_path).name
+        scratch.write_text(target, encoding="utf-8")
+        subprocess.run(
+            ["bash", str(clean_wrapper()), *args, str(scratch)],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+        stripped = read(scratch)
+
+    if stripped is None or stripped == target:
+        return 0
+
+    merged = "\n".join(
+        merge(
+            cur,
+            stripped.split("\n"),
+            added_lines(base, cur),
+            {line.strip() for line in base if line.strip()},
+        )
+    )
+    if merged != target:
+        Path(target_path).write_text(merged, encoding="utf-8")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

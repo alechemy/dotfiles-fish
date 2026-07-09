@@ -21,11 +21,15 @@ else
 # Opt into deterministic comment stripping for this repo.
 #
 # Presence of this file enables the in-session agent stripper (Claude Code Stop /
-# Copilot agentStop hooks) and marks the repo for the commit/CI gate below. uncomment
-# preserves TODO, FIXME, docstrings, and lint pragmas by default; the hook also keeps
-# IMPORTANT / NOTE / WARNING / SAFETY / SECURITY / keep. Set remove_docs = true to also
-# strip docstrings. Newer uncomment CLIs read these keys natively; the hook honors
-# remove_docs and its keep-set regardless of CLI version.
+# Copilot agentStop hooks) and marks the repo for the commit/CI gate below. The
+# in-session stripper only removes comments on lines the agent added this session;
+# the commit/CI gate has no such baseline and strips every staged file whole.
+#
+# uncomment preserves TODO, FIXME, docstrings, and lint pragmas by default; the hook
+# also keeps IMPORTANT / NOTE / WARNING / SAFETY / SECURITY / keep. Newer uncomment
+# CLIs read these keys natively; the hook honors remove_docs and its keep-set
+# regardless of CLI version. remove_docs is a no-op on uncomment 2.0.0, whose default
+# ignore set re-preserves doc comments unless --no-default-ignores is also passed.
 
 # remove_docs = false
 TOML

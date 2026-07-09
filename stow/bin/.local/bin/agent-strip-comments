@@ -3,13 +3,17 @@
 #
 # Reads the hook JSON on stdin (both tools expose `.cwd` and a transcript path) and
 # only acts when the working tree's git repo carries a root .uncommentrc.toml — the
-# per-repo opt-in marker. Strips comments only from files the agent itself touched
-# this session, never unrelated uncommitted work, via `uncomment-clean`. Always exits
-# 0 so it never blocks or fails the agent's turn.
+# per-repo opt-in marker. Always exits 0 so it never blocks or fails the agent's turn.
 #
-# Scoping: the strip set is git's changed files intersected with the files the agent
-# touched, read from the transcript — exact edit targets for a Claude Code transcript,
-# referenced paths for a Copilot one. With no transcript it falls back to all changed.
+# Scoping is two-dimensional, because `uncomment` itself is whole-file:
+#   files — git's changed files intersected with the files the agent touched, read
+#     from the transcript (exact edit targets for Claude Code, referenced paths for
+#     Copilot). With no transcript it falls back to all changed files.
+#   lines — each file is diffed against a baseline and only comments on lines the
+#     agent added get stripped, by `uncomment-scoped`. The baseline is the pre-edit
+#     content the transcript recorded for that file (`originalFile`), so uncommitted
+#     work that predates the session is protected too; failing that, its HEAD blob;
+#     failing that (new file), empty.
 #
 # Enable a repo with `comment-gate-init` (drops the marker + the commit-gate recipe).
 
@@ -66,6 +70,17 @@ else
 fi
 [ "${#files[@]}" -gt 0 ] || exit 0
 
+# Pre-edit content per file, first write wins: Claude Code records it on every Edit/Write
+# tool result. Base64 keeps the embedded newlines on one line.
+baselines=""
+if [ -n "$edited" ]; then
+  baselines=$(jq -r '
+    select(.toolUseResult | type=="object")
+    | select(.toolUseResult.structuredPatch != null and .toolUseResult.filePath != null)
+    | [.toolUseResult.filePath, (.toolUseResult.originalFile // "" | @base64)] | @tsv
+  ' "$transcript" 2>/dev/null | awk -F'\t' '!seen[$1]++')
+fi
+
 # Built-in preservation (TODO/FIXME/doc/pragmas) plus a standing keep-set; honor an
 # optional `remove_docs = true` line in the repo marker.
 args=(-i IMPORTANT -i NOTE -i WARNING -i SAFETY -i SECURITY -i keep)
@@ -73,5 +88,20 @@ if grep -Eq '^[[:space:]]*remove_docs[[:space:]]*=[[:space:]]*true' "$root/.unco
   args+=(--remove-doc)
 fi
 
-bash "$HOME/.local/bin/uncomment-clean" "${args[@]}" "${files[@]}" >/dev/null 2>&1 || true
+tmpdir=$(mktemp -d) || exit 0
+trap 'rm -rf "$tmpdir"' EXIT
+
+py=$(command -v python3 2>/dev/null || true)
+[ -x "$py" ] || py=/usr/bin/python3
+
+n=0
+for f in "${files[@]}"; do
+  base="$tmpdir/base.$((n += 1))"
+  b64=$(printf '%s\n' "$baselines" |
+    awk -F'\t' -v p="$f" '$1==p {print $2; found=1; exit} END {exit !found}') &&
+    printf '%s' "$b64" | base64 -d >"$base" 2>/dev/null ||
+    git -C "$root" show "HEAD:${f#"$root"/}" >"$base" 2>/dev/null ||
+    : >"$base"
+  "$py" "$HOME/.local/bin/uncomment-scoped" "$base" "$f" "${args[@]}" >/dev/null 2>&1 || true
+done
 exit 0
