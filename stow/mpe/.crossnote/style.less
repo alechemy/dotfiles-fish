@@ -1,0 +1,3 @@
+// (inline) embeds the CSS at compile time; a plain @import would emit a runtime url() the
+// preview webview can't fetch — the same sandbox limit that makes markdown.styles reject this file.
+@import (inline) "../.dotfiles/stow/devonthink/Library/Application Support/DEVONthink/StyleSheets/Readable-Universal.css";

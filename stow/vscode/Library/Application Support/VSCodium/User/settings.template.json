@@ -56,6 +56,12 @@
     }
   },
 
+  // MARKDOWN
+  // ----------------------------------------
+  "markdown.preview.fontSize": 16,
+  "markdown.preview.fontFamily": "IBM Plex Sans",
+  "markdown.preview.typographer": true,
+
   // FILES
   // ----------------------------------------
   "files.exclude": {
@@ -326,7 +332,7 @@
   "explorer.confirmDragAndDrop": false,
   "explorer.confirmPasteNative": false,
   "explorer.excludeGitIgnore": false,
-  "extensions.autoUpdate": "onlyEnabledExtensions",
+  "extensions.autoUpdate": "on",
   "fileNestingUpdater.autoUpdate": false,
   "fileNestingUpdater.autoUpdateInterval": 10080, // 1 week
   "fileNestingUpdater.promptOnAutoUpdate": false,
