@@ -656,17 +656,26 @@ EOF
             # rules self-skip on a follower). The ingest + entity agents run only
             # on the driver. com.user.granola-import.plist is built from a
             # gitignored template; load_plist logs and skips if it's absent.
+            dt_driver_agents=(com.user.dt-daily-note \
+                              com.user.singlefile-watcher \
+                              com.user.boox-import-watcher \
+                              com.user.granola-import \
+                              com.user.github-stars-import \
+                              com.user.dt-morning-brief \
+                              com.user.entity-filing)
             dt_agents=(com.user.dt-watchdog)
             if [ "$DT_ROLE" = driver ]; then
-                dt_agents+=(com.user.dt-daily-note \
-                            com.user.singlefile-watcher \
-                            com.user.boox-import-watcher \
-                            com.user.granola-import \
-                            com.user.github-stars-import \
-                            com.user.dt-morning-brief \
-                            com.user.entity-filing)
+                dt_agents+=("${dt_driver_agents[@]}")
             else
                 info "  Follower: loading dt-watchdog only; the ingest and entity agents stay disabled."
+                # A Mac demoted to follower can still have driver agents loaded
+                # from an earlier bootstrap; boot them out so they stop mutating
+                # the synced database.
+                for label in "${dt_driver_agents[@]}"; do
+                    if launchctl bootout "gui/$(id -u)/$label" 2>/dev/null; then
+                        info "  booted out stale driver agent: $label"
+                    fi
+                done
             fi
             for plist in "${dt_agents[@]}"; do
                 load_plist "$HOME/Library/LaunchAgents/${plist}.plist"

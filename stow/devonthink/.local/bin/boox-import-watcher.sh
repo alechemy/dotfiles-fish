@@ -29,6 +29,19 @@ warn() {
 # that dies and stays dead is caught by dt-watchdog's liveness check.
 "$HOME/.local/bin/pipeline-record-run" boox-import-watcher 0 || true
 
+# Runtime role gate, for a follower that still has this agent loaded from an
+# older bootstrap. A follower must never touch the synced Notebooks folder —
+# import_pdf deletes untitled exports before the driver can import them.
+# Exiting would churn launchd's KeepAlive throttle loop, so wait for
+# promotion instead.
+if ! "$HOME/.local/bin/should-run-dt-driver" 2>/dev/null; then
+    log "follower role: import disabled until this Mac becomes the driver"
+    until "$HOME/.local/bin/should-run-dt-driver" 2>/dev/null; do
+        sleep 300
+    done
+    log "driver role detected: enabling watcher"
+fi
+
 # Poll a file's size until it has stayed identical for 5 consecutive samples
 # (~2.5s of quiescence), capped at 30s total. Echoes "stable", "gone" if the
 # file vanished mid-wait, or "unstable:<last-size>" if the cap is reached.
@@ -74,6 +87,10 @@ is_untitled_notebook() {
 # Notebook-<n> exports are deleted rather than imported.
 import_pdf() {
     local path=$1 origin=$2 stability
+    if ! "$HOME/.local/bin/should-run-dt-driver" 2>/dev/null; then
+        log "skipping (follower role): $path ($origin)"
+        return 0
+    fi
     stability=$(wait_for_stable_size "$path")
     if [[ "$stability" == "gone" ]]; then
         log "file disappeared before import, skipping: $path ($origin)"

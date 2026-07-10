@@ -28,6 +28,15 @@ notify() {
         -e 'end run' -- "$1" "$2" >/dev/null 2>&1 || true
 }
 
+# The watchdog runs on every machine (it keeps DT + the database open), but
+# the ingest infrastructure it babysits — Maestral, the fswatch watchers, the
+# SingleFile staging folder — is driver-only. A follower checking those would
+# page about agents that are deliberately not loaded.
+IS_DRIVER=0
+if "$HOME/.local/bin/should-run-dt-driver" 2>/dev/null; then
+    IS_DRIVER=1
+fi
+
 # ── 0. Record run time + alert on missed runs ────────────────────────────────
 # launchd's StartInterval (300s) doesn't fire during sleep. The pseudo-interval
 # is 3600, not 300: on this hardware every lid-close nap exceeds the 2×300s
@@ -109,9 +118,11 @@ scan_log "$HOME/Library/Logs/granola-import.log"
 # Stuck captures: a .html still in the staging folder after 15 minutes was
 # either missed by the watcher or failed ingest (failures stay in place by
 # design). The daily re-notify doubles as a cleanup reminder.
-while IFS= read -r stuck; do
-    surface_line "stuck capture awaiting ingest: $(basename "$stuck")"
-done < <(find "$HOME/Downloads/SingleFile" -name '*.html' -mmin +15 2>/dev/null || true)
+if [[ "$IS_DRIVER" == 1 ]]; then
+    while IFS= read -r stuck; do
+        surface_line "stuck capture awaiting ingest: $(basename "$stuck")"
+    done < <(find "$HOME/Downloads/SingleFile" -name '*.html' -mmin +15 2>/dev/null || true)
+fi
 
 # ── 2. Ensure DEVONthink is running ──────────────────────────────────────────
 if ! pgrep -qx "$DT_APP_NAME"; then
@@ -136,10 +147,12 @@ if ! pgrep -qx "$DT_APP_NAME"; then
     log "DEVONthink launched"
 fi
 
-# ── 3. Ensure Maestral is running (skip on battery) ───────────────────────────
+# ── 3. Ensure Maestral is running (driver only, skip on battery) ─────────────
+# Maestral exists to sync Boox exports for the import watcher, so a follower
+# has no use for it (and may not have it installed).
 # A Shortcuts automation quits Maestral when the laptop unplugs; relaunching it
 # here every 5 min would fight that automation. Defer to the same battery gate.
-if "$HOME/.local/bin/should-run-background-job"; then
+if [[ "$IS_DRIVER" == 1 ]] && "$HOME/.local/bin/should-run-background-job"; then
     if ! pgrep -qx "$MAESTRAL_APP_NAME"; then
         log "Maestral not running — launching '$MAESTRAL_APP_NAME'"
         open -a "$MAESTRAL_APP_NAME"
@@ -157,6 +170,8 @@ if "$HOME/.local/bin/should-run-background-job"; then
     else
         log "OK: Maestral running"
     fi
+elif [[ "$IS_DRIVER" != 1 ]]; then
+    log "skip: Maestral check (follower role)"
 else
     log "skip: Maestral check (on battery)"
 fi
@@ -166,19 +181,23 @@ fi
 # or the agent was booted out, nothing else notices: the watchers record-run
 # only at startup, so the missed-run tracker can never flag one that stays
 # dead — the one failure mode it exists for.
-for WATCHER_LABEL in com.user.singlefile-watcher com.user.boox-import-watcher; do
-    if launchctl list "$WATCHER_LABEL" 2>/dev/null | grep -q --color=never '"PID"'; then
-        continue
-    fi
-    log "ALERT: $WATCHER_LABEL has no running process — kickstarting"
-    if launchctl kickstart "gui/$(id -u)/$WATCHER_LABEL" 2>> "$LOG_FILE"; then
-        log "kickstarted $WATCHER_LABEL"
-        notify "$WATCHER_LABEL was down — kickstarted" "DT pipeline failure"
-    else
-        log "ERROR: kickstart failed for $WATCHER_LABEL (agent not loaded?)"
-        notify "$WATCHER_LABEL is down and kickstart failed" "DT pipeline failure"
-    fi
-done
+if [[ "$IS_DRIVER" == 1 ]]; then
+    for WATCHER_LABEL in com.user.singlefile-watcher com.user.boox-import-watcher; do
+        if launchctl list "$WATCHER_LABEL" 2>/dev/null | grep -q --color=never '"PID"'; then
+            continue
+        fi
+        log "ALERT: $WATCHER_LABEL has no running process — kickstarting"
+        if launchctl kickstart "gui/$(id -u)/$WATCHER_LABEL" 2>> "$LOG_FILE"; then
+            log "kickstarted $WATCHER_LABEL"
+            notify "$WATCHER_LABEL was down — kickstarted" "DT pipeline failure"
+        else
+            log "ERROR: kickstart failed for $WATCHER_LABEL (agent not loaded?)"
+            notify "$WATCHER_LABEL is down and kickstart failed" "DT pipeline failure"
+        fi
+    done
+else
+    log "skip: watcher liveness (follower role)"
+fi
 
 # ── 5. Ensure the target database is open ────────────────────────────────────
 # Write the AppleScript to a temp file to avoid heredoc quoting issues.

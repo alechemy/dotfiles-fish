@@ -37,6 +37,15 @@ log() {
 "$HOME/.local/bin/pipeline-record-run" dt-daily-note 86400 || true
 
 # ---------------------------------------------------------------------------
+# Role gate: only the pipeline driver creates notes in the synced database.
+# An explicit date argument is a deliberate manual run, allowed on any Mac.
+# ---------------------------------------------------------------------------
+if ! "$HOME/.local/bin/should-run-dt-driver" ${1:+--urgent} 2>/dev/null; then
+  log "skip: this Mac is a pipeline follower (should-run-dt-driver)"
+  exit 0
+fi
+
+# ---------------------------------------------------------------------------
 # Temp AppleScript files — written once, cleaned up on exit
 # ---------------------------------------------------------------------------
 FIND_SCRIPT=$(mktemp /tmp/dt-daily-find.XXXXXX.scpt)
