@@ -193,7 +193,9 @@ def person_index(people):
     for p in people:
         keys = [norm(p["name"])]
         keys += [norm(a) for a in p.get("aliases", "").split(",")]
-        email = norm(p.get("md", {}).get("mdemail", ""))
+        # The Email field is url-typed in DT, so a GUI-entered value can
+        # carry a mailto: prefix even though scripts store bare addresses.
+        email = norm(p.get("md", {}).get("mdemail", "")).removeprefix("mailto:")
         if email:
             keys.append(email)
         for k in keys:

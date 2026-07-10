@@ -201,6 +201,19 @@ class PersonSummaryLine(unittest.TestCase):
         self.assertTrue(mb.person_summary_line(person("Bob")).endswith(")"))
 
 
+class PersonIndexEmail(unittest.TestCase):
+    def test_bare_and_mailto_stored_emails_both_match_attendees(self):
+        """The Email field is url-typed in DT: scripts store bare addresses
+        but a GUI edit can save mailto: — both must match calendar emails."""
+        for stored in ("jane.doe@example.com",
+                       "mailto:jane.doe@example.com",
+                       "MAILTO:Jane.Doe@Example.com"):
+            p = person("Jane Doe", email=stored)
+            index = mb.person_index([p])
+            self.assertIs(
+                mb.match_person(index, "", "jane.doe@example.com"), p, stored)
+
+
 class RecentLogBullets(unittest.TestCase):
     def body_person(self, *bullets):
         p = person("Bob")
