@@ -899,6 +899,7 @@ def scan(config, state, dry_run, force_uuid, user_invoked):
         idle = user_idle_seconds()
         idle_ok = idle is None or idle >= idle_min * 60
     idle_skip_logged = False
+    no_transport = 0
     extracted_count = 0
     for source in candidates:
         if extracted_count >= limit:
@@ -914,6 +915,7 @@ def scan(config, state, dry_run, force_uuid, user_invoked):
 
         transport = pick_transport(config, source["kind"])
         if transport is None:
+            no_transport += 1
             continue  # no eligible transport (e.g. daily note without Ollama)
         if transport in LOCAL_TRANSPORTS and not idle_ok:
             # Local inference is deferrable by design; never spin fans while
@@ -976,6 +978,10 @@ def scan(config, state, dry_run, force_uuid, user_invoked):
                       extra={"record_name": source["name"],
                              "record_uuid": source["uuid"]})
             continue
+
+    if no_transport and not extracted_count:
+        log.info("%d candidate source(s) waiting: no eligible transport "
+                 "(TRANSPORT=%s)", no_transport, config["TRANSPORT"])
 
 
 def file_source(config, state, source, source_date, plans, filing_mode, dry_run):
