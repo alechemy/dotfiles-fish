@@ -14,7 +14,7 @@ re-reading audio. Plan: ~/.dotfiles/.context/workout-runnability-plan.md
 
   analyze    extract features (BPM, beat confidence, danceability, energy)
              into ~/.local/state/runnability/features.db; skips rows whose
-             path+size+mtime are already present
+             path+size+mtime are already present (--reanalyze overrides)
   score      rank tracks by runnability from stored features (no file writes)
   write      write RUNNABILITY / BPM_FOLDED / tmpo tags into files whose
              values changed, then refresh the store's size+mtime keys
@@ -233,7 +233,7 @@ def cmd_analyze(args) -> int:
         except ValueError:
             rel = str(p)
         st = p.stat()
-        if not args.force and known.get(rel) == (st.st_size, st.st_mtime):
+        if not args.reanalyze and known.get(rel) == (st.st_size, st.st_mtime):
             continue
         todo.append((str(p), rel))
     print(f"{len(paths)} candidates, {len(todo)} to analyze", file=sys.stderr)
@@ -486,9 +486,25 @@ def cmd_write(args) -> int:
     rows = conn.execute(
         "SELECT * FROM features WHERE error IS NULL ORDER BY relpath"
     ).fetchall()
+    prefixes = None
+    if args.paths:
+        prefixes = []
+        for p in args.paths:
+            rp = pathlib.Path(p).expanduser().resolve()
+            try:
+                prefixes.append(str(rp.relative_to(LIBRARY_ROOT)))
+            except ValueError:
+                print(f"ignoring path outside library: {p}", file=sys.stderr)
+        if not prefixes:
+            return 1
+
     jobs = []
     for r in rows:
         if r["relpath"].startswith("_runnability-test"):
+            continue
+        if prefixes is not None and not any(
+            r["relpath"] == pre or r["relpath"].startswith(pre + "/") for pre in prefixes
+        ):
             continue
         score, _ = score_row(dict(r), cfg)
         if quant > 1:
@@ -542,7 +558,8 @@ def main() -> int:
     a = sub.add_parser("analyze", help="extract features into the store")
     a.add_argument("paths", nargs="*", help="files/dirs (default: whole library)")
     a.add_argument("--workers", type=int, default=4)
-    a.add_argument("--force", action="store_true", help="re-analyze and ignore the AC-power gate")
+    a.add_argument("--force", action="store_true", help="ignore the AC-power gate")
+    a.add_argument("--reanalyze", action="store_true", help="re-analyze files already in the store")
     a.set_defaults(fn=cmd_analyze)
 
     s = sub.add_parser("score", help="rank tracks from stored features")
@@ -551,6 +568,7 @@ def main() -> int:
     s.set_defaults(fn=cmd_score)
 
     w = sub.add_parser("write", help="write scores into file tags")
+    w.add_argument("paths", nargs="*", help="restrict to files/dirs under the library (default: all)")
     w.add_argument("--dry-run", action="store_true", help="report changes without saving")
     w.add_argument("--workers", type=int, default=4)
     w.add_argument("--force", action="store_true", help="ignore the AC-power gate")

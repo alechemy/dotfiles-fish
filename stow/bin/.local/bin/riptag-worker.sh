@@ -293,4 +293,18 @@ if [ "$PERM_FAILED" -eq 1 ]; then
   exit 4
 fi
 
+# --- STEP 6: RUNNABILITY SCORING ---
+# Local mode only: the NAS can't run essentia. NAS-mode rips are scored by the
+# nightly runnability-sync launchd job instead.
+if [ $LOCAL_MODE -eq 1 ] && [ -f "$MANIFEST_FILE" ]; then
+  printf "%s\n" "--> Step 6: Scoring runnability..."
+  while IFS= read -r album_dir; do
+    [ -z "$album_dir" ] && continue
+    if ! { "$HOME/.local/bin/runnability.py" analyze --force "$album_dir" \
+        && "$HOME/.local/bin/runnability.py" write --force "$album_dir"; }; then
+      printf "%s\n" "    WARNING: runnability scoring failed; the nightly sync will retry."
+    fi
+  done < "$MANIFEST_FILE"
+fi
+
 rm -f "$MANIFEST_FILE"

@@ -23,6 +23,8 @@ like cue/log/cover-in-subfolder)" to a clean handoff to music-organize.py:
   5. Invoke music-organize.py to file the album under
      <library-root>/<artist|Compilations>/<album>/. Supports --replaces for
      the guarded re-download path.
+  6. Score runnability for the organized album (best-effort; the nightly
+     runnability-sync job is the safety net).
 
 Usage:
     import-album.py [options] <source_folder>
@@ -35,6 +37,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 from datetime import datetime
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
@@ -479,6 +482,28 @@ def build_plan(audio_files, existing_tags, pattern, args, source):
     return plans, errors
 
 
+def score_runnability(manifest_path):
+    """Best-effort inline runnability scoring for freshly organized albums."""
+    runn = os.path.expanduser("~/.local/bin/runnability.py")
+    if not os.path.isfile(manifest_path) or not os.access(runn, os.X_OK):
+        return
+    with open(manifest_path) as fh:
+        album_dirs = [ln.strip() for ln in fh if ln.strip()]
+    for d in album_dirs:
+        try:
+            ok = subprocess.run([runn, "analyze", "--force", d]).returncode == 0
+            if ok:
+                ok = subprocess.run([runn, "write", "--force", d]).returncode == 0
+        except OSError:
+            ok = False
+        if not ok:
+            print(
+                f"WARNING: runnability scoring failed for {d}; "
+                "the nightly sync will retry.",
+                file=sys.stderr,
+            )
+
+
 def resolve_compilation(args, plans):
     """Match tagger.py: explicit flag wins; otherwise only Soundtrack auto-detects."""
     if args.compilation is True:
@@ -643,10 +668,14 @@ def main():
             plans[0]["albumartist"], plans[0]["album"], args.dry_run,
         )
 
+    manifest_path = os.path.join(
+        tempfile.mkdtemp(prefix="import-album-"), "manifest.txt"
+    )
     cmd = [
         args.organizer,
         "--library-root", library_root,
         "--on-collision", "replace",
+        "--manifest", manifest_path,
     ]
     if args.replaces:
         cmd += ["--replaces", args.replaces]
@@ -663,6 +692,8 @@ def main():
     print(f"\n--> music-organize.py: {' '.join(cmd)}")
     sys.stdout.flush()
     result = subprocess.run(cmd)
+    if result.returncode == 0:
+        score_runnability(manifest_path)
     sys.exit(result.returncode)
 
 
