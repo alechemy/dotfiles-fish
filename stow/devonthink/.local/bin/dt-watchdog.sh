@@ -199,6 +199,40 @@ else
     log "skip: watcher liveness (follower role)"
 fi
 
+# ── 4b. Interval-agent liveness (driver only) ────────────────────────────────
+# The KeepAlive watchers are kickstarted above; interval agents have no
+# resident process, so a booted-out label or a crash-looping script dies
+# silently — pipeline-record-run only flags a gap when the component runs
+# AGAIN. Check each label is loaded and its recorded last run is fresh.
+# Only components that have run on this machine before (a .last-run file
+# exists) are checked, so a deliberately unprovisioned agent (e.g. Granola
+# without its op-built plist) stays quiet. Thresholds are loose on purpose:
+# sleep gaps are routine, and surface_line's dedup caps repeats at daily.
+if [[ "$IS_DRIVER" == 1 ]]; then
+    NOW_EPOCH=$(date +%s)
+    while IFS=: read -r AGENT_LABEL AGENT_JOB AGENT_MAX_AGE; do
+        [[ -n "$AGENT_LABEL" ]] || continue
+        AGENT_STATE="$HOME/.local/state/devonthink/${AGENT_JOB}.last-run"
+        [[ -f "$AGENT_STATE" ]] || continue
+        if ! launchctl list "$AGENT_LABEL" >/dev/null 2>&1; then
+            surface_line "$AGENT_LABEL is not loaded but $AGENT_JOB has run on this Mac — bootstrap the agent (or delete ${AGENT_JOB}.last-run if retired)"
+            continue
+        fi
+        AGENT_LAST=$(cat "$AGENT_STATE" 2>/dev/null || echo 0)
+        [[ "$AGENT_LAST" =~ ^[0-9]+$ && "$AGENT_LAST" -gt 0 ]] || continue
+        AGENT_GAP=$((NOW_EPOCH - AGENT_LAST))
+        if [[ "$AGENT_GAP" -gt "$AGENT_MAX_AGE" ]]; then
+            surface_line "$AGENT_JOB has not run in $((AGENT_GAP / 3600))h (label $AGENT_LABEL is loaded but silent)"
+        fi
+    done <<'AGENTS'
+com.user.dt-daily-note:dt-daily-note:180000
+com.user.dt-morning-brief:dt-morning-brief:180000
+com.user.entity-filing:entity-filing:21600
+com.user.granola-import:granola-import:21600
+com.user.github-stars-import:github-stars-import:21600
+AGENTS
+fi
+
 # ── 5. Ensure the target database is open ────────────────────────────────────
 # Write the AppleScript to a temp file to avoid heredoc quoting issues.
 TMPSCRIPT=$(mktemp /tmp/dt-watchdog.XXXXXX.scpt)

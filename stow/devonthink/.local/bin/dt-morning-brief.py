@@ -96,8 +96,11 @@ SKIP_CALENDARS = {"Birthdays", "Siri Suggestions", "US Holidays", "Holidays"}
 UNMATCHED_LIST_MAX = 8
 
 CONFIG_FILE = os.path.expanduser("~/.config/dt-pipeline/entities.conf")
+ENTITY_STATE_FILE = os.path.expanduser(
+    "~/.local/state/devonthink/entity-filing-state.json")
 DEFAULT_SKIP_ATTENDEE = r"\bVC\b|\bConference\b|\bRoom\b|\d+\s?ppl"
 BACKFILL_DAYS = 365
+PARKED_LIST_MAX = 5
 
 
 def run_osascript(script, args, timeout=120):
@@ -394,11 +397,45 @@ def build_reconnect(people, today):
     return "\n".join(lines)
 
 
+def parked_sources():
+    """Sources entity-filing gave up on after repeated failures. Read from
+    its state file; anything unreadable degrades to 'no parked sources'
+    rather than blocking the brief."""
+    try:
+        with open(ENTITY_STATE_FILE) as f:
+            state = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return {}
+    parked = state.get("parked")
+    return parked if isinstance(parked, dict) else {}
+
+
+def parked_lines(parked):
+    if not parked:
+        return []
+    noun = "source" if len(parked) == 1 else "sources"
+    lines = [f"- {len(parked)} {noun} parked after repeated extraction "
+             f"failures — fix and retry with `entity-filing.py --force "
+             f"<uuid>`, or edit the source (any change retries it):"]
+    ordered = sorted(parked.items(),
+                     key=lambda kv: kv[1].get("parked_at", ""), reverse=True)
+    for uuid, info in ordered[:PARKED_LIST_MAX]:
+        name = info.get("name") or uuid
+        err = str(info.get("last_error") or "").strip()
+        suffix = f" — {err[:100]}" if err else ""
+        lines.append(f"  - [{name}](x-devonthink-item://{uuid}){suffix}")
+    if len(parked) > PARKED_LIST_MAX:
+        lines.append(f"  - … and {len(parked) - PARKED_LIST_MAX} more")
+    return lines
+
+
 def review_nudge(today):
     """Surface the filing review backlog so proposals don't sit unseen — the
     Approved subgroup is the apply drop-zone, so it isn't a backlog, but a
     proposal filing refused to apply stays there and would otherwise be
-    invisible: nothing counts it and its log line is only a WARNING."""
+    invisible: nothing counts it and its log line is only a WARNING. Parked
+    sources are included for the same reason: a note that repeatedly failed
+    extraction would otherwise vanish from every review surface."""
     try:
         children, approved = run_bridge([
             {"op": "list_group", "path": REVIEW_PATH},
@@ -410,7 +447,8 @@ def review_nudge(today):
         log.warning("could not count review proposals: %s", exc)
         return None
     pending = [c for c in children if c["name"] != "Approved"]
-    if not pending and not approved:
+    parked = parked_sources()
+    if not pending and not approved and not parked:
         return None
     lines = [f"<!-- review-nudge:{today} -->", ""]
     if pending:
@@ -421,6 +459,7 @@ def review_nudge(today):
         noun = "proposal" if len(approved) == 1 else "proposals"
         lines.append(f"- {len(approved)} approved {noun} did not apply — see "
                      f"`entity-filing` in the pipeline log")
+    lines.extend(parked_lines(parked))
     return "\n".join(lines)
 
 
