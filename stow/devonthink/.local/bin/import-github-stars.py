@@ -79,7 +79,11 @@ STATE_SCHEMA_VERSION = 1
 
 
 def load_imported():
-    """Return the set of previously-imported full_name strings.
+    """Return (imported full_name set, retry list of star dicts).
+
+    The retry list holds stars whose import failed: fetch_stars stops at the
+    first already-imported repo, so a failed star older than a succeeded one
+    would otherwise never be fetched again.
 
     Fails closed: raises on unreadable or unrecognized state rather than
     silently returning empty, which would cause every star in the user's
@@ -89,11 +93,11 @@ def load_imported():
 
     Accepts the legacy bare-list format ([id1, id2, ...]) for transparent
     migration; the next save_imported() call upgrades the on-disk format to
-    the v1 schema ({"version": 1, "ids": [...]}).
+    the v1 schema ({"version": 1, "ids": [...], "retry": [...]}).
     """
     _migrate_state_file()
     if not os.path.exists(STATE_FILE):
-        return set()
+        return set(), []
     try:
         with open(STATE_FILE, "r") as f:
             data = json.load(f)
@@ -104,13 +108,16 @@ def load_imported():
             f"repaired or removed."
         ) from exc
     if isinstance(data, list):
-        return set(data)
+        return set(data), []
     if (
         isinstance(data, dict)
         and data.get("version") == STATE_SCHEMA_VERSION
         and isinstance(data.get("ids"), list)
     ):
-        return set(data["ids"])
+        retry = data.get("retry", [])
+        if not isinstance(retry, list):
+            retry = []
+        return set(data["ids"]), retry
     raise RuntimeError(
         f"State file {STATE_FILE} has an unrecognized schema "
         f"(top-level type: {type(data).__name__}). Imports are paused until "
@@ -118,7 +125,7 @@ def load_imported():
     )
 
 
-def save_imported(repos):
+def save_imported(repos, retry):
     os.makedirs(STATE_DIR, exist_ok=True)
     fd, tmp = tempfile.mkstemp(
         dir=STATE_DIR, prefix=".github-stars-imported.", suffix=".json.tmp"
@@ -126,7 +133,11 @@ def save_imported(repos):
     try:
         with os.fdopen(fd, "w") as f:
             json.dump(
-                {"version": STATE_SCHEMA_VERSION, "ids": sorted(repos)},
+                {
+                    "version": STATE_SCHEMA_VERSION,
+                    "ids": sorted(repos),
+                    "retry": retry,
+                },
                 f,
                 indent=2,
             )
@@ -137,6 +148,18 @@ def save_imported(repos):
         except FileNotFoundError:
             pass
         raise
+
+
+def merge_pending(stars, retry, imported):
+    """Combine freshly-fetched stars with retry entries from prior failed
+    imports. Retry entries are older than anything fetched, so they go last —
+    the import loop runs reversed (oldest first). Drops retries already
+    re-fetched or since imported."""
+    fetched = {s["full_name"] for s in stars}
+    return stars + [
+        r for r in retry
+        if r["full_name"] not in fetched and r["full_name"] not in imported
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -176,17 +199,17 @@ def fetch_stars(imported, first_run):
                 timeout=30,
             )
         except FileNotFoundError:
-            log(f"gh CLI not found at {GH_BIN}")
+            log(f"ERROR gh CLI not found at {GH_BIN}")
             sys.exit(1)
 
         if result.returncode != 0:
-            log(f"GitHub API error: {result.stderr.strip()}")
+            log(f"ERROR from GitHub API: {result.stderr.strip()}")
             break
 
         try:
             stars = json.loads(result.stdout)
         except json.JSONDecodeError:
-            log("Failed to parse GitHub API response")
+            log("ERROR parsing GitHub API response")
             break
 
         if not stars:
@@ -343,18 +366,18 @@ def main():
             timeout=10,
         )
     except FileNotFoundError:
-        log(f"gh CLI not found at {GH_BIN}")
+        log(f"ERROR gh CLI not found at {GH_BIN}")
         sys.exit(1)
 
     if auth_check.returncode != 0:
-        log("gh CLI not authenticated — run 'gh auth login' first")
+        log("ERROR gh CLI not authenticated — run 'gh auth login' first")
         sys.exit(1)
 
-    imported = load_imported()
+    imported, retry = load_imported()
     first_run = len(imported) == 0
     log(f"Fetching starred repos ({len(imported)} already imported)")
 
-    stars = fetch_stars(imported, first_run)
+    stars = merge_pending(fetch_stars(imported, first_run), retry, imported)
     if not stars:
         log("No new stars to import")
         return
@@ -386,11 +409,15 @@ def main():
 
             if success:
                 imported.add(star["full_name"])
-                save_imported(imported)
+                retry = [r for r in retry if r["full_name"] != star["full_name"]]
+                save_imported(imported, retry)
                 log(f"  {msg}")
                 new_count += 1
             else:
-                log(f"  FAILED: {msg}")
+                if not any(r["full_name"] == star["full_name"] for r in retry):
+                    retry.append(star)
+                    save_imported(imported, retry)
+                log(f"  FAILED: {msg} (queued for retry)")
 
             # Small delay between imports to avoid overwhelming DT
             if i < len(stars) - 1:
