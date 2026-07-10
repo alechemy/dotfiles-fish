@@ -9,12 +9,19 @@
 //
 //   osascript -l JavaScript ~/.local/bin/calendar-events-json.js
 //
-// Usage: calendar-events-json.js [YYYY-MM-DD]   (default: today, local time)
+// Usage: calendar-events-json.js [YYYY-MM-DD [YYYY-MM-DD]]
+//        one day (default: today, local time), or an inclusive day range.
 //
-// stdout: {"ok": true, "date": "...", "events": [{title, calendar, start,
-//          end, all_day, location, declined, attendees: [{name, email,
-//          is_self, is_person}]}]}
+// stdout: {"ok": true, "date": "...", "events": [{title, calendar, date,
+//          start, end, all_day, location, declined, attendees: [{name,
+//          email, is_self, is_person}]}]}
 //         {"ok": false, "error": "..."} on denied/undetermined access.
+//
+// Each event carries its own local `date` so a range dump stays usable.
+//
+// Exchange reports conference rooms with participantType Person, identical
+// to humans on every EventKit field, so `is_person` cannot exclude them —
+// consumers filter rooms by name.
 
 ObjC.import('EventKit')
 ObjC.import('Foundation')
@@ -57,8 +64,14 @@ function run(argv) {
     const local = new Date(now.getTime() - now.getTimezoneOffset() * 60000)
     dateStr = local.toISOString().slice(0, 10)
   }
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
-    return JSON.stringify({ ok: false, error: 'bad date: ' + dateStr })
+  const endStr = argv[1] || dateStr
+  for (const d of [dateStr, endStr]) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) {
+      return JSON.stringify({ ok: false, error: 'bad date: ' + d })
+    }
+  }
+  if (endStr < dateStr) {
+    return JSON.stringify({ ok: false, error: 'end before start: ' + endStr })
   }
 
   const authorized = () => {
@@ -82,9 +95,12 @@ function run(argv) {
   }
 
   const parts = dateStr.split('-').map(Number)
+  const endParts = endStr.split('-').map(Number)
   const dayStart = new Date(parts[0], parts[1] - 1, parts[2]).getTime() / 1000
+  const dayEnd =
+    new Date(endParts[0], endParts[1] - 1, endParts[2]).getTime() / 1000 + 86400
   const start = $.NSDate.dateWithTimeIntervalSince1970(dayStart)
-  const end = $.NSDate.dateWithTimeIntervalSince1970(dayStart + 86400)
+  const end = $.NSDate.dateWithTimeIntervalSince1970(dayEnd)
   const pred = store.predicateForEventsWithStartDateEndDateCalendars(start, end, $())
   const events = store.eventsMatchingPredicate(pred)
 
@@ -98,8 +114,9 @@ function run(argv) {
       for (let j = 0; j < atts.count; j++) {
         const p = atts.objectAtIndex(j)
         const isSelf = !!p.isCurrentUser
+        // JXA hands these NSInteger enums back as strings, so compare on Number().
         // EKParticipantStatusDeclined = 3
-        if (isSelf && p.participantStatus === 3) declined = true
+        if (isSelf && Number(p.participantStatus) === 3) declined = true
         let email = ''
         const url = p.URL
         if (url && !url.isNil()) {
@@ -109,14 +126,15 @@ function run(argv) {
           name: str(p.name),
           email: email,
           is_self: isSelf,
-          // EKParticipantTypePerson = 1 (rooms/resources excluded downstream)
-          is_person: p.participantType === 1,
+          // EKParticipantTypePerson = 1
+          is_person: Number(p.participantType) === 1,
         })
       }
     }
     out.push({
       title: str(ev.title),
       calendar: str(ev.calendar.title),
+      date: isoLocal(ev.startDate).slice(0, 10),
       start: isoLocal(ev.startDate),
       end: isoLocal(ev.endDate),
       all_day: !!ev.allDay,

@@ -33,15 +33,17 @@ Approving an existing proposal without the alias is caught rather than
 silently duplicated (the run warns and leaves the proposal in `Approved`),
 but the alias is what makes it *work* rather than merely fail safely.
 
-Then, once, replay meeting history into everyone's contact dates:
+Then, once, replay your calendar history into everyone's contact dates:
 
 ```bash
-~/.local/bin/entity-filing.py --backfill-contacts
+~/.local/bin/dt-morning-brief.py --backfill-contacts --dry-run   # preview
+~/.local/bin/dt-morning-brief.py --backfill-contacts             # 365 days
 ```
 
-The routine attendance pass only looks back 60 days, so without this a
-person you seeded today shows as "no recorded contact" in Reconnect even
-though you have meetings with them on file.
+The daily run only ever looks at yesterday, so without this a person you
+seeded today shows as "no recorded contact" in Reconnect even though you
+have a year of meetings with them. It's idempotent — re-run it any time you
+add people.
 
 ## Your daily rhythm
 
@@ -59,9 +61,11 @@ though you have meetings with them on file.
   90). Text someone, or set their `entitystatus` to `dormant` to silence
   them.
 
-Contact tracking is mostly automatic: meeting attendance and yesterday's
-calendar events (matched by attendee or by a name in the event title, like
-"Call with Jake") bump `LastContact` without any LLM involved.
+Contact tracking is mostly automatic: yesterday's calendar events (matched by
+attendee or by a name in the event title, like "Call with Jake") bump
+`LastContact` without any LLM involved. Only the work calendar carries
+attendees — personal iCloud events are matched by title alone, so name people
+in the event title if you want them tracked.
 
 ## Reviewing a proposal — walkthrough
 

@@ -20,7 +20,10 @@ Safety model:
     become proposals. A permanent manual-review path, per the design doc.
   - Meeting attendance (GranolaParticipants) bumps LastContact for
     matched people deterministically on every scan — no LLM involved, so
-    it applies in both modes.
+    it applies in both modes. Dormant in practice: Granola reads a
+    subscribed Google calendar, and Google strips attendee lists from
+    one-way imports, so the field is always empty. Calendar-derived
+    contact tracking lives in dt-morning-brief.py instead.
   - Extraction is gated on a seeded roster (MIN_ROSTER). The prompt's
     whole resolution step is the roster, and a source is only ever
     extracted once (its UUID lands in processed_ids), so extracting
@@ -70,10 +73,6 @@ Usage:
     entity-filing.py --force UUID    # re-extract one source record
     entity-filing.py --apply-only    # only process _Review/Approved
     entity-filing.py --scan-only     # skip the apply phase
-    entity-filing.py --backfill-contacts
-                                     # bump LastContact from every meeting on
-                                     # record, ignoring BUMP_WINDOW_DAYS; run
-                                     # once after seeding People
 """
 
 import fcntl
@@ -827,7 +826,7 @@ def pick_transport(config, kind):
     return local_pick(LOCAL_TRANSPORTS) or "dtchat"
 
 
-def scan(config, state, dry_run, force_uuid, user_invoked, backfill_contacts):
+def scan(config, state, dry_run, force_uuid, user_invoked):
     people, sources = run_bridge([
         {"op": "dump_people", "include_bodies": False},
         {"op": "list_sources"},
@@ -840,7 +839,6 @@ def scan(config, state, dry_run, force_uuid, user_invoked, backfill_contacts):
     # whether or not extraction can run. bump_lastcontact only ever raises
     # the date, so a meeting older than the window can no longer change any
     # LastContact — re-scanning the whole archive each tick is pure waste.
-    # --backfill-contacts drops the window for a one-off replay after seeding.
     window_start = (date.today() - timedelta(days=BUMP_WINDOW_DAYS)).isoformat()
     bump_ops = []
     for source in sources:
@@ -848,8 +846,7 @@ def scan(config, state, dry_run, force_uuid, user_invoked, backfill_contacts):
             continue
         d = source_date_of(source)
         added = source.get("added", "")
-        if not backfill_contacts and d < window_start and (
-                not added or added < window_start):
+        if d < window_start and (not added or added < window_start):
             continue
         for raw_name in (source.get("participants") or "").split(","):
             n = norm(raw_name)
@@ -859,18 +856,8 @@ def scan(config, state, dry_run, force_uuid, user_invoked, backfill_contacts):
             if len(hits) == 1:
                 bump_ops.append({"op": "bump_lastcontact",
                                  "uuid": hits[0]["uuid"], "date": d})
-    bumped = 0
     if bump_ops and not dry_run:
-        bumped = sum(1 for r in run_bridge(bump_ops) if r.get("changed"))
-
-    if backfill_contacts:
-        if dry_run:
-            log.info("[dry-run] backfill: %d attendance bumps planned",
-                     len(bump_ops))
-        else:
-            log.info("backfill: %d of %d attendance bumps raised a LastContact",
-                     bumped, len(bump_ops))
-        return
+        run_bridge(bump_ops)
 
     min_roster = int(config["MIN_ROSTER"])
     if len(people) < min_roster and not force_uuid:
@@ -1048,14 +1035,12 @@ def main():
     dry_run = "--dry-run" in args
     apply_only = "--apply-only" in args
     scan_only = "--scan-only" in args
-    backfill_contacts = "--backfill-contacts" in args
     force_uuid = None
     if "--force" in args:
         idx = args.index("--force")
         if idx + 1 < len(args):
             force_uuid = args[idx + 1]
-    user_invoked = bool(dry_run or force_uuid or apply_only or scan_only
-                        or backfill_contacts)
+    user_invoked = bool(dry_run or force_uuid or apply_only or scan_only)
 
     subprocess.run(
         [os.path.expanduser("~/.local/bin/pipeline-record-run"),
@@ -1090,11 +1075,10 @@ def main():
     state = load_state()
 
     try:
-        if not scan_only and not backfill_contacts:
+        if not scan_only:
             apply_approved(dry_run)
         if not apply_only:
-            scan(config, state, dry_run, force_uuid, user_invoked,
-                 backfill_contacts)
+            scan(config, state, dry_run, force_uuid, user_invoked)
     except BridgeUnavailable as exc:
         log.info("skipping: %s", exc)
 

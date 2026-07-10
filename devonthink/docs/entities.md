@@ -85,8 +85,17 @@ Person records by email, name, or alias — and person names are also matched
 against the **event title** ("Call with Jake"), because personal-calendar
 events rarely carry structured attendees. Matched people get their header
 facts plus the three most recent Biographical Log entries; unmatched attendees
-are listed as "no entity record yet". The brief reads live from records, so it
-can never go stale.
+are listed as "no entity record yet" (collapsed to a count past
+`UNMATCHED_LIST_MAX`, so a 200-person CAB invite costs one line). The brief
+reads live from records, so it can never go stale.
+
+Attendees only exist on the Exchange calendar; iCloud events carry none, which
+is why title matching exists. Exchange also reports **conference rooms with
+`participantType` Person** — identical to a human on every EventKit field — so
+rooms are excluded by name via `SKIP_ATTENDEE_PATTERN`. Note that EventKit's
+enums come back from JXA as *strings*: `calendar-events-json.js` compares them
+with `Number(...)`, and dropping that coercion silently makes `is_person` and
+`declined` false for everyone.
 
 Sections are appended *after* `## Today's Notes` (created if missing) because
 `insert-jot-into-daily-note.py` targets the last bullet *before* that header —
@@ -99,6 +108,13 @@ people whose contact is calendared rather than jotted — calls with family,
 social plans — without waiting for a filed fact. Yesterday, not today,
 because a completed day can't have its meetings cancelled out from under the
 bump; and bumps only ever raise the date, so re-runs are harmless.
+
+The daily run only ever looks at yesterday, so a person seeded today starts
+with no contact history. `dt-morning-brief.py --backfill-contacts [--days N]`
+replays a range (default 365 days) through the same matcher, keeping only each
+person's most recent date — one calendar dump, a few seconds, idempotent.
+Run it once after a seeding session. The calendar is the **only** historical
+source of contact dates; see the note on `GranolaParticipants` below.
 
 The brief also writes an `## Entity Review` section counting proposals that
 need attention: those awaiting review in `_Review`, and separately any left
@@ -165,10 +181,18 @@ Meeting attendance is deterministic and LLM-free: any `GranolaParticipants`
 name that uniquely matches a Person record bumps its `LastContact` on every
 scan (bump only ever raises the date). The pass is bounded to meetings from
 the last 60 days — an older meeting can no longer raise anyone's `LastContact`,
-so re-scanning the whole archive each tick is skipped. That window also means
-a person seeded today starts with no contact history from meetings older than
-it; `--backfill-contacts` runs the pass once over every meeting on record to
-recover that, and is worth running immediately after a seeding session.
+so re-scanning the whole archive each tick is skipped.
+
+**This pass is dormant, and not because of a bug here.** Granola reads a
+*subscribed* Google calendar (`…@import.calendar.google.com`), and Google
+strips attendee lists from one-way ICS imports, so `documents.people.attendees`
+and `google_calendar_event.attendees` are empty on every meeting and
+`import-granola.py` has nothing to write into `GranolaParticipants`. The code
+is kept because it starts working the moment Granola is pointed at a real
+Google Calendar connection. Until then, all contact tracking comes from the
+macOS Calendar via `dt-morning-brief.py`, whose Exchange events do carry
+attendees. Do not "fix" this by reading attendees out of the meeting note's
+body text — the pipeline's guarantee is that attendance is LLM-free.
 
 **Review loop:** proposals land in `/20_ENTITIES/_Review` with a human
 summary and the exact ops as a fenced JSON block. Move a proposal into
@@ -203,6 +227,8 @@ FILING_MODE=suggest   # suggest | auto
 MAX_PER_RUN=3
 MIN_ROSTER=1          # extract only once People holds this many records
 SELF_NAME=            # extra self-alias to exclude from extraction
+SKIP_ATTENDEE_PATTERN=\bVC\b|\bConference\b|\bRoom\b|\d+\s?ppl
+                      # calendar attendees that are rooms, not people
 SKIP_SOURCE_TITLES=Round ?Table|Standup|…   # sources never extracted
 IDLE_MINUTES=10       # local extraction waits for user inactivity; 0 = off
 ```
@@ -308,9 +334,9 @@ plus fence-stripping and strict validation in Python.
 # apply approved proposals right now
 ~/.local/bin/entity-filing.py --apply-only
 
-# after seeding People: replay every meeting on record into LastContact,
-# ignoring the 60-day attendance window
-~/.local/bin/entity-filing.py --backfill-contacts
+# after seeding People: replay past calendar days into LastContact
+~/.local/bin/dt-morning-brief.py --backfill-contacts --dry-run
+~/.local/bin/dt-morning-brief.py --backfill-contacts --days 365
 
 # drain the extraction backlog by hand — manual runs bypass the battery and
 # idle gates entirely; each pass extracts MAX_PER_RUN sources, so repeat (or

@@ -36,6 +36,17 @@ Usage:
     dt-morning-brief.py --force      # bypass battery/role gates
     dt-morning-brief.py --weekly     # include the Reconnect section today
     dt-morning-brief.py --date YYYY-MM-DD
+    dt-morning-brief.py --backfill-contacts [--days N]
+                                     # replay past calendar days into
+                                     # LastContact (default 365); run once
+                                     # after seeding People
+
+Config (~/.config/dt-pipeline/entities.conf, shared with entity-filing.py):
+    SKIP_ATTENDEE_PATTERN=<regex>    attendee names matching this are not
+                                     people. Exchange reports conference
+                                     rooms with participantType Person and
+                                     is otherwise indistinguishable from a
+                                     human, so the name is the only signal.
 """
 
 import json
@@ -81,6 +92,10 @@ SKIP_CALENDARS = {"Birthdays", "Siri Suggestions", "US Holidays", "Holidays"}
 # must not dump 38 noise lines into the daily note.
 UNMATCHED_LIST_MAX = 8
 
+CONFIG_FILE = os.path.expanduser("~/.config/dt-pipeline/entities.conf")
+DEFAULT_SKIP_ATTENDEE = r"\bVC\b|\bConference\b|\bRoom\b|\d+\s?ppl"
+BACKFILL_DAYS = 365
+
 
 def run_osascript(script, args, timeout=120):
     result = subprocess.run(
@@ -117,6 +132,39 @@ def run_bridge(ops):
             raise BridgeUnavailable(out.get("error"))
         raise RuntimeError(f"bridge error: {out.get('error')}")
     return out["results"]
+
+
+def load_skip_attendee_re():
+    pattern = DEFAULT_SKIP_ATTENDEE
+    if os.path.exists(CONFIG_FILE):
+        with open(CONFIG_FILE) as f:
+            for line in f:
+                line = line.strip()
+                if line.startswith("SKIP_ATTENDEE_PATTERN="):
+                    pattern = line.partition("=")[2].strip()
+    if not pattern:
+        return None
+    try:
+        return re.compile(pattern, re.IGNORECASE)
+    except re.error as exc:
+        log.warning("bad SKIP_ATTENDEE_PATTERN regex, ignoring: %s", exc)
+        return None
+
+
+def real_attendees(ev, skip_re):
+    """Other humans on an event. Rooms and resources are indistinguishable
+    from people on every EventKit field under Exchange, so they are excluded
+    by name."""
+    out = []
+    for a in ev["attendees"]:
+        if a["is_self"] or not a["is_person"]:
+            continue
+        if not (a["name"] or a["email"]):
+            continue
+        if skip_re and a["name"] and skip_re.search(a["name"]):
+            continue
+        out.append(a)
+    return out
 
 
 def norm(s):
@@ -194,7 +242,7 @@ def title_matches(people, title):
     return hits
 
 
-def build_brief(events, people, today):
+def build_brief(events, people, today, skip_re):
     index = person_index(people)
     blocks = []
     for ev in events:
@@ -202,10 +250,7 @@ def build_brief(events, people, today):
             continue
         if ev["calendar"] in SKIP_CALENDARS:
             continue
-        others = [
-            a for a in ev["attendees"]
-            if not a["is_self"] and a["is_person"] and (a["name"] or a["email"])
-        ]
+        others = real_attendees(ev, skip_re)
         by_title = title_matches(people, ev["title"])
         if not others and not by_title:
             continue
@@ -244,26 +289,28 @@ def build_brief(events, people, today):
     return f"<!-- brief:{today} -->\n\n" + "\n\n".join(blocks)
 
 
-def contact_bumps(events, people, day):
+def contact_bumps(events, people, day, skip_re):
+    """One bump op per person per day. `day` is the fallback for a single-day
+    dump; a range dump tags each event with its own date."""
     index = person_index(people)
     ops = []
     seen = set()
     for ev in events:
         if ev["all_day"] or ev["declined"] or ev["calendar"] in SKIP_CALENDARS:
             continue
-        matched = []
-        for a in ev["attendees"]:
-            if a["is_self"] or not a["is_person"]:
-                continue
-            p = match_person(index, a["name"], a["email"])
-            if p:
-                matched.append(p)
+        when = ev.get("date") or day
+        matched = [
+            p for p in (match_person(index, a["name"], a["email"])
+                        for a in real_attendees(ev, skip_re))
+            if p
+        ]
         matched.extend(title_matches(people, ev["title"]))
         for p in matched:
-            if p["uuid"] in seen:
+            key = (p["uuid"], when)
+            if key in seen:
                 continue
-            seen.add(p["uuid"])
-            ops.append({"op": "bump_lastcontact", "uuid": p["uuid"], "date": day})
+            seen.add(key)
+            ops.append({"op": "bump_lastcontact", "uuid": p["uuid"], "date": when})
     return ops
 
 
@@ -338,6 +385,44 @@ def review_nudge(today):
     return "\n".join(lines)
 
 
+def backfill_contacts(today, days, skip_re, dry_run):
+    """Replay past calendar days into LastContact. Meeting attendance is the
+    only historical source of contact dates — Granola's copy of the calendar
+    carries no attendees — and the daily run only ever looks at yesterday, so
+    a person seeded today starts with no history without this."""
+    start = (date.fromisoformat(today) - timedelta(days=days)).isoformat()
+    end = (date.fromisoformat(today) - timedelta(days=1)).isoformat()
+    cal = run_osascript(CALENDAR, [start, end], timeout=300)
+    if not cal.get("ok"):
+        log.error("calendar unavailable: %s", cal.get("error"))
+        return
+    people = run_bridge([{"op": "dump_people", "include_bodies": False}])[0]
+    if not people:
+        log.info("no Person records yet, nothing to backfill")
+        return
+
+    latest = {}
+    for op in contact_bumps(cal["events"], people, end, skip_re):
+        if op["date"] > latest.get(op["uuid"], ""):
+            latest[op["uuid"]] = op["date"]
+    ops = [{"op": "bump_lastcontact", "uuid": u, "date": d}
+           for u, d in latest.items()]
+
+    if dry_run:
+        by_uuid = {p["uuid"]: p["name"] for p in people}
+        print(f"[dry-run] {start}..{end}: {len(cal['events'])} events, "
+              f"{len(ops)} people would be bumped")
+        for op in sorted(ops, key=lambda o: o["date"], reverse=True):
+            print(f"  {op['date']}  {by_uuid.get(op['uuid'], op['uuid'])}")
+        return
+    if not ops:
+        log.info("backfill: no roster matches in %s..%s", start, end)
+        return
+    changed = sum(1 for r in run_bridge(ops) if r.get("changed"))
+    log.info("backfill: %d of %d people had LastContact raised (%s..%s)",
+             changed, len(ops), start, end)
+
+
 def append_section(note_text, header, content):
     text = note_text
     if NOTES_HEADER not in text:
@@ -350,10 +435,14 @@ def main():
     dry_run = "--dry-run" in args
     force = "--force" in args
     weekly = "--weekly" in args
+    backfill = "--backfill-contacts" in args
+    days = BACKFILL_DAYS
+    if "--days" in args:
+        days = int(args[args.index("--days") + 1])
     today = date.today().isoformat()
     if "--date" in args:
         today = args[args.index("--date") + 1]
-    user_invoked = dry_run or force or "--date" in args or weekly
+    user_invoked = dry_run or force or "--date" in args or weekly or backfill
 
     subprocess.run(
         [os.path.expanduser("~/.local/bin/pipeline-record-run"),
@@ -380,6 +469,12 @@ def main():
             log.info("skipping: follower machine")
             return
 
+    skip_re = load_skip_attendee_re()
+
+    if backfill:
+        backfill_contacts(today, days, skip_re, dry_run)
+        return
+
     events = []
     try:
         cal = run_osascript(CALENDAR, [today], timeout=60)
@@ -396,7 +491,7 @@ def main():
     yesterday = (date.fromisoformat(today) - timedelta(days=1)).isoformat()
     try:
         ycal = run_osascript(CALENDAR, [yesterday], timeout=60)
-        bumps = contact_bumps(ycal["events"], people, yesterday) \
+        bumps = contact_bumps(ycal["events"], people, yesterday, skip_re) \
             if ycal.get("ok") else []
     except Exception as exc:
         log.warning("yesterday's calendar query failed: %s", exc)
@@ -411,7 +506,7 @@ def main():
                      len(bumps), yesterday)
 
     sections = []
-    brief = build_brief(events, people, today)
+    brief = build_brief(events, people, today, skip_re)
     if brief:
         sections.append((BRIEF_HEADER, brief, f"<!-- brief:{today} -->"))
     if weekly or date.fromisoformat(today).weekday() == 0:
