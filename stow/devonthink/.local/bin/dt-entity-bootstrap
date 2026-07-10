@@ -1,0 +1,125 @@
+#!/bin/bash
+# dt-entity-bootstrap
+# Idempotently prepares the entity layer's group scaffold in DEVONthink.
+# The JXA bridge assumes /20_ENTITIES/{People,Places,Events,_Review,_Review/
+# Approved} already exist, but nothing creates them; hand-created Person/Place/
+# Event markdown records also lack the EntityType metadata that scripted
+# creation stamps. This command closes both gaps.
+#
+# What it does (each step is safe to repeat):
+#   - Creates any missing entity group, reporting created vs already present.
+#   - Excludes /20_ENTITIES/People, /20_ENTITIES/_Review, and _Review/Approved
+#     from AI/chat access (DEVONthink's "exclude from chat"), by design.
+#   - Stamps EntityType on markdown records directly inside People (Person),
+#     Places (Place), and Events (Event) only where the field is empty.
+#
+# Usage:
+#   dt-entity-bootstrap        # create/exclude/stamp as needed; logs to
+#                              # ~/Library/Logs/dt-entity-bootstrap.log
+#
+# Hand-run only. Not wired into setup.sh.
+
+set -euo pipefail
+
+DATABASE_NAME="Lorebook"
+LOG_FILE="$HOME/Library/Logs/dt-entity-bootstrap.log"
+
+log() {
+  echo "$(date '+%Y-%m-%d %H:%M:%S') [entity-bootstrap] $*" | tee -a "$LOG_FILE"
+}
+
+BOOTSTRAP_SCRIPT=$(mktemp /tmp/dt-entity-bootstrap.XXXXXX.scpt)
+trap 'rm -f "$BOOTSTRAP_SCRIPT"' EXIT
+
+cat > "$BOOTSTRAP_SCRIPT" <<'BOOTSTRAP_APPLESCRIPT'
+on run argv
+    set dbName to item 1 of argv
+
+    set groupPaths to {"/20_ENTITIES/People", "/20_ENTITIES/Places", "/20_ENTITIES/Events", "/20_ENTITIES/_Review", "/20_ENTITIES/_Review/Approved"}
+    set excludePaths to {"/20_ENTITIES/People", "/20_ENTITIES/_Review", "/20_ENTITIES/_Review/Approved"}
+    set stampSpecs to {{"/20_ENTITIES/People", "Person"}, {"/20_ENTITIES/Places", "Place"}, {"/20_ENTITIES/Events", "Event"}}
+
+    set report to ""
+
+    tell application id "DNtp"
+        try
+            set targetDB to database dbName
+        on error
+            return "error: database " & dbName & " not found or not open"
+        end try
+
+        repeat with p in groupPaths
+            set pStr to p as text
+            set existing to get record at pStr in targetDB
+            if existing is missing value then
+                create location pStr in targetDB
+                set report to report & "group created: " & pStr & linefeed
+            else
+                set report to report & "group present: " & pStr & linefeed
+            end if
+        end repeat
+
+        repeat with p in excludePaths
+            set pStr to p as text
+            set g to get record at pStr in targetDB
+            if g is missing value then
+                set report to report & "exclude skipped (group missing): " & pStr & linefeed
+            else
+                if (exclude from chat of g) is true then
+                    set report to report & "exclude already: " & pStr & linefeed
+                else
+                    set exclude from chat of g to true
+                    set report to report & "exclude applied: " & pStr & linefeed
+                end if
+            end if
+        end repeat
+
+        repeat with spec in stampSpecs
+            set pStr to (item 1 of spec) as text
+            set etype to (item 2 of spec) as text
+            set g to get record at pStr in targetDB
+            if g is missing value then
+                set report to report & "stamp skipped (group missing): " & pStr & linefeed
+            else
+                set stampedCount to 0
+                set alreadyCount to 0
+                repeat with r in (children of g)
+                    if (type of r) is markdown then
+                        set cur to ""
+                        try
+                            set curVal to (get custom meta data for "entitytype" from r)
+                            if curVal is not missing value then set cur to (curVal as text)
+                        end try
+                        if cur is "" then
+                            add custom meta data etype for "entitytype" to r
+                            set stampedCount to stampedCount + 1
+                        else
+                            set alreadyCount to alreadyCount + 1
+                        end if
+                    end if
+                end repeat
+                set report to report & "stamp " & pStr & ": " & stampedCount & " set, " & alreadyCount & " already" & linefeed
+            end if
+        end repeat
+
+        return report
+    end tell
+end run
+BOOTSTRAP_APPLESCRIPT
+
+log "Bootstrapping entity groups in ${DATABASE_NAME}"
+
+if out=$(/usr/bin/osascript "$BOOTSTRAP_SCRIPT" "$DATABASE_NAME" 2>&1); then
+  while IFS= read -r line; do
+    [ -n "$line" ] && log "$line"
+  done <<< "$out"
+else
+  rc=$?
+  log "ERROR: osascript exited with status ${rc}: ${out}"
+  exit "$rc"
+fi
+
+if [[ "$out" == error:* ]]; then
+  log "ERROR: ${out}"
+  exit 1
+fi
