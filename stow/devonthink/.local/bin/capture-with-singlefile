@@ -90,12 +90,11 @@ url_signature() {
 # — better to surface a capture failure to the caller than to commit the
 # wrong document.
 wait_for_new_file() {
-    local marker="$1" target_url="$2"
+    local marker="$1" target_url="$2" deadline="$3"
     local sig
     sig=$(url_signature "$target_url")
-    local end=$((SECONDS + timeout))
 
-    while [[ $SECONDS -lt $end ]]; do
+    while [[ $SECONDS -lt $deadline ]]; do
         local candidates=()
         while IFS= read -r f; do
             [[ -n "$f" ]] && candidates+=("$f")
@@ -133,6 +132,11 @@ if ! pgrep -x "$CHROMIUM_APP" > /dev/null 2>&1; then
 fi
 
 for url in "${urls[@]}"; do
+    # One wall-clock deadline for the whole cycle (navigation, load wait,
+    # settle, capture trigger, output detection) so a page that never finishes
+    # loading can't wedge the batch — every phase below is bounded by it.
+    deadline=$((SECONDS + timeout))
+
     # Open URL in a new tab
     osascript - "$url" <<'APPLESCRIPT'
 on run argv
@@ -152,17 +156,32 @@ on run argv
 end run
 APPLESCRIPT
 
-    # Wait for page to load
-    osascript <<'APPLESCRIPT'
-tell application "Chromium"
-    repeat
-        if not (loading of active tab of window 1) then exit repeat
-        delay 0.5
-    end repeat
-end tell
+    # Wait for page to load, bounded by the overall deadline
+    osascript - "$((deadline - SECONDS))" <<'APPLESCRIPT'
+on run argv
+    set maxSeconds to (item 1 of argv) as integer
+    if maxSeconds < 0 then set maxSeconds to 0
+    set deadlineDate to (current date) + maxSeconds
+    tell application "Chromium"
+        repeat
+            if not (loading of active tab of window 1) then exit repeat
+            if (current date) ≥ deadlineDate then exit repeat
+            delay 0.5
+        end repeat
+    end tell
+end run
 APPLESCRIPT
 
-    sleep "$SETTLE_SECONDS"
+    # Let client-side rendering settle, without overrunning the deadline
+    settle=$SETTLE_SECONDS
+    remaining=$((deadline - SECONDS))
+    if (( settle > remaining )); then settle=$remaining; fi
+    if (( settle > 0 )); then sleep "$settle"; fi
+
+    if (( SECONDS >= deadline )); then
+        echo -e "FAIL\t$url\tPage did not load within ${timeout}s" >&2
+        continue
+    fi
 
     # Create a timestamp marker for detecting new files
     marker=$(mktemp /tmp/sf-marker.XXXXXX)
@@ -181,11 +200,12 @@ delay 0.15
 tell application "System Events" to keystroke "d" using command down
 APPLESCRIPT
 
-    # Wait for the output file, identified by URL signature in its content.
-    if new_file=$(wait_for_new_file "$marker" "$url"); then
+    # Wait for the output file, identified by URL signature in its content,
+    # within whatever remains of the per-URL deadline.
+    if new_file=$(wait_for_new_file "$marker" "$url" "$deadline"); then
         echo "$new_file"
     else
-        echo -e "FAIL\t$url\tNo SingleFile output matching URL after ${timeout}s" >&2
+        echo -e "FAIL\t$url\tNo SingleFile output matching URL within ${timeout}s" >&2
     fi
 
     rm -f "$marker"

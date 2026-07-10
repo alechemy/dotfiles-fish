@@ -43,7 +43,13 @@ on performSmartRule(theRecords)
 		repeat with theRecord in theRecords
 			set jotText to plain text of theRecord
 			if jotText is "" then
-				log message "Process Jots: empty jot, skipping"
+				set jotName to ""
+				try
+					set jotName to (name of theRecord) as text
+				end try
+				log message "Process Jots: empty jot, trashing"
+				my pipelineLog("Process Jots", "WARN", "empty jot, moved to trash", jotName, (uuid of theRecord))
+				move record theRecord to trash group of targetDB
 			else
 				-- Stable per-jot idempotency marker. Embed the source
 				-- record's UUID as an HTML comment trailing the bullet so
@@ -121,3 +127,17 @@ on performSmartRule(theRecords)
 		end repeat
 	end tell
 end performSmartRule
+
+-- Forward an event to the centralized pipeline log. Fails silently if
+-- the helper isn't present, so scripts remain functional before the
+-- stow/setup step that puts it in place.
+on pipelineLog(component, level, msg, recName, recUUID)
+	try
+		do shell script "$HOME/.local/bin/pipeline-log " & ¬
+			quoted form of component & " " & ¬
+			quoted form of level & " " & ¬
+			quoted form of msg & " " & ¬
+			quoted form of (recName as string) & " " & ¬
+			quoted form of (recUUID as string)
+	end try
+end pipelineLog

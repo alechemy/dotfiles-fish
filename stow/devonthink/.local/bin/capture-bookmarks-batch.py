@@ -32,6 +32,7 @@ import argparse
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path.home() / ".local" / "bin"))
@@ -226,7 +227,7 @@ def capture_one(url: str) -> Path | None:
     return Path(first_line)
 
 
-def stage_out_of_watched_dir(html_path: Path, staging_dir: Path) -> Path:
+def stage_out_of_watched_dir(html_path: Path, staging_dir: Path) -> Path | None:
     """Move a fresh capture out of the watcher's folder before ingesting.
 
     The always-on singlefile-watcher ingests every .html that appears in
@@ -234,27 +235,37 @@ def stage_out_of_watched_dir(html_path: Path, staging_dir: Path) -> Path:
     while this batch ingests it with --bookmark races the two ingesters on
     the same path (duplicate triad, concurrent in-place mutation). /bin/mv
     is Apple-signed, so the move out of TCC-protected Downloads is safe
-    regardless of which python runs this script. On failure the original
-    path is returned and the (pre-existing) race window stays open.
+    regardless of which python runs this script.
+
+    Returns the moved path, or None when the move keeps failing after a
+    brief retry. On None the caller must leave the file in place for the
+    watcher and skip the in-place ingest — ingesting where the watcher can
+    still see it would open the duplicate-ingest race this move exists to
+    close.
     """
     dest = staging_dir / html_path.name
     n = 1
     while dest.exists():
         dest = staging_dir / f"{html_path.stem} ({n}){html_path.suffix}"
         n += 1
-    result = subprocess.run(
-        ["/bin/mv", str(html_path), str(dest)],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if result.returncode != 0:
-        log.warning(
-            "could not move capture out of watched folder, ingesting in place: %s",
-            result.stderr.strip(),
+    result = None
+    for attempt in range(3):
+        result = subprocess.run(
+            ["/bin/mv", str(html_path), str(dest)],
+            capture_output=True,
+            text=True,
+            check=False,
         )
-        return html_path
-    return dest
+        if result.returncode == 0:
+            return dest
+        if attempt < 2:
+            time.sleep(0.5)
+    log.warning(
+        "could not move capture out of watched folder after retry; leaving it "
+        "for the watcher and skipping in-place ingest: %s",
+        result.stderr.strip(),
+    )
+    return None
 
 
 def ingest_one(html_path: Path, bookmark_uuid: str, force: bool) -> bool:
@@ -316,6 +327,7 @@ def main() -> int:
     succeeded = 0
     skipped: list[str] = []
     failed: list[str] = []
+    deferred: list[str] = []
     staging_dir = Path(tempfile.mkdtemp(prefix="dt-batch-capture-"))
     for i, (uuid, url) in enumerate(pending, start=1):
         # Pre-filter: if another bookmark with this URL already has a
@@ -342,8 +354,13 @@ def main() -> int:
         if html_path is None:
             failed.append(url)
             continue
-        html_path = stage_out_of_watched_dir(html_path, staging_dir)
-        if not ingest_one(html_path, uuid, args.force):
+        staged = stage_out_of_watched_dir(html_path, staging_dir)
+        if staged is None:
+            # Left in the watched folder; NeedsSingleFile stays set so the
+            # dedup pre-filter clears it off the watcher's new bookmark next run.
+            deferred.append(url)
+            continue
+        if not ingest_one(staged, uuid, args.force):
             failed.append(url)
             continue
         succeeded += 1
@@ -354,9 +371,10 @@ def main() -> int:
         log.info("failed captures left for inspection in %s", staging_dir)
 
     log.info(
-        "done: %d succeeded, %d skipped (dup), %d failed",
+        "done: %d succeeded, %d skipped (dup), %d deferred (watcher), %d failed",
         succeeded,
         len(skipped),
+        len(deferred),
         len(failed),
     )
     # Lowercase: each failure already logged at ERROR; a "FAILED:" token here
