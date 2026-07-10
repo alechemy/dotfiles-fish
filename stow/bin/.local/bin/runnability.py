@@ -211,7 +211,7 @@ def collect_paths(args) -> list[pathlib.Path]:
     return [
         q for q in sorted(LIBRARY_ROOT.rglob("*"))
         if q.suffix.lower() in AUDIO_EXTS and not q.name.startswith("._")
-        and "_runnability-test" not in q.parts
+        and "_runnability-test" not in q.parts and q.is_file()
     ]
 
 
