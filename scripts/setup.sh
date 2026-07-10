@@ -480,6 +480,7 @@ EOF
     load_launch_agent "$HOME/Library/LaunchAgents/com.user.mount-nas.plist" "NAS auto-mount"
     load_launch_agent "$HOME/Library/LaunchAgents/com.user.check-stale-dev-servers.plist" "stale-dev-servers"
     load_launch_agent "$HOME/Library/LaunchAgents/com.user.aerospace-gaps-heartbeat.plist" "aerospace-gaps heartbeat"
+    load_launch_agent "$HOME/Library/LaunchAgents/com.user.caddy.plist" "Caddy (oMLX CSP proxy)"
 
     # Chromium -> Safari bookmark bridge for Alfred. Gate on the Bookmarks file
     # (not the profile dir — a fresh profile has no Bookmarks until the first

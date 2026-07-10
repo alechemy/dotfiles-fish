@@ -1,0 +1,12 @@
+{
+	admin off
+}
+
+# Host-agnostic address, not http://127.0.0.1:8080 — tailscale serve forwards
+# with the ts.net Host header, which a loopback host address would 404. The
+# bind keeps the listener itself loopback-only. Phone: tailscale serve --bg 8080.
+http://:8080 {
+	bind 127.0.0.1
+	reverse_proxy 127.0.0.1:8000
+	header Content-Security-Policy "default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob:; connect-src 'self'; form-action 'self'; base-uri 'self'"
+}
