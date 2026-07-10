@@ -27,8 +27,8 @@
 //   set_text           {uuid,text}                      -> {uuid}
 //   chat               {prompt,role}                    -> {text}
 //   ensure_person      {name,aliases?,fields?,log_lines?} -> {uuid,created}
-//   ensure_event       {name,date,location?,attendees?,summary?,source_uuid}
-//                                                       -> {uuid,created}
+//   ensure_event       {name,date,location?,attendees?,summary?,source_uuid,
+//                       log_line?}                      -> {uuid,created,merged?}
 //   append_log         {uuid,lines}                     -> {uuid,appended,skipped}
 //   set_field          {uuid,field,value,effective_date?,
 //                       expected_previous?,transition_line?}
@@ -190,14 +190,17 @@ function linkEntities(line, excludeUuid) {
 }
 
 // A filed fact's dedup identity: its source-note UUID plus the line's text
-// with every item-link flattened to its label. Keying on content rather than
-// just the source link keeps re-applies idempotent while letting a corrected
-// re-extraction of the same note file the genuinely new facts it surfaces;
-// flattening the links means auto-linking never changes the identity.
+// with every item-link flattened to its label and the fact: provenance
+// marker removed. Keying on content rather than just the source link keeps
+// re-applies idempotent while letting a corrected re-extraction of the same
+// note file the genuinely new facts it surfaces; flattening links and
+// dropping the marker means neither auto-linking nor a hand-deleted marker
+// ever changes the identity.
 function factSignature(line) {
   const src = (line.match(
     /\[source\]\(x-devonthink-item:\/\/([0-9A-Fa-f-]+)\)/) || [])[1] || ''
   const text = line
+    .replace(/<!--\s*fact:[0-9a-f]+\s*-->/g, '')
     .replace(/\[([^\]]*)\]\(x-devonthink-item:\/\/[0-9A-Fa-f-]+\)/g, '$1')
     .replace(/\s+/g, ' ').trim()
   return src + '|' + text
@@ -475,6 +478,13 @@ function run(argv) {
       const EVENT_MATCH_DAYS = 45
       const hits = findByNameOrAlias(EVENTS_PATH, op.name)
       const opDate = String(op.date || '')
+      // log_line arrives pre-built (with its fact: provenance marker) from
+      // ops_for_plan; the composed form covers proposals frozen before it.
+      const logLine = op.log_line ||
+        (op.summary && op.source_uuid
+          ? '- ' + op.date + ' — ' + op.summary +
+            ' ([source](x-devonthink-item://' + op.source_uuid + '))'
+          : null)
       let rec = null
       let bestGap = Infinity
       for (const h of hits) {
@@ -535,12 +545,7 @@ function run(argv) {
           }
         }
         if (changed) rec.plainText = lines.join('\n')
-        if (op.summary && op.source_uuid) {
-          appendLogLines(rec, [
-            '- ' + op.date + ' — ' + op.summary +
-            ' ([source](x-devonthink-item://' + op.source_uuid + '))',
-          ], EVENT_LOG_SECTION)
-        }
+        if (logLine) appendLogLines(rec, [logLine], EVENT_LOG_SECTION)
         return { uuid: uuid, created: false, merged: changed }
       }
       let tpl = readFile(EVENT_TEMPLATE)
@@ -565,12 +570,7 @@ function run(argv) {
       entityIndex = null
       dt.addCustomMetaData('Event', { for: 'entitytype', to: rec })
       dt.addCustomMetaData(op.date, { for: 'eventdate', to: rec })
-      if (op.summary && op.source_uuid) {
-        appendLogLines(rec, [
-          '- ' + op.date + ' — ' + op.summary +
-          ' ([source](x-devonthink-item://' + op.source_uuid + '))',
-        ], EVENT_LOG_SECTION)
-      }
+      if (logLine) appendLogLines(rec, [logLine], EVENT_LOG_SECTION)
       return { uuid: rec.uuid(), created: true }
     },
 

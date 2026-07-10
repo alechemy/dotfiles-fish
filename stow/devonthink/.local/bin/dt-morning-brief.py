@@ -75,6 +75,7 @@ ON_THIS_DAY_PER_YEAR = 5
 REVIEW_PATH = "/20_ENTITIES/_Review"
 APPROVED_PATH = REVIEW_PATH + "/Approved"
 LOG_BULLET_RE = re.compile(r"^- \d{4}-\d{2}-\d{2} — ")
+FACT_MARKER_RE = re.compile(r"\s*<!--\s*fact:[0-9a-f]+\s*-->")
 
 # Days without contact before a person surfaces in the Reconnect digest,
 # keyed by the Relationship field. Absent/other relationships never surface.
@@ -247,7 +248,7 @@ def recent_log_bullets(p, limit=3):
     ]
     by_date = sorted(enumerate(bullets), key=lambda t: (t[1][2:12], t[0]))
     newest = sorted(by_date[-limit:] if limit else [], key=lambda t: t[0])
-    return ["  " + ln for _, ln in newest]
+    return ["  " + FACT_MARKER_RE.sub("", ln).rstrip() for _, ln in newest]
 
 
 def title_matches(people, title):

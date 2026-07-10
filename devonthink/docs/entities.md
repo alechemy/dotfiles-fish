@@ -159,17 +159,28 @@ unaffected either way.
 
 Sources: records with `DocumentType` containing "Meeting", records with
 `Handwritten=1`, and past daily notes in `/10_DAILY` (never today's — it's
-still being written). Processed source UUIDs live in
+still being written), each gated on its upstream pipeline being finished
+(`NeedsProcessing` clear — a Boox record mid-OCR has no text yet).
+Completion state lives in
 `~/.local/state/devonthink/entity-filing-state.json` (fail-closed, like the
-Granola importer); newest sources first, `MAX_PER_RUN` extractions per run.
+Granola importer) and is keyed on a content hash plus DEVONthink's
+modification date, not a bare UUID: a late OCR pass, notebook re-export, or
+hand edit re-enters filing automatically, while a metadata-only touch is
+recognized by hash and re-baselined without spending an extraction. Newest
+sources first, `MAX_PER_RUN` extractions per run; a source that fails
+`MAX_ATTEMPTS` times is parked — surfaced in the brief's `## Entity Review`
+— and retries when its content changes or via `--force`.
+`entity-filing.py --rebuild-state` re-derives the processed set from the
+`EntityFiled` audit flag (and runs automatically when the state file is
+missing).
 
 **Extraction is gated on a seeded roster** (`MIN_ROSTER`, default 1): below
 the threshold the scan logs why and stops before any extraction, while the
 apply phase, the attendance pass, and `--force` keep working. The roster *is*
-the prompt's entire resolution step, and a source is extracted exactly once —
-its UUID goes into `processed_ids` whether or not the extraction was any good
-— so running against an empty People group spends every source on a proposal
-full of bare first names ("Alison", "Mom") that resolve to nothing. The gate
+the prompt's entire resolution step, and a source is only extracted again
+when its content changes — so running against an empty People group spends
+every source on a proposal full of bare first names ("Alison", "Mom") that
+resolve to nothing until the source itself is edited. The gate
 is self-clearing: seed one person and the next tick resumes. `TRANSPORT=off`
 is the blunter pause — `pick_transport` returns `None` before the source is
 ever read, so nothing is marked processed and nothing is charged an attempt;
@@ -325,6 +336,46 @@ Extraction runs at temperature 0 with a JSON schema (`format`) and
 `num_ctx=16384` (Ollama's default context would silently truncate long
 prompts) on the Ollama path; the DT-chat path uses a JSON-only role prompt
 plus fence-stripping and strict validation in Python.
+
+## Fact provenance and correction propagation
+
+Every machine-filed log bullet ends with an invisible provenance marker:
+
+```markdown
+- 2026-07-10 — Moved to Denver. ([source](x-devonthink-item://SRC)) <!-- fact:3f9a1c22 -->
+```
+
+The 8-hex ID is `sha1(source-uuid|date|text)[:8]` — deterministic, so
+re-filing the identical fact from the same source reuses the ID, while a
+rephrased fact gets a new one. HTML comments never render in DEVONthink's
+markdown preview; the marker exists only in the raw text. Dedup ignores it
+(`factSignature` strips it along with item links), so hand-deleting a marker
+never causes a duplicate re-file, and the morning brief strips it from the
+bullets it surfaces.
+
+Together with the `([source](…))` link, the marker gives the future
+correction-propagation workflow three guarantees at zero migration cost,
+because it exists on the first fact ever filed:
+
+- **Machine vs. hand:** only bullets carrying a `fact:` marker were written
+  by filing. Anything authored or edited by hand is unmarked and permanently
+  off-limits to automated retraction.
+- **Addressability:** a reconciliation proposal can name the exact bullet it
+  wants to retract or supersede (`fact:3f9a1c22`), immune to line-number
+  drift and auto-link decoration.
+- **Source join:** every bullet filed from a source is recoverable via the
+  source link, so a re-extraction diff has a well-defined "old" set.
+
+**Not built yet — the reconciliation workflow itself.** When a source's
+content changes, filing re-extracts and appends genuinely new facts; it
+never retracts or rewrites previously filed ones. The planned shape,
+deferred until real facts exist to validate against: re-extraction gathers
+the source's previously filed bullets (by marker), compares them with the
+new extraction, and renders added / changed / removed as a reconciliation
+proposal in `_Review`; only marked bullets are ever eligible for retraction.
+The hard part will be rephrasings — an unchanged fact reworded by the model
+looks removed-plus-added — which is why reconciliation must stay a
+review-gated proposal, never an auto-apply.
 
 ## Failure modes and their mitigations
 

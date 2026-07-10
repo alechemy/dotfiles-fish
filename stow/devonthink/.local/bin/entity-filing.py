@@ -633,9 +633,19 @@ def source_date_of(source):
     return valid_date(source.get("added", "")) or date.today().isoformat()
 
 
+def fact_id(d, fact, source_uuid):
+    """Deterministic 8-hex handle for one filed assertion. Text-derived on
+    purpose: re-filing the identical fact from the same source reuses the
+    ID (stateless idempotency), while a rephrased fact gets a new one —
+    matching across rephrasings is the reconciliation layer's job, not the
+    marker's."""
+    return hashlib.sha1(f"{source_uuid}|{d}|{fact}".encode()).hexdigest()[:8]
+
+
 def fact_line(d, fact, source_uuid):
     fact = fact.rstrip(".") + "."
-    return f"- {d} — {fact} ([source](x-devonthink-item://{source_uuid}))"
+    return (f"- {d} — {fact} ([source](x-devonthink-item://{source_uuid}))"
+            f" <!-- fact:{fact_id(d, fact, source_uuid)} -->")
 
 
 def near_matches(name, people, limit=3):
@@ -747,10 +757,13 @@ def build_event_plans(events_raw, selves, source_date):
 def ops_for_plan(plan, source, source_date):
     src = source["uuid"]
     if plan["kind"] == "event":
-        return [{"op": "ensure_event", "name": plan["name"],
-                 "date": plan["date"], "location": plan["location"],
-                 "attendees": plan["attendees"], "summary": plan["summary"],
-                 "source_uuid": src}]
+        op = {"op": "ensure_event", "name": plan["name"],
+              "date": plan["date"], "location": plan["location"],
+              "attendees": plan["attendees"], "summary": plan["summary"],
+              "source_uuid": src}
+        if plan["summary"]:
+            op["log_line"] = fact_line(plan["date"], plan["summary"], src)
+        return [op]
     lines = [fact_line(d, fact, src) for d, fact in plan["facts"]]
     ops = []
     if plan["kind"] == "existing":

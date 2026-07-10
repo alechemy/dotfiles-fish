@@ -250,6 +250,16 @@ class RecentLogBullets(unittest.TestCase):
         )
         self.assertEqual(len(mb.recent_log_bullets(p)), 1)
 
+    def test_strips_fact_provenance_markers(self):
+        p = self.body_person(
+            "- 2026-06-01 — moved. ([source](x-devonthink-item://S))"
+            " <!-- fact:ab12cd34 -->",
+        )
+        got = mb.recent_log_bullets(p)
+        self.assertEqual(len(got), 1)
+        self.assertNotIn("fact:", got[0])
+        self.assertIn("moved.", got[0])
+
 
 if __name__ == "__main__":
     unittest.main()

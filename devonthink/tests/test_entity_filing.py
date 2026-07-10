@@ -160,6 +160,24 @@ class BuildPersonPlans(unittest.TestCase):
         self.assertFalse(got[0]["interacted"])
 
 
+class FactLine(unittest.TestCase):
+    def test_carries_a_deterministic_provenance_marker(self):
+        a = ef.fact_line("2026-03-16", "moved to Denver", "SRC-1")
+        b = ef.fact_line("2026-03-16", "moved to Denver", "SRC-1")
+        self.assertEqual(a, b)
+        self.assertRegex(a, r" <!-- fact:[0-9a-f]{8} -->$")
+        self.assertIn("([source](x-devonthink-item://SRC-1))", a)
+
+    def test_id_changes_with_text_date_or_source(self):
+        base = ef.fact_id("2026-03-16", "moved to Denver.", "SRC-1")
+        self.assertNotEqual(
+            base, ef.fact_id("2026-03-16", "moved to Boulder.", "SRC-1"))
+        self.assertNotEqual(
+            base, ef.fact_id("2026-03-17", "moved to Denver.", "SRC-1"))
+        self.assertNotEqual(
+            base, ef.fact_id("2026-03-16", "moved to Denver.", "SRC-2"))
+
+
 class OpsForPlan(unittest.TestCase):
     def test_existing_with_field_change_carries_temporal_guards(self):
         plan = {"kind": "existing", "name": "Bob", "uuid": "U1",
@@ -206,6 +224,19 @@ class OpsForPlan(unittest.TestCase):
                 "updates": {}, "interacted": True}
         ops = ef.ops_for_plan(plan, SOURCE, "2026-03-16")
         self.assertEqual(ops[0]["fields"], {"lastcontact": "2026-03-16"})
+
+    def test_event_with_summary_gets_a_marked_log_line(self):
+        plan = {"kind": "event", "name": "Portland Trip", "date": "2026-03-16",
+                "location": "", "attendees": [], "summary": "great trip"}
+        op = ef.ops_for_plan(plan, SOURCE, "2026-03-16")[0]
+        self.assertRegex(op["log_line"], r" <!-- fact:[0-9a-f]{8} -->$")
+        self.assertIn("great trip", op["log_line"])
+
+    def test_event_without_summary_has_no_log_line(self):
+        plan = {"kind": "event", "name": "Portland Trip", "date": "2026-03-16",
+                "location": "", "attendees": [], "summary": ""}
+        op = ef.ops_for_plan(plan, SOURCE, "2026-03-16")[0]
+        self.assertNotIn("log_line", op)
 
 
 class ProposalRoundTrip(unittest.TestCase):
