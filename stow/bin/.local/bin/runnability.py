@@ -122,7 +122,7 @@ def _worker_init(model_paths: dict[str, str]) -> None:
 
     _worker_models = {
         "MonoLoader": MonoLoader,
-        "rhythm": RhythmExtractor2013(method="multifeature"),
+        "RhythmExtractor2013": RhythmExtractor2013,
         "embedding": TensorflowPredictEffnetDiscogs(
             graphFilename=model_paths["embedding"], output="PartitionedCall:1"
         ),
@@ -163,11 +163,12 @@ def _analyze_one(abspath: str, relpath: str) -> dict:
 
         audio44 = m["MonoLoader"](filename=abspath, sampleRate=44100)()
         try:
-            bpm, _, conf, _, _ = m["rhythm"](audio44)
+            # fresh instance per track: a failed streaming run corrupts the
+            # instance and poisons every later track in the worker
+            bpm, _, conf, _, _ = m["RhythmExtractor2013"](method="multifeature")(audio44)
             row["bpm"], row["beat_confidence"] = float(bpm), float(conf)
         except Exception:
-            # RhythmExtractor2013 fails on ~4% of tracks; BPM is optional
-            # (cadence weight 0), the mood/danceability features are not.
+            # BPM is optional (cadence weight 0); mood/danceability are not
             row["bpm"] = row["beat_confidence"] = None
 
         sr, win = 44100, 44100
