@@ -18,6 +18,14 @@ Import pattern (scripts live alongside this file in ~/.local/bin):
 The `extra` dict with `record_name` / `record_uuid` is optional; when
 present, it becomes a `(record="…"|uuid=…)` suffix on the log line.
 Omitting it (most common) produces a plain message line.
+
+A run attached to a terminal, or one with PIPELINE_MANUAL=1 in its environment,
+logs its component as `<component>/manual`. dt-watchdog.sh scans this same file
+for failures and cannot otherwise tell a hand-run script from a launchd one, so
+a manual test would raise a desktop notification about a failure nobody is
+subject to. Set PIPELINE_MANUAL=1 when driving these scripts from a harness
+whose stdout is a pipe (an agent, a CI job); smart-rule invocations leave it
+unset, so their failures still notify.
 """
 
 # Imported by scripts pinned to /usr/bin/python3 (3.9); future annotations
@@ -25,6 +33,7 @@ Omitting it (most common) produces a plain message line.
 from __future__ import annotations
 
 import logging
+import os
 import sys
 from pathlib import Path
 
@@ -43,7 +52,18 @@ class _RecordSuffixFormatter(logging.Formatter):
         return base
 
 
-def setup(component: str, *, echo_stdout: bool | None = None) -> logging.Logger:
+def _is_manual() -> bool:
+    if os.environ.get("PIPELINE_MANUAL") == "1":
+        return True
+    return sys.stdout.isatty() or sys.stderr.isatty()
+
+
+def setup(
+    component: str,
+    *,
+    echo_stdout: bool | None = None,
+    manual: bool | None = None,
+) -> logging.Logger:
     """Return a logger configured to write to the central pipeline log.
 
     Args:
@@ -52,6 +72,10 @@ def setup(component: str, *, echo_stdout: bool | None = None) -> logging.Logger:
         echo_stdout: If True, also echo INFO+ to stdout (useful for
             interactive CLI invocations). If None (default), auto-detect
             based on whether stdout is a TTY.
+        manual: If True, tag the component `<component>/manual` so
+            dt-watchdog.sh does not notify on this run's failures. If None
+            (default), auto-detect from a TTY on either stream or
+            PIPELINE_MANUAL=1.
 
     Subsequent calls with the same component return the same logger
     without re-adding handlers.
@@ -64,10 +88,14 @@ def setup(component: str, *, echo_stdout: bool | None = None) -> logging.Logger:
     logger.setLevel(logging.INFO)
     logger.propagate = False
 
+    if manual is None:
+        manual = _is_manual()
+    label = f"{component}/manual" if manual else component
+
     file_handler = logging.FileHandler(str(LOG_PATH))
     file_handler.setFormatter(
         _RecordSuffixFormatter(
-            f"%(asctime)s %(levelname)s [{component}] %(message)s",
+            f"%(asctime)s %(levelname)s [{label}] %(message)s",
             datefmt="%Y-%m-%dT%H:%M:%S",
         )
     )

@@ -45,6 +45,9 @@ notify() {
 SCAN_STATE_DIR="$HOME/.local/state/devonthink/watchdog-scan"
 NOTIFIED_FILE="$SCAN_STATE_DIR/notified.txt"
 FAILURE_PATTERN=' ERROR | WARN |WARNING:|ALERT:'
+# Components tag themselves `<name>/manual` when a TTY is attached, so a
+# hand-run script's failures never page the user (pipeline_log.py, pipeline-log).
+MANUAL_MARKER='/manual]'
 MAX_NOTIFY_PER_LOG=5
 mkdir -p "$SCAN_STATE_DIR"
 touch "$NOTIFIED_FILE"
@@ -82,7 +85,9 @@ scan_log() {
         if [[ "$count" -le "$MAX_NOTIFY_PER_LOG" ]]; then
             surface_line "$line"
         fi
-    done < <(tail -c +"$((offset + 1))" "$logfile" | grep -E --color=never "$FAILURE_PATTERN" || true)
+    done < <(tail -c +"$((offset + 1))" "$logfile" \
+        | grep -E --color=never "$FAILURE_PATTERN" \
+        | grep -v -F -- "$MANUAL_MARKER" || true)
     if [[ "$count" -gt "$MAX_NOTIFY_PER_LOG" ]]; then
         surface_line "$(basename "$logfile"): $((count - MAX_NOTIFY_PER_LOG)) further failure line(s) since last check"
     fi

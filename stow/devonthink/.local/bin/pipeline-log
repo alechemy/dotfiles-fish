@@ -29,6 +29,13 @@ message=$3
 rec_name=${4:-}
 rec_uuid=${5:-}
 
+# dt-watchdog.sh scans this log and can't otherwise tell a hand-run script from
+# a launchd one; a manual test would notify about a failure nobody is subject to.
+# Smart rules leave PIPELINE_MANUAL unset and have no TTY, so they still notify.
+if [ "${PIPELINE_MANUAL:-}" = "1" ] || [ -t 1 ] || [ -t 2 ]; then
+    component="$component/manual"
+fi
+
 log_dir="$HOME/Library/Logs"
 log_path="$log_dir/devonthink-pipeline.log"
 mkdir -p "$log_dir"

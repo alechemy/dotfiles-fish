@@ -41,6 +41,49 @@ Smart rule scripts live in `../stow/devonthink/Library/Application Scripts/com.d
 
 The **entity layer** (`/20_ENTITIES` — Person/Place/Event records, morning briefing, AI fact filing) sits outside the smart-rule state machine: two launchd-driven tier-1 Python orchestrators (`dt-morning-brief.py`, `entity-filing.py`) do all DEVONthink I/O through a single JXA gateway, `entity-dt-bridge.js`, invoked via `/usr/bin/osascript -l JavaScript` with a JSON ops file. Anything JSON-heavy that talks to DT should go through (or extend) that bridge rather than round-tripping JSON through AppleScript records. Design doc: `docs/entities.md`. JXA gotcha learned there: never probe speculative properties on a DT object specifier (`typeof rec.isNil`) — any property access fires an AppleEvent; commands return `null` for missing records, so null-check instead.
 
+## Tests
+
+```bash
+/usr/bin/python3 -m unittest discover -s devonthink/tests -t devonthink/tests
+```
+
+Stdlib `unittest`, no framework, no dependencies. `tests/helpers.py` loads the
+hyphenated scripts by path and **stubs `pipeline_log`**, so the suite never
+writes to `~/Library/Logs/devonthink-pipeline.log` — a test that exercises a
+warning path would otherwise make `dt-watchdog.sh` raise a desktop
+notification.
+
+The suite covers the pure functions that carry the logic (`md_enum`,
+`real_attendees`, `contact_bumps`, `build_reconnect`, `person_summary_line`,
+`stale_person_ops`, `build_person_plans`, `ops_for_plan`, `pick_transport`,
+`load_state`). Anything needing DEVONthink is out of scope — drive the bridge
+by hand for that, and clean up the records you create.
+
+`test_calendar_canary.py` is the exception: it runs the real
+`calendar-events-json.js` against the real Calendar, because the bug it guards
+(JXA returns EventKit's NSInteger enums as *strings*, so `=== 1` is silently
+false and every attendee stops being a person) cannot be reproduced with a
+fixture. It skips rather than fails when there is no Calendars grant or no
+events with attendees in the window, so a fresh machine or a follower Mac stays
+green. If it ever fails, contact tracking is silently dead — see
+`docs/entities.md`.
+
+When adding a pipeline function, ask whether its failure mode is `continue`
+rather than `raise`. The entity layer's bugs have all been silent skips, which
+produce exactly the output an idle-but-healthy pipeline produces. Those are the
+ones that need a test.
+
+## Manual runs must not page the user
+
+`dt-watchdog.sh` scans the shared pipeline log for `' ERROR | WARN |WARNING:|ALERT:'`
+and raises a macOS notification per new failure signature. It cannot tell a
+hand-run script from a launchd one, so both logging helpers tag a run's
+component as `<component>/manual` when a TTY is attached **or** `PIPELINE_MANUAL=1`
+is set, and the watchdog skips those lines. Export `PIPELINE_MANUAL=1` before
+driving any pipeline script from an agent or CI, where stdout is a pipe and the
+TTY check alone does not fire. Smart rules leave it unset and have no TTY, so
+their failures still notify.
+
 ## MCP server vs the automation bridges
 
 The DEVONthink MCP server is the **interactive** interface — use it freely from an AI session for searches, reads, and one-off record work. It is never a pipeline transport: launchd automation must not depend on a server process or session being alive, so runtime code talks to DT only via `/usr/bin/osascript` (AppleScript or `entity-dt-bridge.js`). Rules for sessions using the MCP tools:
