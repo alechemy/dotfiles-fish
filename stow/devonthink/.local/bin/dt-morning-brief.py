@@ -82,8 +82,11 @@ RECONNECT_DAYS = {
     "friend": 60,
     "colleague": 90,
 }
+# Recognized, but deliberately without a threshold — never surfaced, never warned.
+RECONNECT_NEVER = {"acquaintance"}
 RECONNECT_LIMIT = 10
-ENTITY_STATUSES = {"active", "dormant"}
+# Only "active" surfaces in Reconnect; the rest are recognized ways to be silent.
+ENTITY_STATUSES = {"active", "dormant", "archived", "deceased"}
 
 # Calendars that never contain meetings worth briefing on.
 SKIP_CALENDARS = {"Birthdays", "Siri Suggestions", "US Holidays", "Holidays"}
@@ -343,12 +346,12 @@ def build_reconnect(people, today):
         rel = md_enum(md.get("mdrelationship", ""))
         threshold = RECONNECT_DAYS.get(rel)
         if not threshold:
-            if rel:
+            if rel and rel not in RECONNECT_NEVER:
                 log.warning(
                     "unknown Relationship %r — %s will never appear in "
                     "Reconnect; expected one of %s",
                     md.get("mdrelationship"), p["name"],
-                    ", ".join(sorted(RECONNECT_DAYS)),
+                    ", ".join(sorted(set(RECONNECT_DAYS) | RECONNECT_NEVER)),
                     extra={"record_name": p["name"], "record_uuid": p["uuid"]})
             continue
         last = md.get("mdlastcontact", "")

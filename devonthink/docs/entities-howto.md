@@ -165,9 +165,10 @@ never rewrites what's there.
    calendar matching, and proposal resolution. When anything mismatches, the
    fix is almost always "add an alias".
 2. **Set `relationship` to one of `family`, `close-friend`, `friend`,
-   `colleague`** — case and spacing don't matter ("Close Friend" works), but
-   any other value only earns a warning in the log. Without it they never
-   appear in the Reconnect digest. `email` makes calendar matching exact.
+   `colleague`** (or `acquaintance`, which never surfaces) — case and spacing
+   don't matter ("Close Friend" works), but any other value only earns a
+   warning in the log. Without it they never appear in the Reconnect digest.
+   `email` makes calendar matching exact.
 3. **Seed your inner circle by hand** (Data → New from Template → Entities →
    Person) rather than waiting for proposals; the automation enriches
    records far better than it bootstraps them.
