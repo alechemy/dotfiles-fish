@@ -52,11 +52,31 @@ on performSmartRule(theRecords)
 		try
 			my syncRecord(r)
 		on error errMsg number errNum
-			-- Swallow per-record errors so one bad record doesn't break the batch
-			my logDebug("Error (" & errNum & "): " & errMsg)
+			-- Per-record isolation: one bad record must not break the batch,
+			-- but the failure has to land somewhere visible.
+			set recName to ""
+			try
+				tell application id "DNtp" to set recName to (name of r) as text
+			end try
+			tell application id "DNtp" to log message "Sync H1: failed (" & errNum & "): " & errMsg info recName
+			my pipelineLog("Sync H1 and Filename", "ERROR", "failed (" & errNum & "): " & errMsg, recName, "")
 		end try
 	end repeat
 end performSmartRule
+
+-- Forward an event to the centralized pipeline log. Fails silently if
+-- the helper isn't present, so scripts remain functional before the
+-- stow/setup step that puts it in place.
+on pipelineLog(component, level, msg, recName, recUUID)
+	try
+		do shell script "$HOME/.local/bin/pipeline-log " & ¬
+			quoted form of component & " " & ¬
+			quoted form of level & " " & ¬
+			quoted form of msg & " " & ¬
+			quoted form of (recName as string) & " " & ¬
+			quoted form of (recUUID as string)
+	end try
+end pipelineLog
 
 -- ======== Core Logic ========
 
@@ -124,11 +144,9 @@ on syncRecord(r)
 		else
 			-- Rename the record to match the H1
 			tell application id "DNtp"
-				try
-					set name of r to sanitized
-					my logDebug("Renamed: \"" & recName & "\" → \"" & sanitized & "\"")
-				end try
+				set name of r to sanitized
 			end tell
+			my logDebug("Renamed: \"" & recName & "\" → \"" & sanitized & "\"")
 		end if
 	end if
 end syncRecord
@@ -270,12 +288,8 @@ end getRecordPlainText
 
 on setRecordText(r, t, logMsg)
 	tell application id "DNtp"
-		try
-			set plain text of r to t
-			my logDebug(logMsg & ": \"" & (name of r) & "\"")
-		on error errMsg
-			my logDebug("Failed to set text: " & errMsg)
-		end try
+		set plain text of r to t
+		my logDebug(logMsg & ": \"" & (name of r) & "\"")
 	end tell
 end setRecordText
 
