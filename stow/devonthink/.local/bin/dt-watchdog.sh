@@ -44,7 +44,7 @@ notify() {
 # vary between occurrences of the same failure) and re-notify at most daily.
 SCAN_STATE_DIR="$HOME/.local/state/devonthink/watchdog-scan"
 NOTIFIED_FILE="$SCAN_STATE_DIR/notified.txt"
-FAILURE_PATTERN=' ERROR | WARN |WARNING:|ALERT:'
+FAILURE_PATTERN=' ERROR | WARN(ING)? |WARNING:|ERROR:|ALERT:|FATAL:|FAILED:'
 # Components tag themselves `<name>/manual` when a TTY is attached, so a
 # hand-run script's failures never page the user (pipeline_log.py, pipeline-log).
 MANUAL_MARKER='/manual]'
@@ -104,6 +104,7 @@ awk -v cutoff=$((PRUNE_NOW - 604800)) '$2 >= cutoff' "$NOTIFIED_FILE" > "$NOTIFI
 scan_log "$HOME/Library/Logs/devonthink-pipeline.log"
 scan_log "$HOME/Library/Logs/dt-daily-note.log"
 scan_log "$HOME/Library/Logs/github-stars-import.log"
+scan_log "$HOME/Library/Logs/granola-import.log"
 
 # Stuck captures: a .html still in the staging folder after 15 minutes was
 # either missed by the watcher or failed ingest (failures stay in place by

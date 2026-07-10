@@ -359,8 +359,10 @@ def main() -> int:
         len(skipped),
         len(failed),
     )
+    # Lowercase: each failure already logged at ERROR; a "FAILED:" token here
+    # would page the watchdog a second time per URL.
     for url in failed:
-        log.info("  FAILED: %s", url)
+        log.info("  failed: %s", url)
 
     return 0 if not failed else 2
 

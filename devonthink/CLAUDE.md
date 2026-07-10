@@ -75,8 +75,11 @@ ones that need a test.
 
 ## Manual runs must not page the user
 
-`dt-watchdog.sh` scans the shared pipeline log for `' ERROR | WARN |WARNING:|ALERT:'`
-and raises a macOS notification per new failure signature. It cannot tell a
+`dt-watchdog.sh` scans the shared pipeline log for
+`' ERROR | WARN(ING)? |WARNING:|ERROR:|ALERT:|FATAL:|FAILED:'`
+and raises a macOS notification per new failure signature. The ` WARNING `
+alternative matches Python's `logging` levelname — a failure line must carry
+one of these exact tokens or it never notifies. It cannot tell a
 hand-run script from a launchd one, so both logging helpers tag a run's
 component as `<component>/manual` when a TTY is attached **or** `PIPELINE_MANUAL=1`
 is set, and the watchdog skips those lines. Export `PIPELINE_MANUAL=1` before
