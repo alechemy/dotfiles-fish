@@ -16,6 +16,8 @@ re-reading audio. Plan: ~/.dotfiles/.context/workout-runnability-plan.md
              into ~/.local/state/runnability/features.db; skips rows whose
              path+size+mtime are already present
   score      rank tracks by runnability from stored features (no file writes)
+  write      write RUNNABILITY / BPM_FOLDED / tmpo tags into files whose
+             values changed, then refresh the store's size+mtime keys
   status     feature-store coverage summary
 
 Weights and gates live in ~/.config/runnability/config.toml (stowed from
@@ -37,7 +39,7 @@ import subprocess
 import sys
 import tomllib
 import urllib.request
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 
 LIBRARY_ROOT = pathlib.Path("/Volumes/Media/Music")
@@ -203,6 +205,7 @@ def collect_paths(args) -> list[pathlib.Path]:
     return [
         q for q in sorted(LIBRARY_ROOT.rglob("*"))
         if q.suffix.lower() in AUDIO_EXTS and not q.name.startswith("._")
+        and "_runnability-test" not in q.parts
     ]
 
 
@@ -367,6 +370,152 @@ def cmd_score(args) -> int:
     return 0
 
 
+def _write_mp4(p: pathlib.Path, score: int, folded: int | None, tmpo: int | None, dry_run: bool):
+    from mutagen.mp4 import MP4, MP4FreeForm
+
+    key_r = "----:com.apple.iTunes:RUNNABILITY"
+    key_b = "----:com.apple.iTunes:BPM_FOLDED"
+    audio = MP4(str(p))
+    if score == 0 and key_r not in audio:
+        return None
+    want = {key_r: str(score).encode()}
+    if folded is not None:
+        want[key_b] = str(folded).encode()
+    changed = False
+    for k, v in want.items():
+        cur = bytes(audio[k][0]) if audio.get(k) else None
+        if cur != v:
+            audio[k] = [MP4FreeForm(v)]
+            changed = True
+    if tmpo is not None and list(audio.get("tmpo") or []) != [tmpo]:
+        audio["tmpo"] = [tmpo]
+        changed = True
+    if changed and not dry_run:
+        audio.save()
+    return changed
+
+
+def _write_mp3(p: pathlib.Path, score: int, folded: int | None, tmpo: int | None, dry_run: bool):
+    from mutagen.id3 import ID3, TBPM, TXXX
+    from mutagen.id3._util import ID3NoHeaderError
+
+    try:
+        tags = ID3(str(p))
+    except ID3NoHeaderError:
+        tags = ID3()
+    if score == 0 and not tags.getall("TXXX:RUNNABILITY"):
+        return None
+    changed = False
+    want = {"RUNNABILITY": str(score)}
+    if folded is not None:
+        want["BPM_FOLDED"] = str(folded)
+    for desc, val in want.items():
+        cur = tags.getall(f"TXXX:{desc}")
+        if not cur or list(cur[0].text) != [val]:
+            tags.setall(f"TXXX:{desc}", [TXXX(encoding=3, desc=desc, text=[val])])
+            changed = True
+    if tmpo is not None:
+        cur = tags.getall("TBPM")
+        if not cur or list(cur[0].text) != [str(tmpo)]:
+            tags.setall("TBPM", [TBPM(encoding=3, text=[str(tmpo)])])
+            changed = True
+    if changed and not dry_run:
+        tags.save(str(p))
+    return changed
+
+
+def _write_vorbis(p: pathlib.Path, score: int, folded: int | None, tmpo: int | None, dry_run: bool):
+    import mutagen
+
+    audio = mutagen.File(str(p))
+    if audio is None:
+        raise ValueError("unreadable file")
+    if score == 0 and "RUNNABILITY" not in audio:
+        return None
+    want = {"RUNNABILITY": str(score)}
+    if folded is not None:
+        want["BPM_FOLDED"] = str(folded)
+    if tmpo is not None:
+        want["BPM"] = str(tmpo)
+    changed = False
+    for k, v in want.items():
+        if list(audio.get(k) or []) != [v]:
+            audio[k] = [v]
+            changed = True
+    if changed and not dry_run:
+        audio.save()
+    return changed
+
+
+def _write_one(rel: str, score: int, folded: int | None, tmpo: int | None, dry_run: bool):
+    p = LIBRARY_ROOT / rel
+    try:
+        if not p.exists():
+            return rel, "missing", None, None, None
+        ext = p.suffix.lower()
+        writer = {".m4a": _write_mp4, ".mp3": _write_mp3}.get(ext, _write_vorbis)
+        changed = writer(p, score, folded, tmpo, dry_run)
+        if changed is None:
+            return rel, "skipped-gated", None, None, None
+        if not changed:
+            return rel, "unchanged", None, None, None
+        if dry_run:
+            return rel, "would-write", None, None, None
+        st = p.stat()
+        return rel, "written", st.st_size, st.st_mtime, None
+    except Exception as e:
+        return rel, "error", None, None, f"{type(e).__name__}: {e}"
+
+
+def cmd_write(args) -> int:
+    if not args.dry_run and not args.force and GATE.exists():
+        if subprocess.run([str(GATE)]).returncode != 0:
+            print("on battery; skipping (use --force to override)", file=sys.stderr)
+            return 0
+    cfg = load_config()
+    quant = int(cfg.get("output", {}).get("quantize", 1))
+    target = cfg["cadence"]["target_spm"]
+    conn = open_db()
+    conn.row_factory = sqlite3.Row
+    rows = conn.execute(
+        "SELECT * FROM features WHERE error IS NULL ORDER BY relpath"
+    ).fetchall()
+    jobs = []
+    for r in rows:
+        if r["relpath"].startswith("_runnability-test"):
+            continue
+        score, _ = score_row(dict(r), cfg)
+        if quant > 1:
+            score = quant * round(score / quant)
+        bpm = r["bpm"]
+        tmpo = round(bpm) if bpm else None
+        folded = round(fold_bpm(bpm, target)) if bpm else None
+        jobs.append((r["relpath"], score, folded, tmpo))
+
+    counts: dict[str, int] = {}
+    done = 0
+    with ThreadPoolExecutor(max_workers=args.workers) as pool:
+        futs = [pool.submit(_write_one, *j, args.dry_run) for j in jobs]
+        for fut in as_completed(futs):
+            rel, status, size, mtime, err = fut.result()
+            counts[status] = counts.get(status, 0) + 1
+            done += 1
+            if err:
+                print(f"ERROR {rel}: {err}", file=sys.stderr)
+            elif status == "written":
+                conn.execute(
+                    "UPDATE features SET size=?, mtime=? WHERE relpath=?",
+                    (size, mtime, rel),
+                )
+                if done % 50 == 0:
+                    conn.commit()
+            if done % 500 == 0:
+                print(f"[{done}/{len(jobs)}] {counts}", file=sys.stderr)
+    conn.commit()
+    print(json.dumps(counts, sort_keys=True))
+    return 0
+
+
 def cmd_status(args) -> int:
     conn = open_db()
     total, errors = conn.execute(
@@ -394,6 +543,12 @@ def main() -> int:
     s.add_argument("--limit", type=int, default=0)
     s.add_argument("--json", action="store_true")
     s.set_defaults(fn=cmd_score)
+
+    w = sub.add_parser("write", help="write scores into file tags")
+    w.add_argument("--dry-run", action="store_true", help="report changes without saving")
+    w.add_argument("--workers", type=int, default=4)
+    w.add_argument("--force", action="store_true", help="ignore the AC-power gate")
+    w.set_defaults(fn=cmd_write)
 
     st = sub.add_parser("status", help="feature-store coverage")
     st.set_defaults(fn=cmd_status)

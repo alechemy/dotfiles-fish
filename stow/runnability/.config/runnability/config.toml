@@ -24,6 +24,12 @@ pulse = 0.0
 cadence = 0.0
 arousal = 0.0
 
+[output]
+# RUNNABILITY is rounded to this multiple before writing, and unchanged tags
+# are never rewritten, so re-score jitter of a point or two can't thrash 10k
+# NAS files (and their backups).
+quantize = 5
+
 [gates]
 # Exact match against the track's genre tag, case-insensitive. The library
 # enforces a fixed genre set (see riptag.fish); anything not listed — including
