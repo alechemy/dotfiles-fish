@@ -167,12 +167,23 @@ def merge_pending(stars, retry, imported):
 # ---------------------------------------------------------------------------
 
 
+class FetchError(RuntimeError):
+    """A pagination request failed mid-fetch. The star list is incomplete, so
+    the run must import nothing rather than commit an earlier page and advance
+    the frontier past the repos it never saw."""
+
+
 def fetch_stars(imported, first_run):
     """Fetch starred repos newest-first via gh CLI.
 
-    In normal mode, stops at the first already-imported repo.
+    In normal mode, stops at the first already-imported repo. A --force target
+    suppresses that stop until the target is reached, so a forced re-import can
+    reach a repo older than the frontier.
     On first run (no state file), only fetches stars from the last 24 hours
     to avoid flooding the inbox. Use --backfill to import the full history.
+
+    Raises FetchError if any page request fails, so a partial fetch is never
+    committed.
     """
     if first_run and not BACKFILL:
         cutoff = datetime.utcnow().replace(microsecond=0) - timedelta(hours=24)
@@ -186,6 +197,7 @@ def fetch_stars(imported, first_run):
     all_stars = []
     page = 1
     per_page = 100
+    force_pending = FORCE_REPO is not None
 
     while True:
         url = (
@@ -204,13 +216,13 @@ def fetch_stars(imported, first_run):
 
         if result.returncode != 0:
             log(f"ERROR from GitHub API: {result.stderr.strip()}")
-            break
+            raise FetchError("GitHub API request failed")
 
         try:
             stars = json.loads(result.stdout)
         except json.JSONDecodeError:
             log("ERROR parsing GitHub API response")
-            break
+            raise FetchError("could not parse GitHub API response")
 
         if not stars:
             break
@@ -228,7 +240,7 @@ def fetch_stars(imported, first_run):
                 break
 
             if full_name in imported and full_name != FORCE_REPO:
-                if not BACKFILL:
+                if not BACKFILL and not force_pending:
                     stop = True
                     break
                 continue
@@ -241,6 +253,9 @@ def fetch_stars(imported, first_run):
                     "starred_at": star.get("starred_at", ""),
                 }
             )
+
+            if full_name == FORCE_REPO:
+                force_pending = False
 
         if stop or len(stars) < per_page:
             break
@@ -377,7 +392,13 @@ def main():
     first_run = len(imported) == 0
     log(f"Fetching starred repos ({len(imported)} already imported)")
 
-    stars = merge_pending(fetch_stars(imported, first_run), retry, imported)
+    try:
+        fetched = fetch_stars(imported, first_run)
+    except FetchError as exc:
+        log(f"Aborting: {exc}; nothing imported this run")
+        return
+
+    stars = merge_pending(fetched, retry, imported)
     if not stars:
         log("No new stars to import")
         return
