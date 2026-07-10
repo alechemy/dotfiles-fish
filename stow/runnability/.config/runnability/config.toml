@@ -1,19 +1,37 @@
 # Runnability scoring weights and gates, consumed by runnability.py.
 # Re-scoring after an edit is cheap (no audio re-analysis): runnability.py score
+#
+# Calibrated 2026-07-09 on the two "Running Calibration" playlists (25 great /
+# 25 bad): AUC 0.936, precision 1.00 / recall 0.76 at score >= 65. Cadence and
+# arousal-band terms measured at/below chance on this library (great picks
+# include 96-110 BPM groove tracks), so their weights are 0 — kept here so
+# they can be re-enabled without code changes.
 
 [cadence]
 target_spm = 170
-sigma_spm = 8.0
+sigma_spm = 20.0
 
 [weights]
-cadence = 0.25
-arousal = 0.15
-pulse = 0.20
-energy = 0.20
-danceability = 0.20
+danceability = 4.0
+energy = 3.0
+pulse = 1.0
+cadence = 0.0
+arousal = 0.0
 
 [gates]
-# Substring match against the track's genre tag, case-insensitive.
-genres_exclude = ["classical", "soundtrack", "ambient", "spoken", "audiobook", "holiday", "christmas"]
+# Exact match against the track's genre tag, case-insensitive. The library
+# enforces a fixed genre set (see riptag.fish); anything not listed — including
+# a missing or Unknown genre — is rejected.
+genres_allow = [
+  "Country",
+  "Electronic",
+  "Experimental",
+  "Hip-Hop",
+  "Mashup",
+  "Pop",
+  "R&B",
+  "Rock",
+  "Soundtrack",
+]
 duration_min = 120
 duration_max = 600

@@ -136,9 +136,9 @@ def _analyze_one(abspath: str, relpath: str) -> dict:
         except Exception:
             import mutagen
 
-            f = mutagen.File(abspath)
+            f = mutagen.File(abspath, easy=True)
             row["duration"] = f.info.length if f else None
-            row["genre"] = None
+            row["genre"] = (f.get("genre") or [None])[0] if f else None
 
         audio44 = m["MonoLoader"](filename=abspath, sampleRate=44100)()
         bpm, _, conf, _, _ = m["rhythm"](audio44)
@@ -258,8 +258,8 @@ def _ramp(x: float, x0: float, y0: float, x1: float, y1: float) -> float:
 
 def score_row(r: dict, cfg: dict) -> tuple[int, dict]:
     gates = cfg["gates"]
-    genre = (r["genre"] or "").lower()
-    if any(g in genre for g in gates["genres_exclude"]):
+    genre = (r["genre"] or "").strip().lower()
+    if genre not in {g.lower() for g in gates["genres_allow"]}:
         return 0, {"gate": f"genre:{r['genre']}"}
     dur = r["duration"] or 0
     if not gates["duration_min"] <= dur <= gates["duration_max"]:
@@ -283,11 +283,10 @@ def score_row(r: dict, cfg: dict) -> tuple[int, dict]:
 
     conf = r["beat_confidence"] or 0.0
     pulse = _ramp(conf, 0.5, 0.0, 3.5, 1.0)
-    clarity_mult = _ramp(conf, 0.5, 0.15, 1.5, 1.0)
 
     energy = _ramp(r["mean_rms_db"] or -60, -30.0, 0.0, -10.0, 1.0)
 
-    continuity = (1.0 - (r["low_energy_ratio"] or 0.0)) ** 2
+    continuity = 1.0 - (r["low_energy_ratio"] or 0.0)
     if (r["intro_rms_ratio"] or 1.0) < 0.35:
         continuity *= 0.85
 
@@ -299,7 +298,7 @@ def score_row(r: dict, cfg: dict) -> tuple[int, dict]:
         + w["energy"] * energy
         + w["danceability"] * r["danceability"]
     ) / sum(w.values())
-    final = base * clarity_mult * continuity
+    final = base * continuity
     parts = {
         "folded_bpm": round(folded, 1),
         "cadence": round(cadence, 2),
