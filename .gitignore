@@ -27,8 +27,9 @@ stow/devonthink/.local/share/devonthink-capture/package-lock.json
 # Generated launch-agent plists (built from *.plist.template by
 # scripts/build-launchd-plists.sh); the glob doesn't match the templates.
 stow/*/Library/LaunchAgents/*.plist
-# granola-import's template is itself gitignored (documents a sensitive pipeline)
-stow/devonthink/Library/LaunchAgents/com.user.granola-import.plist.template
-stow/devonthink/.local/bin/import-granola.py
+# granola-import: only the parser is private — it documents how the local
+# store is decrypted. The sender and plist template carry no sensitive
+# detail and are tracked so a clean rebuild only needs the parser restored
+# from backup (see ~/.local/share/granola-import/NOTES.md).
 stow/devonthink/.local/bin/import-granola-parse.py
 .claude/settings.local.json
