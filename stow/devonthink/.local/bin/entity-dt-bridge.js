@@ -35,6 +35,7 @@
 //   mark_filed         {uuid}                           -> {uuid}
 //   create_record      {name,path,text,fields?,tags?}   -> {uuid}
 //   get_or_create_daily {date,heading}                  -> {uuid,text,created}
+//   upsert_section     {uuid,header,content}            -> {uuid,changed,replaced}
 //   trash              {uuid}                           -> {uuid}
 
 ObjC.import('Foundation')
@@ -45,6 +46,7 @@ const PEOPLE_PATH = ENTITIES_PATH + '/People'
 const PLACES_PATH = ENTITIES_PATH + '/Places'
 const EVENTS_PATH = ENTITIES_PATH + '/Events'
 const DAILY_PATH = '/10_DAILY'
+const NOTES_SECTION = "## Today's Notes"
 const LOG_SECTION = '## Biographical Log'
 const EVENT_LOG_SECTION = '## Log'
 const TEMPLATE_DIR =
@@ -573,6 +575,60 @@ function run(argv) {
       rec.plainText = text
       rec.tags = ['Daily Note']
       return { uuid: rec.uuid(), text: text, created: true }
+    },
+
+    // Replace (or append, or remove on empty content) one generated `##`
+    // section — the header line through the next `##` header — against the
+    // record's LATEST body, read and written inside this single bridge
+    // invocation. The old flow read the whole body, edited it in Python,
+    // and wrote it back seconds later; a jot inserted in between was lost.
+    // The write is skipped when the section is already byte-identical, so
+    // refresh retries don't churn sync.
+    upsert_section(op) {
+      const rec = byUuid(op.uuid)
+      const lines = rec.plainText().split('\n')
+      const content = String(op.content || '')
+      let start = -1
+      for (let i = 0; i < lines.length; i++) {
+        if (lines[i].trim() === op.header) { start = i; break }
+      }
+      if (start === -1) {
+        if (!content.trim()) {
+          return { uuid: op.uuid, changed: false, replaced: false }
+        }
+        let out = lines.slice()
+        // Jots are inserted relative to the last bullet BEFORE this header
+        // (see insert-jot-into-daily-note.py); generated sections must sit
+        // after it, so guarantee it exists.
+        if (out.map(l => l.trim()).indexOf(NOTES_SECTION) === -1) {
+          while (out.length && out[out.length - 1].trim() === '') out.pop()
+          out = out.concat(['', NOTES_SECTION])
+        }
+        while (out.length && out[out.length - 1].trim() === '') out.pop()
+        rec.plainText =
+          out.concat(['', op.header, ''], content.split('\n')).join('\n') + '\n'
+        return { uuid: op.uuid, changed: true, replaced: false }
+      }
+      let end = lines.length
+      for (let i = start + 1; i < lines.length; i++) {
+        if (/^##\s/.test(lines[i].trim())) { end = i; break }
+      }
+      if (!content.trim()) {
+        const out = lines.slice(0, start).concat(lines.slice(end))
+        while (out.length && out[out.length - 1].trim() === '') out.pop()
+        rec.plainText = out.join('\n') + '\n'
+        return { uuid: op.uuid, changed: true, replaced: true, removed: true }
+      }
+      let spanEnd = end
+      while (spanEnd > start && lines[spanEnd - 1].trim() === '') spanEnd--
+      const section = [op.header, ''].concat(content.split('\n'))
+      if (lines.slice(start, spanEnd).join('\n') === section.join('\n')) {
+        return { uuid: op.uuid, changed: false, replaced: true }
+      }
+      const out = lines.slice(0, start)
+        .concat(section, [''], lines.slice(end))
+      rec.plainText = out.join('\n')
+      return { uuid: op.uuid, changed: true, replaced: true }
     },
 
     trash(op) {

@@ -66,7 +66,6 @@ log = setup_log("morning-brief")
 
 BRIDGE = os.path.expanduser("~/.local/bin/entity-dt-bridge.js")
 CALENDAR = os.path.expanduser("~/.local/bin/calendar-events-json.js")
-NOTES_HEADER = "## Today's Notes"
 BRIEF_HEADER = "## Briefing"
 RECONNECT_HEADER = "## Reconnect"
 REVIEW_HEADER = "## Entity Review"
@@ -463,13 +462,6 @@ def backfill_contacts(today, days, skip_re, dry_run):
              changed, len(ops), start, end)
 
 
-def append_section(note_text, header, content):
-    text = note_text
-    if NOTES_HEADER not in text:
-        text = text.rstrip("\n") + f"\n\n{NOTES_HEADER}\n"
-    return text.rstrip("\n") + f"\n\n{header}\n\n{content}\n"
-
-
 def main():
     args = sys.argv[1:]
     dry_run = "--dry-run" in args
@@ -545,46 +537,38 @@ def main():
             log.info("bumped LastContact for %d people from %s calendar",
                      len(bumps), yesterday)
 
-    sections = []
-    brief = build_brief(events, people, today, skip_re)
-    if brief:
-        sections.append((BRIEF_HEADER, brief, f"<!-- brief:{today} -->"))
+    # Every section is upserted (not append-once): the 05:45/06:30/08:00
+    # retries refresh a 05:15 brief built from incomplete calendar sync, and
+    # a cleared review backlog removes its stale nudge (empty content).
+    sections = [(BRIEF_HEADER, build_brief(events, people, today, skip_re))]
     if weekly or date.fromisoformat(today).weekday() == 0:
-        reconnect = build_reconnect(people, today)
-        if reconnect:
-            sections.append(
-                (RECONNECT_HEADER, reconnect, f"<!-- reconnect:{today} -->")
-            )
-    nudge = review_nudge(today)
-    if nudge:
-        sections.append(
-            (REVIEW_HEADER, nudge, f"<!-- review-nudge:{today} -->")
-        )
+        sections.append((RECONNECT_HEADER, build_reconnect(people, today)))
+    sections.append((REVIEW_HEADER, review_nudge(today)))
 
-    if not sections:
+    if not any(content for _, content in sections):
         log.info("nothing to write (no briefable meetings, no reconnects)")
         return
 
     if dry_run:
-        for header, content, _ in sections:
-            print(f"\n{header}\n\n{content}")
+        for header, content in sections:
+            if content:
+                print(f"\n{header}\n\n{content}")
         return
 
     heading = datetime.strptime(today, "%Y-%m-%d").strftime("%A, %B %-d, %Y")
     daily = run_bridge(
         [{"op": "get_or_create_daily", "date": today, "heading": heading}]
     )[0]
-    text = daily["text"]
-    wrote = []
-    for header, content, marker in sections:
-        if marker in text:
-            continue
-        text = append_section(text, header, content)
-        wrote.append(header)
+    results = run_bridge([
+        {"op": "upsert_section", "uuid": daily["uuid"], "header": header,
+         "content": content or ""}
+        for header, content in sections
+    ])
+    wrote = [header for (header, _), res in zip(sections, results)
+             if res.get("changed")]
     if not wrote:
-        log.info("sections already present, nothing to do")
+        log.info("sections already current, nothing to do")
         return
-    run_bridge([{"op": "set_text", "uuid": daily["uuid"], "text": text}])
     log.info(
         "wrote %s to daily note %s", ", ".join(wrote), today,
         extra={"record_name": today, "record_uuid": daily["uuid"]},
