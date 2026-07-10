@@ -25,13 +25,25 @@ Safety model:
     one-way imports, so the field is always empty. Calendar-derived
     contact tracking lives in dt-morning-brief.py instead.
   - Extraction is gated on a seeded roster (MIN_ROSTER). The prompt's
-    whole resolution step is the roster, and a source is only ever
-    extracted once (its UUID lands in processed_ids), so extracting
-    against an empty People group burns each source on a proposal full of
-    unresolvable bare first names.
+    whole resolution step is the roster, and a source is only extracted
+    again when its content changes, so extracting against an empty People
+    group burns each source on a proposal full of unresolvable bare first
+    names.
   - An approved proposal is re-verified against the *live* roster before
     its ops run: a frozen `ensure_person "Alison"` written before
     "Alison Vance" was seeded would otherwise create a duplicate record.
+
+Lifecycle: a source is only discovered once its upstream pipeline is
+complete (NeedsProcessing cleared — a Boox record mid-OCR has no text
+yet), and completion is keyed on a content hash plus DEVONthink's
+modification date rather than a bare UUID: a later OCR pass, notebook
+re-export, or hand edit re-enters filing automatically, with fact-level
+dedup in the bridge keeping re-runs idempotent. Field updates carry an
+effective date; the bridge refuses writes older than a field's recorded
+as-of date, so an old source processed late can never overwrite newer
+state. Sources that fail MAX_ATTEMPTS times are parked with their last
+error and retry automatically when their content changes (or via
+--force).
 
 Privacy: daily notes live in /10_DAILY, which is excluded from
 DEVONthink's AI chat by design. This script honors that boundary — daily
@@ -41,9 +53,13 @@ notes already flow through DT chat for enrichment, so either transport is
 acceptable for them.
 
 Config (~/.config/dt-pipeline/entities.conf, KEY=VALUE):
-  TRANSPORT=auto|local|omlx|ollama|dtchat|off
-                                     auto: omlx, else ollama, else dtchat.
-                                     local: omlx, else ollama, never dtchat
+  TRANSPORT=local|auto|omlx|ollama|dtchat|off
+                                     local (default): omlx, else ollama,
+                                     never dtchat — extraction stays
+                                     on-device. auto: omlx, else ollama,
+                                     else dtchat; auto/dtchat are an
+                                     explicit opt-in to whatever provider
+                                     DT chat is configured with.
   OMLX_MODEL=<name>                  model id as listed by /v1/models
   OMLX_URL=http://127.0.0.1:8000
   OMLX_API_KEY=<key>                 required when oMLX auth is enabled
@@ -57,7 +73,7 @@ Config (~/.config/dt-pipeline/entities.conf, KEY=VALUE):
                                      approved proposals and the attendance
                                      pass are never gated. TRANSPORT=off is
                                      the blunter pause: it stops extraction
-                                     without touching processed_ids either.
+                                     without recording anything processed.
   SELF_NAME=<name>                   extra self-alias to exclude
   SKIP_SOURCE_TITLES=<regex>         sources whose name matches are never
                                      extracted (recurring standups etc.);
@@ -76,6 +92,7 @@ Usage:
 """
 
 import fcntl
+import hashlib
 import json
 import os
 import pwd
@@ -85,7 +102,7 @@ import sys
 import tempfile
 import urllib.error
 import urllib.request
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 sys.path.insert(0, str(Path.home() / ".local" / "bin"))
@@ -98,7 +115,7 @@ CONFIG_FILE = os.path.expanduser("~/.config/dt-pipeline/entities.conf")
 STATE_DIR = os.path.expanduser("~/.local/state/devonthink")
 STATE_FILE = os.path.join(STATE_DIR, "entity-filing-state.json")
 LOCK_FILE = os.path.join(STATE_DIR, "entity-filing.lock")
-STATE_SCHEMA_VERSION = 1
+STATE_SCHEMA_VERSION = 2
 REVIEW_PATH = "/20_ENTITIES/_Review"
 APPROVED_PATH = "/20_ENTITIES/_Review/Approved"
 MAX_ATTEMPTS = 5
@@ -115,6 +132,7 @@ exactly this shape:
 
 {{"people": [{{"name": "<canonical full name>",
   "match": "<exact name from KNOWN PEOPLE, or null>",
+  "interacted": true,
   "facts": [{{"date": "yyyy-mm-dd or null", "fact": "<one concise sentence>"}}],
   "updates": {{"employer": null, "role": null, "city": null, "email": null}}}}],
  "events": [{{"name": "<short reusable title>", "date": "yyyy-mm-dd or null",
@@ -141,6 +159,10 @@ Rules:
   meetings, standups, syncs, and 1:1 calls are NEVER events. Give it a short
   reusable title (e.g. "Portland Hiking Trip"). Most notes have no event —
   an empty "events" list is the normal answer.
+- Set "interacted" to true only when the author directly spoke, met, or
+  corresponded with that person in what this note documents. Someone the
+  author merely heard about, or whose news arrived secondhand, gets
+  "interacted": false even when the facts about them are worth recording.
 - Set an "updates" value only when the note states that person's CURRENT
   employer, job role, home city, or email address; otherwise leave it null.
 - If the note contains no such facts, return {{"people": []}}.
@@ -164,6 +186,7 @@ EXTRACTION_SCHEMA = {
                 "properties": {
                     "name": {"type": "string"},
                     "match": {"type": ["string", "null"]},
+                    "interacted": {"type": "boolean"},
                     "facts": {
                         "type": "array",
                         "items": {
@@ -182,7 +205,7 @@ EXTRACTION_SCHEMA = {
                         },
                     },
                 },
-                "required": ["name", "facts"],
+                "required": ["name", "facts", "interacted"],
             },
         },
         "events": {
@@ -211,7 +234,7 @@ EXTRACTION_SCHEMA = {
 
 def load_config():
     config = {
-        "TRANSPORT": "auto",
+        "TRANSPORT": "local",
         "OMLX_MODEL": "",
         "OMLX_URL": "http://127.0.0.1:8000",
         "OMLX_API_KEY": "",
@@ -235,11 +258,31 @@ def load_config():
     return config
 
 
+def migrate_v1_state(old):
+    """v1 kept only a processed-UUID list. Grandfather each entry as
+    processed-as-of-migration: it re-enters filing only if DEVONthink's
+    modification date advances past this stamp (a later edit, OCR pass, or
+    notebook re-export) — exactly the reprocessing v1 could never do."""
+    stamp = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+    attempts = {}
+    for uuid, count in (old.get("attempts") or {}).items():
+        if isinstance(count, int):
+            attempts[uuid] = {"count": count}
+    return {
+        "version": STATE_SCHEMA_VERSION,
+        "processed": {u: {"modified": stamp, "hash": None}
+                      for u in old["processed_ids"]},
+        "attempts": attempts,
+        "parked": {},
+    }
+
+
 def load_state():
     """Fail closed like the Granola importer: an unreadable state file must
     pause filing, not silently re-extract (and re-propose) every source."""
     if not os.path.exists(STATE_FILE):
-        return {"version": STATE_SCHEMA_VERSION, "processed_ids": [], "attempts": {}}
+        return {"version": STATE_SCHEMA_VERSION, "processed": {},
+                "attempts": {}, "parked": {}}
     try:
         with open(STATE_FILE) as f:
             data = json.load(f)
@@ -250,15 +293,56 @@ def load_state():
         ) from exc
     if (
         isinstance(data, dict)
-        and data.get("version") == STATE_SCHEMA_VERSION
+        and data.get("version") == 1
         and isinstance(data.get("processed_ids"), list)
     ):
+        data = migrate_v1_state(data)
+    if (
+        isinstance(data, dict)
+        and data.get("version") == STATE_SCHEMA_VERSION
+        and isinstance(data.get("processed"), dict)
+    ):
         data.setdefault("attempts", {})
+        data.setdefault("parked", {})
         return data
     raise RuntimeError(
         f"State file {STATE_FILE} has an unrecognized schema. Filing is "
         f"paused until the file is inspected and repaired or removed."
     )
+
+
+def remember_processed(state, source, text, modified=None):
+    state["processed"][source["uuid"]] = {
+        "modified": modified if modified is not None
+        else source.get("modified", ""),
+        "hash": hashlib.sha256(text.encode()).hexdigest(),
+    }
+    state["attempts"].pop(source["uuid"], None)
+    state["parked"].pop(source["uuid"], None)
+
+
+def record_attempt(state, uuid, error):
+    entry = state["attempts"].setdefault(uuid, {"count": 0})
+    entry["count"] = entry.get("count", 0) + 1
+    entry["last_error"] = str(error)[:300]
+
+
+def source_needs_filing(source, state):
+    """Discovery predicate: the source's upstream pipeline is complete and it
+    is new, changed since it was last filed, or parked but changed since
+    parking. Change detection is DEVONthink's modification date; the scan
+    loop still hash-checks before extracting, so a metadata-only touch never
+    burns an extraction."""
+    if not source.get("ready", True):
+        return False
+    modified = source.get("modified", "")
+    parked = state["parked"].get(source["uuid"])
+    if parked is not None:
+        return bool(modified) and modified > (parked.get("modified") or "")
+    entry = state["processed"].get(source["uuid"])
+    if entry is None:
+        return True
+    return bool(modified) and modified > (entry.get("modified") or "")
 
 
 def save_state(state):
@@ -280,7 +364,7 @@ def acquire_lock():
     """Hold a non-blocking exclusive lock for the run's lifetime so a
     hand-looped --scan-only never interleaves with the 30-minute launchd
     tick — concurrent runs would duplicate proposals and drop each other's
-    processed_ids (the state file is last-writer-wins). Returns the open fd
+    processed entries (the state file is last-writer-wins). Returns the open fd
     (kept referenced to hold the lock) or None if another run holds it."""
     os.makedirs(STATE_DIR, exist_ok=True)
     fd = open(LOCK_FILE, "w")
@@ -574,14 +658,27 @@ def build_person_plans(extracted, index, selves, people, source_date):
         if not facts and not updates:
             continue
 
+        interacted = bool(person.get("interacted"))
         claimed = str(person.get("match") or "").strip()
-        hits = index.get(norm(claimed)) or index.get(norm(name)) or []
+        matched_key = ""
+        hits = []
+        for cand in (claimed, name):
+            k = norm(cand)
+            if k and index.get(k):
+                matched_key, hits = k, index[k]
+                break
         if len(hits) == 1:
             plans.append({
                 "kind": "existing",
                 "name": hits[0]["name"],
                 "uuid": hits[0]["uuid"],
                 "md": hits[0].get("md", {}),
+                # Resolved only through a single-token alias ("maya" ->
+                # Maya Chen): too weak to auto-apply — common first names
+                # collide silently as the roster grows.
+                "weak_match": len(matched_key.split()) < 2
+                and matched_key != norm(hits[0]["name"]),
+                "interacted": interacted,
                 "facts": facts,
                 "updates": updates,
             })
@@ -590,6 +687,7 @@ def build_person_plans(extracted, index, selves, people, source_date):
                 "kind": "ambiguous",
                 "name": name,
                 "candidates": [h["name"] for h in hits],
+                "interacted": interacted,
                 "facts": facts,
                 "updates": updates,
             })
@@ -599,6 +697,7 @@ def build_person_plans(extracted, index, selves, people, source_date):
                 "name": name,
                 "single_token": len(name.split()) < 2,
                 "near": near_matches(name, people),
+                "interacted": interacted,
                 "facts": facts,
                 "updates": updates,
             })
@@ -642,18 +741,26 @@ def ops_for_plan(plan, source, source_date):
             previous = str(plan["md"].get("md" + field, "") or "")
             if norm(previous) == norm(value):
                 continue
-            ops.append({"op": "set_field", "uuid": plan["uuid"],
-                        "field": field, "value": value})
+            op = {"op": "set_field", "uuid": plan["uuid"],
+                  "field": field, "value": value,
+                  "effective_date": source_date,
+                  "expected_previous": previous}
             if previous:
-                lines.append(fact_line(
+                # Rides inside set_field so a refused stale write never
+                # files its own transition line.
+                op["transition_line"] = fact_line(
                     source_date,
-                    f"{field.capitalize()}: {previous} → {value}", src))
+                    f"{field.capitalize()}: {previous} → {value}", src)
+            ops.append(op)
         if lines:
             ops.append({"op": "append_log", "uuid": plan["uuid"], "lines": lines})
-        ops.append({"op": "bump_lastcontact", "uuid": plan["uuid"],
-                    "date": source_date})
+        if plan.get("interacted"):
+            ops.append({"op": "bump_lastcontact", "uuid": plan["uuid"],
+                        "date": source_date})
     else:
         fields = dict(plan["updates"])
+        if plan.get("interacted"):
+            fields["lastcontact"] = source_date
         ops.append({"op": "ensure_person", "name": plan["name"],
                     "fields": fields, "log_lines": lines})
     return ops
@@ -686,7 +793,10 @@ def proposal_body(source, source_date, plans, ops):
             if plan["summary"]:
                 lines.append(f"  - {plan['summary']}")
         elif plan["kind"] == "existing":
-            lines.append(f"- **{plan['name']}** (existing record)")
+            contact = ", direct interaction" if plan.get("interacted") else ""
+            weak = (" — matched via single-token alias, verify before"
+                    " approving") if plan.get("weak_match") else ""
+            lines.append(f"- **{plan['name']}** (existing record{contact}){weak}")
         elif plan["kind"] == "ambiguous":
             cands = ", ".join(plan["candidates"])
             lines.append(f"- **{plan['name']}** — AMBIGUOUS: matches {cands};"
@@ -771,7 +881,7 @@ def apply_approved(dry_run):
             log.info("[dry-run] would apply %d ops from %s", len(ops), rec["name"])
             continue
         try:
-            run_bridge(ops + [{"op": "trash", "uuid": rec["uuid"]}])
+            results = run_bridge(ops + [{"op": "trash", "uuid": rec["uuid"]}])
         except BridgeUnavailable:
             raise
         except Exception as exc:
@@ -780,6 +890,16 @@ def apply_approved(dry_run):
                       extra={"record_name": rec["name"],
                              "record_uuid": rec["uuid"]})
             continue
+        for op, res in zip(ops, results):
+            if op.get("op") == "set_field" and isinstance(res, dict) \
+                    and res.get("stale"):
+                log.warning(
+                    "approved %s update refused as stale (current value %r "
+                    "is newer than this proposal); update the record by hand "
+                    "if the proposal was right",
+                    op.get("field"), res.get("previous"),
+                    extra={"record_name": rec["name"],
+                           "record_uuid": rec["uuid"]})
         log.info("applied %d ops", len(ops),
                  extra={"record_name": rec["name"], "record_uuid": rec["uuid"]})
         if any(op.get("op") == "ensure_person" for op in ops):
@@ -833,7 +953,6 @@ def scan(config, state, dry_run, force_uuid, user_invoked):
     ])
     index = roster_index(people)
     selves = self_names(config)
-    processed = set(state["processed_ids"])
 
     # Deterministic attendance pass: meeting participants bump LastContact
     # whether or not extraction can run. bump_lastcontact only ever raises
@@ -883,10 +1002,15 @@ def scan(config, state, dry_run, force_uuid, user_invoked):
                 log.error("--force uuid %s could not be fetched: %s",
                           force_uuid, exc)
                 return
+        if not candidates[0].get("ready", True):
+            log.warning("--force target still has NeedsProcessing set — its "
+                        "content may not be final; extracting anyway",
+                        extra={"record_name": candidates[0].get("name", ""),
+                               "record_uuid": force_uuid})
     else:
         candidates = [
             s for s in sources
-            if s["uuid"] not in processed
+            if source_needs_filing(s, state)
             and not (skip_re and skip_re.search(s["name"]))
         ]
         candidates.sort(key=source_date_of, reverse=True)
@@ -904,13 +1028,37 @@ def scan(config, state, dry_run, force_uuid, user_invoked):
     for source in candidates:
         if extracted_count >= limit:
             break
-        attempts = state["attempts"].get(source["uuid"], 0)
+        uuid = source["uuid"]
+        if uuid in state["parked"]:
+            # Discovery only surfaces a parked source when its content
+            # changed since parking; give it a fresh set of attempts.
+            attempts = 0
+            if not dry_run:
+                state["parked"].pop(uuid, None)
+                state["attempts"].pop(uuid, None)
+                save_state(state)
+        else:
+            attempts = (state["attempts"].get(uuid) or {}).get("count", 0)
         if attempts >= MAX_ATTEMPTS and not force_uuid:
-            log.warning("giving up after %d attempts, marking processed",
-                        attempts, extra={"record_name": source["name"],
-                                         "record_uuid": source["uuid"]})
-            state["processed_ids"].append(source["uuid"])
-            save_state(state)
+            last_error = (state["attempts"].get(uuid) or {}).get(
+                "last_error", "")
+            log.warning("parking after %d failed attempts%s — retries when "
+                        "the source changes, or via --force %s",
+                        attempts,
+                        f" (last error: {last_error})" if last_error else "",
+                        uuid,
+                        extra={"record_name": source["name"],
+                               "record_uuid": uuid})
+            if not dry_run:
+                state["parked"][uuid] = {
+                    "name": source["name"],
+                    "attempts": attempts,
+                    "last_error": last_error,
+                    "modified": source.get("modified", ""),
+                    "parked_at": date.today().isoformat(),
+                }
+                state["attempts"].pop(uuid, None)
+                save_state(state)
             continue
 
         transport = pick_transport(config, source["kind"])
@@ -926,10 +1074,19 @@ def scan(config, state, dry_run, force_uuid, user_invoked):
             continue
 
         source_date = source_date_of(source)
-        text = run_bridge([{"op": "get_text", "uuid": source["uuid"]}])[0]["text"]
-        if len(text.split()) < 20:
-            state["processed_ids"].append(source["uuid"])
+        text = run_bridge([{"op": "get_text", "uuid": uuid}])[0]["text"]
+        entry = state["processed"].get(uuid)
+        if entry is not None and entry.get("hash") == \
+                hashlib.sha256(text.encode()).hexdigest():
+            # Metadata-only touch (tags, EntityFiled, sync churn): the text
+            # already filed is unchanged, so just re-baseline the mod stamp.
             if not dry_run:
+                entry["modified"] = source.get("modified", "")
+                save_state(state)
+            continue
+        if len(text.split()) < 20:
+            if not dry_run:
+                remember_processed(state, source, text)
                 save_state(state)
             continue
 
@@ -954,12 +1111,12 @@ def scan(config, state, dry_run, force_uuid, user_invoked):
         except BridgeUnavailable:
             raise
         except Exception as exc:
-            state["attempts"][source["uuid"]] = attempts + 1
             if not dry_run:
+                record_attempt(state, uuid, f"{type(exc).__name__}: {exc}")
                 save_state(state)
             log.error("extraction failed: %s: %s", type(exc).__name__, exc,
                       extra={"record_name": source["name"],
-                             "record_uuid": source["uuid"]})
+                             "record_uuid": uuid})
             continue
 
         try:
@@ -967,16 +1124,16 @@ def scan(config, state, dry_run, force_uuid, user_invoked):
                                        source_date)
             plans += build_event_plans(extracted_events, selves, source_date)
             file_source(config, state, source, source_date, plans, filing_mode,
-                        dry_run)
+                        dry_run, text)
         except BridgeUnavailable:
             raise
         except Exception as exc:
-            state["attempts"][source["uuid"]] = attempts + 1
             if not dry_run:
+                record_attempt(state, uuid, f"{type(exc).__name__}: {exc}")
                 save_state(state)
             log.error("filing failed: %s: %s", type(exc).__name__, exc,
                       extra={"record_name": source["name"],
-                             "record_uuid": source["uuid"]})
+                             "record_uuid": uuid})
             continue
 
     if no_transport and not extracted_count:
@@ -984,11 +1141,13 @@ def scan(config, state, dry_run, force_uuid, user_invoked):
                  "(TRANSPORT=%s)", no_transport, config["TRANSPORT"])
 
 
-def file_source(config, state, source, source_date, plans, filing_mode, dry_run):
+def file_source(config, state, source, source_date, plans, filing_mode,
+                dry_run, text):
     direct_ops = []
     proposal_plans = []
     for plan in plans:
-        if filing_mode == "auto" and plan["kind"] == "existing":
+        if filing_mode == "auto" and plan["kind"] == "existing" \
+                and not plan.get("weak_match"):
             direct_ops.extend(ops_for_plan(plan, source, source_date))
         else:
             proposal_plans.append(plan)
@@ -1006,7 +1165,15 @@ def file_source(config, state, source, source_date, plans, filing_mode, dry_run)
         return
 
     if direct_ops:
-        run_bridge(direct_ops)
+        results = run_bridge(direct_ops)
+        for op, res in zip(direct_ops, results):
+            if op["op"] == "set_field" and isinstance(res, dict) \
+                    and res.get("stale"):
+                log.info("stale %s update refused (current value %r is newer, "
+                         "as of %s)", op["field"], res.get("previous"),
+                         res.get("asof", "?"),
+                         extra={"record_name": source["name"],
+                                "record_uuid": source["uuid"]})
         log.info("auto-applied %d ops", len(direct_ops),
                  extra={"record_name": source["name"],
                         "record_uuid": source["uuid"]})
@@ -1026,8 +1193,15 @@ def file_source(config, state, source, source_date, plans, filing_mode, dry_run)
     else:
         run_bridge([{"op": "mark_filed", "uuid": source["uuid"]}])
 
-    state["processed_ids"].append(source["uuid"])
-    state["attempts"].pop(source["uuid"], None)
+    # mark_filed just bumped the record's modification date; re-read it so
+    # the stored stamp doesn't immediately re-candidate the source.
+    modified = source.get("modified", "")
+    try:
+        fresh = run_bridge([{"op": "get_source", "uuid": source["uuid"]}])[0]
+        modified = fresh.get("modified", "") or modified
+    except Exception:
+        pass
+    remember_processed(state, source, text, modified=modified)
     save_state(state)
 
 
@@ -1078,6 +1252,11 @@ def main():
             return
 
     config = load_config()
+    if config["TRANSPORT"] in ("auto", "dtchat"):
+        log.info("TRANSPORT=%s allows extraction through DEVONthink chat, "
+                 "which may be a cloud provider; prompts include the People "
+                 "roster. Set TRANSPORT=local to keep extraction on-device.",
+                 config["TRANSPORT"])
     state = load_state()
 
     try:

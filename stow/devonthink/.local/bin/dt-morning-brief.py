@@ -231,12 +231,16 @@ def person_summary_line(p):
 
 
 def recent_log_bullets(p, limit=3):
+    """Newest bullets by fact date, not append order — a backlog drain can
+    append years-old facts after current ones. Renders in document order."""
     lines = (p.get("body") or "").split("\n")
     bullets = [
         ln for ln in lines
         if LOG_BULLET_RE.match(ln) and not ln.rstrip().endswith("— Created.")
     ]
-    return ["  " + ln for ln in bullets[-limit:]]
+    by_date = sorted(enumerate(bullets), key=lambda t: (t[1][2:12], t[0]))
+    newest = sorted(by_date[-limit:] if limit else [], key=lambda t: t[0])
+    return ["  " + ln for _, ln in newest]
 
 
 def title_matches(people, title):

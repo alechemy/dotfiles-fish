@@ -201,5 +201,42 @@ class PersonSummaryLine(unittest.TestCase):
         self.assertTrue(mb.person_summary_line(person("Bob")).endswith(")"))
 
 
+class RecentLogBullets(unittest.TestCase):
+    def body_person(self, *bullets):
+        p = person("Bob")
+        p["body"] = "# Bob\n\n## Biographical Log\n\n" + "\n".join(bullets)
+        return p
+
+    def test_selects_newest_by_date_not_append_order(self):
+        """A backlog drain appends old facts after current ones; the brief
+        must not surface 2024 facts as 'recent'."""
+        p = self.body_person(
+            "- 2026-06-01 — new job.",
+            "- 2026-07-01 — moved.",
+            "- 2024-01-01 — backfilled old fact.",
+            "- 2024-02-01 — another old fact.",
+        )
+        got = mb.recent_log_bullets(p, limit=2)
+        self.assertEqual([ln.strip()[2:12] for ln in got],
+                         ["2026-06-01", "2026-07-01"])
+
+    def test_renders_in_document_order(self):
+        p = self.body_person(
+            "- 2026-07-01 — later fact filed first.",
+            "- 2026-06-01 — earlier fact filed second.",
+        )
+        got = mb.recent_log_bullets(p, limit=2)
+        self.assertEqual([ln.strip()[2:12] for ln in got],
+                         ["2026-07-01", "2026-06-01"])
+
+    def test_skips_created_marker_and_non_bullets(self):
+        p = self.body_person(
+            "- 2026-01-01 — Created.",
+            "prose line",
+            "- 2026-06-01 — real fact.",
+        )
+        self.assertEqual(len(mb.recent_log_bullets(p)), 1)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -134,23 +134,64 @@ class BuildPersonPlans(unittest.TestCase):
         got = self.plans([{"name": "Wren", "facts": [{"fact": "x"}]}])
         self.assertEqual(got[0]["facts"][0][0], "2026-03-16")
 
+    def test_single_token_alias_match_is_weak(self):
+        got = self.plans([{"name": "Maya", "facts": [{"fact": "x"}]}],
+                         [person("Maya Chen", aliases="Maya")])
+        self.assertEqual(got[0]["kind"], "existing")
+        self.assertTrue(got[0]["weak_match"])
+
+    def test_full_name_match_is_strong(self):
+        got = self.plans([{"name": "Maya Chen", "facts": [{"fact": "x"}]}],
+                         [person("Maya Chen", aliases="Maya")])
+        self.assertFalse(got[0]["weak_match"])
+
+    def test_single_token_record_name_match_is_strong(self):
+        """A person whose record name IS one token can't match any stronger."""
+        got = self.plans([{"name": "Alison", "facts": [{"fact": "x"}]}],
+                         [person("Alison")])
+        self.assertFalse(got[0]["weak_match"])
+
+    def test_interacted_flag_carries_through(self):
+        got = self.plans([{"name": "Maya Chen", "interacted": True,
+                           "facts": [{"fact": "x"}]}], [person("Maya Chen")])
+        self.assertTrue(got[0]["interacted"])
+        got = self.plans([{"name": "Maya Chen", "facts": [{"fact": "x"}]}],
+                         [person("Maya Chen")])
+        self.assertFalse(got[0]["interacted"])
+
 
 class OpsForPlan(unittest.TestCase):
-    def test_existing_with_field_change_logs_the_previous_value(self):
+    def test_existing_with_field_change_carries_temporal_guards(self):
         plan = {"kind": "existing", "name": "Bob", "uuid": "U1",
                 "md": {"mdemployer": "Acme"}, "facts": [],
-                "updates": {"employer": "Globex"}}
+                "updates": {"employer": "Globex"}, "interacted": True}
         ops = ef.ops_for_plan(plan, SOURCE, "2026-03-16")
         kinds = [o["op"] for o in ops]
-        self.assertEqual(kinds, ["set_field", "append_log", "bump_lastcontact"])
-        self.assertIn("Employer: Acme → Globex", ops[1]["lines"][0])
+        self.assertEqual(kinds, ["set_field", "bump_lastcontact"])
+        self.assertEqual(ops[0]["effective_date"], "2026-03-16")
+        self.assertEqual(ops[0]["expected_previous"], "Acme")
+        self.assertIn("Employer: Acme → Globex", ops[0]["transition_line"])
+
+    def test_first_value_has_no_transition_line(self):
+        plan = {"kind": "existing", "name": "Bob", "uuid": "U1",
+                "md": {}, "facts": [], "updates": {"employer": "Globex"}}
+        ops = ef.ops_for_plan(plan, SOURCE, "2026-03-16")
+        self.assertEqual([o["op"] for o in ops], ["set_field"])
+        self.assertNotIn("transition_line", ops[0])
+        self.assertEqual(ops[0]["expected_previous"], "")
 
     def test_unchanged_field_emits_no_set_field(self):
         plan = {"kind": "existing", "name": "Bob", "uuid": "U1",
                 "md": {"mdemployer": "Acme"}, "facts": [],
-                "updates": {"employer": "acme"}}
+                "updates": {"employer": "acme"}, "interacted": True}
         ops = ef.ops_for_plan(plan, SOURCE, "2026-03-16")
         self.assertEqual([o["op"] for o in ops], ["bump_lastcontact"])
+
+    def test_no_interaction_files_facts_without_contact_bump(self):
+        plan = {"kind": "existing", "name": "Bob", "uuid": "U1", "md": {},
+                "facts": [("2026-03-16", "x")], "updates": {}}
+        ops = ef.ops_for_plan(plan, SOURCE, "2026-03-16")
+        self.assertEqual([o["op"] for o in ops], ["append_log"])
 
     def test_new_person_becomes_ensure_person(self):
         plan = {"kind": "new", "name": "Wren", "facts": [("2026-03-16", "x")],
@@ -159,6 +200,12 @@ class OpsForPlan(unittest.TestCase):
         self.assertEqual(ops[0]["op"], "ensure_person")
         self.assertEqual(ops[0]["fields"], {"city": "Durango"})
         self.assertIn("x-devonthink-item://SRC-1", ops[0]["log_lines"][0])
+
+    def test_new_person_from_interaction_gets_lastcontact(self):
+        plan = {"kind": "new", "name": "Wren", "facts": [("2026-03-16", "x")],
+                "updates": {}, "interacted": True}
+        ops = ef.ops_for_plan(plan, SOURCE, "2026-03-16")
+        self.assertEqual(ops[0]["fields"], {"lastcontact": "2026-03-16"})
 
 
 class ProposalRoundTrip(unittest.TestCase):
@@ -227,9 +274,56 @@ class LoadState(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             self.run_with_state('{"version": 99, "processed_ids": []}')
 
-    def test_valid_state_gets_default_attempts(self):
-        state = self.run_with_state('{"version": 1, "processed_ids": ["a"]}')
+    def test_v1_state_migrates_in_place(self):
+        state = self.run_with_state(
+            '{"version": 1, "processed_ids": ["a"], "attempts": {"b": 2}}')
+        self.assertEqual(state["version"], 2)
+        self.assertIn("a", state["processed"])
+        self.assertIsNone(state["processed"]["a"]["hash"])
+        self.assertTrue(state["processed"]["a"]["modified"])
+        self.assertEqual(state["attempts"]["b"], {"count": 2})
+        self.assertEqual(state["parked"], {})
+
+    def test_valid_v2_state_gets_default_maps(self):
+        state = self.run_with_state('{"version": 2, "processed": {}}')
         self.assertEqual(state["attempts"], {})
+        self.assertEqual(state["parked"], {})
+
+
+class SourceNeedsFiling(unittest.TestCase):
+    def state(self, processed=None, parked=None):
+        return {"version": 2, "processed": processed or {},
+                "attempts": {}, "parked": parked or {}}
+
+    def src(self, ready=True, modified="2026-01-02T00:00:00"):
+        return {"uuid": "U", "ready": ready, "modified": modified}
+
+    def test_unready_source_is_never_a_candidate(self):
+        self.assertFalse(ef.source_needs_filing(self.src(ready=False),
+                                                self.state()))
+
+    def test_new_source_is_a_candidate(self):
+        self.assertTrue(ef.source_needs_filing(self.src(), self.state()))
+
+    def test_unchanged_source_is_skipped(self):
+        st = self.state(processed={
+            "U": {"modified": "2026-01-02T00:00:00", "hash": "h"}})
+        self.assertFalse(ef.source_needs_filing(self.src(), st))
+
+    def test_changed_source_re_enters_filing(self):
+        st = self.state(processed={
+            "U": {"modified": "2026-01-01T00:00:00", "hash": "h"}})
+        self.assertTrue(ef.source_needs_filing(self.src(), st))
+
+    def test_parked_source_returns_only_when_changed(self):
+        st = self.state(parked={"U": {"modified": "2026-01-02T00:00:00"}})
+        self.assertFalse(ef.source_needs_filing(self.src(), st))
+        self.assertTrue(ef.source_needs_filing(
+            self.src(modified="2026-03-01T00:00:00"), st))
+
+    def test_missing_ready_defaults_to_candidate(self):
+        self.assertTrue(ef.source_needs_filing(
+            {"uuid": "U", "modified": "2026-01-02T00:00:00"}, self.state()))
 
 
 class CapWords(unittest.TestCase):

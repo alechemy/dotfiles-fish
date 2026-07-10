@@ -17,7 +17,8 @@
 //
 // Ops:
 //   dump_people        {include_bodies?}                -> [{uuid,name,aliases,md,body?}]
-//   list_sources       {}                               -> [{uuid,name,kind,eventdate}]
+//   list_sources       {}                               -> [{uuid,name,kind,eventdate,
+//                                                            modified,ready,...}]
 //   get_source         {uuid}                            -> {uuid,name,kind,eventdate,...}
 //   list_group         {path}                           -> [{uuid,name}]
 //   get_text           {uuid}                           -> {uuid,text}
@@ -27,7 +28,9 @@
 //   ensure_event       {name,date,location?,attendees?,summary?,source_uuid}
 //                                                       -> {uuid,created}
 //   append_log         {uuid,lines}                     -> {uuid,appended,skipped}
-//   set_field          {uuid,field,value}               -> {uuid,changed,previous}
+//   set_field          {uuid,field,value,effective_date?,
+//                       expected_previous?,transition_line?}
+//                                                       -> {uuid,changed,previous,stale?}
 //   bump_lastcontact   {uuid,date}                      -> {uuid,changed}
 //   mark_filed         {uuid}                           -> {uuid}
 //   create_record      {name,path,text,fields?,tags?}   -> {uuid}
@@ -60,6 +63,19 @@ function mdValue(rec, key) {
   const md = rec.customMetaData() || {}
   const v = md['md' + key]
   return v === undefined || v === null ? '' : String(v)
+}
+
+// A flag set by script reads back as '1'; the same flag ticked in the GUI
+// reads back as 'true' (see CLAUDE.md on DT's boolean representation).
+function flagSet(v) {
+  return v === '1' || v === 'true'
+}
+
+function isoStamp(d) {
+  return d
+    ? new Date(d.getTime() - d.getTimezoneOffset() * 60000)
+        .toISOString().slice(0, 19)
+    : ''
 }
 
 function normName(s) {
@@ -306,10 +322,14 @@ function run(argv) {
           kind: kind,
           eventdate: mdValue(rec, 'eventdate'),
           participants: mdValue(rec, 'granolaparticipants'),
-          added: added
-            ? new Date(added.getTime() - added.getTimezoneOffset() * 60000)
-                .toISOString().slice(0, 10)
-            : '',
+          added: added ? isoStamp(added).slice(0, 10) : '',
+          modified: isoStamp(rec.modificationDate()),
+          // NeedsProcessing=1 means the smart-rule pipeline (OCR, comment
+          // formatting, enrichment) hasn't finished — the record's text may
+          // not exist yet. Daily notes never carry the flag.
+          ready: kind === 'daily'
+            ? true
+            : !flagSet(mdValue(rec, 'needsprocessing')),
         })
       }
       // Quoted-phrase equality (mddocumenttype=="Meeting Notes") matches
@@ -337,7 +357,7 @@ function run(argv) {
       const hw = mdValue(r, 'handwritten')
       let kind = 'other'
       if (String(r.location() || '').indexOf(DAILY_PATH) === 0) kind = 'daily'
-      else if (hw === '1' || hw === 'true') kind = 'handwritten'
+      else if (flagSet(hw)) kind = 'handwritten'
       else if (mdValue(r, 'documenttype').indexOf('Meeting') !== -1) kind = 'meeting'
       const added = r.additionDate()
       return {
@@ -346,10 +366,11 @@ function run(argv) {
         kind: kind,
         eventdate: mdValue(r, 'eventdate'),
         participants: mdValue(r, 'granolaparticipants'),
-        added: added
-          ? new Date(added.getTime() - added.getTimezoneOffset() * 60000)
-              .toISOString().slice(0, 10)
-          : '',
+        added: added ? isoStamp(added).slice(0, 10) : '',
+        modified: isoStamp(r.modificationDate()),
+        ready: kind === 'daily'
+          ? true
+          : !flagSet(mdValue(r, 'needsprocessing')),
       }
     },
 
@@ -399,7 +420,19 @@ function run(argv) {
       }
       if (op.aliases) rec.aliases = op.aliases
       for (const [field, value] of Object.entries(op.fields || {})) {
-        if (value) dt.addCustomMetaData(value, { for: field, to: rec })
+        if (!value) continue
+        // ensure_person can resolve to an existing record (a re-run proposal),
+        // so LastContact keeps the bump op's monotonicity instead of being
+        // overwritten backwards.
+        if (field === 'lastcontact') {
+          const current = mdValue(rec, 'lastcontact')
+          const comparable = /^\d{4}-\d{2}-\d{2}$/.test(current) ? current : ''
+          if (!comparable || String(value) > comparable) {
+            dt.addCustomMetaData(value, { for: field, to: rec })
+          }
+          continue
+        }
+        dt.addCustomMetaData(value, { for: field, to: rec })
       }
       if ((op.log_lines || []).length) {
         appendLogLines(rec, op.log_lines)
@@ -456,13 +489,42 @@ function run(argv) {
       return { uuid: op.uuid, appended: counts.appended, skipped: counts.skipped }
     },
 
+    // Temporal conflict protection: each applied update records the source's
+    // date in the FieldAsOf JSON blob, and an update dated before a field's
+    // recorded date is refused (an older source processed later, or an
+    // approved proposal overtaken by a newer write, must not clobber current
+    // state). expected_previous is the fallback for fields with no recorded
+    // date yet: a mismatch means the value changed after the ops were built.
     set_field(op) {
       const rec = byUuid(op.uuid)
       const previous = mdValue(rec, op.field)
+      let dates = {}
+      try { dates = JSON.parse(mdValue(rec, 'fieldasof') || '{}') || {} }
+      catch (e) { dates = {} }
+      const asof = typeof dates[op.field] === 'string' ? dates[op.field] : ''
+      const stampAsOf = () => {
+        if (op.effective_date && op.effective_date > asof) {
+          dates[op.field] = op.effective_date
+          dt.addCustomMetaData(JSON.stringify(dates), { for: 'fieldasof', to: rec })
+        }
+      }
       if (previous === String(op.value)) {
+        stampAsOf()
         return { uuid: op.uuid, changed: false, previous: previous }
       }
+      if (op.effective_date && asof) {
+        if (op.effective_date < asof) {
+          return { uuid: op.uuid, changed: false, stale: true,
+                   previous: previous, asof: asof }
+        }
+      } else if (previous && op.expected_previous !== undefined &&
+                 op.expected_previous !== null &&
+                 String(op.expected_previous) !== previous) {
+        return { uuid: op.uuid, changed: false, stale: true, previous: previous }
+      }
       dt.addCustomMetaData(op.value, { for: op.field, to: rec })
+      stampAsOf()
+      if (op.transition_line) appendLogLines(rec, [op.transition_line])
       return { uuid: op.uuid, changed: true, previous: previous }
     },
 
