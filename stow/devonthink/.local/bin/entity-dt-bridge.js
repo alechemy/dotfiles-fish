@@ -36,6 +36,7 @@
 //   create_record      {name,path,text,fields?,tags?}   -> {uuid}
 //   get_or_create_daily {date,heading}                  -> {uuid,text,created}
 //   upsert_section     {uuid,header,content}            -> {uuid,changed,replaced}
+//   relink_entities    {}                               -> {records,changed}
 //   trash              {uuid}                           -> {uuid}
 
 ObjC.import('Foundation')
@@ -171,7 +172,7 @@ function linkEntities(line, excludeUuid) {
   for (const e of entityIndex) {
     if (e.uuid === excludeUuid || out.indexOf(e.uuid) !== -1) continue
     const re = new RegExp(
-      '(^|[^\\w\\[])(' + escapeRe(e.name) + ')(?![\\w\\]])')
+      '(^|[^\\w\\[])(' + escapeRe(e.name) + ')(?![\\w\\]])', 'i')
     const parts = out.split(LINK_SPLIT_RE)
     for (let i = 0; i < parts.length; i += 2) {
       const m = parts[i].match(re)
@@ -444,17 +445,83 @@ function run(argv) {
       return { uuid: rec.uuid(), created: created }
     },
 
+    // Event identity is normalized name PLUS date proximity: same-name
+    // events dated within EVENT_MATCH_DAYS merge (closest date wins);
+    // outside the window a new record is created, so "Christmas Party"
+    // 2025 and 2026 stay distinct. A matched event merges its structured
+    // fields — attendee union, missing Date/Where filled — instead of
+    // freezing whatever the first note happened to mention.
     ensure_event(op) {
+      const EVENT_MATCH_DAYS = 45
       const hits = findByNameOrAlias(EVENTS_PATH, op.name)
-      if (hits.length > 0) {
-        const rec = hits[0]
+      const opDate = String(op.date || '')
+      let rec = null
+      let bestGap = Infinity
+      for (const h of hits) {
+        const d = mdValue(h, 'eventdate').slice(0, 10)
+        let gap
+        if (!opDate || !d) {
+          // Undated on either side: date-agnostic legacy match, weakest.
+          gap = EVENT_MATCH_DAYS
+        } else {
+          gap = Math.abs(new Date(opDate) - new Date(d)) / 86400000
+        }
+        if (gap <= EVENT_MATCH_DAYS && gap < bestGap) {
+          rec = h
+          bestGap = gap
+        }
+      }
+      if (rec !== null) {
+        const uuid = rec.uuid()
+        const lines = rec.plainText().split('\n')
+        let changed = false
+        for (let i = 0; i < lines.length; i++) {
+          const bare = v => v === '' || v === '—'
+          if (/^\*\*Date:\*\*/.test(lines[i])) {
+            const v = lines[i].replace(/^\*\*Date:\*\*\s*/, '').trim()
+            if (bare(v) && opDate) {
+              lines[i] = '**Date:** ' + opDate
+              changed = true
+              if (!mdValue(rec, 'eventdate')) {
+                dt.addCustomMetaData(opDate, { for: 'eventdate', to: rec })
+              }
+            }
+          } else if (/^\*\*Where:\*\*/.test(lines[i])) {
+            const v = lines[i].replace(/^\*\*Where:\*\*\s*/, '').trim()
+            if (bare(v) && op.location) {
+              lines[i] = '**Where:** ' + linkEntities(op.location, uuid)
+              changed = true
+            }
+          } else if (/^\*\*Who:\*\*/.test(lines[i])) {
+            const raw = lines[i].replace(/^\*\*Who:\*\*\s*/, '').trim()
+            const existing = (raw === '' || raw === '—')
+              ? [] : raw.split(',').map(s => s.trim()).filter(Boolean)
+            const seen = Object.create(null)
+            for (const e of existing) {
+              seen[normName(e.replace(/^\[([^\]]*)\].*$/, '$1'))] = true
+            }
+            const additions = []
+            for (const a of (op.attendees || [])) {
+              const k = normName(a)
+              if (k && !seen[k]) {
+                seen[k] = true
+                additions.push(personLink(a))
+              }
+            }
+            if (additions.length) {
+              lines[i] = '**Who:** ' + existing.concat(additions).join(', ')
+              changed = true
+            }
+          }
+        }
+        if (changed) rec.plainText = lines.join('\n')
         if (op.summary && op.source_uuid) {
           appendLogLines(rec, [
             '- ' + op.date + ' — ' + op.summary +
             ' ([source](x-devonthink-item://' + op.source_uuid + '))',
           ], EVENT_LOG_SECTION)
         }
-        return { uuid: rec.uuid(), created: false }
+        return { uuid: uuid, created: false, merged: changed }
       }
       let tpl = readFile(EVENT_TEMPLATE)
       if (tpl === null) {
@@ -472,7 +539,7 @@ function run(argv) {
           lines[i] = '**Who:** ' + attendees.join(', ')
         }
       }
-      const rec = dt.createRecordWith(
+      rec = dt.createRecordWith(
         { name: op.name, type: 'markdown' }, { in: groupAt(EVENTS_PATH) })
       rec.plainText = lines.join('\n')
       entityIndex = null
@@ -575,6 +642,41 @@ function run(argv) {
       rec.plainText = text
       rec.tags = ['Daily Note']
       return { uuid: rec.uuid(), text: text, created: true }
+    },
+
+    // On-demand backfill: creating a Place or Event only affects facts
+    // filed afterwards, so this re-runs entity auto-linking over every
+    // existing entity record's bullet lines. Fact identity is unchanged —
+    // factSignature flattens links. Invoke manually:
+    //   echo '{"ops":[{"op":"relink_entities"}]}' > /tmp/ops.json &&
+    //   osascript -l JavaScript entity-dt-bridge.js /tmp/ops.json
+    relink_entities() {
+      let records = 0
+      let changedRecords = 0
+      for (const path of [PEOPLE_PATH, PLACES_PATH, EVENTS_PATH]) {
+        let group
+        try { group = groupAt(path) } catch (e) { continue }
+        for (const rec of group.children()) {
+          if (String(rec.type()) !== 'markdown') continue
+          records++
+          const uuid = rec.uuid()
+          const lines = rec.plainText().split('\n')
+          let changed = false
+          for (let i = 0; i < lines.length; i++) {
+            if (!/^- /.test(lines[i])) continue
+            const linked = linkEntities(lines[i], uuid)
+            if (linked !== lines[i]) {
+              lines[i] = linked
+              changed = true
+            }
+          }
+          if (changed) {
+            rec.plainText = lines.join('\n')
+            changedRecords++
+          }
+        }
+      }
+      return { records: records, changed: changedRecords }
     },
 
     // Replace (or append, or remove on empty content) one generated `##`
