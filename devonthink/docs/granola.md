@@ -63,7 +63,7 @@ The record's name is `{event_date} {title}`. AI enrichment still runs to generat
 
 The pipeline is split across two scripts so the AppleEvent-sending process is Apple-signed:
 
-- **`~/.local/bin/import-granola.py`** — entry point. Shebang `#!/usr/bin/env python3`. Stdlib only. Owns logging, state file, Granola version detection, AppleScript blocks, all `osascript` calls, deferral logic, and failure reporting. The launchd plist invokes this directly.
+- **`~/.local/bin/import-granola.py`** — entry point. Shebang `#!/usr/bin/python3` (Apple-signed interpreter at a stable path, for a stable TCC identity — this script owns the AppleEvents). Stdlib only. Owns logging, state file, Granola version detection, AppleScript blocks, all `osascript` calls, deferral logic, and failure reporting. The launchd plist invokes this directly.
 - **`~/.local/bin/import-granola-parse.py`** — internal helper. Shebang `#!/usr/bin/env -S uv run --script` with PEP 723 inline deps (`cryptography`, `sqlcipher3-wheels`, `ccl-chromium-reader`). The sender invokes it as a subprocess and exchanges JSON over stdin/stdout. The parser never sends AppleEvents.
 
 The launchd plist's `ProgramArguments[0]` must be `/usr/bin/python3`, never uv. macOS TCC keys AppleEvents grants to the sending process's code identity. Apple-signed binaries like `/usr/bin/python3` get a stable Designated Requirement that survives version updates. Adhoc-signed binaries (uv, Homebrew Python, mise Python) fall back to path + CDHash, both of which rotate on every upgrade. Before this split, `brew upgrade uv` (weekly) re-prompted "uv wants to control data in other apps" via launchd, blocking the pipeline whenever the user wasn't there to click through. With the split, uv is invisible to TCC because the parser doesn't drive AppleEvents. The entry binary stays Apple-signed and TCC stays quiet.
@@ -104,33 +104,31 @@ echo '{"imported_ids": [], "force_id": null}' \
 
 ## Installation
 
-Both scripts and the launchd plist template live in the dotfiles repo at:
+Most of the pipeline is tracked and installs through the normal bootstrap — **only the parser is private**:
 
-- `stow/devonthink/.local/bin/import-granola.py`
-- `stow/devonthink/.local/bin/import-granola-parse.py`
-- `stow/devonthink/Library/LaunchAgents/com.user.granola-import.plist.template`
+- `stow/devonthink/.local/bin/import-granola.py` — **tracked.** The sender holds no decryption detail (it owns state, logging, and AppleEvents), so it lives in the repo and `setup.sh` stows it like any other file.
+- `stow/devonthink/Library/LaunchAgents/com.user.granola-import.plist.template` — **tracked.** `setup.sh` renders it (`__HOME__` expanded) and, on the driver, loads the agent.
+- `stow/devonthink/.local/bin/import-granola-parse.py` — **gitignored.** This is the only sensitive file: its PEP 723 metadata pins a specific `ccl-chromium-reader` commit and, together with `NOTES.md`, documents enough of Granola's encryption to be worth keeping out of a public repo. It must be restored from a trusted backup.
 
-All three are gitignored (the parser's PEP 723 metadata pins a specific commit of `ccl-chromium-reader`, and the broader machinery documents enough of Granola's encryption to be worth keeping out of a public repo). On a fresh machine they need to be copied in from a trusted source. See `~/.local/share/granola-import/NOTES.md` for the bootstrap checklist.
+So a clean rebuild on a fresh machine is:
 
 ```bash
-# 1. Create the GranolaID (Text) and GranolaParticipants (Multi-line Text)
-#    custom metadata fields in DEVONthink → Settings → Data → Custom Metadata.
+# 1. Run the normal bootstrap. This seeds the GranolaID + GranolaParticipants
+#    custom metadata fields (they ship in CustomMetaData.plist — see the README's
+#    "Seeding and reconciliation"), stows the tracked sender, renders the plist
+#    template, and — on the driver — loads the launchd agent.
+./scripts/setup.sh
 
-# 2. Drop the three files into the locations above and chmod +x both scripts.
+# 2. Restore the one private file from backup and make it executable. Its
+#    location and the full bootstrap checklist are in
+#    ~/.local/share/granola-import/NOTES.md.
+cp <backup>/import-granola-parse.py ~/.local/bin/import-granola-parse.py
+chmod +x ~/.local/bin/import-granola-parse.py
 
-# 3. Render the plist template (substitutes __HOME__).
-~/.dotfiles/scripts/build-launchd-plists.sh
-
-# 4. Stow the package so symlinks land in $HOME.
-cd ~/.dotfiles/stow && stow --restow --no-folding --ignore='.DS_Store' --target="$HOME" devonthink
-
-# 5. Load the launchd job.
-launchctl bootstrap "gui/$(id -u)" ~/Library/LaunchAgents/com.user.granola-import.plist
-
-# 6. Confirm with a dry-run before letting the schedule handle it.
+# 3. Confirm with a dry-run before letting the schedule handle it.
 ~/.local/bin/import-granola.py --dry-run
 
-# 7. (Optional) Trigger immediately instead of waiting for the next 30-minute tick.
+# 4. (Optional) Trigger immediately instead of waiting for the next 30-minute tick.
 launchctl kickstart -k "gui/$(id -u)/com.user.granola-import"
 ```
 
@@ -142,7 +140,7 @@ To reload after editing the plist template: re-render with the build script, the
 
 State files live in `~/.local/state/devonthink/`:
 
-- `granola-imported.json` — sorted list of UUIDs already imported (or marked as no-content). Delete to re-import every meeting from scratch (creates duplicate DT records — usually not what you want; use `--force <id>` for selective re-imports instead).
+- `granola-imported.json` — sorted list of UUIDs already imported (or marked as no-content). It's a performance cache, not the idempotency boundary: import first checks DEVONthink for an existing record with the same `GranolaID` and **adopts** it instead of creating a duplicate, so deleting this file no longer floods the database — the next run re-derives it (and adopts anything already present). To re-derive it explicitly without importing, run `--rebuild-state`; it also rebuilds automatically when the file is missing. For a deliberate selective re-import use `--force <id>`.
 - `granola-version.json` — last-seen Granola app version. The script logs a one-liner whenever this transitions, useful for correlating regressions with specific releases.
 - `granola-failure.json` — signature of the last reported failure, used to dedupe (see Failure Reporting below). Cleared automatically on the next successful run.
 

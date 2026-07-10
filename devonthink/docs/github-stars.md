@@ -60,22 +60,23 @@ cd ~/.dotfiles/stow && stow --restow --no-folding --ignore='.DS_Store' --target=
 gh auth status
 
 # 3. Load the launchd job (runs every 30 minutes)
-launchctl load ~/Library/LaunchAgents/com.user.github-stars-import.plist
+launchctl bootstrap "gui/$(id -u)" ~/Library/LaunchAgents/com.user.github-stars-import.plist
 
 # 4. (Optional) Run immediately
 python3 ~/.local/bin/import-github-stars.py
 ```
 
-To unload: `launchctl unload ~/Library/LaunchAgents/com.user.github-stars-import.plist`
+To unload: `launchctl bootout "gui/$(id -u)/com.user.github-stars-import"`.
+To reload after editing the plist template: re-render with `scripts/build-launchd-plists.sh`, then `bootout` followed by `bootstrap`.
 
 ## State
 
-- **Imported repos:** `~/.local/state/devonthink/github-stars-imported.json` — tracks which `owner/repo` names have been imported. Delete this file to re-import all stars. (Auto-migrated from the old `~/.github-stars-dt-imported.json` location on first run.)
+- **Imported repos:** `~/.local/state/devonthink/github-stars-imported.json` — tracks which `owner/repo` names have been imported. It's a performance cache, not the idempotency boundary. **Deleting it does not re-import all history:** the next run treats it as a first run, which imports only the last 24 hours (use `--backfill` for the full history), and before creating any bookmark it looks the URL up in DEVONthink and skips repos already present — so no duplicates. It also auto-rebuilds from the database when the file is missing (and `--rebuild-state` re-derives it on demand without importing). (Auto-migrated from the old `~/.github-stars-dt-imported.json` location on first run.)
 - **Logs:** `~/Library/Logs/github-stars-import.log` (script) and `/tmp/github-stars-import.log` (launchd stdout/stderr).
 
 ## Notes
 
 - **`gh` CLI must be installed and authenticated** — the script calls `/opt/homebrew/bin/gh` (Homebrew install path). Run `gh auth login` if not yet configured.
 - **DEVONthink must be running** — the script uses AppleScript to create bookmark records.
-- **Idempotency** — repos are tracked by `full_name` in the state file. State is saved after each successful import, so a crash mid-run won't cause duplicates.
+- **Idempotency** — creation is idempotent against the database: each repo is looked up by its canonical URL before a bookmark is created, and an existing record is adopted rather than duplicated. The `full_name` state file is a cache on top of that. A pagination failure aborts the whole run and commits nothing, so a partial fetch can never advance the frontier past stars it missed.
 - **No external dependencies** — uses only Python 3 standard library and the `gh` CLI.

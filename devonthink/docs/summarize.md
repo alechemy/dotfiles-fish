@@ -19,7 +19,7 @@ Create an on-demand smart rule in DEVONthink that triggers the skill on the sele
   - Kind is Bookmark
   - Kind is PDF/PS
 - **Trigger**: On Demand
-- **Actions**: Run AppleScript (external) — [`summarize-on-demand.applescript`](../stow/devonthink/Library/Application%20Scripts/com.devon-technologies.think/Smart%20Rules/summarize-on-demand.applescript)
+- **Actions**: Run AppleScript (external) — [`summarize-on-demand.applescript`](../../stow/devonthink/Library/Application%20Scripts/com.devon-technologies.think/Smart%20Rules/summarize-on-demand.applescript)
 
 Select a bookmark or PDF in DEVONthink and run the rule. The script reads the URL (for bookmarks) or file path (for PDFs), then invokes `claude -p "/summarize <source>"` in the background. Progress is logged to `~/Library/Logs/summarize.log`. The skill imports all output back into `00_INBOX` and the pipeline picks it up from there.
 

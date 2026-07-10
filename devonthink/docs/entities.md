@@ -21,6 +21,16 @@ Groups (all in Lorebook):
 | `/20_ENTITIES/_Review` | Filing proposals awaiting review |
 | `/20_ENTITIES/_Review/Approved` | Drop zone: move a proposal here and the next filing run applies it |
 
+**Bootstrap the groups first.** The bridge assumes all of the above already
+exist; nothing in `setup.sh` creates them. Run `~/.local/bin/dt-entity-bootstrap`
+once on the driver before seeding People — it is idempotent and does three
+things: creates any missing entity group, applies the `exclude from chat`
+flag to `People`, `_Review`, and `_Review/Approved`, and stamps `EntityType`
+(`Person`/`Place`/`Event`) on any hand-authored markdown record inside the
+matching group that lacks it (scripted creation already stamps it; this covers
+records made from templates by hand). Re-run it any time you hand-author a
+batch of entity records. It logs to `~/Library/Logs/dt-entity-bootstrap.log`.
+
 Person records use a small metadata schema (see the Custom Metadata table in
 the [README](../README.md)): `EntityType`, `EntityStatus`, `City`, `Employer`,
 `Role`, `Relationship`, `Email`, `LastContact`. Everything narrative — partner,
@@ -130,10 +140,14 @@ source of contact dates; see the note on `GranolaParticipants` below.
 The brief also writes an `## Entity Review` section counting proposals that
 need attention: those awaiting review in `_Review`, and separately any left
 sitting in `_Review/Approved`, which means filing refused to apply them (bad
-ops JSON, a failing op, or the stale-`ensure_person` guard below). Nothing
-else counts the Approved group — it is normally emptied by the next run — and
-those refusals only log at `WARNING`, which is below the watchdog's
-notification threshold, so without this line they would be invisible.
+ops JSON, a failing op, or the stale-`ensure_person` guard below). It also
+lists sources parked after `MAX_ATTEMPTS` failed extractions (see below), so a
+note that never became entity knowledge stays visible. Nothing else surfaces
+the Approved group in the daily workflow — it is normally emptied by the next
+run. `dt-watchdog` *does* notify on those refusal `WARNING`s (its scan pattern
+` WARN(ING)? ` matches Python's ` WARNING ` levelname), but that is a
+transient, per-signature-deduplicated alert; this line keeps a standing count
+in front of you each morning.
 
 Note: only calendars in macOS Calendar are visible. Work meetings appear in
 the brief because your company email account is
@@ -252,19 +266,27 @@ the model's ~22 GB right after each batch instead of Ollama's 5-minute
 default. Once the backlog drains, inference happens only when a new
 meeting/handwritten/daily note appears — a few short runs a day.
 
-The deployed posture is **local-only** (`TRANSPORT=local`): extraction runs
-on **oMLX** (`Qwen3.5-35B-A3B-4bit`, MLX backend, ~2–10 s per extraction)
-and *waits* when the server is down rather than ever falling back to a
-cloud provider — filing is latency-tolerant by design, so an outage costs
-nothing but delay. The code also carries an Ollama transport (same `local`
-chain, tried after oMLX); it is currently uninstalled — reinstate with
+The deployed posture is **local-only** (`TRANSPORT=local`), and `local` is
+also the **code default** — the value the script uses when `entities.conf` is
+missing or unreadable — so a lost or damaged config fails safe on-device
+rather than silently widening the privacy boundary. Extraction runs on
+**oMLX** (`Qwen3.5-35B-A3B-4bit`, MLX backend, ~2–10 s per extraction) and
+*waits* when the server is down rather than ever falling back to a cloud
+provider — filing is latency-tolerant by design, so an outage costs nothing
+but delay. The code also carries an Ollama transport (same `local` chain,
+tried after oMLX); it is currently uninstalled — reinstate with
 `brew install ollama`, a model pull, and `OLLAMA_MODEL=` in the conf.
-`auto` restores the DT-chat fallback for meeting/handwritten notes if
-availability ever matters more than consistency — but the extraction prompt
-embeds the full People roster (every name and alias), so under `auto` each
-DT-chat extraction ships the whole roster to DT chat's configured provider,
-not just the note being extracted; the local-only posture keeps this moot
-today. oMLX serves an OpenAI-compatible API on :8000
+
+`auto` and `dtchat` are the **explicit cloud opt-ins**, and they are the only
+transports that can leave the machine. `auto` restores the DT-chat fallback
+for meeting/handwritten notes when a local model is unavailable; `dtchat`
+forces DT chat for those sources. The catch is that the extraction prompt
+embeds the full People roster (every name and alias), so each DT-chat
+extraction ships the *whole roster* — not just the note being extracted — to
+DT chat's configured provider. Because that is a real privacy-boundary change,
+selecting `auto` or `dtchat` logs a prominent notice on every run; leave it on
+`local` unless you have decided availability matters more than keeping the
+roster on-device. oMLX serves an OpenAI-compatible API on :8000
 (`extract_omlx` uses `response_format: json_schema` +
 `chat_template_kwargs: {enable_thinking: false}`); models are MLX builds
 from HuggingFace in `~/.omlx/models/`. The oMLX app (menu-bar,
@@ -371,5 +393,17 @@ brief passes `--urgent` to the battery gate because it is deadline-bound.
   do I know at X" becomes a real question; `Employer` is a string until then.
 - **Mesh/CRM enrichment feeds** — rejected as a second source of truth.
 - **Multi-hop queries** ("friends of my Chicago friends") — known weak spot of
-  the DT-native approach; use the DEVONthink MCP server from an AI client for
-  these rather than building query infrastructure.
+  the DT-native approach; no query infrastructure is built for these. Note the
+  DEVONthink MCP server **cannot** answer them: `/20_ENTITIES/People` and
+  `_Review` are excluded from AI chat, so MCP refuses those records by design
+  (do not lift the exclusion for this — the records are distilled dossiers).
+  The retrieval path over People is the bridge or plain osascript, which read
+  entity records directly. To pull the whole roster with bodies, run the
+  `dump_people` op through an ops file:
+
+  ```bash
+  echo '{"ops":[{"op":"dump_people","include_bodies":true}]}' > /tmp/ops.json
+  osascript -l JavaScript ~/.local/bin/entity-dt-bridge.js /tmp/ops.json | jq .
+  ```
+
+  then do the graph walk over that JSON however you like.

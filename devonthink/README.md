@@ -4,9 +4,70 @@ Behold my needlessly complex, fully-automated document-processing pipeline. It's
 
 Pipeline scripts live in [`../stow/devonthink/`](../stow/devonthink/) (stowed to `$HOME` via GNU Stow). Standalone utilities and documentation live here.
 
+When something breaks, jump to the [Runbook](docs/runbook.md) — recovery is organized by symptom (stuck inbox record, missing brief, dead agent, duplicate imports, database restore, …).
+
+## Multi-Mac Topology (Driver / Follower)
+
+The Lorebook database syncs across every Mac over CloudKit, but exactly **one** machine — the *driver* — runs the document-mutating automation: the ingest watchers, the scheduled importers, the morning brief, entity filing, and the daily-note/archive jobs. Every other Mac is a *follower*: it keeps DEVONthink and Maestral alive and serves reads and UI, but never writes to the synced database. Two drivers would race each other's mutations over the same synced records, which is exactly what this split prevents.
+
+**Role resolution** — `~/.local/bin/should-run-dt-driver` decides, first match wins:
+
+1. `~/.config/dt-pipeline/role` containing the word `driver` or `follower`.
+2. This host's `LocalHostName` (`scutil --get LocalHostName`) listed one-per-line in `~/.config/dt-pipeline/driver-hosts`.
+3. **Default: follower.** A Mac with no marker sits passive rather than becoming an accidental co-driver.
+
+`--urgent` / `--force` always pass, so a deliberate manual run works on any Mac regardless of role. `setup.sh` prompts for the role the first time you opt into the pipeline and writes the role file.
+
+**What runs where:**
+
+| Launch agent | Driver | Follower |
+| --- | --- | --- |
+| `com.user.dt-watchdog` | ✅ | ✅ (keeps DT + database open on every Mac) |
+| `com.user.dt-daily-note` | ✅ | — |
+| `com.user.singlefile-watcher` | ✅ | — |
+| `com.user.boox-import-watcher` | ✅ | — |
+| `com.user.granola-import` | ✅ | — |
+| `com.user.github-stars-import` | ✅ | — |
+| `com.user.dt-morning-brief` | ✅ | — |
+| `com.user.entity-filing` | ✅ | — |
+| `com.user.dt-database-archive` | ✅ | — |
+
+On a follower, `setup.sh` loads only `dt-watchdog` and **boots out** any of the driver-only labels that an earlier bootstrap left loaded, so a demotion is a single re-run.
+
+**Runtime backstops** (defense in depth, for a follower still carrying a driver agent from a pre-role-split bootstrap):
+
+- The two fswatch watchers (`singlefile-watcher.sh`, `boox-import-watcher.sh`) re-check the role at startup **and on every event** — a follower's watcher parks in a wait-for-promotion loop rather than exiting (an exit would churn launchd's `KeepAlive` throttle) and skips each file.
+- `dt-watchdog.sh` gates its Maestral launch, watcher-liveness, interval-agent-liveness, and stuck-capture/stale-export checks on the driver role, so a follower's watchdog never pages about agents that are deliberately absent.
+- `create-daily-note.sh` self-skips on a follower (an explicit date argument counts as an urgent manual run).
+- Both network importers call `should-run-dt-driver` before touching the database, and every auto-firing mutating smart rule guards on it too — a follower's rule engine fires then no-ops while the database syncs in over CloudKit.
+
+**Promote or demote a Mac** — edit the role file and re-run setup; setup reconciles the loaded agents to the role (booting out the driver-only ones on a demotion):
+
+```bash
+echo driver > ~/.config/dt-pipeline/role      # or: echo follower > ~/.config/dt-pipeline/role
+./scripts/setup.sh
+```
+
+To flip roles by hand without a full setup run, boot out the driver-only agents yourself:
+
+```bash
+for l in dt-daily-note singlefile-watcher boox-import-watcher granola-import \
+         github-stars-import dt-morning-brief entity-filing dt-database-archive; do
+  launchctl bootout "gui/$(id -u)/com.user.$l" 2>/dev/null
+done
+```
+
+**Verify what's loaded:**
+
+```bash
+launchctl list | grep com.user.
+```
+
+A driver shows all nine `com.user.*` agents; a follower shows only `com.user.dt-watchdog`.
+
 ## Custom Metadata Setup
 
-The following custom metadata fields must be created in DEVONthink before the pipeline will work (Settings → Data → Custom Metadata):
+The pipeline keys on the following custom metadata fields. You do **not** create them by hand on a fresh machine — they are seeded automatically (see [Seeding and reconciliation](#seeding-and-reconciliation) below); this table is the reference for what each one means. To inspect or add display names, see Settings → Data → Custom Metadata.
 
 | Field               | Type            | Purpose                                                                                                                                                                                                                                                                                      |
 | ------------------- | --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -52,6 +113,32 @@ The following custom metadata fields must be created in DEVONthink before the pi
 | EntityFiled         | Boolean         | Set on source documents (meeting notes, handwritten notes, daily notes) once the entity-filing step has extracted them (or a proposal was applied). Authoritative gate is the state file; this flag is the in-DT audit trail                                                                 |
 
 > **Migration Note — `AI-Renamed` retired.** The earlier `AI-Renamed` boolean flag has been replaced by `NameLocked`. If any existing records still carry `AI-Renamed` metadata, you can safely ignore or batch-clear it; it is no longer referenced by any rule or script.
+
+### Seeding and reconciliation
+
+These fields — and the smart rules, smart groups, and batch-processing presets the pipeline depends on — live in `~/Library/Application Support/DEVONthink/` as plists that DEVONthink rewrites at runtime, so they can't be stowed as symlinks (an atomic-rename save would replace a symlink with a real file and silently de-stow it). Instead the repo keeps a tracked seed under `stow/devonthink/_seed/` and `setup.sh` runs [`scripts/seed-devonthink-config.sh`](../scripts/seed-devonthink-config.sh) to copy it into place. Seeded files:
+
+- `CustomMetaData.plist` — every field in the table above (including `GranolaID` / `GranolaParticipants`), so the fields exist the first time DT launches.
+- `SmartRules.plist`, `SmartGroups.plist`, `BatchProcessing.plist` — the rule engine, smart groups, and batch presets.
+
+Seeding is **copy-if-absent**: once a destination plist exists, DEVONthink owns it, so the seed never clobbers a live file. That makes it idempotent and safe to run with DT open — but it also means a repo update to a seeded rule or field does **not** reach a machine that already has the plist; `setup.sh` alone can't push it.
+
+To pull repo seed changes onto an existing machine, use the reconciler ([`scripts/reconcile-devonthink-seed.sh`](../scripts/reconcile-devonthink-seed.sh)):
+
+```bash
+# Report drift only — a table of missing | same | differs. Nothing is written.
+# (Plists are compared after plutil canonicalization, so byte-order noise isn't drift.)
+./scripts/reconcile-devonthink-seed.sh
+
+# Apply seed files over the live ones. Each live file is backed up first to
+# ~/.local/state/devonthink/seed-backups/<timestamp>/. Quit DEVONthink first —
+# it rewrites these plists at runtime and would clobber/be clobbered by the copy;
+# --apply refuses while DT is running unless you add --force.
+./scripts/reconcile-devonthink-seed.sh --apply             # everything that differs
+./scripts/reconcile-devonthink-seed.sh --apply "Library/Application Support/DEVONthink/SmartRules.plist"
+```
+
+Going the other way — after editing **any** rule, smart group, metadata field, or batch preset in DEVONthink's GUI — refresh the seed so the change is versioned: quit DT and run [`scripts/dump-devonthink-seed.sh`](../scripts/dump-devonthink-seed.sh) (the reverse copy; `--force` to run with DT open), then commit the diff. The seed is the only carrier of that opaque plist state, so it goes stale the moment you edit config in the app and don't dump.
 
 ## Boox -> Dropbox -> Mac
 
@@ -316,7 +403,7 @@ Either way, `capture-bookmarks-batch.py` launches in the background, a macOS not
 
 ### AI chat transcript rewrite
 
-When the SingleFile capture's source URL is hosted on `claude.ai` or `gemini.google.com`, the defuddle output is a raw turn-by-turn transcript that reads poorly as a reference document. Before import, `ingest-singlefile-html.py` calls DEVONthink's `get chat response` with a curated rewrite prompt that reorganizes the transcript by topic, drops conversational framing (greetings, "great question", model signatures, the user's questions restated), and applies the prose style rules from `~/.claude/CLAUDE.md`. The result is a topic-organized writeup, not a summary — every fact, recommendation, and caveat the assistant produced is preserved.
+When the SingleFile capture's source URL is hosted on `claude.ai`, `gemini.google.com`, or `chatgpt.com`, the defuddle output is a raw turn-by-turn transcript that reads poorly as a reference document. Before import, `ingest-singlefile-html.py` calls DEVONthink's `get chat response` with a curated rewrite prompt that reorganizes the transcript by topic, drops conversational framing (greetings, "great question", model signatures, the user's questions restated), and applies the prose style rules from `~/.claude/CLAUDE.md`. The result is a topic-organized writeup, not a summary — every fact, recommendation, and caveat the assistant produced is preserved.
 
 A provenance line is prepended to the markdown body inside the import AppleScript: `*Generated from a conversation with Claude on YYYY-MM-DD. Original capture: [title](x-devonthink-item://...).*` The link points at the HTML snapshot record so the original conversation is one click away.
 
@@ -577,7 +664,7 @@ The schedule is set to a daytime wake-hour rather than the small hours: `StartCa
 
 ### Pipeline Integration
 
-The primary DEVONthink smart rule pipeline integrates directly with daily notes via the **Process: Daily Notes** step:
+The primary DEVONthink smart rule pipeline integrates directly with daily notes through [Post-Enrich & Archive](#post-enrich--archive) (which absorbed the retired standalone "Process: Daily Notes" rule):
 
 - **Extracting Daily Logs:** For handwritten notes, the pipeline searches for headers like "Daily Notes", "Today", "Journal", or "Log". If found, it extracts the content beneath them and automatically appends it to today's daily note. Deduplication ensures that repeated notebook updates don't result in duplicated entries.
 - **Linking Temporal Events:** For any document processed by the pipeline, if the AI enrichment step identified a specific `EventDate` (e.g., from meeting notes), the pipeline automatically appends a wikilink to that document on the daily note corresponding to that specific date. If the target note doesn't exist yet — a past/future `EventDate`, or a morning where the 5:00 AM `create-daily-note.sh` run was missed — Post-Enrich & Archive creates it on demand (matching `create-daily-note.sh`'s heading and `Daily Note` tag) rather than dropping the link. Extract: Web Content and `ingest-singlefile-html.py` create today's note on demand the same way, so captures landing between midnight and the 05:00 seeder keep their daily-note entry.
@@ -726,3 +813,4 @@ A *sync-store* loss plus a dead machine is the only scenario with no automated a
 - [GitHub Stars Integration](docs/github-stars.md) — automated bookmark import for starred repos
 - [Summarize Skill](docs/summarize.md) — on-demand content summarization via Claude Code
 - [Entity Layer](docs/entities.md) — person/place/event memory: morning briefings, reconnect digests, AI fact filing
+- [Runbook](docs/runbook.md) — recovery procedures organized by symptom

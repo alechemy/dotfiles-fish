@@ -24,6 +24,13 @@ roster it carries, and each note is extracted exactly once, so an empty
 roster would burn every note on a proposal naming bare first names it can't
 resolve. Seed one person and the next run resumes on its own.
 
+Before the very first seeding, create the entity groups once: run
+`~/.local/bin/dt-entity-bootstrap` in a terminal. It makes the
+`20_ENTITIES/{People,Places,Events,_Review,_Review/Approved}` groups (if they
+aren't there already), excludes the sensitive ones from AI chat, and stamps
+`EntityType` on any hand-made records — all idempotent, so it's safe to re-run
+whenever you add records by hand.
+
 So the first sitting is: **Data → New from Template → Entities → Person** for
 your inner circle, and for each one fill in the DEVONthink **aliases** field
 with every short form you actually use — "Alison", "Ali". Aliases are what

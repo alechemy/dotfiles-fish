@@ -358,8 +358,8 @@ on run argv
 end run
 
 -- Returns the daily note for dateStr (YYYY-MM-DD), creating it in destGroup
--- if it doesn't exist yet. The 6:15 AM launchd job (create-daily-note.sh)
--- normally seeds these, but desktop captures between midnight and 06:15
+-- if it doesn't exist yet. The 05:00 launchd job (create-daily-note.sh)
+-- normally seeds these, but desktop captures between midnight and 05:00
 -- land before the note exists; creating on demand keeps the wikilink from
 -- being dropped. Mirrors create-daily-note.sh's content and "Daily Note"
 -- tag so an on-demand note is indistinguishable from a seeded one.
