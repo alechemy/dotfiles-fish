@@ -12,6 +12,8 @@
 //   stdout   {"ok": true, "results": [...]}                on success
 //            {"ok": false, "error": "...", "failed_op": i,
 //             "results": [...partial...]}                  on first failure
+//            {"ok": false, "unavailable": true, "error": "..."}
+//                                                          DT/db not reachable
 //
 // Ops:
 //   dump_people        {include_bodies?}                -> [{uuid,name,aliases,md,body?}]
@@ -166,16 +168,33 @@ function linkEntities(line, excludeUuid) {
   return out
 }
 
-// Drop lines whose source item-link already appears in the body, link known
-// entities in the remainder, then insert under the given section header.
+// A filed fact's dedup identity: its source-note UUID plus the line's text
+// with every item-link flattened to its label. Keying on content rather than
+// just the source link keeps re-applies idempotent while letting a corrected
+// re-extraction of the same note file the genuinely new facts it surfaces;
+// flattening the links means auto-linking never changes the identity.
+function factSignature(line) {
+  const src = (line.match(
+    /\[source\]\(x-devonthink-item:\/\/([0-9A-Fa-f-]+)\)/) || [])[1] || ''
+  const text = line
+    .replace(/\[([^\]]*)\]\(x-devonthink-item:\/\/[0-9A-Fa-f-]+\)/g, '$1')
+    .replace(/\s+/g, ' ').trim()
+  return src + '|' + text
+}
+
+// Skip lines already filed (by fact signature), link known entities in the
+// remainder, then insert under the given section header.
 function appendLogLines(rec, lines, section) {
   const body = rec.plainText()
   const uuid = rec.uuid()
+  const seen = Object.create(null)
+  for (const bl of body.split('\n')) seen[factSignature(bl)] = true
   const fresh = []
   let skipped = 0
   for (const line of lines || []) {
-    const src = (line.match(/x-devonthink-item:\/\/([0-9A-Fa-f-]+)/) || [])[1]
-    if (src && body.indexOf(src) !== -1) { skipped++; continue }
+    const sig = factSignature(line)
+    if (seen[sig]) { skipped++; continue }
+    seen[sig] = true
     fresh.push(linkEntities(line, uuid))
   }
   if (fresh.length) {
@@ -192,7 +211,30 @@ function run(argv) {
   const ops = JSON.parse(opsRaw).ops || []
 
   const dt = Application('com.devon-technologies.think')
-  const db = dt.databases.byName(DB_NAME)
+
+  // A byName() specifier resolves lazily, so a closed or still-loading
+  // database would surface as a bare "Can't get object." from whichever op
+  // touches it first. Enumerate, and report unavailability as its own answer.
+  let db = null
+  try {
+    const dbs = dt.databases()
+    for (let i = 0; i < dbs.length; i++) {
+      if (String(dbs[i].name()) === DB_NAME) { db = dbs[i]; break }
+    }
+  } catch (e) {
+    return JSON.stringify({
+      ok: false,
+      unavailable: true,
+      error: 'DEVONthink is not answering: ' + String(e.message || e),
+    })
+  }
+  if (db === null) {
+    return JSON.stringify({
+      ok: false,
+      unavailable: true,
+      error: 'database not open: ' + DB_NAME,
+    })
+  }
 
   function groupAt(path) {
     const g = dt.getRecordAt(path, { in: db })

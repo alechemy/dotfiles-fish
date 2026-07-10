@@ -21,6 +21,14 @@ Safety model:
   - Meeting attendance (GranolaParticipants) bumps LastContact for
     matched people deterministically on every scan — no LLM involved, so
     it applies in both modes.
+  - Extraction is gated on a seeded roster (MIN_ROSTER). The prompt's
+    whole resolution step is the roster, and a source is only ever
+    extracted once (its UUID lands in processed_ids), so extracting
+    against an empty People group burns each source on a proposal full of
+    unresolvable bare first names.
+  - An approved proposal is re-verified against the *live* roster before
+    its ops run: a frozen `ensure_person "Alison"` written before
+    "Alison Vance" was seeded would otherwise create a duplicate record.
 
 Privacy: daily notes live in /10_DAILY, which is excluded from
 DEVONthink's AI chat by design. This script honors that boundary — daily
@@ -41,6 +49,12 @@ Config (~/.config/dt-pipeline/entities.conf, KEY=VALUE):
   OLLAMA_URL=http://127.0.0.1:11434
   FILING_MODE=suggest|auto           default suggest
   MAX_PER_RUN=<n>                    extraction budget per run, default 3
+  MIN_ROSTER=<n>                     extract only once People holds at least
+                                     this many records, default 1. Applying
+                                     approved proposals and the attendance
+                                     pass are never gated. TRANSPORT=off is
+                                     the blunter pause: it stops extraction
+                                     without touching processed_ids either.
   SELF_NAME=<name>                   extra self-alias to exclude
   SKIP_SOURCE_TITLES=<regex>         sources whose name matches are never
                                      extracted (recurring standups etc.);
@@ -56,6 +70,10 @@ Usage:
     entity-filing.py --force UUID    # re-extract one source record
     entity-filing.py --apply-only    # only process _Review/Approved
     entity-filing.py --scan-only     # skip the apply phase
+    entity-filing.py --backfill-contacts
+                                     # bump LastContact from every meeting on
+                                     # record, ignoring BUMP_WINDOW_DAYS; run
+                                     # once after seeding People
 """
 
 import fcntl
@@ -68,7 +86,7 @@ import sys
 import tempfile
 import urllib.error
 import urllib.request
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 sys.path.insert(0, str(Path.home() / ".local" / "bin"))
@@ -86,6 +104,7 @@ REVIEW_PATH = "/20_ENTITIES/_Review"
 APPROVED_PATH = "/20_ENTITIES/_Review/Approved"
 MAX_ATTEMPTS = 5
 UPDATE_FIELDS = ("employer", "role", "city", "email")
+BUMP_WINDOW_DAYS = 60
 
 CHAT_ROLE = (
     "You are a personal-CRM extraction assistant that responds only with JSON."
@@ -201,6 +220,7 @@ def load_config():
         "OLLAMA_URL": "http://127.0.0.1:11434",
         "FILING_MODE": "suggest",
         "MAX_PER_RUN": "3",
+        "MIN_ROSTER": "1",
         "SELF_NAME": "",
         "SKIP_SOURCE_TITLES": "",
         "IDLE_MINUTES": "10",
@@ -278,6 +298,14 @@ def acquire_lock():
 # ---------------------------------------------------------------------------
 
 
+class BridgeUnavailable(RuntimeError):
+    """DEVONthink is not answering or the Lorebook database is not open.
+
+    Transient by nature (app relaunch, database still loading), so callers
+    end the run quietly rather than charging a source an attempt for it.
+    """
+
+
 def run_bridge(ops, timeout=300):
     fd, path = tempfile.mkstemp(suffix=".json")
     try:
@@ -293,6 +321,8 @@ def run_bridge(ops, timeout=300):
         raise RuntimeError(f"bridge failed: {result.stderr.strip()}")
     out = json.loads(result.stdout)
     if not out.get("ok"):
+        if out.get("unavailable"):
+            raise BridgeUnavailable(out.get("error"))
         raise RuntimeError(
             f"bridge op {out.get('failed_op')} failed: {out.get('error')}"
         )
@@ -680,8 +710,33 @@ def proposal_body(source, source_date, plans, ops):
     return "\n".join(lines)
 
 
+def stale_person_ops(ops, index, people):
+    """`ensure_person` ops whose name no longer resolves the way the proposal
+    assumed. The ops are frozen when the proposal is written, but the roster
+    keeps growing: a proposal that says `ensure_person "Alison"` because People
+    was empty at extraction time would, once "Alison Vance" is seeded, match
+    nothing and quietly create a second record. `ensure_person` resolves on
+    exact name/alias only, so a shared name token is the signal. Returns
+    [(name, [near matches])]; `"confirm_new": true` in an op opts out."""
+    stale = []
+    for op in ops:
+        if op.get("op") != "ensure_person" or op.get("confirm_new"):
+            continue
+        name = str(op.get("name", "")).strip()
+        if not name or index.get(norm(name)):
+            continue
+        near = near_matches(name, people)
+        if near:
+            stale.append((name, near))
+    return stale
+
+
 def apply_approved(dry_run):
     approved = run_bridge([{"op": "list_group", "path": APPROVED_PATH}])[0]
+    if not approved:
+        return
+    people = run_bridge([{"op": "dump_people", "include_bodies": False}])[0]
+    index = roster_index(people)
     for rec in approved:
         text = run_bridge([{"op": "get_text", "uuid": rec["uuid"]}])[0]["text"]
         blocks = re.findall(r"```json\s*\n(.*?)\n```", text, re.DOTALL)
@@ -697,11 +752,29 @@ def apply_approved(dry_run):
                       exc, extra={"record_name": rec["name"],
                                   "record_uuid": rec["uuid"]})
             continue
+        if not isinstance(ops, list) or not all(isinstance(o, dict) for o in ops):
+            log.error("approved proposal ops are not a JSON array of objects, "
+                      "skipping", extra={"record_name": rec["name"],
+                                         "record_uuid": rec["uuid"]})
+            continue
+        stale = stale_person_ops(ops, index, people)
+        if stale:
+            for name, near in stale:
+                log.warning(
+                    'proposal would create "%s" alongside %s — add "%s" as an '
+                    'alias on the existing record, or set "confirm_new": true '
+                    "in the op to create a separate person; leaving in Approved",
+                    name, ", ".join(near), name,
+                    extra={"record_name": rec["name"],
+                           "record_uuid": rec["uuid"]})
+            continue
         if dry_run:
             log.info("[dry-run] would apply %d ops from %s", len(ops), rec["name"])
             continue
         try:
             run_bridge(ops + [{"op": "trash", "uuid": rec["uuid"]}])
+        except BridgeUnavailable:
+            raise
         except Exception as exc:
             log.error("applying proposal failed (%s), leaving in Approved: %s",
                       type(exc).__name__, exc,
@@ -710,6 +783,9 @@ def apply_approved(dry_run):
             continue
         log.info("applied %d ops", len(ops),
                  extra={"record_name": rec["name"], "record_uuid": rec["uuid"]})
+        if any(op.get("op") == "ensure_person" for op in ops):
+            people = run_bridge([{"op": "dump_people", "include_bodies": False}])[0]
+            index = roster_index(people)
 
 
 # ---------------------------------------------------------------------------
@@ -751,7 +827,7 @@ def pick_transport(config, kind):
     return local_pick(LOCAL_TRANSPORTS) or "dtchat"
 
 
-def scan(config, state, dry_run, force_uuid, user_invoked):
+def scan(config, state, dry_run, force_uuid, user_invoked, backfill_contacts):
     people, sources = run_bridge([
         {"op": "dump_people", "include_bodies": False},
         {"op": "list_sources"},
@@ -762,12 +838,19 @@ def scan(config, state, dry_run, force_uuid, user_invoked):
 
     # Deterministic attendance pass: meeting participants bump LastContact
     # whether or not extraction can run. bump_lastcontact only ever raises
-    # the date, so re-running is harmless.
+    # the date, so a meeting older than the window can no longer change any
+    # LastContact — re-scanning the whole archive each tick is pure waste.
+    # --backfill-contacts drops the window for a one-off replay after seeding.
+    window_start = (date.today() - timedelta(days=BUMP_WINDOW_DAYS)).isoformat()
     bump_ops = []
     for source in sources:
         if source["kind"] != "meeting":
             continue
         d = source_date_of(source)
+        added = source.get("added", "")
+        if not backfill_contacts and d < window_start and (
+                not added or added < window_start):
+            continue
         for raw_name in (source.get("participants") or "").split(","):
             n = norm(raw_name)
             if not n or n in selves:
@@ -776,8 +859,25 @@ def scan(config, state, dry_run, force_uuid, user_invoked):
             if len(hits) == 1:
                 bump_ops.append({"op": "bump_lastcontact",
                                  "uuid": hits[0]["uuid"], "date": d})
+    bumped = 0
     if bump_ops and not dry_run:
-        run_bridge(bump_ops)
+        bumped = sum(1 for r in run_bridge(bump_ops) if r.get("changed"))
+
+    if backfill_contacts:
+        if dry_run:
+            log.info("[dry-run] backfill: %d attendance bumps planned",
+                     len(bump_ops))
+        else:
+            log.info("backfill: %d of %d attendance bumps raised a LastContact",
+                     bumped, len(bump_ops))
+        return
+
+    min_roster = int(config["MIN_ROSTER"])
+    if len(people) < min_roster and not force_uuid:
+        log.info("People holds %d record(s), MIN_ROSTER is %d — extraction "
+                 "paused until /20_ENTITIES/People is seeded",
+                 len(people), min_roster)
+        return
 
     skip_re = None
     if config["SKIP_SOURCE_TITLES"]:
@@ -862,6 +962,8 @@ def scan(config, state, dry_run, force_uuid, user_invoked):
             else:
                 raw = extract_dtchat(prompt)
             extracted_people, extracted_events = parse_extraction(raw)
+        except BridgeUnavailable:
+            raise
         except Exception as exc:
             state["attempts"][source["uuid"]] = attempts + 1
             if not dry_run:
@@ -877,6 +979,8 @@ def scan(config, state, dry_run, force_uuid, user_invoked):
             plans += build_event_plans(extracted_events, selves, source_date)
             file_source(config, state, source, source_date, plans, filing_mode,
                         dry_run)
+        except BridgeUnavailable:
+            raise
         except Exception as exc:
             state["attempts"][source["uuid"]] = attempts + 1
             if not dry_run:
@@ -944,12 +1048,14 @@ def main():
     dry_run = "--dry-run" in args
     apply_only = "--apply-only" in args
     scan_only = "--scan-only" in args
+    backfill_contacts = "--backfill-contacts" in args
     force_uuid = None
     if "--force" in args:
         idx = args.index("--force")
         if idx + 1 < len(args):
             force_uuid = args[idx + 1]
-    user_invoked = dry_run or force_uuid or apply_only or scan_only
+    user_invoked = bool(dry_run or force_uuid or apply_only or scan_only
+                        or backfill_contacts)
 
     subprocess.run(
         [os.path.expanduser("~/.local/bin/pipeline-record-run"),
@@ -983,10 +1089,14 @@ def main():
     config = load_config()
     state = load_state()
 
-    if not scan_only:
-        apply_approved(dry_run)
-    if not apply_only:
-        scan(config, state, dry_run, force_uuid, user_invoked)
+    try:
+        if not scan_only and not backfill_contacts:
+            apply_approved(dry_run)
+        if not apply_only:
+            scan(config, state, dry_run, force_uuid, user_invoked,
+                 backfill_contacts)
+    except BridgeUnavailable as exc:
+        log.info("skipping: %s", exc)
 
 
 if __name__ == "__main__":

@@ -15,6 +15,34 @@ jots through a local LLM and *proposes* new facts — and, when a note
 documents a trip, celebration, or gathering, an Event record with its
 attendees; nothing is created or changed until you approve it.
 
+## Start here: seed People before filing can help
+
+Filing does not extract while `20_ENTITIES/People` is empty — it logs
+"extraction paused until /20_ENTITIES/People is seeded" and stops. That is
+deliberate. The extraction prompt's only way to know who anyone is is the
+roster it carries, and each note is extracted exactly once, so an empty
+roster would burn every note on a proposal naming bare first names it can't
+resolve. Seed one person and the next run resumes on its own.
+
+So the first sitting is: **Data → New from Template → Entities → Person** for
+your inner circle, and for each one fill in the DEVONthink **aliases** field
+with every short form you actually use — "Alison", "Ali". Aliases are what
+let a proposal that says `ensure_person "Alison"` land in the record you
+just made for "Alison Vance" instead of creating a second one beside it.
+Approving an existing proposal without the alias is caught rather than
+silently duplicated (the run warns and leaves the proposal in `Approved`),
+but the alias is what makes it *work* rather than merely fail safely.
+
+Then, once, replay meeting history into everyone's contact dates:
+
+```bash
+~/.local/bin/entity-filing.py --backfill-contacts
+```
+
+The routine attendance pass only looks back 60 days, so without this a
+person you seeded today shows as "no recorded contact" in Reconnect even
+though you have meetings with them on file.
+
 ## Your daily rhythm
 
 - **Morning:** the daily note has a `## Briefing` section by ~5:15 (or moments after the Mac wakes). Read it.
@@ -23,7 +51,9 @@ attendees; nothing is created or changed until you approve it.
   names. "Bob's new role is X, Alice expecting in March" files itself;
   "talked to him about the thing" files nothing.
 - **Every day or two (2 minutes):** open `20_ENTITIES/_Review` and process
-  proposals — see the walkthrough below.
+  proposals — see the walkthrough below. The briefing's `## Entity Review`
+  line counts what's waiting, and separately flags anything still sitting in
+  `_Review/Approved`, which means the run refused to apply it.
 - **Monday:** the `## Reconnect` section lists active people past their
   contact threshold (family/close friends 30 days, friends 60, colleagues
   90). Text someone, or set their `entitystatus` to `dormant` to silence
@@ -74,6 +104,12 @@ six attendees. Things you might do to it:
   "possible existing match: …" hints on new-person proposals: usually the
   right fix is adding the alias to the existing record, deleting the
   proposal, and re-running `entity-filing.py --force <source-uuid>`.
+  You don't have to catch this by eye. Apply re-checks each
+  `ensure_person` against the roster as it stands *now*, and a proposal that
+  would create "Maya" next to an existing "Maya Chen" is refused and left in
+  `Approved` with a warning in the log. Add the alias and it applies on the
+  next run; if they really are two different Mayas, put
+  `"confirm_new": true` in that op to say so.
 - **Add a fact of your own** while you're there: append a string to that
   person's `log_lines`, format `"- 2026-06-13 — Whatever you know."` (the
   source link is optional for hand-added lines).

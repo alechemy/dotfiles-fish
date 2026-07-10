@@ -46,8 +46,10 @@ Rules the automation enforces:
   with the fact's date and an `x-devonthink-item://` link to the source
   document. When a queryable field changes (new employer), the field is
   updated *and* a `Employer: old → new` line is logged, so history survives.
-- **Idempotent by provenance.** A log line whose source link already appears
-  in the body is skipped, so re-running filing never duplicates facts.
+- **Idempotent by fact.** A log line already in the body — same source, date,
+  and text, ignoring auto-link decoration — is skipped, so re-running filing
+  never duplicates facts, while re-extracting a corrected note (`--force`)
+  still files the genuinely new facts it surfaces.
 - **Known entities are auto-linked.** When a log line is filed, the bridge
   wraps the first mention of any *existing* Person/Place/Event name or alias
   in an item link (longest name wins, never inside an existing link, never
@@ -98,6 +100,14 @@ social plans — without waiting for a filed fact. Yesterday, not today,
 because a completed day can't have its meetings cancelled out from under the
 bump; and bumps only ever raise the date, so re-runs are harmless.
 
+The brief also writes an `## Entity Review` section counting proposals that
+need attention: those awaiting review in `_Review`, and separately any left
+sitting in `_Review/Approved`, which means filing refused to apply them (bad
+ops JSON, a failing op, or the stale-`ensure_person` guard below). Nothing
+else counts the Approved group — it is normally emptied by the next run — and
+those refusals only log at `WARNING`, which is below the watchdog's
+notification threshold, so without this line they would be invisible.
+
 Note: only calendars in macOS Calendar are visible. Work meetings appear in
 the brief because your company email account is
 added in Settings → Internet Accounts — re-add it on a fresh machine.
@@ -111,6 +121,18 @@ Sources: records with `DocumentType` containing "Meeting", records with
 still being written). Processed source UUIDs live in
 `~/.local/state/devonthink/entity-filing-state.json` (fail-closed, like the
 Granola importer); newest sources first, `MAX_PER_RUN` extractions per run.
+
+**Extraction is gated on a seeded roster** (`MIN_ROSTER`, default 1): below
+the threshold the scan logs why and stops before any extraction, while the
+apply phase, the attendance pass, and `--force` keep working. The roster *is*
+the prompt's entire resolution step, and a source is extracted exactly once —
+its UUID goes into `processed_ids` whether or not the extraction was any good
+— so running against an empty People group spends every source on a proposal
+full of bare first names ("Alison", "Mom") that resolve to nothing. The gate
+is self-clearing: seed one person and the next tick resumes. `TRANSPORT=off`
+is the blunter pause — `pick_transport` returns `None` before the source is
+ever read, so nothing is marked processed and nothing is charged an attempt;
+sources simply queue until the transport comes back.
 
 The extraction prompt carries the current People roster (names + aliases) so
 the model resolves nicknames and pronouns to known people; the script then
@@ -141,7 +163,12 @@ no working-style observations, and "an empty list is a good answer".
 
 Meeting attendance is deterministic and LLM-free: any `GranolaParticipants`
 name that uniquely matches a Person record bumps its `LastContact` on every
-scan (bump only ever raises the date).
+scan (bump only ever raises the date). The pass is bounded to meetings from
+the last 60 days — an older meeting can no longer raise anyone's `LastContact`,
+so re-scanning the whole archive each tick is skipped. That window also means
+a person seeded today starts with no contact history from meetings older than
+it; `--backfill-contacts` runs the pass once over every meeting on record to
+recover that, and is worth running immediately after a seeding session.
 
 **Review loop:** proposals land in `/20_ENTITIES/_Review` with a human
 summary and the exact ops as a fenced JSON block. Move a proposal into
@@ -149,6 +176,17 @@ summary and the exact ops as a fenced JSON block. Move a proposal into
 executes the ops and trashes the proposal. Delete a proposal to reject it.
 Editing the JSON block before approving is supported — the ops are the truth,
 the prose is just a rendering.
+
+A proposal's ops freeze at extraction time but the roster keeps growing, so
+apply re-verifies every `ensure_person` against the **live** roster first:
+if its name matches no record or alias yet shares a name token with one
+(`ensure_person "Alison"` after `Alison Vance` was seeded), the proposal is
+left in `Approved` with a warning naming the collision, rather than silently
+creating a second record. Resolve it by adding the short form as an alias on
+the existing record, or by setting `"confirm_new": true` on that op when the
+two really are different people. This is the same near-match check that
+writes the "possible existing match" hints into a proposal, applied a second
+time at the moment the ops actually run.
 
 ### Transports and privacy
 
@@ -163,6 +201,7 @@ OLLAMA_MODEL=         # optional fallback server; empty = not installed
 OLLAMA_URL=http://127.0.0.1:11434
 FILING_MODE=suggest   # suggest | auto
 MAX_PER_RUN=3
+MIN_ROSTER=1          # extract only once People holds this many records
 SELF_NAME=            # extra self-alias to exclude from extraction
 SKIP_SOURCE_TITLES=Round ?Table|Standup|…   # sources never extracted
 IDLE_MINUTES=10       # local extraction waits for user inactivity; 0 = off
@@ -240,6 +279,11 @@ plus fence-stripping and strict validation in Python.
   verify during review; the LLM never merges, only extracts.
 - **Repeat extraction cost**: processed-state file + per-source attempt cap
   (5) so a persistently failing source is eventually parked.
+- **DEVONthink mid-relaunch**: the bridge resolves the Lorebook database by
+  enumeration before running any op and answers `{"unavailable": true}` when
+  the app or the database isn't there, so both orchestrators log a skip and
+  exit 0 instead of dying on a bare `Can't get object.` — and a source is
+  never charged an attempt for someone else's outage.
 - **Schema sprawl**: metadata is capped at the queryable few; everything else
   goes in the body. Resist adding fields.
 - **Upkeep fatigue**: the only manual acts are jotting (which you'd do anyway)
@@ -263,6 +307,10 @@ plus fence-stripping and strict validation in Python.
 
 # apply approved proposals right now
 ~/.local/bin/entity-filing.py --apply-only
+
+# after seeding People: replay every meeting on record into LastContact,
+# ignoring the 60-day attendance window
+~/.local/bin/entity-filing.py --backfill-contacts
 
 # drain the extraction backlog by hand — manual runs bypass the battery and
 # idle gates entirely; each pass extracts MAX_PER_RUN sources, so repeat (or

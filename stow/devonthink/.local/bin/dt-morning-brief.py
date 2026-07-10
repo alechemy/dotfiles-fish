@@ -60,6 +60,7 @@ BRIEF_HEADER = "## Briefing"
 RECONNECT_HEADER = "## Reconnect"
 REVIEW_HEADER = "## Entity Review"
 REVIEW_PATH = "/20_ENTITIES/_Review"
+APPROVED_PATH = REVIEW_PATH + "/Approved"
 LOG_BULLET_RE = re.compile(r"^- \d{4}-\d{2}-\d{2} — ")
 
 # Days without contact before a person surfaces in the Reconnect digest,
@@ -95,6 +96,14 @@ def run_osascript(script, args, timeout=120):
     return json.loads(result.stdout)
 
 
+class BridgeUnavailable(RuntimeError):
+    """DEVONthink is not answering or the Lorebook database is not open.
+
+    Transient by nature (app relaunch, database still loading); the brief's
+    launchd retries at 05:45/06:30/08:00 cover it, so the run ends quietly.
+    """
+
+
 def run_bridge(ops):
     fd, path = tempfile.mkstemp(suffix=".json")
     try:
@@ -104,6 +113,8 @@ def run_bridge(ops):
     finally:
         os.unlink(path)
     if not out.get("ok"):
+        if out.get("unavailable"):
+            raise BridgeUnavailable(out.get("error"))
         raise RuntimeError(f"bridge error: {out.get('error')}")
     return out["results"]
 
@@ -298,22 +309,33 @@ def build_reconnect(people, today):
 
 
 def review_nudge(today):
-    """Surface the filing review backlog so proposals don't sit unseen —
-    the Approved subgroup is the apply drop-zone, so it isn't a backlog."""
+    """Surface the filing review backlog so proposals don't sit unseen — the
+    Approved subgroup is the apply drop-zone, so it isn't a backlog, but a
+    proposal filing refused to apply stays there and would otherwise be
+    invisible: nothing counts it and its log line is only a WARNING."""
     try:
-        children = run_bridge([{"op": "list_group", "path": REVIEW_PATH}])[0]
+        children, approved = run_bridge([
+            {"op": "list_group", "path": REVIEW_PATH},
+            {"op": "list_group", "path": APPROVED_PATH},
+        ])
+    except BridgeUnavailable:
+        raise
     except Exception as exc:
         log.warning("could not count review proposals: %s", exc)
         return None
     pending = [c for c in children if c["name"] != "Approved"]
-    if not pending:
+    if not pending and not approved:
         return None
-    noun = "proposal" if len(pending) == 1 else "proposals"
-    return (
-        f"<!-- review-nudge:{today} -->\n\n"
-        f"- {len(pending)} filing {noun} awaiting review in "
-        f"`20_ENTITIES/_Review`"
-    )
+    lines = [f"<!-- review-nudge:{today} -->", ""]
+    if pending:
+        noun = "proposal" if len(pending) == 1 else "proposals"
+        lines.append(f"- {len(pending)} filing {noun} awaiting review in "
+                     f"`20_ENTITIES/_Review`")
+    if approved:
+        noun = "proposal" if len(approved) == 1 else "proposals"
+        lines.append(f"- {len(approved)} approved {noun} did not apply — see "
+                     f"`entity-filing` in the pipeline log")
+    return "\n".join(lines)
 
 
 def append_section(note_text, header, content):
@@ -437,6 +459,8 @@ def main():
 if __name__ == "__main__":
     try:
         main()
+    except BridgeUnavailable as exc:
+        log.info("skipping: %s", exc)
     except Exception as exc:
         log.error("FATAL: %s: %s", type(exc).__name__, exc)
         sys.exit(1)
