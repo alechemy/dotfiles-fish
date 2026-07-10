@@ -26,6 +26,15 @@ the [README](../README.md)): `EntityType`, `EntityStatus`, `City`, `Employer`,
 `Role`, `Relationship`, `Email`, `LastContact`. Everything narrative — partner,
 kids, how-we-met, and the dated fact history — lives in the record body:
 
+Two of those are enums that DEVONthink stores as free text, so a hand-typed
+value can miss silently. `Relationship` must resolve to `family`,
+`close-friend`, `friend`, or `colleague` (its Reconnect threshold), and
+`EntityStatus` to `active` or `dormant`. The brief folds case, spaces, and
+underscores before matching, then warns on anything left unresolved: an
+unknown `Relationship` skips Reconnect (as a blank one does), while an unknown
+`EntityStatus` is treated as `active` — failing open, so a typo can't quietly
+hide a person the way `dormant` deliberately does.
+
 ```markdown
 # Bob Carter
 

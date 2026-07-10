@@ -83,6 +83,7 @@ RECONNECT_DAYS = {
     "colleague": 90,
 }
 RECONNECT_LIMIT = 10
+ENTITY_STATUSES = {"active", "dormant"}
 
 # Calendars that never contain meetings worth briefing on.
 SKIP_CALENDARS = {"Birthdays", "Siri Suggestions", "US Holidays", "Holidays"}
@@ -171,6 +172,14 @@ def norm(s):
     s = unicodedata.normalize("NFKD", s or "")
     s = "".join(c for c in s if not unicodedata.combining(c))
     return re.sub(r"\s+", " ", s).strip().lower()
+
+
+def md_enum(value):
+    """Fold a hand-typed metadata value onto its canonical token: DEVONthink
+    types EntityStatus and Relationship as free text, so "Close Friend" and
+    "close_friend" reach us verbatim and would silently miss an exact
+    lookup — dropping the person out of Reconnect with no error."""
+    return re.sub(r"[\s_]+", "-", norm(value))
 
 
 def person_index(people):
@@ -319,11 +328,28 @@ def build_reconnect(people, today):
     overdue = []
     for p in people:
         md = p.get("md", {})
-        status = md.get("mdentitystatus", "active") or "active"
+        status = md_enum(md.get("mdentitystatus", "")) or "active"
+        if status not in ENTITY_STATUSES:
+            # Fail open: an unrecognized status surfaces the person alongside a
+            # warning, rather than hiding them the way a typo'd "dormant" would.
+            log.warning(
+                "unknown EntityStatus %r on %s — treating as active; expected "
+                "one of %s", md.get("mdentitystatus"), p["name"],
+                ", ".join(sorted(ENTITY_STATUSES)),
+                extra={"record_name": p["name"], "record_uuid": p["uuid"]})
+            status = "active"
         if status != "active":
             continue
-        threshold = RECONNECT_DAYS.get(md.get("mdrelationship", ""))
+        rel = md_enum(md.get("mdrelationship", ""))
+        threshold = RECONNECT_DAYS.get(rel)
         if not threshold:
+            if rel:
+                log.warning(
+                    "unknown Relationship %r — %s will never appear in "
+                    "Reconnect; expected one of %s",
+                    md.get("mdrelationship"), p["name"],
+                    ", ".join(sorted(RECONNECT_DAYS)),
+                    extra={"record_name": p["name"], "record_uuid": p["uuid"]})
             continue
         last = md.get("mdlastcontact", "")
         if not last:

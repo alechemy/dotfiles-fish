@@ -164,7 +164,9 @@ never rewrites what's there.
    alternate spelling you add to a Person record improves jot filing,
    calendar matching, and proposal resolution. When anything mismatches, the
    fix is almost always "add an alias".
-2. **Set `relationship` on people you care about** — without it they never
+2. **Set `relationship` to one of `family`, `close-friend`, `friend`,
+   `colleague`** — case and spacing don't matter ("Close Friend" works), but
+   any other value only earns a warning in the log. Without it they never
    appear in the Reconnect digest. `email` makes calendar matching exact.
 3. **Seed your inner circle by hand** (Data → New from Template → Entities →
    Person) rather than waiting for proposals; the automation enriches
