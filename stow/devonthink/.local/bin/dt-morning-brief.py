@@ -363,6 +363,13 @@ def build_reconnect(people, today):
         try:
             days = (today_d - date.fromisoformat(last)).days
         except ValueError:
+            # Free-text field; hiding the person on a hand-typed date would be
+            # worse than the missing-LastContact case it otherwise resembles.
+            log.warning(
+                "unparseable LastContact %r on %s — treating as no recorded "
+                "contact", last, p["name"],
+                extra={"record_name": p["name"], "record_uuid": p["uuid"]})
+            overdue.append((float("inf"), None, p))
             continue
         if days > threshold:
             overdue.append((days / threshold, days, p))

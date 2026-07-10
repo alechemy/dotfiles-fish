@@ -171,10 +171,15 @@ class BuildReconnect(unittest.TestCase):
             [person("Over", relationship="colleague", lastcontact="2026-04-09")])
         self.assertIn("Over", out)
 
-    def test_malformed_lastcontact_is_skipped(self):
-        out, _ = self.reconnect(
-            [person("Bad", relationship="family", lastcontact="not-a-date")])
-        self.assertNotIn("Bad", out)
+    def test_malformed_lastcontact_warns_and_surfaces(self):
+        # The field is free text; a hand-typed date must not hide the person.
+        for raw in ("July 8, 2025", "2025-7-8", "not-a-date"):
+            out, warnings = self.reconnect(
+                [person("Bad", relationship="family", lastcontact=raw)])
+            self.assertIn("Bad", out, raw)
+            self.assertIn("no recorded contact", out, raw)
+            self.assertEqual(len(warnings), 1, raw)
+            self.assertIn("unparseable LastContact", warnings[0])
 
     def test_limit(self):
         people = [person(f"P{i}", relationship="family") for i in range(15)]

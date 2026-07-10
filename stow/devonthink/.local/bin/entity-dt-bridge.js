@@ -469,7 +469,10 @@ function run(argv) {
     bump_lastcontact(op) {
       const rec = byUuid(op.uuid)
       const current = mdValue(rec, 'lastcontact')
-      if (current && current >= op.date) {
+      // A hand-typed non-ISO value sorts above every ISO date and would
+      // freeze the field; treat it as absent so a real date can repair it.
+      const comparable = /^\d{4}-\d{2}-\d{2}$/.test(current) ? current : ''
+      if (comparable && comparable >= op.date) {
         return { uuid: op.uuid, changed: false }
       }
       dt.addCustomMetaData(op.date, { for: 'lastcontact', to: rec })
