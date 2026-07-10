@@ -2,19 +2,25 @@
 # Re-scoring after an edit is cheap (no audio re-analysis): runnability.py score
 #
 # Calibrated 2026-07-09 on the two "Running Calibration" playlists (25 great /
-# 25 bad): AUC 0.936, precision 1.00 / recall 0.76 at score >= 65. Cadence and
-# arousal-band terms measured at/below chance on this library (great picks
-# include 96-110 BPM groove tracks), so their weights are 0 — kept here so
-# they can be re-enabled without code changes.
+# 25 bad) plus 9 user-flagged duds from the first sample-playlist test run:
+# AUC 0.947, precision 1.00 / recall 0.84 at score >= 41 (recommend ~45 for
+# margin). The mood heads (party, non-relaxed) catch laid-back grooves that
+# danceability alone scores high; non-relaxed is the single strongest feature
+# (AUC 0.987 great|bad). Cadence and arousal-band terms measured at/below
+# chance on this library (great picks include 96-110 BPM groove tracks), so
+# their weights are 0 — kept here so they can be re-enabled without code
+# changes.
 
 [cadence]
 target_spm = 170
 sigma_spm = 20.0
 
 [weights]
-danceability = 4.0
-energy = 3.0
-pulse = 1.0
+danceability = 1.0
+energy = 1.0
+mood_party = 2.0
+mood_nonrelaxed = 4.0
+pulse = 0.0
 cadence = 0.0
 arousal = 0.0
 

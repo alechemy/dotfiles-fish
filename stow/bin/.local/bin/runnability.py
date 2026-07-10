@@ -49,6 +49,9 @@ GATE = pathlib.Path("~/.local/bin/should-run-background-job").expanduser()
 MODELS = {
     "embedding": "https://essentia.upf.edu/models/feature-extractors/discogs-effnet/discogs-effnet-bs64-1.pb",
     "danceability": "https://essentia.upf.edu/models/classification-heads/danceability/danceability-discogs-effnet-1.pb",
+    "mood_party": "https://essentia.upf.edu/models/classification-heads/mood_party/mood_party-discogs-effnet-1.pb",
+    "mood_relaxed": "https://essentia.upf.edu/models/classification-heads/mood_relaxed/mood_relaxed-discogs-effnet-1.pb",
+    "mood_aggressive": "https://essentia.upf.edu/models/classification-heads/mood_aggressive/mood_aggressive-discogs-effnet-1.pb",
 }
 
 AUDIO_EXTS = {".m4a", ".mp3", ".flac", ".ogg", ".opus"}
@@ -82,12 +85,19 @@ def open_db() -> sqlite3.Connection:
             bpm REAL,
             beat_confidence REAL,
             danceability REAL,
+            mood_party REAL,
+            mood_relaxed REAL,
+            mood_aggressive REAL,
             mean_rms_db REAL,
             low_energy_ratio REAL,
             intro_rms_ratio REAL,
             error TEXT
         )
     """)
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(features)")}
+    for col in ("mood_party", "mood_relaxed", "mood_aggressive"):
+        if col not in cols:
+            conn.execute(f"ALTER TABLE features ADD COLUMN {col} REAL")
     return conn
 
 
@@ -116,6 +126,15 @@ def _worker_init(model_paths: dict[str, str]) -> None:
         ),
         "danceability": TensorflowPredict2D(
             graphFilename=model_paths["danceability"], output="model/Softmax"
+        ),
+        "mood_party": TensorflowPredict2D(
+            graphFilename=model_paths["mood_party"], output="model/Softmax"
+        ),
+        "mood_relaxed": TensorflowPredict2D(
+            graphFilename=model_paths["mood_relaxed"], output="model/Softmax"
+        ),
+        "mood_aggressive": TensorflowPredict2D(
+            graphFilename=model_paths["mood_aggressive"], output="model/Softmax"
         ),
     }
 
@@ -159,6 +178,10 @@ def _analyze_one(abspath: str, relpath: str) -> dict:
         emb = m["embedding"](audio16)
         probs = m["danceability"](emb)
         row["danceability"] = float(probs.mean(axis=0)[0])
+        # class index 1 = positive for party/relaxed, 0 for aggressive
+        row["mood_party"] = float(m["mood_party"](emb).mean(axis=0)[1])
+        row["mood_relaxed"] = float(m["mood_relaxed"](emb).mean(axis=0)[1])
+        row["mood_aggressive"] = float(m["mood_aggressive"](emb).mean(axis=0)[0])
     except Exception as e:
         row["error"] = f"{type(e).__name__}: {e}"
     return row
@@ -286,6 +309,9 @@ def score_row(r: dict, cfg: dict) -> tuple[int, dict]:
 
     energy = _ramp(r["mean_rms_db"] or -60, -30.0, 0.0, -10.0, 1.0)
 
+    party = r.get("mood_party") or 0.0
+    nonrelaxed = 1.0 - (r.get("mood_relaxed") if r.get("mood_relaxed") is not None else 1.0)
+
     continuity = 1.0 - (r["low_energy_ratio"] or 0.0)
     if (r["intro_rms_ratio"] or 1.0) < 0.35:
         continuity *= 0.85
@@ -297,6 +323,8 @@ def score_row(r: dict, cfg: dict) -> tuple[int, dict]:
         + w["pulse"] * pulse
         + w["energy"] * energy
         + w["danceability"] * r["danceability"]
+        + w["mood_party"] * party
+        + w["mood_nonrelaxed"] * nonrelaxed
     ) / sum(w.values())
     final = base * continuity
     parts = {
@@ -306,6 +334,8 @@ def score_row(r: dict, cfg: dict) -> tuple[int, dict]:
         "pulse": round(pulse, 2),
         "energy": round(energy, 2),
         "dance": round(r["danceability"], 2),
+        "party": round(party, 2),
+        "nonrel": round(nonrelaxed, 2),
         "continuity": round(continuity, 2),
     }
     return round(100 * final), parts
@@ -330,7 +360,8 @@ def cmd_score(args) -> int:
     for s in scored:
         detail = s.get("gate") or (
             f"bpm={s['bpm']:.0f}→{s['folded_bpm']} cad={s['cadence']} aro={s['arousal']} "
-            f"pul={s['pulse']} nrg={s['energy']} dan={s['dance']} cont={s['continuity']}"
+            f"pul={s['pulse']} nrg={s['energy']} dan={s['dance']} pty={s['party']} "
+            f"nrl={s['nonrel']} cont={s['continuity']}"
         )
         print(f"{s['score']:3d}  {s['relpath']}  [{detail}]")
     return 0
