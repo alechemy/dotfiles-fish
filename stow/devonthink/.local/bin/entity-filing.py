@@ -89,6 +89,7 @@ Usage:
     entity-filing.py --force UUID    # re-extract one source record
     entity-filing.py --apply-only    # only process _Review/Approved
     entity-filing.py --scan-only     # skip the apply phase
+    entity-filing.py --rebuild-state # seed processed state from EntityFiled
 """
 
 import fcntl
@@ -325,6 +326,22 @@ def record_attempt(state, uuid, error):
     entry = state["attempts"].setdefault(uuid, {"count": 0})
     entry["count"] = entry.get("count", 0) + 1
     entry["last_error"] = str(error)[:300]
+
+
+def rebuild_processed_from_dt(state):
+    """Seed processed entries for sources DEVONthink's EntityFiled audit
+    flag says were already filed, with v1-migration semantics (processed as
+    of now, hash unknown): a fresh or restored machine then re-extracts only
+    sources that change afterwards, instead of re-proposing all history.
+    Returns the number of entries added."""
+    sources = run_bridge([{"op": "list_sources"}])[0]
+    stamp = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+    added = 0
+    for s in sources:
+        if s.get("entityfiled") and s["uuid"] not in state["processed"]:
+            state["processed"][s["uuid"]] = {"modified": stamp, "hash": None}
+            added += 1
+    return added
 
 
 def source_needs_filing(source, state):
@@ -1215,12 +1232,14 @@ def main():
     dry_run = "--dry-run" in args
     apply_only = "--apply-only" in args
     scan_only = "--scan-only" in args
+    rebuild_state = "--rebuild-state" in args
     force_uuid = None
     if "--force" in args:
         idx = args.index("--force")
         if idx + 1 < len(args):
             force_uuid = args[idx + 1]
-    user_invoked = bool(dry_run or force_uuid or apply_only or scan_only)
+    user_invoked = bool(dry_run or force_uuid or apply_only or scan_only
+                        or rebuild_state)
 
     subprocess.run(
         [os.path.expanduser("~/.local/bin/pipeline-record-run"),
@@ -1257,9 +1276,19 @@ def main():
                  "which may be a cloud provider; prompts include the People "
                  "roster. Set TRANSPORT=local to keep extraction on-device.",
                  config["TRANSPORT"])
+    state_file_existed = os.path.exists(STATE_FILE)
     state = load_state()
 
     try:
+        if rebuild_state or not state_file_existed:
+            added = rebuild_processed_from_dt(state)
+            if added or rebuild_state:
+                log.info("state rebuild: %d source(s) marked processed from "
+                         "their EntityFiled flag", added)
+            if not dry_run:
+                save_state(state)
+            if rebuild_state:
+                return
         if not scan_only:
             apply_approved(dry_run)
         if not apply_only:

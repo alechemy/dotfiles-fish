@@ -324,6 +324,7 @@ function run(argv) {
           participants: mdValue(rec, 'granolaparticipants'),
           added: added ? isoStamp(added).slice(0, 10) : '',
           modified: isoStamp(rec.modificationDate()),
+          entityfiled: flagSet(mdValue(rec, 'entityfiled')),
           // NeedsProcessing=1 means the smart-rule pipeline (OCR, comment
           // formatting, enrichment) hasn't finished — the record's text may
           // not exist yet. Daily notes never carry the flag.
@@ -368,6 +369,7 @@ function run(argv) {
         participants: mdValue(r, 'granolaparticipants'),
         added: added ? isoStamp(added).slice(0, 10) : '',
         modified: isoStamp(r.modificationDate()),
+        entityfiled: flagSet(mdValue(r, 'entityfiled')),
         ready: kind === 'daily'
           ? true
           : !flagSet(mdValue(r, 'needsprocessing')),

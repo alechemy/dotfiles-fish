@@ -15,6 +15,7 @@ Usage:
     python3 import-github-stars.py --dry-run    # preview without importing
     python3 import-github-stars.py --backfill   # import entire star history
     python3 import-github-stars.py --force owner/repo  # re-import a specific repo
+    python3 import-github-stars.py --rebuild-state  # re-derive state from DEVONthink
 """
 
 import json
@@ -39,6 +40,7 @@ GH_BIN = "/opt/homebrew/bin/gh"
 
 DRY_RUN = "--dry-run" in sys.argv
 BACKFILL = "--backfill" in sys.argv
+REBUILD_STATE = "--rebuild-state" in sys.argv
 FORCE_REPO = None
 if "--force" in sys.argv:
     idx = sys.argv.index("--force")
@@ -50,10 +52,18 @@ if "--force" in sys.argv:
 # Logging
 # ---------------------------------------------------------------------------
 
+# dt-watchdog scans this log and pages on failure tokens; the /manual tag
+# tells it a human was driving (same convention as pipeline_log.py).
+_COMPONENT = (
+    "github-stars/manual"
+    if sys.stdout.isatty() or os.environ.get("PIPELINE_MANUAL") == "1"
+    else "github-stars"
+)
+
 
 def log(msg):
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    line = f"{timestamp} [github-stars] {msg}"
+    line = f"{timestamp} [{_COMPONENT}] {msg}"
     print(line)
     try:
         with open(LOG_FILE, "a") as f:
@@ -287,6 +297,14 @@ on run argv
             return "error: inbox group not found"
         end if
 
+        -- Idempotency: the database is the source of truth. A bookmark with
+        -- this exact URL already exists when the state file was lost or the
+        -- database restored; adopt it rather than creating a duplicate.
+        set existing to lookup records with URL repoURL in targetDB
+        if (count of existing) > 0 then
+            return "exists: " & (name of item 1 of existing)
+        end if
+
         set newRecord to create record with {name:repoName, type:bookmark, URL:repoURL} in destGroup
 
         -- Skip Extract: Web Content by pre-setting Recognized and Commented.
@@ -304,6 +322,58 @@ on run argv
     end tell
 end run
 """
+
+
+REBUILD_APPLESCRIPT = """
+on run
+    tell application id "DNtp"
+        try
+            set targetDB to database "%%DATABASE%%"
+        on error
+            return "error: database not found"
+        end try
+        set out to ""
+        set hits to search "kind:bookmark url:~github.com" in root of targetDB
+        repeat with hit in hits
+            try
+                set out to out & (URL of hit) & linefeed
+            end try
+        end repeat
+        return out
+    end tell
+end run
+"""
+
+
+def rebuild_ids_from_devonthink():
+    """Return the set of repo full names whose bookmarks exist in the
+    database, or None when DEVONthink could not be queried (unknown, not
+    empty). Only URLs shaped like a repo home page (github.com/owner/repo)
+    count — deep links and gists captured by other pipelines are ignored."""
+    fd, script_path = tempfile.mkstemp(suffix=".applescript")
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(REBUILD_APPLESCRIPT.replace("%%DATABASE%%", DATABASE_NAME))
+        result = subprocess.run(
+            ["/usr/bin/osascript", script_path],
+            capture_output=True, text=True, timeout=600,
+        )
+    finally:
+        os.unlink(script_path)
+    output = result.stdout.strip()
+    if result.returncode != 0 or output.startswith("error:"):
+        log(f"State rebuild query failed: {(result.stderr or output).strip()}")
+        return None
+    names = set()
+    for line in output.splitlines():
+        url = line.strip().rstrip("/")
+        prefix = "https://github.com/"
+        if not url.startswith(prefix):
+            continue
+        path = url[len(prefix):]
+        if path.count("/") == 1:
+            names.add(path)
+    return names
 
 
 def import_to_devonthink(star, script_path):
@@ -345,8 +415,9 @@ def main():
     )
 
     # Skip launchd-driven runs on battery. User-invoked runs (--force,
-    # --backfill, --dry-run) bypass the gate so explicit intent always wins.
-    user_invoked = BACKFILL or FORCE_REPO is not None or DRY_RUN
+    # --backfill, --dry-run, --rebuild-state) bypass the gate so explicit
+    # intent always wins.
+    user_invoked = BACKFILL or FORCE_REPO is not None or DRY_RUN or REBUILD_STATE
     if not user_invoked:
         gate = subprocess.run(
             [os.path.expanduser("~/.local/bin/should-run-background-job")],
@@ -388,7 +459,35 @@ def main():
         log("ERROR gh CLI not authenticated — run 'gh auth login' first")
         sys.exit(1)
 
+    if REBUILD_STATE:
+        rebuilt = rebuild_ids_from_devonthink()
+        if rebuilt is None:
+            sys.exit(1)
+        existing, retry = (
+            load_imported() if os.path.exists(STATE_FILE) else (set(), [])
+        )
+        merged = existing | rebuilt
+        log(f"State rebuild: {len(rebuilt)} repo(s) in DEVONthink, "
+            f"{len(existing)} in state file, {len(merged)} after merge")
+        if DRY_RUN:
+            log("[DRY RUN] state file not written")
+        else:
+            save_imported(merged, retry)
+        return
+
+    state_file_existed = os.path.exists(STATE_FILE)
     imported, retry = load_imported()
+    if not state_file_existed and not imported:
+        # Fresh or restored machine: the database remembers what was already
+        # imported even when the local state file is gone.
+        rebuilt = rebuild_ids_from_devonthink()
+        if rebuilt:
+            log(f"State file missing but DEVONthink holds {len(rebuilt)} "
+                f"GitHub bookmark(s); rebuilding state from the database")
+            imported = rebuilt
+            if not DRY_RUN:
+                save_imported(imported, retry)
+
     first_run = len(imported) == 0
     log(f"Fetching starred repos ({len(imported)} already imported)")
 
