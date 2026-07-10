@@ -162,8 +162,13 @@ def _analyze_one(abspath: str, relpath: str) -> dict:
             row["genre"] = (f.get("genre") or [None])[0] if f else None
 
         audio44 = m["MonoLoader"](filename=abspath, sampleRate=44100)()
-        bpm, _, conf, _, _ = m["rhythm"](audio44)
-        row["bpm"], row["beat_confidence"] = float(bpm), float(conf)
+        try:
+            bpm, _, conf, _, _ = m["rhythm"](audio44)
+            row["bpm"], row["beat_confidence"] = float(bpm), float(conf)
+        except Exception:
+            # RhythmExtractor2013 fails on ~4% of tracks; BPM is optional
+            # (cadence weight 0), the mood/danceability features are not.
+            row["bpm"] = row["beat_confidence"] = None
 
         sr, win = 44100, 44100
         n = len(audio44) // win
@@ -290,14 +295,14 @@ def score_row(r: dict, cfg: dict) -> tuple[int, dict]:
     dur = r["duration"] or 0
     if not gates["duration_min"] <= dur <= gates["duration_max"]:
         return 0, {"gate": f"duration:{dur:.0f}s"}
-    if r["bpm"] is None or r["danceability"] is None:
+    if r["danceability"] is None:
         return 0, {"gate": "missing-features"}
 
+    bpm = r["bpm"] or 0.0
     t = cfg["cadence"]
-    folded = fold_bpm(r["bpm"], t["target_spm"])
+    folded = fold_bpm(bpm, t["target_spm"])
     cadence = math.exp(-0.5 * ((folded - t["target_spm"]) / t["sigma_spm"]) ** 2)
 
-    bpm = r["bpm"]
     if bpm < 123:
         arousal = _ramp(bpm, 100, 0.0, 123, 1.0)
     elif bpm <= 140:
@@ -362,7 +367,7 @@ def cmd_score(args) -> int:
         return 0
     for s in scored:
         detail = s.get("gate") or (
-            f"bpm={s['bpm']:.0f}→{s['folded_bpm']} cad={s['cadence']} aro={s['arousal']} "
+            f"bpm={(s['bpm'] or 0):.0f}→{s['folded_bpm']} cad={s['cadence']} aro={s['arousal']} "
             f"pul={s['pulse']} nrg={s['energy']} dan={s['dance']} pty={s['party']} "
             f"nrl={s['nonrel']} cont={s['continuity']}"
         )
