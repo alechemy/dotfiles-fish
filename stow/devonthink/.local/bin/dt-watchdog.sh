@@ -122,6 +122,13 @@ if [[ "$IS_DRIVER" == 1 ]]; then
     while IFS= read -r stuck; do
         surface_line "stuck capture awaiting ingest: $(basename "$stuck")"
     done < <(find "$HOME/Downloads/SingleFile" -name '*.html' -mmin +15 2>/dev/null || true)
+
+    # Stale Boox exports: the watcher sweeps its backlog before subscribing
+    # to fswatch, so a PDF that finalized in that gap (or a failed import
+    # left in place) sits unnoticed until the next watcher restart.
+    while IFS= read -r stuck; do
+        surface_line "stale Boox export awaiting import: $(basename "$stuck")"
+    done < <(find "$HOME/Dropbox (Maestral)/onyx/Go103/Notebooks" -type f -name '*.pdf' -mmin +15 2>/dev/null || true)
 fi
 
 # ── 2. Ensure DEVONthink is running ──────────────────────────────────────────
