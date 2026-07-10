@@ -107,6 +107,7 @@ on run argv
     set aiChatPlatform to item 6 of argv
     set isGenericTitle to ((item 7 of argv) is "1")
     set overrideExistingName to ((item 8 of argv) is "1")
+    set allowAdopt to ((item 9 of argv) is "1")
 
     tell application id "DNtp"
         set archiveGroup to get record at "/99_ARCHIVE" in database "Lorebook"
@@ -117,18 +118,15 @@ on run argv
         -- Archive can later propagate the AI-enriched name from the
         -- markdown sibling. The bookmark still gets fast-tracked
         -- (Recognized/Commented/AIEnriched=1) — only NameLocked changes.
-        set isNewBookmark to (bookmarkUUID is "")
-        if isNewBookmark then
-            set bmRecord to create record with {name:safeTitle, type:bookmark, URL:sourceURL} in archiveGroup
-            if not isGenericTitle then
-                add custom meta data 1 for "NameLocked" to bmRecord
-            end if
-            add custom meta data 1 for "Recognized" to bmRecord
-            add custom meta data 1 for "Commented" to bmRecord
-            add custom meta data 1 for "AIEnriched" to bmRecord
-        else
+        --
+        -- The capture's stable identity is the bookmark's URL plus its
+        -- WebClipSnapshot/WebClipMarkdown links: a retry after a partial
+        -- earlier pass adopts the same-URL bookmark and any triad members
+        -- those links still resolve to, then repairs the cross-links,
+        -- instead of creating duplicates. --force disables adoption.
+        set bmRecord to missing value
+        if bookmarkUUID is not "" then
             set bmRecord to get record with uuid bookmarkUUID
-            add custom meta data 0 for "NeedsSingleFile" to bmRecord
             -- Reddit carve-out: existing bookmark was created by the
             -- clipper with a "From the X community on Reddit" boilerplate
             -- name. derive_title got the verbatim post title from the
@@ -140,6 +138,38 @@ on run argv
                 end if
                 add custom meta data 1 for "NameLocked" to bmRecord
             end if
+        else if allowAdopt then
+            try
+                set candidates to lookup records with URL sourceURL in database "Lorebook"
+                repeat with candidateRecord in candidates
+                    if (type of candidateRecord) is bookmark then
+                        set bmRecord to candidateRecord
+                        exit repeat
+                    end if
+                end repeat
+            end try
+        end if
+        set createdNew to (bmRecord is missing value)
+        if createdNew then
+            set bmRecord to create record with {name:safeTitle, type:bookmark, URL:sourceURL} in archiveGroup
+            if not isGenericTitle then
+                add custom meta data 1 for "NameLocked" to bmRecord
+            end if
+            add custom meta data 1 for "Recognized" to bmRecord
+            add custom meta data 1 for "Commented" to bmRecord
+            add custom meta data 1 for "AIEnriched" to bmRecord
+        end if
+
+        -- Reuse an HTML snapshot from a prior partial pass when the
+        -- bookmark's WebClipSnapshot link still resolves.
+        set htmlRecord to missing value
+        if allowAdopt and not createdNew then
+            try
+                set snapLink to (get custom meta data for "WebClipSnapshot" from bmRecord) as text
+                if snapLink starts with "x-devonthink-item://" then
+                    set htmlRecord to get record with uuid (text 21 thru -1 of snapLink)
+                end if
+            end try
         end if
 
         -- Import the HTML snapshot directly into 99_ARCHIVE. The Python
@@ -149,16 +179,19 @@ on run argv
         -- and force NameLocked=1 even in the untitled-page fallback path).
         -- Keep the `set name` as a defensive no-op only if DT somehow
         -- normalized the name during import.
-        set htmlRecord to import htmlPath to archiveGroup
-        set URL of htmlRecord to sourceURL
-        if (name of htmlRecord) is not safeTitle then
-            set name of htmlRecord to safeTitle
+        set freshHtml to (htmlRecord is missing value)
+        if freshHtml then
+            set htmlRecord to import htmlPath to archiveGroup
+            set URL of htmlRecord to sourceURL
+            if (name of htmlRecord) is not safeTitle then
+                set name of htmlRecord to safeTitle
+            end if
+            if not isGenericTitle then
+                add custom meta data 1 for "NameLocked" to htmlRecord
+            end if
+            add custom meta data 1 for "Recognized" to htmlRecord
+            add custom meta data 1 for "Commented" to htmlRecord
         end if
-        if not isGenericTitle then
-            add custom meta data 1 for "NameLocked" to htmlRecord
-        end if
-        add custom meta data 1 for "Recognized" to htmlRecord
-        add custom meta data 1 for "Commented" to htmlRecord
 
         set bmLink to "x-devonthink-item://" & (uuid of bmRecord)
         set htmlLink to "x-devonthink-item://" & (uuid of htmlRecord)
@@ -168,11 +201,30 @@ on run argv
         if mdPath is "" then
             -- No markdown — let Enrich: AI Metadata process the HTML directly.
             -- Leave Recognized/Commented=1, AIEnriched empty, NeedsProcessing=1.
-            add custom meta data 1 for "NeedsProcessing" to htmlRecord
+            -- A reused snapshot is already in (or through) the pipeline;
+            -- re-priming it would send an archived record around again.
+            if freshHtml then
+                add custom meta data 1 for "NeedsProcessing" to htmlRecord
+            end if
             set resultUUIDs to (uuid of bmRecord) & "|" & (uuid of htmlRecord) & "|"
         else
             -- Markdown carries enrichment — fully fast-track the HTML.
-            add custom meta data 1 for "AIEnriched" to htmlRecord
+            if freshHtml then
+                add custom meta data 1 for "AIEnriched" to htmlRecord
+            end if
+
+            -- Reuse a markdown extract from a prior partial pass when the
+            -- bookmark's WebClipMarkdown link still resolves.
+            set mdRecord to missing value
+            if allowAdopt and not createdNew then
+                try
+                    set mdExisting to (get custom meta data for "WebClipMarkdown" from bmRecord) as text
+                    if mdExisting starts with "x-devonthink-item://" then
+                        set mdRecord to get record with uuid (text 21 thru -1 of mdExisting)
+                    end if
+                end try
+            end if
+            set freshMd to (mdRecord is missing value)
 
             -- Pre-lint + pre-flag the markdown so Extract: Native Text
             -- Bypass doesn't match it and fire a mutation storm on the
@@ -180,14 +232,16 @@ on run argv
             -- Recognized=1, Commented=1 here stand in for the flags that
             -- rule would have set; the mdPath file was already lint-fixed
             -- on disk before we imported it.
-            set mdRecord to import mdPath to inboxGroup
-            set URL of mdRecord to sourceURL
-            add custom meta data 1 for "NeedsProcessing" to mdRecord
-            if not isGenericTitle then
-                add custom meta data 1 for "NameLocked" to mdRecord
+            if freshMd then
+                set mdRecord to import mdPath to inboxGroup
+                set URL of mdRecord to sourceURL
+                add custom meta data 1 for "NeedsProcessing" to mdRecord
+                if not isGenericTitle then
+                    add custom meta data 1 for "NameLocked" to mdRecord
+                end if
+                add custom meta data 1 for "Recognized" to mdRecord
+                add custom meta data 1 for "Commented" to mdRecord
             end if
-            add custom meta data 1 for "Recognized" to mdRecord
-            add custom meta data 1 for "Commented" to mdRecord
 
             set mdLink to "x-devonthink-item://" & (uuid of mdRecord)
             add custom meta data bmLink for "WebClipSource" to mdRecord
@@ -198,7 +252,7 @@ on run argv
             -- line pointing at the HTML snapshot. Done here (not in Python)
             -- because the snapshot UUID isn't known until htmlRecord exists.
             -- The line goes after the body's H1 if present, otherwise at the top.
-            if aiChatPlatform is not "" then
+            if aiChatPlatform is not "" and freshMd then
                 add custom meta data 1 for "AIChatTranscript" to mdRecord
 
                 set cDate to current date
@@ -229,6 +283,13 @@ on run argv
             set resultUUIDs to (uuid of bmRecord) & "|" & (uuid of htmlRecord) & "|" & (uuid of mdRecord)
         end if
 
+        -- Cleared only now, with the triad created and cross-linked: an
+        -- error anywhere above leaves the bookmark queued so a later batch
+        -- run retries (and repairs) the capture instead of dropping it.
+        if not createdNew then
+            add custom meta data 0 for "NeedsSingleFile" to bmRecord
+        end if
+
         -- Scenario 1 only: log the new bookmark to today's daily note.
         -- Scenario 2 bookmarks were already logged by Post-Enrich & Archive
         -- when they first arrived via Extract: Web Content, so re-logging
@@ -237,7 +298,7 @@ on run argv
         -- writes the daily-note line after AI enrichment supplies a real
         -- title, so the entry lands with a meaningful name instead of
         -- "No title — host/path".
-        if isNewBookmark and not isGenericTitle then
+        if createdNew and not isGenericTitle then
             try
                 set cDate to current date
                 set cYear to year of cDate as text
@@ -896,6 +957,7 @@ def import_to_devonthink(
     ai_chat_platform: str = "",
     is_generic_title: bool = False,
     override_existing_name: bool = False,
+    allow_adopt: bool = True,
 ) -> str:
     """Run the single-pass AppleScript. Returns the pipe-joined UUIDs.
 
@@ -914,6 +976,12 @@ def import_to_devonthink(
     the Reddit "From the X community on Reddit" boilerplate) and should be
     renamed to `safe_title` with NameLocked=1. Ignored when bookmark_uuid
     is empty.
+
+    `allow_adopt` lets the AppleScript treat a same-URL bookmark and its
+    surviving WebClipSnapshot/WebClipMarkdown links as this capture's
+    identity, repairing a partial triad from an earlier failed pass instead
+    of duplicating its members. False under --force, which means "make a
+    fresh capture".
     """
     argv = [
         str(html_path),
@@ -924,6 +992,7 @@ def import_to_devonthink(
         ai_chat_platform,
         "1" if is_generic_title else "0",
         "1" if override_existing_name else "0",
+        "1" if allow_adopt else "0",
     ]
     result = subprocess.run(
         ["osascript", "-", *argv],
@@ -1062,6 +1131,7 @@ def main() -> int:
                 ai_chat_platform=ai_chat_platform if has_md else "",
                 is_generic_title=is_generic_title,
                 override_existing_name=override_existing_name,
+                allow_adopt=not args.force,
             )
         except subprocess.CalledProcessError as e:
             log.error("AppleScript import failed: %s", e.stderr)
