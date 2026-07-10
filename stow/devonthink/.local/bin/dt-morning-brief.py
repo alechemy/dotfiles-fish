@@ -69,6 +69,9 @@ CALENDAR = os.path.expanduser("~/.local/bin/calendar-events-json.js")
 BRIEF_HEADER = "## Briefing"
 RECONNECT_HEADER = "## Reconnect"
 REVIEW_HEADER = "## Entity Review"
+ON_THIS_DAY_HEADER = "## On This Day"
+ON_THIS_DAY_YEARS = 5
+ON_THIS_DAY_PER_YEAR = 5
 REVIEW_PATH = "/20_ENTITIES/_Review"
 APPROVED_PATH = REVIEW_PATH + "/Approved"
 LOG_BULLET_RE = re.compile(r"^- \d{4}-\d{2}-\d{2} — ")
@@ -465,6 +468,50 @@ def review_nudge(today):
     return "\n".join(lines)
 
 
+def build_on_this_day(today):
+    """Anniversary resurfacing from metadata the pipeline already writes:
+    records whose EventDate falls on this day in past years, plus the daily
+    note from one year ago."""
+    t = date.fromisoformat(today)
+    ops = []
+    year_dates = []
+    for back in range(1, ON_THIS_DAY_YEARS + 1):
+        try:
+            past = t.replace(year=t.year - back).isoformat()
+        except ValueError:
+            continue
+        year_dates.append(past)
+        ops.append({"op": "search", "query": f"mdeventdate=={past}",
+                    "limit": ON_THIS_DAY_PER_YEAR})
+    if not year_dates:
+        return None
+    last_year = year_dates[0]
+    ops.append({"op": "get_at_path", "path": f"/10_DAILY/{last_year}.md"})
+    try:
+        results = run_bridge(ops)
+    except BridgeUnavailable:
+        raise
+    except Exception as exc:
+        log.warning("on-this-day lookup failed: %s", exc)
+        return None
+    lines = [f"<!-- on-this-day:{today} -->", ""]
+    found = False
+    for past, hits in zip(year_dates, results):
+        back = t.year - date.fromisoformat(past).year
+        noun = "year" if back == 1 else "years"
+        for h in hits or []:
+            found = True
+            kind = f" ({h['documenttype']})" if h.get("documenttype") else ""
+            lines.append(f"- {back} {noun} ago: "
+                         f"[{h['name']}](x-devonthink-item://{h['uuid']}){kind}")
+    daily = results[-1]
+    if daily:
+        found = True
+        lines.append(f"- One year ago today: "
+                     f"[{daily['name']}](x-devonthink-item://{daily['uuid']})")
+    return "\n".join(lines) if found else None
+
+
 def backfill_contacts(today, days, skip_re, dry_run):
     """Replay past calendar days into LastContact. Meeting attendance is the
     only historical source of contact dates — Granola's copy of the calendar
@@ -585,6 +632,7 @@ def main():
     if weekly or date.fromisoformat(today).weekday() == 0:
         sections.append((RECONNECT_HEADER, build_reconnect(people, today)))
     sections.append((REVIEW_HEADER, review_nudge(today)))
+    sections.append((ON_THIS_DAY_HEADER, build_on_this_day(today)))
 
     if not any(content for _, content in sections):
         log.info("nothing to write (no briefable meetings, no reconnects)")

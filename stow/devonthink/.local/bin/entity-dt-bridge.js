@@ -21,6 +21,8 @@
 //                                                            modified,ready,...}]
 //   get_source         {uuid}                            -> {uuid,name,kind,eventdate,...}
 //   list_group         {path}                           -> [{uuid,name}]
+//   search             {query,limit?}                   -> [{uuid,name,eventdate,documenttype}]
+//   get_at_path        {path}                           -> {uuid,name} | null
 //   get_text           {uuid}                           -> {uuid,text}
 //   set_text           {uuid,text}                      -> {uuid}
 //   chat               {prompt,role}                    -> {text}
@@ -381,6 +383,24 @@ function run(argv) {
 
     list_group(op) {
       return groupAt(op.path).children().map(r => ({ uuid: r.uuid(), name: r.name() }))
+    },
+
+    search(op) {
+      const cap = op.limit || 50
+      return dt.search(String(op.query || ''), { in: db.root() })
+        .slice(0, cap)
+        .map(r => ({
+          uuid: r.uuid(),
+          name: r.name(),
+          eventdate: mdValue(r, 'eventdate'),
+          documenttype: mdValue(r, 'documenttype'),
+        }))
+    },
+
+    get_at_path(op) {
+      const r = dt.getRecordAt(op.path, { in: db })
+      if (!r) return null
+      return { uuid: r.uuid(), name: r.name() }
     },
 
     get_text(op) {
