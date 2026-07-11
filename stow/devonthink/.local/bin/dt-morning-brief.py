@@ -13,15 +13,24 @@ all-of-Contacts Birthdays calendar stays in SKIP_CALENDARS. Whenever
 filing proposals sit unreviewed in `/20_ENTITIES/_Review`, an
 `## Entity Review` line reports the backlog count.
 
-The brief reads live from the records, so it is never stale. Two mutations
-only: the daily-note section insert (idempotent via an HTML comment marker
-per section per day), and a LastContact bump for every person matched in
-YESTERDAY's calendar — yesterday because the day is complete, so a
-meeting that was cancelled after the morning run never counts as contact.
-This keeps the Reconnect digest honest for people whose contact happens
-on the calendar rather than in filed facts (calls with family, social
-events); bump_lastcontact only ever raises the date, so re-runs are
-harmless.
+The brief reads live from the records, so it is never stale. Mutations are
+limited to the daily-note section insert (idempotent via an HTML comment
+marker per section per day) and LastContact bumps from two sources: every
+person matched in YESTERDAY's calendar — yesterday because the day is
+complete, so a meeting that was cancelled after the morning run never
+counts as contact — and everyone texted with since yesterday, read from
+Messages' chat.db (messages have no cancellation concept, so today's
+count too). Both keep the Reconnect digest honest for people whose
+contact happens outside filed facts; bump_lastcontact only ever raises
+the date, so re-runs are harmless.
+
+The Messages read is deliberately narrow: a read-only SQLite connection
+that selects handle identifiers, dates, and is_from_me — structurally
+never the text column — and maps handles to the roster live through
+macOS Contacts (per the entity-layer decision, phone numbers are never
+stored in DEVONthink). Received messages attribute to their sender in
+any chat; sent messages count only in 1:1 chats, so a group broadcast
+never marks every member as contacted.
 
 Section placement: jots are inserted relative to the `## Today's Notes`
 header (see insert-jot-into-daily-note.py), targeting the last content
@@ -44,6 +53,9 @@ Usage:
                                      # replay past calendar days into
                                      # LastContact (default 365); run once
                                      # after seeding People
+    dt-morning-brief.py --backfill-messages [--days N]
+                                     # replay Messages history into
+                                     # LastContact (default 365); run once
 
 Config (~/.config/dt-pipeline/entities.conf, shared with entity-filing.py):
     SKIP_ATTENDEE_PATTERN=<regex>    attendee names matching this are not
@@ -57,11 +69,12 @@ import calendar as calmod
 import json
 import os
 import re
+import sqlite3
 import subprocess
 import sys
 import tempfile
 import unicodedata
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path.home() / ".local" / "bin"))
@@ -72,6 +85,28 @@ log = setup_log("morning-brief")
 BRIDGE = os.path.expanduser("~/.local/bin/entity-dt-bridge.js")
 CALENDAR = os.path.expanduser("~/.local/bin/calendar-events-json.js")
 CONTACTS = os.path.expanduser("~/.local/bin/contacts-json.js")
+MESSAGES_DB = os.path.expanduser("~/Library/Messages/chat.db")
+
+# Received messages attribute to their sender in any chat; sent messages
+# attribute to the peer only in single-participant chats, so a group
+# broadcast never counts as contact with every member. item_type 0 keeps
+# group housekeeping events (renames, joins) from counting. Only handle
+# identifiers and dates are ever selected — never message text.
+MESSAGES_QUERY = """
+SELECT h.id, MAX(m.date) FROM message m
+JOIN handle h ON h.ROWID = m.handle_id
+WHERE m.date >= ? AND m.is_from_me = 0 AND m.item_type = 0
+GROUP BY h.id
+UNION ALL
+SELECT h.id, MAX(m.date) FROM message m
+JOIN chat_message_join cmj ON cmj.message_id = m.ROWID
+JOIN chat_handle_join chj ON chj.chat_id = cmj.chat_id
+JOIN handle h ON h.ROWID = chj.handle_id
+WHERE m.date >= ? AND m.is_from_me = 1 AND m.item_type = 0
+  AND (SELECT COUNT(*) FROM chat_handle_join c2
+       WHERE c2.chat_id = cmj.chat_id) = 1
+GROUP BY h.id
+"""
 BRIEF_HEADER = "## Briefing"
 RECONNECT_HEADER = "## Reconnect"
 BIRTHDAYS_HEADER = "## Birthdays"
@@ -475,6 +510,89 @@ def build_birthdays(contacts, people, today, lookahead=BIRTHDAY_LOOKAHEAD):
     return "\n".join(lines)
 
 
+def apple_ns(day):
+    """Local midnight of an ISO day as Apple nanoseconds (Cocoa epoch)."""
+    local_midnight = datetime.fromisoformat(day).astimezone()
+    epoch = datetime(2001, 1, 1, tzinfo=timezone.utc)
+    return int((local_midnight - epoch).total_seconds() * 1_000_000_000)
+
+
+def apple_ts_to_local_date(raw):
+    """chat.db stores nanoseconds since the Cocoa epoch, except rows migrated
+    from pre-High-Sierra installs, which are plain seconds."""
+    secs = raw / 1_000_000_000 if raw > 1e12 else raw
+    dt = datetime(2001, 1, 1, tzinfo=timezone.utc) + timedelta(seconds=secs)
+    return dt.astimezone().date().isoformat()
+
+
+def norm_handle(h):
+    """Messages handles are phone numbers or iMessage emails. Phones fold to
+    their last 10 digits so +1/formatting variants between chat.db and the
+    Contacts card can't miss; anything shorter (short codes) stays as-is and
+    simply never matches a card."""
+    h = (h or "").strip().lower()
+    if "@" in h:
+        return h
+    digits = re.sub(r"\D", "", h)
+    return digits[-10:] if len(digits) >= 10 else digits
+
+
+def handle_index(contacts, people):
+    """Normalized phone/email handle -> roster person, via each card's
+    match_contact resolution. A handle claimed by cards resolving to two
+    different people is dropped rather than guessed."""
+    index = person_index(people)
+    out = {}
+    ambiguous = set()
+    for c in contacts:
+        p = match_contact(index, c)
+        if not p:
+            continue
+        for raw in list(c.get("phones") or []) + list(c.get("emails") or []):
+            k = norm_handle(raw)
+            if not k:
+                continue
+            if k in out and out[k]["uuid"] != p["uuid"]:
+                ambiguous.add(k)
+                continue
+            out[k] = p
+    for k in ambiguous:
+        out.pop(k, None)
+    return out
+
+
+def message_bumps(handle_dates, index):
+    """One bump op per person at their newest message date across all of
+    their handles. handle_dates rows are (handle, raw_apple_timestamp)."""
+    latest = {}
+    for handle, raw in handle_dates:
+        p = index.get(norm_handle(handle))
+        if not p:
+            continue
+        d = apple_ts_to_local_date(raw)
+        if d > latest.get(p["uuid"], ""):
+            latest[p["uuid"]] = d
+    return [{"op": "bump_lastcontact", "uuid": u, "date": d}
+            for u, d in latest.items()]
+
+
+def query_messages(since_day):
+    """Latest message date per handle since local midnight of since_day.
+    Read-only; any failure (no Full Disk Access, schema drift, database
+    locked) degrades to no bumps with a warning the watchdog surfaces."""
+    try:
+        conn = sqlite3.connect(f"file:{MESSAGES_DB}?mode=ro", uri=True,
+                               timeout=5)
+        try:
+            cutoff = apple_ns(since_day)
+            return conn.execute(MESSAGES_QUERY, (cutoff, cutoff)).fetchall()
+        finally:
+            conn.close()
+    except Exception as exc:
+        log.warning("Messages query failed: %s", exc)
+        return []
+
+
 def parked_sources():
     """Sources entity-filing gave up on after repeated failures. Read from
     its state file; anything unreadable degrades to 'no parked sources'
@@ -623,19 +741,54 @@ def backfill_contacts(today, days, skip_re, dry_run):
              changed, len(ops), start, end)
 
 
+def backfill_messages(today, days, dry_run):
+    """Replay Messages history into LastContact — the non-work contact
+    signal the calendar never carries. Run once; the daily pass covers
+    everything from then on."""
+    start = (date.fromisoformat(today) - timedelta(days=days)).isoformat()
+    rows = query_messages(start)
+    if not rows:
+        log.info("backfill: no Messages rows since %s", start)
+        return
+    cj = run_osascript(CONTACTS, [], timeout=60)
+    if not cj.get("ok"):
+        log.error("contacts unavailable: %s", cj.get("error"))
+        return
+    people = run_bridge([{"op": "dump_people", "include_bodies": False}])[0]
+    if not people:
+        log.info("no Person records yet, nothing to backfill")
+        return
+    ops = message_bumps(rows, handle_index(cj["contacts"], people))
+    if dry_run:
+        by_uuid = {p["uuid"]: p["name"] for p in people}
+        print(f"[dry-run] {start}..: {len(rows)} texted handles, "
+              f"{len(ops)} people would be bumped")
+        for op in sorted(ops, key=lambda o: o["date"], reverse=True):
+            print(f"  {op['date']}  {by_uuid.get(op['uuid'], op['uuid'])}")
+        return
+    if not ops:
+        log.info("backfill: no roster matches in Messages since %s", start)
+        return
+    changed = sum(1 for r in run_bridge(ops) if r.get("changed"))
+    log.info("backfill: %d of %d people had LastContact raised from "
+             "Messages (since %s)", changed, len(ops), start)
+
+
 def main():
     args = sys.argv[1:]
     dry_run = "--dry-run" in args
     force = "--force" in args
     weekly = "--weekly" in args
     backfill = "--backfill-contacts" in args
+    backfill_msgs = "--backfill-messages" in args
     days = BACKFILL_DAYS
     if "--days" in args:
         days = int(args[args.index("--days") + 1])
     today = date.today().isoformat()
     if "--date" in args:
         today = args[args.index("--date") + 1]
-    user_invoked = dry_run or force or "--date" in args or weekly or backfill
+    user_invoked = (dry_run or force or "--date" in args or weekly
+                    or backfill or backfill_msgs)
 
     subprocess.run(
         [os.path.expanduser("~/.local/bin/pipeline-record-run"),
@@ -666,6 +819,9 @@ def main():
 
     if backfill:
         backfill_contacts(today, days, skip_re, dry_run)
+        return
+    if backfill_msgs:
+        backfill_messages(today, days, dry_run)
         return
 
     events = []
@@ -708,6 +864,17 @@ def main():
             run_bridge(bumps)
             log.info("bumped LastContact for %d people from %s calendar",
                      len(bumps), yesterday)
+
+    mops = message_bumps(query_messages(yesterday),
+                         handle_index(contacts, people))
+    if mops:
+        if dry_run:
+            print(f"[dry-run] would bump LastContact from Messages for "
+                  f"{len(mops)} people")
+        else:
+            changed = sum(1 for r in run_bridge(mops) if r.get("changed"))
+            log.info("bumped LastContact for %d people from Messages "
+                     "(since %s)", changed, yesterday)
 
     # Every section is upserted (not append-once): the 05:45/06:30/08:00
     # retries refresh a 05:15 brief built from incomplete calendar sync, and

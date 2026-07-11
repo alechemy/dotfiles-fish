@@ -76,6 +76,14 @@ rather than `raise`. The entity layer's bugs have all been silent skips, which
 produce exactly the output an idle-but-healthy pipeline produces. Those are the
 ones that need a test.
 
+**Test fixtures must never contain real people.** This repo is public and its
+history has already been scrubbed once. No name from the People roster or from
+macOS Contacts, no real phone number or address-book email — it is easy to
+absorb one from a live dump while writing tests against real data. Use
+clearly fictional names, `*@x.com` emails, and phones from the reserved
+fictional range (`XXX-555-01xx`). The user's own name/work email in docs is
+fine (it is the repo's git author); other people's identifiers never are.
+
 ## Manual runs must not page the user
 
 `dt-watchdog.sh` scans the shared pipeline log for

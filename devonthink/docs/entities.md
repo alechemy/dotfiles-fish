@@ -97,7 +97,7 @@ stay stdlib-only (tier-1 `/usr/bin/python3`, stable TCC identity):
 | `entity-dt-bridge.js` | Executes a JSON ops batch against DT (dump people, search sources, append log lines, set fields, create proposals/records, DT-chat call). Run via `/usr/bin/osascript -l JavaScript` |
 | `calendar-events-json.js` | Dumps one day of calendar events (EventKit via osascript, so the Calendars TCC grant sticks to an Apple-signed binary). One interactive run to approve the prompt |
 | `contacts-json.js` | Dumps macOS Contacts (Contacts framework via osascript, same TCC pattern — one interactive run): name, nickname, emails, phones, birthday. Identifiers only, never facts |
-| `dt-morning-brief.py` | Daily ~05:15 — retried 05:45/06:30/08:00 for standby-missed triggers, idempotent (`com.user.dt-morning-brief`): calendar + Person records → `## Briefing` section in today's daily note; Mondays also `## Reconnect`; Contacts birthdays → `## Birthdays` |
+| `dt-morning-brief.py` | Daily ~05:15 — retried 05:45/06:30/08:00 for standby-missed triggers, idempotent (`com.user.dt-morning-brief`): calendar + Person records → `## Briefing` section in today's daily note; Mondays also `## Reconnect`; Contacts birthdays → `## Birthdays`; LastContact bumps from yesterday's calendar and from Messages |
 | `entity-filing.py` | Every 30 min (`com.user.entity-filing`): applies approved proposals, then extracts facts from unprocessed sources and files them (suggest mode by default) |
 
 ### Morning brief (resurfacing + contact tracking)
@@ -149,12 +149,35 @@ an NSArray ObjC-side (a JS array crashes the fetch), and a year-less
 birthday's `year` comes back as NSIntegerMax — bound-check before trusting
 it.
 
+LastContact is also bumped from **Messages** — the real non-work contact
+signal. Each morning the brief reads `~/Library/Messages/chat.db` for
+messages since yesterday's local midnight (messages have no cancellation
+concept, so unlike the calendar there is no reason to exclude today's) and
+bumps everyone whose handle resolves to the roster. The boundary is
+deliberately narrow and hard-coded: a **read-only** SQLite connection whose
+query selects handle identifiers, dates, and `is_from_me` — structurally
+never the text column — and logs carry person + date only. Semantics:
+received messages attribute to their sender in any chat (so family group
+chats register the members who actually talk); sent messages count only in
+1:1 chats, so a group broadcast never marks every member as contacted;
+`item_type = 0` keeps renames/joins from counting. Handles map to people
+**live** through Contacts (`norm_handle` folds phones to their last 10
+digits; a handle claimed by two people's cards is dropped, not guessed) —
+per the identifier decision above, phone numbers are never stored in
+DEVONthink. Requires Full Disk Access on `/usr/bin/python3` (the
+chromium-bookmarks agent already established that grant pattern); without
+it, or on schema drift after a macOS update, the query degrades to a
+logged warning the watchdog surfaces, and the brief itself is unaffected.
+`--backfill-messages [--days N]` replays history once (run 2026-07-11 at
+730 days).
+
 The daily run only ever looks at yesterday, so a person seeded today starts
 with no contact history. `dt-morning-brief.py --backfill-contacts [--days N]`
 replays a range (default 365 days) through the same matcher, keeping only each
 person's most recent date — one calendar dump, a few seconds, idempotent.
-Run it once after a seeding session. The calendar is the **only** historical
-source of contact dates; see the note on `GranolaParticipants` below.
+Run it once after a seeding session. The calendar and Messages are the only
+historical sources of contact dates; see the note on `GranolaParticipants`
+below.
 
 The brief also writes an `## Entity Review` section counting proposals that
 need attention: those awaiting review in `_Review`, and separately any left
@@ -440,6 +463,10 @@ review-gated proposal, never an auto-apply.
 # after seeding People: replay past calendar days into LastContact
 ~/.local/bin/dt-morning-brief.py --backfill-contacts --dry-run
 ~/.local/bin/dt-morning-brief.py --backfill-contacts --days 365
+
+# one-time: replay Messages history into LastContact (handles+dates only)
+~/.local/bin/dt-morning-brief.py --backfill-messages --dry-run --days 730
+~/.local/bin/dt-morning-brief.py --backfill-messages --days 730
 
 # drain the extraction backlog by hand — manual runs bypass the battery and
 # idle gates entirely; each pass extracts MAX_PER_RUN sources, so repeat (or

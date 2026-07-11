@@ -691,6 +691,8 @@ EOF
                 info "If this machine hasn't granted osascript Calendar/Contacts access yet, run once each:"
                 info "  osascript -l JavaScript ~/.local/bin/calendar-events-json.js"
                 info "  osascript -l JavaScript ~/.local/bin/contacts-json.js"
+                info "Messages-based LastContact needs Full Disk Access on /usr/bin/python3"
+                info "(System Settings > Privacy & Security > Full Disk Access; add /usr/bin/python3)."
             fi
         else
             info "Skipping DEVONthink pipeline."

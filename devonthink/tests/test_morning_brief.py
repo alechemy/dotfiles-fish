@@ -41,7 +41,7 @@ class SkipAttendeePattern(unittest.TestCase):
 class RealAttendees(unittest.TestCase):
     def test_filters_self_nonperson_and_rooms(self):
         ev = event("UI Sync", [
-            attendee("Alec Custer", "alec@x.com", is_self=True),
+            attendee("Sam Doe", "sam@x.com", is_self=True),
             attendee("Anthony Fielding", "a@x.com"),
             attendee("Durham - Wolfpack VC-Z 10 ppl", "room@x.com"),
             attendee("A Resource", "r@x.com", is_person=False),
@@ -311,6 +311,87 @@ class BuildBirthdays(unittest.TestCase):
              contact("Jake Pendry", birthday={"day": 15})],
             [person("Jake Pendry")])
         self.assertEqual(out, "")
+
+
+class AppleTimestamps(unittest.TestCase):
+    def test_local_midnight_roundtrip(self):
+        self.assertEqual(
+            mb.apple_ts_to_local_date(mb.apple_ns("2026-07-10")), "2026-07-10")
+
+    def test_legacy_seconds_rows_agree_with_nanoseconds(self):
+        ns = mb.apple_ns("2026-07-10")
+        self.assertEqual(mb.apple_ts_to_local_date(ns),
+                         mb.apple_ts_to_local_date(ns // 1_000_000_000))
+
+
+class NormHandle(unittest.TestCase):
+    def test_phone_formatting_variants_fold_together(self):
+        for raw in ("+12125550142", "(212) 555-0142", "212-555-0142",
+                    "1 212 555 0142"):
+            self.assertEqual(mb.norm_handle(raw), "2125550142", raw)
+
+    def test_email_casefolds(self):
+        self.assertEqual(mb.norm_handle("Jake@X.com"), "jake@x.com")
+
+    def test_short_code_passes_through(self):
+        self.assertEqual(mb.norm_handle("87892"), "87892")
+
+    def test_empty(self):
+        self.assertEqual(mb.norm_handle(""), "")
+        self.assertEqual(mb.norm_handle(None), "")
+
+
+class HandleIndex(unittest.TestCase):
+    def test_matched_card_maps_phones_and_emails(self):
+        p = person("Jake Pendry")
+        index = mb.handle_index(
+            [contact("Jake Pendry", phones=["(212) 555-0142"],
+                     emails=["Jake@X.com"])], [p])
+        self.assertIs(index["2125550142"], p)
+        self.assertIs(index["jake@x.com"], p)
+
+    def test_unmatched_card_contributes_nothing(self):
+        index = mb.handle_index(
+            [contact("Stranger", phones=["2125550142"])],
+            [person("Jake Pendry")])
+        self.assertEqual(index, {})
+
+    def test_handle_claimed_by_two_people_is_dropped(self):
+        people = [person("Marisa Voss"), person("Martin Voss")]
+        index = mb.handle_index(
+            [contact("Marisa Voss", phones=["212-555-0142"]),
+             contact("Martin Voss", phones=["+12125550142"])], people)
+        self.assertNotIn("2125550142", index)
+
+    def test_two_cards_for_one_person_do_not_collide(self):
+        p = person("Jake Pendry", email="jake@x.com")
+        index = mb.handle_index(
+            [contact("Jake Pendry", phones=["212-555-0142"]),
+             contact("Jakey", emails=["jake@x.com"], phones=["2125550142"])],
+            [p])
+        self.assertIs(index["2125550142"], p)
+
+
+class MessageBumps(unittest.TestCase):
+    def test_newest_date_across_handles_wins(self):
+        p = person("Jake Pendry")
+        index = mb.handle_index(
+            [contact("Jake Pendry", phones=["212-555-0142"],
+                     emails=["jake@x.com"])], [p])
+        ops = mb.message_bumps(
+            [("+12125550142", mb.apple_ns("2026-07-08")),
+             ("jake@x.com", mb.apple_ns("2026-07-09"))], index)
+        self.assertEqual(ops, [{"op": "bump_lastcontact",
+                                "uuid": p["uuid"], "date": "2026-07-09"}])
+
+    def test_unknown_handles_are_ignored(self):
+        index = mb.handle_index(
+            [contact("Jake Pendry", phones=["212-555-0142"])],
+            [person("Jake Pendry")])
+        ops = mb.message_bumps(
+            [("87892", mb.apple_ns("2026-07-09")),
+             ("stranger@x.com", mb.apple_ns("2026-07-09"))], index)
+        self.assertEqual(ops, [])
 
 
 class PersonSummaryLine(unittest.TestCase):
