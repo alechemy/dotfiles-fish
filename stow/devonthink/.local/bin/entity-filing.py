@@ -870,6 +870,22 @@ def stale_person_ops(ops, index, people):
     return stale
 
 
+def proposal_ops(text):
+    """Ops list from the last ```json fence of a proposal body, or None when
+    no fence exists. Line endings are normalized first: proposals are meant
+    to be hand-edited before approval, and DEVONthink's editor saves
+    markdown with classic-Mac \\r endings. Raises ValueError (including
+    json.JSONDecodeError) when the fence isn't a JSON array of objects."""
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    blocks = re.findall(r"```json\s*\n(.*?)\n```", text, re.DOTALL)
+    if not blocks:
+        return None
+    ops = json.loads(blocks[-1])
+    if not isinstance(ops, list) or not all(isinstance(o, dict) for o in ops):
+        raise ValueError("ops are not a JSON array of objects")
+    return ops
+
+
 def apply_approved(dry_run):
     approved = run_bridge([{"op": "list_group", "path": APPROVED_PATH}])[0]
     if not approved:
@@ -878,23 +894,17 @@ def apply_approved(dry_run):
     index = roster_index(people)
     for rec in approved:
         text = run_bridge([{"op": "get_text", "uuid": rec["uuid"]}])[0]["text"]
-        blocks = re.findall(r"```json\s*\n(.*?)\n```", text, re.DOTALL)
-        if not blocks:
-            log.warning("approved proposal has no ops block, skipping",
-                        extra={"record_name": rec["name"],
-                               "record_uuid": rec["uuid"]})
-            continue
         try:
-            ops = json.loads(blocks[-1])
-        except json.JSONDecodeError as exc:
+            ops = proposal_ops(text)
+        except ValueError as exc:
             log.error("approved proposal has invalid ops JSON (%s), skipping",
                       exc, extra={"record_name": rec["name"],
                                   "record_uuid": rec["uuid"]})
             continue
-        if not isinstance(ops, list) or not all(isinstance(o, dict) for o in ops):
-            log.error("approved proposal ops are not a JSON array of objects, "
-                      "skipping", extra={"record_name": rec["name"],
-                                         "record_uuid": rec["uuid"]})
+        if ops is None:
+            log.warning("approved proposal has no ops block, skipping",
+                        extra={"record_name": rec["name"],
+                               "record_uuid": rec["uuid"]})
             continue
         stale = stale_person_ops(ops, index, people)
         if stale:

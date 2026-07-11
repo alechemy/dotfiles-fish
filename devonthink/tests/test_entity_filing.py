@@ -240,16 +240,31 @@ class OpsForPlan(unittest.TestCase):
 
 
 class ProposalRoundTrip(unittest.TestCase):
-    def test_ops_survive_the_fenced_block_apply_approved_parses(self):
-        """apply_approved reads back the last ```json fence. If proposal_body ever
-        stops emitting exactly that, approvals silently become no-ops."""
+    def build(self):
         plan = {"kind": "new", "name": "Wren", "single_token": True, "near": [],
                 "facts": [("2026-03-16", "attends Cedar Ridge")], "updates": {}}
         ops = ef.ops_for_plan(plan, SOURCE, "2026-03-16")
-        body = ef.proposal_body(SOURCE, "2026-03-16", [plan], ops)
-        blocks = re.findall(r"```json\s*\n(.*?)\n```", body, re.DOTALL)
-        self.assertTrue(blocks)
-        self.assertEqual(json.loads(blocks[-1]), ops)
+        return ops, ef.proposal_body(SOURCE, "2026-03-16", [plan], ops)
+
+    def test_ops_survive_the_fenced_block_apply_approved_parses(self):
+        """apply_approved reads back the last ```json fence. If proposal_body ever
+        stops emitting exactly that, approvals silently become no-ops."""
+        ops, body = self.build()
+        self.assertEqual(ef.proposal_ops(body), ops)
+
+    def test_dt_editor_line_endings_still_parse(self):
+        """DEVONthink's editor saves markdown with classic-Mac CR endings, so
+        any proposal the user hand-edits before approving comes back that way."""
+        ops, body = self.build()
+        self.assertEqual(ef.proposal_ops(body.replace("\n", "\r")), ops)
+        self.assertEqual(ef.proposal_ops(body.replace("\n", "\r\n")), ops)
+
+    def test_no_fence_is_none_and_bad_json_raises(self):
+        self.assertIsNone(ef.proposal_ops("# File: x\n\nno ops here\n"))
+        with self.assertRaises(ValueError):
+            ef.proposal_ops("```json\n{not json\n```")
+        with self.assertRaises(ValueError):
+            ef.proposal_ops('```json\n{"op": "not-a-list"}\n```')
 
 
 class PickTransport(unittest.TestCase):
