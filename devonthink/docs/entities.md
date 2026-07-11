@@ -96,7 +96,8 @@ stay stdlib-only (tier-1 `/usr/bin/python3`, stable TCC identity):
 | --- | --- |
 | `entity-dt-bridge.js` | Executes a JSON ops batch against DT (dump people, search sources, append log lines, set fields, create proposals/records, DT-chat call). Run via `/usr/bin/osascript -l JavaScript` |
 | `calendar-events-json.js` | Dumps one day of calendar events (EventKit via osascript, so the Calendars TCC grant sticks to an Apple-signed binary). One interactive run to approve the prompt |
-| `dt-morning-brief.py` | Daily ~05:15 — retried 05:45/06:30/08:00 for standby-missed triggers, idempotent (`com.user.dt-morning-brief`): calendar + Person records → `## Briefing` section in today's daily note; Mondays also `## Reconnect` |
+| `contacts-json.js` | Dumps macOS Contacts (Contacts framework via osascript, same TCC pattern — one interactive run): name, nickname, emails, phones, birthday. Identifiers only, never facts |
+| `dt-morning-brief.py` | Daily ~05:15 — retried 05:45/06:30/08:00 for standby-missed triggers, idempotent (`com.user.dt-morning-brief`): calendar + Person records → `## Briefing` section in today's daily note; Mondays also `## Reconnect`; Contacts birthdays → `## Birthdays` |
 | `entity-filing.py` | Every 30 min (`com.user.entity-filing`): applies approved proposals, then extracts facts from unprocessed sources and files them (suggest mode by default) |
 
 ### Morning brief (resurfacing + contact tracking)
@@ -129,6 +130,24 @@ people whose contact is calendared rather than jotted — calls with family,
 social plans — without waiting for a filed fact. Yesterday, not today,
 because a completed day can't have its meetings cancelled out from under the
 bump; and bumps only ever raise the date, so re-runs are harmless.
+
+A `## Birthdays` section lists people whose macOS Contacts card carries a
+birthday falling within the next 14 days. Cards are matched against the
+roster the same way attendees are (email first, then name, then the card's
+nickname against record aliases); only roster-matched people surface, which
+is the whole point versus the all-of-Contacts "Birthdays" calendar that
+stays in `SKIP_CALENDARS`. Birthdays are read live from Contacts on every
+run and deliberately **not** stored on the Person record: identifiers from
+Contacts are matching keys, not knowledge, and a stored copy would drift the
+moment the card is edited. Year-less birthdays (Contacts allows them) render
+without an age; a Feb 29 birthday surfaces on Feb 28 in non-leap years. The
+Contacts read is one-way and identifier-only — nothing is ever written back,
+per the boundaries above. JXA gotchas discovered here, guarded by
+`test_contacts_canary.py`: ObjC nil must be spelled `$()` (a JS `null`
+predicate silently returns zero containers), `keysToFetch` must be built as
+an NSArray ObjC-side (a JS array crashes the fetch), and a year-less
+birthday's `year` comes back as NSIntegerMax — bound-check before trusting
+it.
 
 The daily run only ever looks at yesterday, so a person seeded today starts
 with no contact history. `dt-morning-brief.py --backfill-contacts [--days N]`

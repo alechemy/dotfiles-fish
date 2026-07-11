@@ -78,6 +78,18 @@ def person(name, uuid=None, aliases="", **md):
     }
 
 
+def contact(name, nickname="", emails=(), phones=(), birthday=None):
+    """A contacts-json.js entry. birthday is {"month", "day", "year"?} or None."""
+    return {
+        "id": f"cn-{name.replace(' ', '-').lower()}",
+        "name": name,
+        "nickname": nickname,
+        "emails": list(emails),
+        "phones": list(phones),
+        "birthday": birthday,
+    }
+
+
 def attendee(name, email="", is_self=False, is_person=True):
     return {"name": name, "email": email, "is_self": is_self, "is_person": is_person}
 

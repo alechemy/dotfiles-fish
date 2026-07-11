@@ -683,12 +683,14 @@ EOF
             done
             success "DEVONthink pipeline installed"
 
-            # The morning brief reads the calendar through EventKit under
-            # /usr/bin/osascript; the Calendars TCC grant can only be created
-            # interactively. One manual run answers the prompt for good.
+            # The morning brief reads the calendar through EventKit and the
+            # address book through the Contacts framework, both under
+            # /usr/bin/osascript; those TCC grants can only be created
+            # interactively. One manual run of each answers the prompt for good.
             if [ "$DT_ROLE" = driver ]; then
-                info "If this machine hasn't granted osascript Calendar access yet, run once:"
+                info "If this machine hasn't granted osascript Calendar/Contacts access yet, run once each:"
                 info "  osascript -l JavaScript ~/.local/bin/calendar-events-json.js"
+                info "  osascript -l JavaScript ~/.local/bin/contacts-json.js"
             fi
         else
             info "Skipping DEVONthink pipeline."

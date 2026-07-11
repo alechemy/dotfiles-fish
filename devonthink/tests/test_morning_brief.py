@@ -1,7 +1,7 @@
 import re
 import unittest
 
-from helpers import attendee, capture_logs, event, load, person
+from helpers import attendee, capture_logs, contact, event, load, person
 
 mb = load("dt-morning-brief.py", "dt_morning_brief")
 
@@ -185,6 +185,132 @@ class BuildReconnect(unittest.TestCase):
         people = [person(f"P{i}", relationship="family") for i in range(15)]
         out, _ = self.reconnect(people)
         self.assertEqual(out.count("\n- "), mb.RECONNECT_LIMIT)
+
+
+class MatchContact(unittest.TestCase):
+    def index(self, *people):
+        return mb.person_index(list(people))
+
+    def test_email_beats_name(self):
+        by_email = person("Jake Pendry", email="jake@x.com")
+        by_name = person("Jake Old")
+        index = self.index(by_email, by_name)
+        c = contact("Jake Old", emails=["jake@x.com"])
+        self.assertIs(mb.match_contact(index, c), by_email)
+
+    def test_matches_by_name_and_by_nickname_alias(self):
+        p = person("Jacob Pendry", aliases="Jake")
+        index = self.index(p)
+        self.assertIs(mb.match_contact(index, contact("Jacob Pendry")), p)
+        self.assertIs(mb.match_contact(index, contact("J. D.", nickname="Jake")), p)
+
+    def test_ambiguous_key_is_no_match(self):
+        index = self.index(person("Jonathan Marsh", aliases="Jonathan"),
+                           person("Jonathan Vega", aliases="Jonathan"))
+        self.assertIsNone(mb.match_contact(index, contact("Jonathan")))
+
+    def test_unmatched_contact(self):
+        index = self.index(person("Jake Pendry"))
+        self.assertIsNone(mb.match_contact(index, contact("Someone Else")))
+
+
+class BirthdayOccurrence(unittest.TestCase):
+    def occ(self, month, day, start, lookahead=14):
+        return mb.birthday_occurrence(month, day, mb.date.fromisoformat(start),
+                                      lookahead)
+
+    def test_window_boundaries(self):
+        self.assertEqual(str(self.occ(7, 11, "2026-07-11")), "2026-07-11")
+        self.assertEqual(str(self.occ(7, 25, "2026-07-11")), "2026-07-25")
+        self.assertIsNone(self.occ(7, 26, "2026-07-11"))
+
+    def test_wraps_year_end(self):
+        self.assertEqual(str(self.occ(1, 3, "2026-12-28")), "2027-01-03")
+
+    def test_feb29_in_leap_year(self):
+        self.assertEqual(str(self.occ(2, 29, "2028-02-20")), "2028-02-29")
+
+    def test_feb29_falls_on_feb28_in_non_leap_year(self):
+        self.assertEqual(str(self.occ(2, 29, "2026-02-20")), "2026-02-28")
+
+    def test_feb28_birthday_unaffected_by_leap_rule(self):
+        self.assertEqual(str(self.occ(2, 28, "2028-02-20")), "2028-02-28")
+
+
+class BuildBirthdays(unittest.TestCase):
+    TODAY = "2026-07-11"
+
+    def build(self, contacts, people, today=TODAY):
+        return mb.build_birthdays(contacts, people, today) or ""
+
+    def test_roster_matched_birthday_renders_with_link_and_marker(self):
+        p = person("Jake Pendry")
+        out = self.build([contact("Jake Pendry",
+                                  birthday={"month": 7, "day": 15})], [p])
+        self.assertIn(f"<!-- birthdays:{self.TODAY} -->", out)
+        self.assertIn(f"- 2026-07-15 — [Jake Pendry](x-devonthink-item://"
+                      f"{p['uuid']}) — birthday", out)
+
+    def test_unmatched_contact_never_surfaces(self):
+        out = self.build([contact("Stranger", birthday={"month": 7, "day": 12})],
+                         [person("Jake Pendry")])
+        self.assertEqual(out, "")
+
+    def test_age_from_year(self):
+        out = self.build([contact("Jake Pendry",
+                                  birthday={"month": 7, "day": 15, "year": 1986})],
+                         [person("Jake Pendry")])
+        self.assertIn("turns 40", out)
+
+    def test_sentinel_year_gets_no_age(self):
+        for year in (1604, 5, 2100):
+            out = self.build([contact("Jake Pendry",
+                                      birthday={"month": 7, "day": 15, "year": year})],
+                             [person("Jake Pendry")])
+            self.assertIn("— birthday", out, year)
+            self.assertNotIn("turns", out, year)
+
+    def test_age_uses_occurrence_year_across_new_year(self):
+        out = self.build([contact("Jake Pendry",
+                                  birthday={"month": 1, "day": 3, "year": 1990})],
+                         [person("Jake Pendry")], today="2026-12-28")
+        self.assertIn("- 2027-01-03", out)
+        self.assertIn("turns 37", out)
+
+    def test_today_is_flagged(self):
+        out = self.build([contact("Jake Pendry",
+                                  birthday={"month": 7, "day": 11})],
+                         [person("Jake Pendry")])
+        self.assertIn("(today!)", out)
+
+    def test_outside_window_is_silent(self):
+        out = self.build([contact("Jake Pendry",
+                                  birthday={"month": 7, "day": 26})],
+                         [person("Jake Pendry")])
+        self.assertEqual(out, "")
+
+    def test_sorted_by_date(self):
+        people = [person("Aaron Brooks"), person("Jake Pendry")]
+        out = self.build(
+            [contact("Jake Pendry", birthday={"month": 7, "day": 13}),
+             contact("Aaron Brooks", birthday={"month": 7, "day": 20})], people)
+        self.assertLess(out.index("Jake Pendry"), out.index("Aaron Brooks"))
+
+    def test_two_cards_for_one_person_yield_one_line(self):
+        p = person("Jake Pendry", email="jake@x.com")
+        out = self.build(
+            [contact("Jake Pendry", birthday={"month": 7, "day": 15}),
+             contact("Jakey", emails=["jake@x.com"],
+                     birthday={"month": 7, "day": 15})], [p])
+        self.assertEqual(out.count("Jake Pendry"), 1)
+
+    def test_birthdayless_and_partial_cards_are_ignored(self):
+        out = self.build(
+            [contact("Jake Pendry"),
+             contact("Jake Pendry", birthday={"month": 7}),
+             contact("Jake Pendry", birthday={"day": 15})],
+            [person("Jake Pendry")])
+        self.assertEqual(out, "")
 
 
 class PersonSummaryLine(unittest.TestCase):

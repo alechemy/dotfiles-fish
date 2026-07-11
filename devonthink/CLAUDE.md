@@ -59,13 +59,16 @@ The suite covers the pure functions that carry the logic (`md_enum`,
 `load_state`). Anything needing DEVONthink is out of scope — drive the bridge
 by hand for that, and clean up the records you create.
 
-`test_calendar_canary.py` is the exception: it runs the real
-`calendar-events-json.js` against the real Calendar, because the bug it guards
-(JXA returns EventKit's NSInteger enums as *strings*, so `=== 1` is silently
-false and every attendee stops being a person) cannot be reproduced with a
-fixture. It skips rather than fails when there is no Calendars grant or no
-events with attendees in the window, so a fresh machine or a follower Mac stays
-green. If it ever fails, contact tracking is silently dead — see
+`test_calendar_canary.py` and `test_contacts_canary.py` are the exception:
+they run the real `calendar-events-json.js` / `contacts-json.js` against the
+real Calendar and Contacts, because the bugs they guard live in the JXA/ObjC
+bridge and cannot be reproduced with a fixture — EventKit's NSInteger enums
+come back as *strings* (so `=== 1` is silently false and every attendee stops
+being a person), a JS `null` where ObjC nil `$()` is expected silently returns
+zero contact containers, and a year-less birthday carries NSIntegerMax as its
+year. They skip rather than fail when there is no TCC grant or no data in the
+window, so a fresh machine or a follower Mac stays green. If one ever fails,
+contact tracking or the birthday section is silently dead — see
 `docs/entities.md`.
 
 When adding a pipeline function, ask whether its failure mode is `continue`

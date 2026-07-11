@@ -6,9 +6,12 @@ Builds a "who am I about to meet" briefing from today's calendar plus the
 Person records in Lorebook/20_ENTITIES/People and appends it to today's
 daily note as a `## Briefing` section. On Mondays (or with --weekly) it
 also appends a `## Reconnect` section listing people whose LastContact
-has drifted past their relationship tier's threshold. Whenever filing
-proposals sit unreviewed in `/20_ENTITIES/_Review`, an `## Entity Review`
-line reports the backlog count.
+has drifted past their relationship tier's threshold. A `## Birthdays`
+section lists roster-matched macOS Contacts whose birthday falls within
+the next two weeks — matched, not all of Contacts, which is why the
+all-of-Contacts Birthdays calendar stays in SKIP_CALENDARS. Whenever
+filing proposals sit unreviewed in `/20_ENTITIES/_Review`, an
+`## Entity Review` line reports the backlog count.
 
 The brief reads live from the records, so it is never stale. Two mutations
 only: the daily-note section insert (idempotent via an HTML comment marker
@@ -27,8 +30,9 @@ this script guarantees `## Today's Notes` exists before appending its own
 sections at the end of the note.
 
 Calendar access goes through calendar-events-json.js (EventKit via
-osascript, Apple-signed TCC identity). DEVONthink access goes through
-entity-dt-bridge.js. Both are invoked via /usr/bin/osascript.
+osascript, Apple-signed TCC identity), Contacts access through
+contacts-json.js (same pattern), and DEVONthink access through
+entity-dt-bridge.js. All are invoked via /usr/bin/osascript.
 
 Usage:
     dt-morning-brief.py              # normal launchd-driven run
@@ -49,6 +53,7 @@ Config (~/.config/dt-pipeline/entities.conf, shared with entity-filing.py):
                                      human, so the name is the only signal.
 """
 
+import calendar as calmod
 import json
 import os
 import re
@@ -66,8 +71,11 @@ log = setup_log("morning-brief")
 
 BRIDGE = os.path.expanduser("~/.local/bin/entity-dt-bridge.js")
 CALENDAR = os.path.expanduser("~/.local/bin/calendar-events-json.js")
+CONTACTS = os.path.expanduser("~/.local/bin/contacts-json.js")
 BRIEF_HEADER = "## Briefing"
 RECONNECT_HEADER = "## Reconnect"
+BIRTHDAYS_HEADER = "## Birthdays"
+BIRTHDAY_LOOKAHEAD = 14
 REVIEW_HEADER = "## Entity Review"
 ON_THIS_DAY_HEADER = "## On This Day"
 ON_THIS_DAY_YEARS = 5
@@ -403,6 +411,70 @@ def build_reconnect(people, today):
     return "\n".join(lines)
 
 
+def match_contact(index, contact):
+    """Resolve a Contacts card to a roster person: emails first (the precise
+    key), then full name, then nickname — the first key with any roster hit
+    decides, and ambiguity on that key means no match, same as match_person."""
+    keys = list(contact.get("emails") or [])
+    keys += [contact.get("name", ""), contact.get("nickname", "")]
+    for key in (norm(k) for k in keys):
+        hits = index.get(key)
+        if key and hits:
+            return hits[0] if len(hits) == 1 else None
+    return None
+
+
+def birthday_occurrence(month, day, start, lookahead):
+    """Date the birthday is celebrated within [start, start+lookahead], or
+    None. A Feb 29 birthday falls on Feb 28 in non-leap years."""
+    for off in range(lookahead + 1):
+        d = start + timedelta(days=off)
+        if (d.month, d.day) == (month, day):
+            return d
+        if ((month, day) == (2, 29) and (d.month, d.day) == (2, 28)
+                and not calmod.isleap(d.year)):
+            return d
+    return None
+
+
+def build_birthdays(contacts, people, today, lookahead=BIRTHDAY_LOOKAHEAD):
+    """Upcoming birthdays for roster-matched Contacts cards only — the whole
+    point vs. the skipped all-of-Contacts Birthdays calendar. Read live from
+    Contacts each run, never stored on the Person record: identifiers are
+    matching keys, not knowledge, and a stored copy would drift."""
+    index = person_index(people)
+    start = date.fromisoformat(today)
+    rows = []
+    seen = set()
+    for c in contacts:
+        b = c.get("birthday") or {}
+        month, day = b.get("month"), b.get("day")
+        if not month or not day:
+            continue
+        p = match_contact(index, c)
+        if not p or p["uuid"] in seen:
+            continue
+        when = birthday_occurrence(month, day, start, lookahead)
+        if not when:
+            continue
+        seen.add(p["uuid"])
+        year = b.get("year")
+        # Plausibility guard: some clients store year-less birthdays with a
+        # sentinel year (1604) rather than omitting it.
+        age = when.year - year if year and 1900 <= year <= when.year else None
+        rows.append((when, age, p))
+    if not rows:
+        return None
+    rows.sort(key=lambda r: (r[0], norm(r[2]["name"])))
+    lines = [f"<!-- birthdays:{today} -->", ""]
+    for when, age, p in rows:
+        link = f"[{p['name']}](x-devonthink-item://{p['uuid']})"
+        what = f"turns {age}" if age is not None else "birthday"
+        suffix = " (today!)" if when == start else ""
+        lines.append(f"- {when.isoformat()} — {link} — {what}{suffix}")
+    return "\n".join(lines)
+
+
 def parked_sources():
     """Sources entity-filing gave up on after repeated failures. Read from
     its state file; anything unreadable degrades to 'no parked sources'
@@ -606,8 +678,19 @@ def main():
     except Exception as exc:
         log.warning("calendar query failed: %s", exc)
 
+    contacts = []
+    try:
+        cj = run_osascript(CONTACTS, [], timeout=60)
+        if cj.get("ok"):
+            contacts = cj["contacts"]
+        else:
+            log.warning("contacts unavailable: %s", cj.get("error"))
+    except Exception as exc:
+        log.warning("contacts query failed: %s", exc)
+
     people = run_bridge([{"op": "dump_people"}])[0]
-    log.info("loaded %d people, %d events", len(people), len(events))
+    log.info("loaded %d people, %d events, %d contacts",
+             len(people), len(events), len(contacts))
 
     yesterday = (date.fromisoformat(today) - timedelta(days=1)).isoformat()
     try:
@@ -632,6 +715,7 @@ def main():
     sections = [(BRIEF_HEADER, build_brief(events, people, today, skip_re))]
     if weekly or date.fromisoformat(today).weekday() == 0:
         sections.append((RECONNECT_HEADER, build_reconnect(people, today)))
+    sections.append((BIRTHDAYS_HEADER, build_birthdays(contacts, people, today)))
     sections.append((REVIEW_HEADER, review_nudge(today)))
     sections.append((ON_THIS_DAY_HEADER, build_on_this_day(today)))
 
