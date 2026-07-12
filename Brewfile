@@ -18,6 +18,7 @@ tap "yqrashawn/goku"
 # Binaries
 brew "ast-grep"
 brew "bat"
+brew "betterleaks"
 brew "felixkratz/formulae/borders"
 # Loopback reverse proxy for the oMLX chat UI; injects a CSP header so the page
 # can't make non-same-origin requests (see stow/caddy/.config/caddy/Caddyfile).

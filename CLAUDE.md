@@ -96,6 +96,12 @@ Rules baked into the worker:
 
 `core.hooksPath` is **local** git config (lives in `.git/config`, not tracked), so it can't ship in the repo — `setup.sh` step 0d points it at `scripts/git-hooks` on every machine and re-marks the hooks executable. To wire it up by hand on a clone that hasn't re-run setup: `git -C ~/.dotfiles config --local core.hooksPath "$PWD/scripts/git-hooks"`. To restow after a sync without waiting for a hook, run `scripts/restow-changed.sh <old-ref> <new-ref>` directly (e.g. `HEAD@{1} HEAD`).
 
+### Secrets gate (betterleaks)
+
+Two hooks in `scripts/git-hooks/` scan for leaked secrets with [betterleaks](https://betterleaks.com) (Brewfile) and — unlike the restow hooks — block on a finding: `pre-commit` scans staged changes, and `pre-push` scans every outgoing commit per pushed ref (`remote..local`, or `--not --remotes` for a new branch). pre-push is the authoritative gate: it catches commits made with `--no-verify` or by tooling that skipped the pre-commit hook. Both skip with a warning when betterleaks isn't installed, so bare git still works mid-bootstrap.
+
+Config is `.betterleaks.toml` at the repo root (auto-discovered; currently just extends the default ruleset). For a false positive: prefer a `betterleaks:allow` trailing comment on the flagged line, or an allowlist entry in the config; `git commit --no-verify` defers the decision to push time rather than bypassing it. Findings print redacted (`--redact=85`) — rerun `betterleaks git --staged .` without the flag to see the full match. Note betterleaks validates token *structure*, not just prefixes (e.g. a fabricated `AKIA…` string with non-base32 characters is correctly ignored), so test fixtures for the gate need realistically-shaped fakes.
+
 ### Generated configs (template → build → stow)
 
 Some package configs are generated at install time from a tracked template. The pattern:

@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+#
+# Secrets gate: block a commit whose staged changes contain a detectable
+# secret (betterleaks, config in .betterleaks.toml). Unlike the restow hooks
+# this one blocks on purpose. For a false positive, add a `betterleaks:allow`
+# comment on the flagged line or an allowlist entry in .betterleaks.toml;
+# `git commit --no-verify` also works, and the pre-push gate rescans every
+# outgoing commit so a bypass here still can't leave the machine unnoticed.
+# Installed via core.hooksPath by setup.sh.
+
+command -v betterleaks >/dev/null 2>&1 || {
+    echo "pre-commit: betterleaks not installed; skipping secrets scan (brew install betterleaks)" >&2
+    exit 0
+}
+
+exec betterleaks git --staged --no-banner --redact=85 -v .
