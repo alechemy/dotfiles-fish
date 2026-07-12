@@ -8,6 +8,12 @@ mb = load("dt-morning-brief.py", "dt_morning_brief")
 ROOM_RE = re.compile(r"\bVC\b|\bConference\b|\bRoom\b|\d+\s?ppl", re.IGNORECASE)
 
 
+def backlog(pending=0, approved=0, parked=None,
+            review_uuid="REV", approved_uuid="APR"):
+    return {"pending": pending, "approved": approved, "parked": parked or {},
+            "review_uuid": review_uuid, "approved_uuid": approved_uuid}
+
+
 class MdEnum(unittest.TestCase):
     def test_folds_case_space_and_underscore(self):
         for raw in ("family", "Family", " FAMILY "):
@@ -468,6 +474,32 @@ class RecentLogBullets(unittest.TestCase):
         self.assertIn("moved.", got[0])
 
 
+class RenderReview(unittest.TestCase):
+    TODAY = "2026-07-09"
+
+    def test_pending_links_to_the_review_group(self):
+        got = mb.render_review(backlog(pending=2), self.TODAY)
+        self.assertIn(
+            "- 2 filing proposals awaiting review in "
+            "[20_ENTITIES/_Review](x-devonthink-item://REV)", got)
+
+    def test_approved_links_to_the_approved_group(self):
+        got = mb.render_review(backlog(approved=1), self.TODAY)
+        self.assertIn(
+            "- 1 approved proposal in "
+            "[20_ENTITIES/_Review/Approved](x-devonthink-item://APR) "
+            "did not apply", got)
+
+    def test_missing_uuid_degrades_to_the_bare_path(self):
+        got = mb.render_review(backlog(pending=1, review_uuid=None), self.TODAY)
+        self.assertIn("awaiting review in `20_ENTITIES/_Review`", got)
+        self.assertNotIn("x-devonthink-item://None", got)
+
+    def test_empty_backlog_renders_nothing(self):
+        self.assertIsNone(mb.render_review(backlog(), self.TODAY))
+        self.assertIsNone(mb.render_review(None, self.TODAY))
+
+
 class BuildSnapshot(unittest.TestCase):
     TODAY = "2026-07-09"
 
@@ -513,7 +545,8 @@ class BuildSnapshot(unittest.TestCase):
              "today": True}])
 
     def test_review_counts_parked_dict_becomes_count(self):
-        snap = self.snap(backlog=(2, 1, {"u1": {}, "u2": {}}))
+        snap = self.snap(backlog=backlog(pending=2, approved=1,
+                                         parked={"u1": {}, "u2": {}}))
         self.assertEqual(snap["review"],
                          {"pending": 2, "approved": 1, "parked": 2})
 

@@ -683,13 +683,15 @@ def parked_lines(parked):
 
 
 def review_backlog(today):
-    """Filing review backlog counts: (pending, approved, parked) — pending and
-    approved are counts, parked is the state-file dict. None when the bridge
-    count failed (BridgeUnavailable still propagates)."""
+    """Filing review backlog: pending/approved counts, the parked state-file
+    dict, and each review group's UUID so the nudge can link straight to it.
+    None when the bridge count failed (BridgeUnavailable still propagates)."""
     try:
-        children, approved = run_bridge([
+        children, approved, review_group, approved_group = run_bridge([
             {"op": "list_group", "path": REVIEW_PATH},
             {"op": "list_group", "path": APPROVED_PATH},
+            {"op": "get_at_path", "path": REVIEW_PATH},
+            {"op": "get_at_path", "path": APPROVED_PATH},
         ])
     except BridgeUnavailable:
         raise
@@ -697,7 +699,21 @@ def review_backlog(today):
         log.warning("could not count review proposals: %s", exc)
         return None
     pending = [c for c in children if c["name"] != "Approved"]
-    return len(pending), len(approved), parked_sources()
+    return {
+        "pending": len(pending),
+        "approved": len(approved),
+        "parked": parked_sources(),
+        "review_uuid": (review_group or {}).get("uuid"),
+        "approved_uuid": (approved_group or {}).get("uuid"),
+    }
+
+
+def group_link(label, uuid):
+    """Markdown item link to a DEVONthink group, degrading to the bare path
+    when the UUID lookup came back empty — a dead link is worse than text."""
+    if not uuid:
+        return f"`{label}`"
+    return f"[{label}](x-devonthink-item://{uuid})"
 
 
 def render_review(backlog, today):
@@ -709,18 +725,22 @@ def render_review(backlog, today):
     extraction would otherwise vanish from every review surface."""
     if backlog is None:
         return None
-    pending, approved, parked = backlog
+    pending = backlog["pending"]
+    approved = backlog["approved"]
+    parked = backlog["parked"]
     if not pending and not approved and not parked:
         return None
     lines = [f"<!-- review-nudge:{today} -->", ""]
     if pending:
         noun = "proposal" if pending == 1 else "proposals"
-        lines.append(f"- {pending} filing {noun} awaiting review in "
-                     f"`20_ENTITIES/_Review`")
+        link = group_link("20_ENTITIES/_Review", backlog["review_uuid"])
+        lines.append(f"- {pending} filing {noun} awaiting review in {link}")
     if approved:
         noun = "proposal" if approved == 1 else "proposals"
-        lines.append(f"- {approved} approved {noun} did not apply — see "
-                     f"`entity-filing` in the pipeline log")
+        link = group_link("20_ENTITIES/_Review/Approved",
+                          backlog["approved_uuid"])
+        lines.append(f"- {approved} approved {noun} in {link} did not apply "
+                     f"— see `entity-filing` in the pipeline log")
     lines.extend(parked_lines(parked))
     return "\n".join(lines)
 
@@ -903,9 +923,9 @@ def build_snapshot(today, blocks, overdue, bdays, backlog, journal_info, otd):
         "on_this_day": [],
     }
     if backlog is not None:
-        pending, approved, parked = backlog
-        snap["review"] = {"pending": pending, "approved": approved,
-                          "parked": len(parked)}
+        snap["review"] = {"pending": backlog["pending"],
+                          "approved": backlog["approved"],
+                          "parked": len(backlog["parked"])}
     if journal_info is not None:
         state = ("pending" if journal_info["pending"] or journal_info["staged"]
                  else "parked" if journal_info["parked"] else "missing")
