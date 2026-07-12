@@ -185,8 +185,11 @@ def save_state(state):
 def push(url, body):
     """POST the webhook body. Returns True on success; logs and returns
     False otherwise."""
+    # Cloudflare fronts trmnl.com and 403s the default Python-urllib agent.
     req = urllib.request.Request(
-        url, data=body, headers={"Content-Type": "application/json"},
+        url, data=body,
+        headers={"Content-Type": "application/json",
+                 "User-Agent": "trmnl-push-brief/1.0"},
         method="POST")
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:
