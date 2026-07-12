@@ -1,31 +1,30 @@
 #!/bin/bash
-# journal-import.sh <pdf-path>
+# boox-stage.sh <pdf-path>
 #
-# Stages a Boox journal-notebook PDF export ("<year> Journal") for local
-# processing by journal-process.py. Invoked per file by
-# boox-import-watcher.sh, which routes journal notebooks here instead of
-# boox-import.sh — the journal never enters 00_INBOX and never touches the
-# cloud-backed smart-rule pipeline (OCR, formatting, enrichment all run
-# through DEVONthink chat); transcription happens on-device only.
+# Stages a named Boox notebook PDF export for local processing by
+# boox-process.py. Invoked per file by boox-import-watcher.sh. Handwritten
+# notebooks never enter 00_INBOX unprocessed and never touch the
+# cloud-backed smart-rule stages (DT OCR, comment formatting, chat
+# enrichment); transcription happens on-device only.
 #
 # This script stays dumb and fast: byte-hash short-circuits (the Boox
 # re-emits unchanged notebooks on every device sync), an atomic copy into
 # the staging directory, and removal of the Maestral-synced source. All
 # heavy work (rendering, page diffing, OCR, DEVONthink writes) belongs to
-# journal-process.py, which runs on its own launchd schedule behind
+# boox-process.py, which runs on its own launchd schedule behind
 # battery/idle gates.
 
 set -uo pipefail
 
-JOURNAL_DIR="$HOME/.local/state/devonthink/journal"
-STAGING_DIR="$JOURNAL_DIR/staging"
-DONE_DIR="$JOURNAL_DIR/done"
+BOOX_DIR="$HOME/.local/state/devonthink/boox"
+STAGING_DIR="$BOOX_DIR/staging"
+DONE_DIR="$BOOX_DIR/done"
 PIPELINE_LOG="$HOME/.local/bin/pipeline-log"
 
-INPUT_FILE="${1:?usage: journal-import.sh <pdf-path>}"
+INPUT_FILE="${1:?usage: boox-stage.sh <pdf-path>}"
 
-log()  { "$PIPELINE_LOG" journal-import INFO "$*" || true; }
-warn() { "$PIPELINE_LOG" journal-import WARN "$*" || true; }
+log()  { "$PIPELINE_LOG" boox-stage INFO "$*" || true; }
+warn() { "$PIPELINE_LOG" boox-stage WARN "$*" || true; }
 
 if [[ ! -f "$INPUT_FILE" ]]; then
     warn "source PDF vanished before staging, skipping: $INPUT_FILE"
@@ -60,7 +59,7 @@ if [[ -f "$STAGED_FILE" ]] && \
     exit 0
 fi
 
-# Stage + atomic mv so journal-process never reads a half-copied PDF.
+# Stage + atomic mv so boox-process never reads a half-copied PDF.
 TMP_FILE="$STAGED_FILE.tmp"
 if ! cp "$INPUT_FILE" "$TMP_FILE"; then
     rm -f "$TMP_FILE"

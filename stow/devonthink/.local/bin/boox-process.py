@@ -1,34 +1,41 @@
 #!/usr/bin/python3
-"""journal-process.py — local OCR pipeline for the Boox daily journal.
+"""boox-process.py — local OCR pipeline for every named Boox notebook.
 
-Consumes journal-notebook PDFs staged by journal-import.sh, detects which
-pages are new or edited via per-page pixel signatures, transcribes only
-those pages with a local vision model (oMLX), and files one markdown
-record per day into Lorebook/15_JOURNAL/<year>/. Each entry is linked
-from its daily note. The journal never touches the cloud-backed
-smart-rule pipeline: transcription, dating, and filing all happen here,
-on-device.
+Consumes notebook PDFs staged by boox-stage.sh, detects which pages are
+new or edited via per-page pixel signatures, and transcribes only those
+pages with a local vision model (oMLX). Handwritten content never
+reaches the cloud-backed smart-rule stages (DT OCR, comment formatting,
+chat enrichment): transcription, formatting, and metadata all happen
+here, on-device. Two notebook shapes:
 
-Page model: the notebook is one page per day, each page starting with a
-handwritten date line (e.g. "Fri, Jul 11"). The transcription's first
-heading is parsed as the entry date and validated three ways — the
-written weekday must match the parsed date, the year must match the
-notebook's name ("<year> Journal"), and dates must increase with page
-order. A page that fails validation is parked with its reason rather
-than filed under a guessed date; --force re-queues parked pages.
+  - The daily journal ("<year> Journal", one dated page per day) files
+    one markdown record per day into /15_JOURNAL/<year>/, linked from
+    its daily note. The transcription's first heading is parsed as the
+    entry date and validated (weekday check digit, notebook year,
+    monotonic page order); a page that fails validation is parked with
+    its reason rather than filed under a guessed date.
+  - Every other notebook keeps the classic record model: a monochrome
+    TIFF in 00_INBOX, deduplicated by SourceFile (a re-export replaces
+    the backing file in place, preserving UUID/name/tags/WikiLinks),
+    with the assembled markdown transcription in the Finder comment and
+    a local metadata pass supplying EventDate/tags/summary. Pipeline
+    flags arrive pre-set (Recognized/Commented/AIEnriched) so only the
+    LLM-free Post-Enrich & Archive rule ever matches — it still does
+    daily-note extraction, Things tasks, and archiving. The record is
+    filed only once every page has transcribed, so a partially-OCR'd
+    comment never enters the pipeline.
 
 Change detection: pages are rendered once per staged export (grayscale
 PNG, kept in a per-notebook workdir) and identified by ImageMagick's
 pixel signature, so an unchanged page is never re-OCR'd no matter how
 often the Boox re-exports the notebook, and an edit to any old page —
 or a page inserted mid-notebook, which shifts every later signature —
-re-enters processing automatically. Entries are keyed by date, not page
-index, so re-OCR of shifted pages updates records in place.
+re-enters processing automatically. Per-page transcriptions are cached
+in the state file, so a one-page edit re-OCRs one page.
 
 RAM safety: OCR holds the shared local-LLM lock that entity-filing.py
-also honors, so the ~18 GB journal vision model and the entity
-extraction model are never loaded into unified memory simultaneously;
-oMLX's LRU eviction handles the sequential swap.
+also honors, so two ~18 GB models are never loaded into unified memory
+simultaneously; oMLX's LRU eviction handles sequential swaps.
 
 Config (~/.config/dt-pipeline/journal.conf, KEY=VALUE; OMLX_URL and
 OMLX_API_KEY default from entities.conf so the shared server is
@@ -41,17 +48,18 @@ configured once):
   IDLE_MINUTES=<n>       run OCR only after this much user inactivity,
                          default 10, 0 disables the gate
   DENSITY=<dpi>          page render density, default 200
-  THINGS_TASKS=on|off    send bullets under a Tasks:/Action Items: section
-                         to Things 3, default off — journal musings are
-                         not usually deliberate task lists; opt in only
-                         if you write explicit task sections
+  THINGS_TASKS=on|off    journal only: send bullets under a Tasks:/Action
+                         Items: section to Things 3, default off —
+                         journal musings are not usually deliberate task
+                         lists. Regular notebooks get Things extraction
+                         from Post-Enrich & Archive as always.
 
 Usage:
-    journal-process.py                  # launchd-driven tick
-    journal-process.py --dry-run        # report planned work, write nothing
-    journal-process.py --force          # re-queue parked pages, bypass gates
-    journal-process.py --status         # print per-notebook state summary
-    journal-process.py --rebuild-state  # reseed state from DT records
+    boox-process.py                  # launchd-driven tick
+    boox-process.py --dry-run        # report planned work, write nothing
+    boox-process.py --force         # re-queue parked pages, bypass gates
+    boox-process.py --status        # print per-notebook state summary
+    boox-process.py --rebuild-state # reseed journal state from DT records
 """
 
 import base64
@@ -73,26 +81,30 @@ from pathlib import Path
 sys.path.insert(0, str(Path.home() / ".local" / "bin"))
 from pipeline_log import setup as setup_log
 
-log = setup_log("journal-process")
+log = setup_log("boox-process")
 
 BRIDGE = os.path.expanduser("~/.local/bin/entity-dt-bridge.js")
 INSERT_SECTION = os.path.expanduser("~/.local/bin/insert-daily-note-section.py")
 CONFIG_FILE = os.path.expanduser("~/.config/dt-pipeline/journal.conf")
 ENTITIES_CONFIG = os.path.expanduser("~/.config/dt-pipeline/entities.conf")
 STATE_DIR = os.path.expanduser("~/.local/state/devonthink")
-JOURNAL_DIR = os.path.join(STATE_DIR, "journal")
-STAGING_DIR = os.path.join(JOURNAL_DIR, "staging")
-WORK_DIR = os.path.join(JOURNAL_DIR, "work")
-DONE_DIR = os.path.join(JOURNAL_DIR, "done")
-STATE_FILE = os.path.join(JOURNAL_DIR, "state.json")
-LOCK_FILE = os.path.join(JOURNAL_DIR, "journal-process.lock")
+BOOX_DIR = os.path.join(STATE_DIR, "boox")
+STAGING_DIR = os.path.join(BOOX_DIR, "staging")
+WORK_DIR = os.path.join(BOOX_DIR, "work")
+DONE_DIR = os.path.join(BOOX_DIR, "done")
+STATE_FILE = os.path.join(BOOX_DIR, "state.json")
+LOCK_FILE = os.path.join(BOOX_DIR, "boox-process.lock")
 LLM_LOCK_FILE = os.path.join(STATE_DIR, "local-llm.lock")
 STATE_SCHEMA_VERSION = 1
 
 JOURNAL_GROUP = "/15_JOURNAL"
+INBOX_GROUP = "/00_INBOX"
 DAILY_SECTION = "## Today's Notes"
-NOTEBOOK_RE = re.compile(r"^(\d{4}) Journal$")
+JOURNAL_RE = re.compile(r"^(\d{4}) Journal$")
 MAGICK = "/opt/homebrew/bin/magick"
+MARKDOWNLINT = "/opt/homebrew/bin/markdownlint"
+TIFF_DENSITY = 300
+MAX_TIFF_MB = 50
 
 DEFAULTS = {
     "OMLX_MODEL": "Qwen3-VL-32B-Instruct-4bit",
@@ -109,8 +121,23 @@ TASK_HEADER_RE = re.compile(
 TASK_BULLET_RE = re.compile(r"^\s*[-*•]\s*(?:\[\s?[xX]?\]\s*)?(.+)")
 MD_HEADER_RE = re.compile(r"^\s*#+\s")
 
-OCR_ROLE = "You transcribe handwritten journal pages into clean Markdown."
-OCR_PROMPT = """\
+OCR_ROLE = "You transcribe handwritten note pages into clean Markdown."
+OCR_RULES = """\
+- Use ## / ### headers for titles and section breaks (replace underlines \
+or horizontal rules).
+- Replace middle dots, bullet characters, and other non-standard list \
+markers with standard Markdown bullets (-), preserving nesting via \
+indentation.
+- Replace drawn arrows and connectors with nested lists or blockquotes to \
+show relationships.
+- Replace circled numbers or other enclosed number forms with standard \
+ordered list items (1., 2., 3.).
+- When text wraps across multiple lines as a single thought or sentence, \
+join it into one line rather than treating each line as a separate item.
+- Preserve line breaks between distinct thoughts.
+- Output ONLY the reformatted Markdown — no preamble, no code fences."""
+
+JOURNAL_OCR_PROMPT = """\
 Transcribe this handwritten journal page as clean Markdown. Preserve ALL \
 original content exactly — do not add, remove, rephrase, or comment on \
 anything.
@@ -118,16 +145,39 @@ anything.
 Rules:
 - The page begins with a handwritten date line (e.g. "Fri, Jul 11"). \
 Transcribe it verbatim as a level-1 heading: "# Fri, Jul 11".
-- Use ## / ### headers for section breaks within the page.
-- Replace middle dots, bullet characters, and other non-standard list \
-markers with standard Markdown bullets (-), preserving nesting via \
-indentation.
-- Replace drawn arrows and connectors with nested lists or blockquotes to \
-show relationships.
-- When text wraps across multiple lines as a single thought or sentence, \
-join it into one line rather than treating each line as a separate item.
-- Preserve line breaks between distinct thoughts.
-- Output ONLY the reformatted Markdown — no preamble, no code fences."""
+""" + OCR_RULES
+
+NOTE_OCR_PROMPT = """\
+Transcribe this handwritten note page as clean Markdown. Preserve ALL \
+original content exactly — do not add, remove, rephrase, or comment on \
+anything. If a heading ends with "(cont.)", keep it verbatim.
+
+Rules:
+""" + OCR_RULES
+
+METADATA_ROLE = ("You are a document cataloguing assistant that responds "
+                 "only in JSON.")
+METADATA_PROMPT = """\
+Based on this handwritten note, respond with ONLY a JSON object containing:
+- "eventDate": a strict yyyy-mm-dd date string, or "". Set ONLY when a \
+specific single date is intrinsic to the note's meaning (meeting notes, a \
+call log, an appointment, a dated occurrence). It may come from an \
+explicit date in the content or from relative references ("today", "this \
+morning") resolved against today's date below. Do NOT set it for \
+reference material, study notes, how-to notes, brainstorms, or plans — a \
+note is not event-anchored merely because it was written on some day. \
+Return "" when unsure.
+- "tags": an array of 1-3 concise, singular, Title-Cased topical tags. \
+Prefer the existing tags listed below when applicable; only create a new \
+tag when none fits.
+- "summary": a 1-2 sentence plain-English summary of the note.
+
+Note title: {name}
+Today's date: {today}
+Existing tags in the database: {tags}
+
+Note content:
+{content}"""
 
 WEEKDAY_MAP = {}
 for i, names in enumerate([
@@ -195,14 +245,15 @@ def load_state():
 
 
 def save_state(state):
-    os.makedirs(JOURNAL_DIR, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=JOURNAL_DIR, suffix=".tmp")
+    os.makedirs(BOOX_DIR, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=BOOX_DIR, suffix=".tmp")
     with os.fdopen(fd, "w") as f:
         json.dump(state, f, indent=2)
     os.replace(tmp, STATE_FILE)
 
 
 def acquire_lock(path):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
     fd = open(path, "w")
     try:
         fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -287,18 +338,12 @@ def page_signatures(pngs):
 # ---------------------------------------------------------------------------
 
 
-def ocr_page(config, png_path):
-    with open(png_path, "rb") as f:
-        b64 = base64.b64encode(f.read()).decode()
+def _chat(config, role, content, timeout=900):
     payload = json.dumps({
         "model": config["OMLX_MODEL"],
         "messages": [
-            {"role": "system", "content": OCR_ROLE},
-            {"role": "user", "content": [
-                {"type": "text", "text": OCR_PROMPT},
-                {"type": "image_url",
-                 "image_url": {"url": "data:image/png;base64," + b64}},
-            ]},
+            {"role": "system", "content": role},
+            {"role": "user", "content": content},
         ],
         "temperature": 0,
         "max_tokens": 4096,
@@ -309,14 +354,51 @@ def ocr_page(config, png_path):
     req = urllib.request.Request(
         config["OMLX_URL"] + "/v1/chat/completions",
         data=payload, headers=headers)
-    with urllib.request.urlopen(req, timeout=900) as resp:
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
         out = json.load(resp)
-    text = out["choices"][0]["message"]["content"].strip()
-    # Strip a stray fence despite instructions; the content itself is markdown.
+    return out["choices"][0]["message"]["content"].strip()
+
+
+def strip_fence(text):
     if text.startswith("```"):
         text = re.sub(r"^```[a-z]*\n", "", text)
         text = re.sub(r"\n```$", "", text)
     return text.strip()
+
+
+def ocr_page(config, png_path, prompt):
+    with open(png_path, "rb") as f:
+        b64 = base64.b64encode(f.read()).decode()
+    content = [
+        {"type": "text", "text": prompt},
+        {"type": "image_url",
+         "image_url": {"url": "data:image/png;base64," + b64}},
+    ]
+    return strip_fence(_chat(config, OCR_ROLE, content))
+
+
+def extract_metadata(config, name, text, tags_pool, today):
+    """Local replacement for the cloud enrichment pass: eventDate, tags,
+    summary. Returns None on any failure — filing proceeds without
+    metadata rather than blocking on it, matching the enrich rule's
+    advance-on-timeout behavior."""
+    prompt = METADATA_PROMPT.format(
+        name=name, today=today.isoformat(),
+        tags=", ".join(tags_pool) if tags_pool else "(none)",
+        content=text[:24000])
+    try:
+        raw = strip_fence(_chat(config, METADATA_ROLE, prompt))
+        meta = json.loads(raw)
+    except (urllib.error.URLError, OSError, json.JSONDecodeError,
+            KeyError, TypeError, AttributeError) as exc:
+        log.warning("metadata extraction failed for %s: %s", name, exc)
+        return None
+    ed = str(meta.get("eventDate") or "")
+    if not re.match(r"^\d{4}-\d{2}-\d{2}$", ed):
+        ed = ""
+    tags = [str(t) for t in meta.get("tags") or [] if str(t).strip()][:3]
+    summary = str(meta.get("summary") or "").strip()
+    return {"eventDate": ed, "tags": tags, "summary": summary}
 
 
 def omlx_available(config):
@@ -332,6 +414,55 @@ def omlx_available(config):
             m.get("id", "") for m in models.get("data", [])}
     except (urllib.error.URLError, OSError, json.JSONDecodeError):
         return False
+
+
+CONT_HEADING_RE = re.compile(r"^\s*#+\s*.+?\s*\(cont\.?\)\s*$", re.IGNORECASE)
+
+
+def assemble_pages(texts):
+    """Join per-page transcriptions into one document. A page whose first
+    line is a "(cont.)" heading is a page-break continuation of the
+    previous section, so that heading is dropped and its content flows on."""
+    parts = []
+    for text in texts:
+        lines = text.splitlines()
+        first = next((k for k, l in enumerate(lines) if l.strip()), None)
+        if parts and first is not None and CONT_HEADING_RE.match(lines[first]):
+            lines = lines[:first] + lines[first + 1:]
+        part = "\n".join(lines).strip()
+        if part:
+            parts.append(part)
+    return "\n\n".join(parts)
+
+
+def markdownlint_fix(text):
+    fd, tmp = tempfile.mkstemp(suffix=".md")
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(text)
+        subprocess.run([MARKDOWNLINT, tmp, "--quiet", "--fix"],
+                       capture_output=True, timeout=60)
+        with open(tmp) as f:
+            return f.read()
+    except (OSError, subprocess.SubprocessError):
+        return text
+    finally:
+        os.unlink(tmp)
+
+
+def convert_tiff(pdf_path, workdir, stem):
+    """Monochrome Group4 TIFF, the stored record artifact — same recipe as
+    the retired boox-import.sh (flattening matters for vector PDFs)."""
+    out = os.path.join(workdir, f"{stem}.tiff")
+    subprocess.run(
+        [MAGICK, "-density", str(TIFF_DENSITY), pdf_path,
+         "-background", "white", "-alpha", "remove", "-alpha", "off",
+         "-threshold", "50%", "-monochrome", "-compress", "Group4", out],
+        check=True, capture_output=True, timeout=300)
+    size = os.path.getsize(out)
+    if size > MAX_TIFF_MB * 1024 * 1024:
+        raise RuntimeError(f"TIFF too large ({size} bytes)")
+    return out
 
 
 def user_idle_seconds():
@@ -537,6 +668,54 @@ def link_daily_note(entry_date, uuid):
                  "text": result.stdout}])
 
 
+def file_regular_note(stem, tiff_path, markdown, meta):
+    """Create or update the notebook's TIFF record in 00_INBOX,
+    deduplicated by SourceFile. All pipeline flags arrive set, so of the
+    smart rules only Post-Enrich & Archive (no LLM) ever matches; a
+    re-export replaces the backing file in place and moves the record
+    back to the inbox for a fresh idempotent post-enrich pass."""
+    fields = {
+        "SourceFile": stem,
+        "Handwritten": 1,
+        "NeedsProcessing": 1,
+        "Recognized": 1,
+        "Commented": 1,
+        "AIEnriched": 1,
+        "DocumentType": "Handwritten Note",
+        "EventDate": meta["eventDate"] if meta else "",
+    }
+    if meta and meta["summary"]:
+        fields["summary"] = meta["summary"]
+    hits = run_bridge([{"op": "find_by_field", "field": "SourceFile",
+                        "value": stem}])[0]
+    if hits:
+        uuid = hits[0]["uuid"]
+        run_bridge([
+            {"op": "replace_file", "uuid": uuid, "path": tiff_path},
+            {"op": "set_comment", "uuid": uuid, "comment": markdown},
+            {"op": "set_fields", "uuid": uuid, "fields": fields},
+            {"op": "move_to", "uuid": uuid, "group": INBOX_GROUP},
+        ])
+        return uuid, "updated"
+    name = stem
+    if meta and meta["eventDate"]:
+        name = f"{meta['eventDate']} {stem}"
+        fields["NameLocked"] = 1
+    ops = [
+        {"op": "import_record", "path": tiff_path, "group": INBOX_GROUP},
+    ]
+    uuid = run_bridge(ops)[0]["uuid"]
+    ops = [
+        {"op": "set_comment", "uuid": uuid, "comment": markdown},
+        {"op": "set_fields", "uuid": uuid, "fields": fields},
+        {"op": "set_name", "uuid": uuid, "name": name},
+    ]
+    if meta and meta["tags"]:
+        ops.append({"op": "set_tags", "uuid": uuid, "tags": meta["tags"]})
+    run_bridge(ops)
+    return uuid, "imported"
+
+
 # ---------------------------------------------------------------------------
 # Notebook processing
 # ---------------------------------------------------------------------------
@@ -551,17 +730,25 @@ def notebook_state(state, name):
     return nb
 
 
+def page_done(page, is_journal):
+    return bool(page["date"] if is_journal else page.get("text"))
+
+
+def finish_notebook(basename, pdf_sha, pdf_path, workdir):
+    os.makedirs(DONE_DIR, exist_ok=True)
+    with open(os.path.join(DONE_DIR, basename + ".sha256"), "w") as f:
+        f.write(pdf_sha)
+    os.unlink(pdf_path)
+    shutil.rmtree(workdir, ignore_errors=True)
+    log.info("%s fully processed, staged PDF removed", basename)
+
+
 def process_notebook(pdf_path, state, config, dry_run, force, budget,
                      chat_warned):
     """Process one staged notebook; returns pages OCR'd this run."""
     basename = os.path.basename(pdf_path)
     stem = basename[:-4]
-    m = NOTEBOOK_RE.match(stem)
-    if not m:
-        log.warning("staged file does not look like a journal notebook, "
-                    "skipping: %s", basename)
-        return 0
-    year = int(m.group(1))
+    is_journal = bool(JOURNAL_RE.match(stem))
     nb = notebook_state(state, stem)
     workdir = os.path.join(WORK_DIR, stem)
 
@@ -587,8 +774,9 @@ def process_notebook(pdf_path, state, config, dry_run, force, budget,
             if i < len(old_pages) and old_pages[i].get("sig") == sig:
                 pages.append(old_pages[i])
             else:
-                pages.append({"sig": sig, "date": "", "parked": "",
-                              "attempts": 0})
+                pages.append({"sig": sig, "date": "", "text": "",
+                              "parked": "", "attempts": 0})
+                nb["dirty"] = True
         nb["pages"] = pages
         nb["render_sha"] = pdf_sha
         if not dry_run:
@@ -606,16 +794,45 @@ def process_notebook(pdf_path, state, config, dry_run, force, budget,
             return 0
 
     pending = [i for i, p in enumerate(nb["pages"])
-               if not p["date"] and not p["parked"]]
+               if not page_done(p, is_journal) and not p["parked"]]
     parked = [i for i, p in enumerate(nb["pages"]) if p["parked"]]
 
     if dry_run:
-        log.info("[dry-run] %s: %d page(s), %d pending OCR %s, %d parked %s",
-                 basename, len(nb["pages"]), len(pending),
-                 [i + 1 for i in pending], len(parked),
+        log.info("[dry-run] %s (%s): %d page(s), %d pending OCR %s, "
+                 "%d parked %s", basename,
+                 "journal" if is_journal else "notebook", len(nb["pages"]),
+                 len(pending), [i + 1 for i in pending], len(parked),
                  [i + 1 for i in parked])
         return 0
 
+    if is_journal:
+        processed = process_journal_pages(
+            nb, stem, basename, workdir, pending, config, budget, state,
+            chat_warned)
+    else:
+        processed = process_note_pages(
+            nb, basename, workdir, pending, config, budget, state)
+
+    pending_after = [i for i, p in enumerate(nb["pages"])
+                     if not page_done(p, is_journal) and not p["parked"]]
+    parked_after = [i + 1 for i, p in enumerate(nb["pages"]) if p["parked"]]
+    if pending_after:
+        return processed
+    if parked_after:
+        log.warning("%s: page(s) %s parked — fix and re-run with --force",
+                    basename, parked_after)
+        return processed
+
+    if not is_journal:
+        if not file_note_if_needed(nb, stem, pdf_path, workdir, config):
+            return processed
+    finish_notebook(basename, pdf_sha, pdf_path, workdir)
+    return processed
+
+
+def process_journal_pages(nb, stem, basename, workdir, pending, config,
+                          budget, state, chat_warned):
+    year = int(JOURNAL_RE.match(stem).group(1))
     today = date.today()
     processed = 0
     if pending:
@@ -628,7 +845,7 @@ def process_notebook(pdf_path, state, config, dry_run, force, budget,
         page = nb["pages"][i]
         png = os.path.join(workdir, f"page-{i:04d}.png")
         try:
-            text = ocr_page(config, png)
+            text = ocr_page(config, png, JOURNAL_OCR_PROMPT)
         except (urllib.error.URLError, OSError, json.JSONDecodeError,
                 KeyError, TypeError, AttributeError) as exc:
             page["attempts"] = page.get("attempts", 0) + 1
@@ -676,21 +893,70 @@ def process_notebook(pdf_path, state, config, dry_run, force, budget,
         save_state(state)
         log.info("%s page %d -> %s (%s)", basename, i + 1,
                  entry_date.isoformat(), "updated" if changed else "unchanged")
-
-    pending_after = [i for i, p in enumerate(nb["pages"])
-                     if not p["date"] and not p["parked"]]
-    parked_after = [i + 1 for i, p in enumerate(nb["pages"]) if p["parked"]]
-    if not pending_after and not parked_after:
-        os.makedirs(DONE_DIR, exist_ok=True)
-        with open(os.path.join(DONE_DIR, basename + ".sha256"), "w") as f:
-            f.write(pdf_sha)
-        os.unlink(pdf_path)
-        shutil.rmtree(workdir, ignore_errors=True)
-        log.info("%s fully processed, staged PDF removed", basename)
-    elif parked_after and not pending_after:
-        log.warning("%s: page(s) %s parked — fix and re-run with --force",
-                    basename, parked_after)
     return processed
+
+
+def process_note_pages(nb, basename, workdir, pending, config, budget, state):
+    processed = 0
+    for i in pending:
+        if processed >= budget:
+            log.info("OCR budget reached (%d), remaining pages wait for the "
+                     "next run", budget)
+            break
+        page = nb["pages"][i]
+        png = os.path.join(workdir, f"page-{i:04d}.png")
+        try:
+            text = ocr_page(config, png, NOTE_OCR_PROMPT)
+        except (urllib.error.URLError, OSError, json.JSONDecodeError,
+                KeyError, TypeError, AttributeError) as exc:
+            page["attempts"] = page.get("attempts", 0) + 1
+            log.warning("OCR failed for %s page %d (attempt %d): %s",
+                        basename, i + 1, page["attempts"], exc)
+            if page["attempts"] >= MAX_ATTEMPTS:
+                page["parked"] = f"OCR failed {MAX_ATTEMPTS} times: {exc}"
+                log.error("parked %s page %d: %s", basename, i + 1,
+                          page["parked"])
+            save_state(state)
+            continue
+        processed += 1
+        page["text"] = text or " "
+        page["parked"] = ""
+        page["attempts"] = 0
+        save_state(state)
+        log.info("%s page %d transcribed", basename, i + 1)
+    return processed
+
+
+def file_note_if_needed(nb, stem, pdf_path, workdir, config):
+    """Assemble, enrich, and upsert a completed regular notebook. Returns
+    True when the notebook is fully filed (caller may clean up), False
+    when filing must be retried next run."""
+    markdown = markdownlint_fix(
+        assemble_pages([p.get("text", "") for p in nb["pages"]]))
+    content_sha = hashlib.sha256(markdown.encode()).hexdigest()
+    hits = run_bridge([{"op": "find_by_field", "field": "SourceFile",
+                        "value": stem}])[0]
+    if hits and nb.get("filed_sha") == content_sha and not nb.get("dirty"):
+        return True
+
+    try:
+        tags_pool = run_bridge([{"op": "list_tags"}])[0]
+    except (RuntimeError, BridgeUnavailable):
+        tags_pool = []
+    meta = extract_metadata(config, stem, markdown, tags_pool, date.today())
+
+    try:
+        tiff = convert_tiff(pdf_path, workdir, stem)
+    except (subprocess.SubprocessError, RuntimeError) as exc:
+        log.error("TIFF conversion failed for %s, keeping staged: %s",
+                  stem, exc)
+        return False
+    uuid, status = file_regular_note(stem, tiff, markdown, meta)
+    nb["filed_sha"] = content_sha
+    nb["dirty"] = False
+    log.info("%s %s as %s (eventDate=%s)", stem, status, uuid,
+             (meta or {}).get("eventDate", "") or "none")
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -737,13 +1003,17 @@ def rebuild_state(state):
 
 def print_status(state):
     for name, nb in sorted(state["notebooks"].items()):
+        is_journal = bool(JOURNAL_RE.match(name))
         pages = nb["pages"]
-        done = sum(1 for p in pages if p["date"])
+        done = sum(1 for p in pages if page_done(p, is_journal))
         parked = [(i + 1, p["parked"]) for i, p in enumerate(pages)
                   if p["parked"]]
-        pending = sum(1 for p in pages if not p["date"] and not p["parked"])
-        print(f"{name}: {len(pages)} page(s) rendered, {done} filed, "
-              f"{pending} pending, {len(nb['entries'])} entries")
+        pending = len(pages) - done - len(parked)
+        detail = (f"{len(nb['entries'])} entries" if is_journal
+                  else ("filed" if nb.get("filed_sha") and not nb.get("dirty")
+                        else "not yet filed"))
+        print(f"{name}: {len(pages)} page(s) rendered, {done} transcribed, "
+              f"{pending} pending, {detail}")
         for idx, reason in parked:
             print(f"  parked page {idx}: {reason}")
     staged = sorted(glob.glob(os.path.join(STAGING_DIR, "*.pdf")))
@@ -766,7 +1036,7 @@ def main():
 
     subprocess.run(
         [os.path.expanduser("~/.local/bin/pipeline-record-run"),
-         "journal-process", "1800"],
+         "boox-process", "1800"],
         check=False,
     )
 
@@ -792,7 +1062,7 @@ def main():
     if not dry_run:
         lock_fd = acquire_lock(LOCK_FILE)
         if lock_fd is None:
-            log.info("another journal-process run holds the lock, exiting")
+            log.info("another boox-process run holds the lock, exiting")
             return
 
     config = load_config()

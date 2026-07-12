@@ -28,6 +28,14 @@
 //   ensure_group       {path,exclude_chat?}             -> {uuid,created,chat_excluded}
 //   get_fields         {uuid,fields}                    -> {uuid,fields:{k:v}}
 //   set_fields         {uuid,fields}                    -> {uuid}
+//   set_comment        {uuid,comment}                   -> {uuid}
+//   set_name           {uuid,name}                      -> {uuid}
+//   set_tags           {uuid,tags}                      -> {uuid}
+//   find_by_field      {field,value}                    -> [{uuid,name,path,location}]
+//   import_record      {path,group}                     -> {uuid,name}
+//   replace_file       {uuid,path}                      -> {uuid}
+//   move_to            {uuid,group}                     -> {uuid}
+//   list_tags          {}                               -> [name,...]
 //   chat               {prompt,role}                    -> {text}
 //   ensure_person      {name,aliases?,fields?,log_lines?} -> {uuid,created}
 //   ensure_event       {name,date,location?,attendees?,summary?,source_uuid,
@@ -239,6 +247,8 @@ function run(argv) {
   const ops = JSON.parse(opsRaw).ops || []
 
   const dt = Application('com.devon-technologies.think')
+  const std = Application.currentApplication()
+  std.includeStandardAdditions = true
 
   // A byName() specifier resolves lazily, so a closed or still-loading
   // database would surface as a bare "Can't get object." from whichever op
@@ -429,6 +439,13 @@ function run(argv) {
 
     get_text(op) {
       const r = byUuid(op.uuid)
+      // Handwritten records keep their AI-readable text in the Finder
+      // comment (the formatted transcription); their image plain text is
+      // a legacy OCR layer that goes stale on re-export.
+      if (flagSet(mdValue(r, 'handwritten'))) {
+        const c = r.comment()
+        if (c) return { uuid: op.uuid, text: c }
+      }
       return { uuid: op.uuid, text: r.plainText() }
     },
 
@@ -465,6 +482,74 @@ function run(argv) {
         dt.addCustomMetaData(value, { for: field, to: r })
       }
       return { uuid: op.uuid }
+    },
+
+    set_comment(op) {
+      const r = byUuid(op.uuid)
+      r.comment = op.comment
+      return { uuid: op.uuid }
+    },
+
+    set_name(op) {
+      const r = byUuid(op.uuid)
+      r.name = op.name
+      return { uuid: op.uuid }
+    },
+
+    set_tags(op) {
+      const r = byUuid(op.uuid)
+      r.tags = op.tags
+      return { uuid: op.uuid }
+    },
+
+    // Unquoted value is deliberate: DT's md<field>== matches multi-word
+    // values this way but not when quoted; the exact-compare filter makes
+    // the broad hit set harmless (same trick as boox-import's dedup).
+    find_by_field(op) {
+      const key = op.field.toLowerCase().replace(/\s/g, '')
+      const out = []
+      for (const hit of dt.search('md' + key + '==' + op.value,
+                                  { in: db.root() })) {
+        if (mdValue(hit, key) === String(op.value)) {
+          out.push({ uuid: hit.uuid(), name: hit.name(), path: hit.path(),
+                     location: hit.location() })
+        }
+      }
+      return out
+    },
+
+    import_record(op) {
+      const rec = dt.importPath(op.path, { to: groupAt(op.group) })
+      return { uuid: rec.uuid(), name: rec.name() }
+    },
+
+    // Stage + atomic same-volume mv so the record's backing file is always
+    // the old or the new content — a plain copy truncates in place and a
+    // mid-write failure would corrupt the record with no undo.
+    replace_file(op) {
+      const r = byUuid(op.uuid)
+      const dest = r.path()
+      const stage = dest + '.dt-replace-tmp'
+      const shq = s => "'" + String(s).replace(/'/g, "'\\''") + "'"
+      try {
+        std.doShellScript('cp ' + shq(op.path) + ' ' + shq(stage) +
+                          ' && /bin/mv -f ' + shq(stage) + ' ' + shq(dest))
+      } catch (e) {
+        try { std.doShellScript('rm -f ' + shq(stage)) } catch (e2) {}
+        throw new Error('replace failed: ' + e.message)
+      }
+      dt.synchronize({ record: r })
+      return { uuid: op.uuid }
+    },
+
+    move_to(op) {
+      const r = byUuid(op.uuid)
+      dt.move({ record: r, to: groupAt(op.group) })
+      return { uuid: op.uuid }
+    },
+
+    list_tags() {
+      return db.tagGroups().map(t => t.name())
     },
 
     set_text(op) {

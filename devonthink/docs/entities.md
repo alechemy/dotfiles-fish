@@ -334,8 +334,9 @@ tried after oMLX); it is currently uninstalled — reinstate with
 
 `auto` and `dtchat` are the **explicit cloud opt-ins**, and they are the only
 transports that can leave the machine. `auto` restores the DT-chat fallback
-for meeting/handwritten notes when a local model is unavailable; `dtchat`
-forces DT chat for those sources. The catch is that the extraction prompt
+for meeting notes when a local model is unavailable; `dtchat` forces DT chat
+for those sources. Handwritten notes are excluded from both — like daily
+notes and journal entries, they are local-only regardless of transport. The catch is that the extraction prompt
 embeds the full People roster (every name and alias), so each DT-chat
 extraction ships the *whole roster* — not just the note being extracted — to
 DT chat's configured provider. Because that is a real privacy-boundary change,
@@ -369,10 +370,13 @@ temperature 0, ≥16k usable context, ≤~25 GB quantized.
 
 Boundaries hard-coded regardless of config:
 
-- **Daily notes and journal entries are local-only.** `/10_DAILY` and
-  `/15_JOURNAL` are excluded from DT's AI chat by design, and the filing
-  step honors that: the `daily` and `journal` kinds are only ever
-  extracted through a local transport, never DT chat.
+- **Daily notes, journal entries, and handwritten notes are local-only.**
+  `/10_DAILY` and `/15_JOURNAL` are excluded from DT's AI chat by design,
+  and handwritten notebooks are transcribed on-device (see
+  `boox-local.md`); the filing step honors all three: the `daily`,
+  `journal`, and `handwritten` kinds are only ever extracted through a
+  local transport, never DT chat. Handwritten sources read from the
+  Finder comment (the transcription), not the image's OCR text layer.
 - **`/20_ENTITIES/People` and `_Review` are excluded from DT's AI chat**
   (`excludeFromChat`), because Person records are distilled dossiers — more
   sensitive than any single source note. The automation is unaffected

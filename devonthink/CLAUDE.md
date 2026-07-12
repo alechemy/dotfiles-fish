@@ -23,11 +23,11 @@ Documents flow through DEVONthink smart rules gated by boolean custom metadata f
 
 ```
 Boox device → Dropbox (via Boox export)
-  → boox-import-watcher.sh (launchd + fswatch on the Maestral-synced Notebooks folder; deletes untitled `Notebook-<n>` quick notes instead of importing; routes the daily journal — a notebook named `<year> Journal` — to journal-import.sh, NOT into this pipeline) → boox-import.sh: PDF → TIFF, then dedup by SourceFile at import — a new note imports to 00_INBOX (Handwritten=1, SourceFile set); a re-export replaces the matching record's file in place, resets flags, re-primes it; byte-identical re-exports are a no-op
+  → boox-import-watcher.sh (launchd + fswatch on the Maestral-synced Notebooks folder; deletes untitled `Notebook-<n>` quick notes) → boox-stage.sh (byte-hash dedup, atomic copy into ~/.local/state/devonthink/boox/staging/) → boox-process.py (launchd, AC/idle/driver-gated): renders pages, diffs by pixel signature, OCRs only new/changed pages through the local oMLX vision model — handwritten content NEVER reaches DT chat or DT's cloud OCR. Then, per notebook type:
+    · "<year> Journal" → one markdown record per day at /15_JOURNAL/<year>/YYYY-MM-DD Journal (group chat-excluded like /10_DAILY), linked from its daily note; entity filing discovers these as kind `journal` (local-transport only)
+    · every other notebook → monochrome TIFF filed to 00_INBOX, dedup by SourceFile (re-export replaces the backing file in place, preserving UUID/name/tags/WikiLinks), formatted transcription in the Finder comment, local metadata pass (EventDate/tags/summary), flags pre-set (Handwritten=1, Recognized=1, Commented=1, AIEnriched=1, NeedsProcessing=1) so of the rules below only Post-Enrich & Archive matches
+  → (Extract: Boox Handwritten and Format: Boox Comments are vestigial: they never match records that arrive pre-flagged, and act only if someone manually resets flags — which would route through the cloud; re-export from the device or use boox-process.py --force instead. Design doc: docs/boox-local.md)
 
-The journal branch is fully local (privacy: journal content never reaches DT chat, which may be a cloud provider): journal-import.sh stages exports, journal-process.py (launchd) renders pages, diffs them by pixel signature, OCRs only changed pages through a local oMLX vision model, files one markdown record per day at `/15_JOURNAL/<year>/YYYY-MM-DD Journal` (group chat-excluded like /10_DAILY), and links each entry from its daily note. Entity filing discovers these as kind `journal` (local-transport only). See `docs/journal.md`.
-  → Extract: Boox Handwritten (OCR) → sets Recognized=1
-  → Format: Boox Comments (LLM markdown formatting → Finder Comment) → sets Commented=1
   → Extract: Scans & Images (standard OCR for non-handwritten images/PDFs with no text layer — Word Count 0) → sets Recognized=1, Commented=1
   → Extract: Web Content (bookmarks → clean title + NeedsSingleFile=1 OR SkipSingleFile=1 depending on domain (~/.config/devonthink-pipeline/singlefile-skip-domains.txt) + daily-note wikilink + archive directly to 99_ARCHIVE in one pass — does NOT flow through Post-Enrich & Archive)
 
@@ -39,7 +39,7 @@ SingleFile ingestion is OUT of smart rules — it's Python scripts + an fswatch 
   → Post-Enrich & Archive (action items → Things 3, daily notes extraction + wikilinks, archive to 99_ARCHIVE) → move only on success
 ```
 
-Smart rule scripts live in `../stow/devonthink/Library/Application Scripts/com.devon-technologies.think/Smart Rules/`. Standalone Python helpers called by those scripts live in `../stow/devonthink/.local/bin/`. Standalone AppleScript utilities live in `utils/`. Integration docs (Granola, GitHub Stars, Summarize, Journal) live in `docs/`. The canonical reference for rule criteria, triggers, and actions is `README.md`.
+Smart rule scripts live in `../stow/devonthink/Library/Application Scripts/com.devon-technologies.think/Smart Rules/`. Standalone Python helpers called by those scripts live in `../stow/devonthink/.local/bin/`. Standalone AppleScript utilities live in `utils/`. Integration docs (Granola, GitHub Stars, Summarize, Boox/Journal) live in `docs/`. The canonical reference for rule criteria, triggers, and actions is `README.md`.
 
 The **entity layer** (`/20_ENTITIES` — Person/Place/Event records, morning briefing, AI fact filing) sits outside the smart-rule state machine: two launchd-driven tier-1 Python orchestrators (`dt-morning-brief.py`, `entity-filing.py`) do all DEVONthink I/O through a single JXA gateway, `entity-dt-bridge.js`, invoked via `/usr/bin/osascript -l JavaScript` with a JSON ops file. Anything JSON-heavy that talks to DT should go through (or extend) that bridge rather than round-tripping JSON through AppleScript records. Design doc: `docs/entities.md`. JXA gotcha learned there: never probe speculative properties on a DT object specifier (`typeof rec.isNil`) — any property access fires an AppleEvent; commands return `null` for missing records, so null-check instead.
 
@@ -104,7 +104,7 @@ their failures still notify.
 
 The DEVONthink MCP server is the **interactive** interface — use it freely from an AI session for searches, reads, and one-off record work. It is never a pipeline transport: launchd automation must not depend on a server process or session being alive, so runtime code talks to DT only via `/usr/bin/osascript` (AppleScript or `entity-dt-bridge.js`). Rules for sessions using the MCP tools:
 
-- `/20_ENTITIES/People` and `/20_ENTITIES/_Review` are excluded from AI access; MCP tools refuse their UUIDs ("Record is excluded from AI access") and omit them from results. This is by design, not breakage — operate on entity records via osascript/the bridge instead. Same applies to `/10_DAILY`.
+- `/20_ENTITIES/People` and `/20_ENTITIES/_Review` are excluded from AI access; MCP tools refuse their UUIDs ("Record is excluded from AI access") and omit them from results. This is by design, not breakage — operate on entity records via osascript/the bridge instead. Same applies to `/10_DAILY` and `/15_JOURNAL`.
 - Custom-metadata writes through MCP auto-create fields (typos become new fields) and can flip the flags the smart-rule state machine keys on (`NeedsProcessing`, `Recognized`, `Commented`, `AIEnriched`, …). Before setting any flag from the README's metadata table, understand which rule watches it.
 - The server's privacy posture (exposed databases, private-info redaction — currently enabled) lives in DT's Settings → AI on the machine, not in this repo; see the README fresh-machine checklist.
 

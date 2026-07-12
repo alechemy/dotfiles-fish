@@ -991,9 +991,10 @@ def pick_transport(config, kind):
         return local_pick((transport,))
     if transport == "local":
         return local_pick(LOCAL_TRANSPORTS)
-    if kind in ("daily", "journal"):
-        # /10_DAILY and /15_JOURNAL are excluded from DT chat by design;
-        # local model only.
+    if kind in ("daily", "journal", "handwritten"):
+        # Daily notes, journal entries, and handwritten notes are
+        # local-only by policy: personal content never reaches DT chat,
+        # which may be a cloud provider.
         return local_pick(LOCAL_TRANSPORTS) if transport == "auto" else None
     if transport == "dtchat":
         return "dtchat"

@@ -5,23 +5,23 @@
 	<key>Disabled</key>
 	<false/>
 	<key>Label</key>
-	<string>com.user.journal-process</string>
+	<string>com.user.boox-process</string>
 	<key>ProgramArguments</key>
 	<array>
 		<string>/usr/bin/python3</string>
-		<string>__HOME__/.local/bin/journal-process.py</string>
+		<string>__HOME__/.local/bin/boox-process.py</string>
 	</array>
 	<key>RunAtLoad</key>
 	<true/>
 	<key>StandardErrorPath</key>
-	<string>/tmp/journal-process.log</string>
+	<string>/tmp/boox-process.log</string>
 	<key>StandardOutPath</key>
-	<string>/tmp/journal-process.log</string>
+	<string>/tmp/boox-process.log</string>
 	<key>StartInterval</key>
 	<integer>1800</integer>
 	<key>WatchPaths</key>
 	<array>
-		<string>__HOME__/.local/state/devonthink/journal/staging</string>
+		<string>__HOME__/.local/state/devonthink/boox/staging</string>
 	</array>
 </dict>
 </plist>

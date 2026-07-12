@@ -5,7 +5,7 @@ from datetime import date
 
 from helpers import load
 
-jp = load("journal-process.py", "journal_process")
+jp = load("boox-process.py", "boox_process")
 
 TODAY = date(2026, 7, 11)  # a Saturday
 YEAR = 2026
@@ -53,6 +53,25 @@ class ParseDateLine(unittest.TestCase):
         # with no date must park rather than fish one out.
         with self.assertRaises(jp.DateParseError):
             self.parse("# planning the trip")
+
+
+class AssemblePages(unittest.TestCase):
+    def test_cont_heading_merges_into_previous_section(self):
+        pages = [
+            "# Trip Notes\n\n## Packing\n- boots\n- rain shell",
+            "## Packing (cont.)\n- headlamp\n\n## Food\n- oats",
+        ]
+        got = jp.assemble_pages(pages)
+        self.assertEqual(got.count("## Packing"), 1)
+        self.assertIn("- headlamp", got)
+        self.assertIn("## Food", got)
+
+    def test_cont_only_merges_across_a_boundary(self):
+        got = jp.assemble_pages(["## Ideas (cont.)\n- first page keeps it"])
+        self.assertIn("## Ideas (cont.)", got)
+
+    def test_blank_pages_dropped(self):
+        self.assertEqual(jp.assemble_pages(["# A", "  ", "# B"]), "# A\n\n# B")
 
 
 class ExtractTasks(unittest.TestCase):

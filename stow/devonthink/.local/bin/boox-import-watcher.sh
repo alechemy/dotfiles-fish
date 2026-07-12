@@ -1,19 +1,18 @@
 #!/bin/bash
 # Watch the Maestral-synced Boox "Notebooks" folder for new .pdf exports and
-# hand each one to boox-import.sh. Launched by com.user.boox-import-watcher.plist.
+# hand each one to boox-stage.sh for local-only processing (boox-process.py
+# does the OCR on-device; handwritten content never reaches the cloud-backed
+# smart-rule stages). Launched by com.user.boox-import-watcher.plist.
 #
-# Replaces the former Hazel rule "Convert Boox PDFs to TIFFs and Import to
-# DEVONthink". fswatch emits one NUL-terminated event per filesystem change;
-# we act on "Created" and "Renamed" events for .pdf files, wait ~2s for the
-# write to settle, then invoke the importer. The importer deletes the source
-# PDF on success and quarantines failures, so the folder stays clear of
-# already-processed exports.
+# fswatch emits one NUL-terminated event per filesystem change; we act on
+# "Created" and "Renamed" events for .pdf files, wait ~2s for the write to
+# settle, then invoke the stager. The stager deletes the source PDF on
+# success, so the folder stays clear of already-processed exports.
 
 set -euo pipefail
 
 WATCH_DIR="$HOME/Dropbox (Maestral)/onyx/Go103/Notebooks"
-IMPORTER="$HOME/.local/bin/boox-import.sh"
-JOURNAL_IMPORTER="$HOME/.local/bin/journal-import.sh"
+STAGER="$HOME/.local/bin/boox-stage.sh"
 PIPELINE_LOG="$HOME/.local/bin/pipeline-log"
 
 log() {
@@ -83,16 +82,9 @@ is_untitled_notebook() {
     [[ "$(basename "$1" .pdf)" =~ ^Notebook-[0-9]+$ ]]
 }
 
-# The daily-journal notebook ("<year> Journal") is deeply personal content
-# and is processed entirely on-device: it routes to journal-import.sh and
-# never enters the cloud-backed DEVONthink smart-rule pipeline.
-is_journal_notebook() {
-    [[ "$(basename "$1" .pdf)" =~ ^[0-9]{4}\ Journal$ ]]
-}
-
-# Import one .pdf: wait for quiescence, then hand off to boox-import.sh. Skips
+# Stage one .pdf: wait for quiescence, then hand off to boox-stage.sh. Skips
 # truncated files so the next event (or backlog sweep) can retry. Untitled
-# Notebook-<n> exports are deleted rather than imported.
+# Notebook-<n> exports are deleted rather than staged.
 import_pdf() {
     local path=$1 origin=$2 stability
     if ! "$HOME/.local/bin/should-run-dt-driver" 2>/dev/null; then
@@ -115,13 +107,8 @@ import_pdf() {
             rm -f "$path"
             return 0
         fi
-        if is_journal_notebook "$path"; then
-            log "staging journal notebook ($origin) $path"
-            "$JOURNAL_IMPORTER" "$path" || log "journal importer exited non-zero for $path ($origin)"
-            return 0
-        fi
-        log "importing ($origin) $path"
-        "$IMPORTER" "$path" || log "importer exited non-zero for $path ($origin)"
+        log "staging ($origin) $path"
+        "$STAGER" "$path" || log "stager exited non-zero for $path ($origin)"
     fi
 }
 

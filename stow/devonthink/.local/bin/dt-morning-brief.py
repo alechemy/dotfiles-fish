@@ -117,9 +117,10 @@ ON_THIS_DAY_YEARS = 5
 ON_THIS_DAY_PER_YEAR = 5
 JOURNAL_HEADER = "## Journal"
 JOURNAL_STATE = os.path.expanduser(
-    "~/.local/state/devonthink/journal/state.json")
+    "~/.local/state/devonthink/boox/state.json")
 JOURNAL_STAGING = os.path.expanduser(
-    "~/.local/state/devonthink/journal/staging")
+    "~/.local/state/devonthink/boox/staging")
+JOURNAL_NOTEBOOK_RE = re.compile(r"^\d{4} Journal$")
 JOURNAL_LAPSE_DAYS = 7
 REVIEW_PATH = "/20_ENTITIES/_Review"
 APPROVED_PATH = REVIEW_PATH + "/Approved"
@@ -671,7 +672,9 @@ def journal_status_lines(today, state, staged_count):
     watchdog only catches dead agents, not an empty staging folder. Quiet
     unless the habit is active: no line before the first entry ever files,
     and none once the newest entry is older than JOURNAL_LAPSE_DAYS."""
-    notebooks = (state or {}).get("notebooks", {})
+    notebooks = {name: nb for name, nb in
+                 (state or {}).get("notebooks", {}).items()
+                 if JOURNAL_NOTEBOOK_RE.match(name)}
     entry_dates = {d for nb in notebooks.values() for d in nb.get("entries", {})}
     if not entry_dates:
         return None

@@ -116,9 +116,9 @@ launchctl bootout "gui/$(id -u)/com.user.entity-filing"
 ```
 
 The watchdog kickstarts the two KeepAlive watchers itself; it only *reports*
-interval agents (daily-note, morning-brief, entity-filing, granola,
-github-stars, database-archive) that are booted out or stale, because those
-have no resident process to restart. After editing a plist template, re-render
+interval agents (daily-note, morning-brief, entity-filing, boox-process,
+granola, github-stars, database-archive) that are booted out or stale,
+because those have no resident process to restart. After editing a plist template, re-render
 with `scripts/build-launchd-plists.sh`, then `bootout` + `bootstrap`.
 
 ## Unreadable / corrupt state file
@@ -240,27 +240,31 @@ A parked source retries automatically when its content changes, or on demand:
 Fix the underlying note first if the extraction kept failing on bad input.
 Detail: [entities.md](entities.md).
 
-## Journal page parked or missing
+## Boox page parked, or a note/journal entry missing
 
-A day's journal entry never appeared in `/15_JOURNAL`, or the log shows
-`parked <notebook> page N`. Parked pages never retry on their own — same
-input, same misread.
+A handwritten note never appeared in DT, a day's journal entry never
+appeared in `/15_JOURNAL`, or the log shows `parked <notebook> page N`.
+Parked pages never retry on their own — same input, same misread.
 
 ```bash
-# Which pages are parked, and why (weekday mismatch, no date, out of order).
-~/.local/bin/journal-process.py --status
+# Which pages are parked, and why (OCR failure; for the journal also
+# weekday mismatch, no date, out of order). Regular notebooks file only
+# once every page has transcribed.
+~/.local/bin/boox-process.py --status
 
 # Re-queue parked pages and run now (bypasses battery/idle gates).
-~/.local/bin/journal-process.py --force
+~/.local/bin/boox-process.py --force
 
-# Nothing staged at all? The notebook must be named "<year> Journal" on the
-# device — unnamed exports are deleted by the watcher, never staged.
-rg 'journal-(import|process)' ~/Library/Logs/devonthink-pipeline.log | tail
+# Nothing staged at all? The notebook must be named on the device —
+# unnamed Notebook-<n> exports are deleted by the watcher, never staged.
+rg 'boox-(stage|process)' ~/Library/Logs/devonthink-pipeline.log | tail
 ```
 
-A weekday-mismatch park usually means the handwritten date really is
-ambiguous; fix the page on the device and re-export. Detail:
-[journal.md](journal.md).
+Do **not** reset `Recognized`/`Commented` on a handwritten record to
+re-process it — that re-arms the vestigial cloud OCR rules; re-export
+from the device or use `--force` instead. A weekday-mismatch park
+usually means the handwritten date really is ambiguous; fix the page on
+the device and re-export. Detail: [boox-local.md](boox-local.md).
 
 ## Driver / follower mistake
 

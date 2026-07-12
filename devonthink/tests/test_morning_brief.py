@@ -518,6 +518,13 @@ class JournalStatusLines(unittest.TestCase):
         self.assertIn("parked", got)
         self.assertIn("--status", got)
 
+    def test_regular_notebooks_ignored(self):
+        state = self.state(["2026-07-09"])
+        state["notebooks"]["Kitchen Ideas"] = {
+            "entries": {}, "pages": [{"date": "", "text": "", "parked": ""}]}
+        got = mb.journal_status_lines(self.TODAY, state, 0)
+        self.assertIn("No journal entry arrived", got)
+
 
 if __name__ == "__main__":
     unittest.main()
