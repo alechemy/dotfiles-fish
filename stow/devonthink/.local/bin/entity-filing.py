@@ -116,6 +116,7 @@ CONFIG_FILE = os.path.expanduser("~/.config/dt-pipeline/entities.conf")
 STATE_DIR = os.path.expanduser("~/.local/state/devonthink")
 STATE_FILE = os.path.join(STATE_DIR, "entity-filing-state.json")
 LOCK_FILE = os.path.join(STATE_DIR, "entity-filing.lock")
+LLM_LOCK_FILE = os.path.join(STATE_DIR, "local-llm.lock")
 STATE_SCHEMA_VERSION = 2
 REVIEW_PATH = "/20_ENTITIES/_Review"
 APPROVED_PATH = "/20_ENTITIES/_Review/Approved"
@@ -385,6 +386,21 @@ def acquire_lock():
     (kept referenced to hold the lock) or None if another run holds it."""
     os.makedirs(STATE_DIR, exist_ok=True)
     fd = open(LOCK_FILE, "w")
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        fd.close()
+        return None
+    return fd
+
+
+def acquire_llm_lock():
+    """Cross-pipeline lock serializing local inference with journal OCR
+    (journal-process.py holds it for its OCR phase), so two ~18 GB models
+    are never resident in unified memory at once — the sequential holders
+    let oMLX's LRU eviction swap cleanly. Non-blocking: a busy lock defers
+    this run's local extraction to the next tick."""
+    fd = open(LLM_LOCK_FILE, "w")
     try:
         fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except OSError:
@@ -978,8 +994,9 @@ def pick_transport(config, kind):
         return local_pick((transport,))
     if transport == "local":
         return local_pick(LOCAL_TRANSPORTS)
-    if kind == "daily":
-        # /10_DAILY is excluded from DT chat by design; local model only.
+    if kind in ("daily", "journal"):
+        # /10_DAILY and /15_JOURNAL are excluded from DT chat by design;
+        # local model only.
         return local_pick(LOCAL_TRANSPORTS) if transport == "auto" else None
     if transport == "dtchat":
         return "dtchat"
@@ -1065,6 +1082,8 @@ def scan(config, state, dry_run, force_uuid, user_invoked):
     idle_skip_logged = False
     no_transport = 0
     extracted_count = 0
+    llm_lock = None
+    llm_lock_failed = False
     for source in candidates:
         if extracted_count >= limit:
             break
@@ -1112,6 +1131,15 @@ def scan(config, state, dry_run, force_uuid, user_invoked):
                 log.info("user active, deferring local extraction to an idle run")
                 idle_skip_logged = True
             continue
+        if transport in LOCAL_TRANSPORTS:
+            if llm_lock is None and not llm_lock_failed:
+                llm_lock = acquire_llm_lock()
+                if llm_lock is None:
+                    llm_lock_failed = True
+                    log.info("local-llm lock held (journal OCR?), deferring "
+                             "local extraction to the next run")
+            if llm_lock is None:
+                continue
 
         source_date = source_date_of(source)
         text = run_bridge([{"op": "get_text", "uuid": uuid}])[0]["text"]

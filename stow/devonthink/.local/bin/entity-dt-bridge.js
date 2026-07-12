@@ -25,6 +25,9 @@
 //   get_at_path        {path}                           -> {uuid,name} | null
 //   get_text           {uuid}                           -> {uuid,text}
 //   set_text           {uuid,text}                      -> {uuid}
+//   ensure_group       {path,exclude_chat?}             -> {uuid,created,chat_excluded}
+//   get_fields         {uuid,fields}                    -> {uuid,fields:{k:v}}
+//   set_fields         {uuid,fields}                    -> {uuid}
 //   chat               {prompt,role}                    -> {text}
 //   ensure_person      {name,aliases?,fields?,log_lines?} -> {uuid,created}
 //   ensure_event       {name,date,location?,attendees?,summary?,source_uuid,
@@ -49,6 +52,7 @@ const PEOPLE_PATH = ENTITIES_PATH + '/People'
 const PLACES_PATH = ENTITIES_PATH + '/Places'
 const EVENTS_PATH = ENTITIES_PATH + '/Events'
 const DAILY_PATH = '/10_DAILY'
+const JOURNAL_PATH = '/15_JOURNAL'
 const NOTES_SECTION = "## Today's Notes"
 const LOG_SECTION = '## Biographical Log'
 const EVENT_LOG_SECTION = '## Log'
@@ -356,6 +360,22 @@ function run(argv) {
           add(rec, 'daily')
         }
       }
+      // Journal entries live under year subgroups; today's entry is
+      // skipped like today's daily note — it may still gain content.
+      let journalGroup = null
+      try { journalGroup = groupAt(JOURNAL_PATH) } catch (e) {}
+      if (journalGroup) {
+        for (const yearGroup of journalGroup.children()) {
+          if (String(yearGroup.type()) !== 'group') continue
+          for (const rec of yearGroup.children()) {
+            const name = rec.name()
+            if (/^\d{4}-\d{2}-\d{2} Journal$/.test(name) &&
+                name.slice(0, 10) < localToday) {
+              add(rec, 'journal')
+            }
+          }
+        }
+      }
       return out
     },
 
@@ -366,6 +386,7 @@ function run(argv) {
       const hw = mdValue(r, 'handwritten')
       let kind = 'other'
       if (String(r.location() || '').indexOf(DAILY_PATH) === 0) kind = 'daily'
+      else if (String(r.location() || '').indexOf(JOURNAL_PATH) === 0) kind = 'journal'
       else if (flagSet(hw)) kind = 'handwritten'
       else if (mdValue(r, 'documenttype').indexOf('Meeting') !== -1) kind = 'meeting'
       const added = r.additionDate()
@@ -409,6 +430,41 @@ function run(argv) {
     get_text(op) {
       const r = byUuid(op.uuid)
       return { uuid: op.uuid, text: r.plainText() }
+    },
+
+    ensure_group(op) {
+      let g = dt.getRecordAt(op.path, { in: db })
+      const created = !g
+      if (!g) g = dt.createLocation(op.path, { in: db })
+      let chatExcluded = false
+      if (op.exclude_chat) {
+        // Privacy boundary, same as /10_DAILY: journal content must never
+        // be readable by DT chat, which may be a cloud provider.
+        try {
+          g.excludeFromChat = true
+          chatExcluded = flagSet(String(g.excludeFromChat()))
+        } catch (e) {
+          chatExcluded = false
+        }
+      }
+      return { uuid: g.uuid(), created: created, chat_excluded: chatExcluded }
+    },
+
+    get_fields(op) {
+      const out = {}
+      const r = byUuid(op.uuid)
+      for (const field of op.fields || []) {
+        out[field] = mdValue(r, field.toLowerCase().replace(/\s/g, ''))
+      }
+      return { uuid: op.uuid, fields: out }
+    },
+
+    set_fields(op) {
+      const r = byUuid(op.uuid)
+      for (const [field, value] of Object.entries(op.fields || {})) {
+        dt.addCustomMetaData(value, { for: field, to: r })
+      }
+      return { uuid: op.uuid }
     },
 
     set_text(op) {

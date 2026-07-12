@@ -13,6 +13,7 @@ set -euo pipefail
 
 WATCH_DIR="$HOME/Dropbox (Maestral)/onyx/Go103/Notebooks"
 IMPORTER="$HOME/.local/bin/boox-import.sh"
+JOURNAL_IMPORTER="$HOME/.local/bin/journal-import.sh"
 PIPELINE_LOG="$HOME/.local/bin/pipeline-log"
 
 log() {
@@ -82,6 +83,13 @@ is_untitled_notebook() {
     [[ "$(basename "$1" .pdf)" =~ ^Notebook-[0-9]+$ ]]
 }
 
+# The daily-journal notebook ("<year> Journal") is deeply personal content
+# and is processed entirely on-device: it routes to journal-import.sh and
+# never enters the cloud-backed DEVONthink smart-rule pipeline.
+is_journal_notebook() {
+    [[ "$(basename "$1" .pdf)" =~ ^[0-9]{4}\ Journal$ ]]
+}
+
 # Import one .pdf: wait for quiescence, then hand off to boox-import.sh. Skips
 # truncated files so the next event (or backlog sweep) can retry. Untitled
 # Notebook-<n> exports are deleted rather than imported.
@@ -105,6 +113,11 @@ import_pdf() {
         if is_untitled_notebook "$path"; then
             log "ignoring untitled Boox note, deleting: $path ($origin)"
             rm -f "$path"
+            return 0
+        fi
+        if is_journal_notebook "$path"; then
+            log "staging journal notebook ($origin) $path"
+            "$JOURNAL_IMPORTER" "$path" || log "journal importer exited non-zero for $path ($origin)"
             return 0
         fi
         log "importing ($origin) $path"

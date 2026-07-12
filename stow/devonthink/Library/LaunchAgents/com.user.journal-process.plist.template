@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Disabled</key>
+	<false/>
+	<key>Label</key>
+	<string>com.user.journal-process</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/usr/bin/python3</string>
+		<string>__HOME__/.local/bin/journal-process.py</string>
+	</array>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>StandardErrorPath</key>
+	<string>/tmp/journal-process.log</string>
+	<key>StandardOutPath</key>
+	<string>/tmp/journal-process.log</string>
+	<key>StartInterval</key>
+	<integer>1800</integer>
+	<key>WatchPaths</key>
+	<array>
+		<string>__HOME__/.local/state/devonthink/journal/staging</string>
+	</array>
+</dict>
+</plist>

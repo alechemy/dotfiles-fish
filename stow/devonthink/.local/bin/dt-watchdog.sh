@@ -236,6 +236,7 @@ com.user.dt-daily-note:dt-daily-note:180000
 com.user.dt-morning-brief:dt-morning-brief:180000
 com.user.dt-database-archive:dt-database-archive:180000
 com.user.entity-filing:entity-filing:21600
+com.user.journal-process:journal-process:21600
 com.user.granola-import:granola-import:21600
 com.user.github-stars-import:github-stars-import:21600
 AGENTS

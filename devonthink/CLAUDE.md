@@ -23,7 +23,9 @@ Documents flow through DEVONthink smart rules gated by boolean custom metadata f
 
 ```
 Boox device → Dropbox (via Boox export)
-  → boox-import-watcher.sh (launchd + fswatch on the Maestral-synced Notebooks folder; deletes untitled `Notebook-<n>` quick notes instead of importing) → boox-import.sh: PDF → TIFF, then dedup by SourceFile at import — a new note imports to 00_INBOX (Handwritten=1, SourceFile set); a re-export replaces the matching record's file in place, resets flags, re-primes it; byte-identical re-exports are a no-op
+  → boox-import-watcher.sh (launchd + fswatch on the Maestral-synced Notebooks folder; deletes untitled `Notebook-<n>` quick notes instead of importing; routes the daily journal — a notebook named `<year> Journal` — to journal-import.sh, NOT into this pipeline) → boox-import.sh: PDF → TIFF, then dedup by SourceFile at import — a new note imports to 00_INBOX (Handwritten=1, SourceFile set); a re-export replaces the matching record's file in place, resets flags, re-primes it; byte-identical re-exports are a no-op
+
+The journal branch is fully local (privacy: journal content never reaches DT chat, which may be a cloud provider): journal-import.sh stages exports, journal-process.py (launchd) renders pages, diffs them by pixel signature, OCRs only changed pages through a local oMLX vision model, files one markdown record per day at `/15_JOURNAL/<year>/YYYY-MM-DD Journal` (group chat-excluded like /10_DAILY), and links each entry from its daily note. Entity filing discovers these as kind `journal` (local-transport only). See `docs/journal.md`.
   → Extract: Boox Handwritten (OCR) → sets Recognized=1
   → Format: Boox Comments (LLM markdown formatting → Finder Comment) → sets Commented=1
   → Extract: Scans & Images (standard OCR for non-handwritten images/PDFs with no text layer — Word Count 0) → sets Recognized=1, Commented=1
@@ -37,7 +39,7 @@ SingleFile ingestion is OUT of smart rules — it's Python scripts + an fswatch 
   → Post-Enrich & Archive (action items → Things 3, daily notes extraction + wikilinks, archive to 99_ARCHIVE) → move only on success
 ```
 
-Smart rule scripts live in `../stow/devonthink/Library/Application Scripts/com.devon-technologies.think/Smart Rules/`. Standalone Python helpers called by those scripts live in `../stow/devonthink/.local/bin/`. Standalone AppleScript utilities live in `utils/`. Integration docs (Granola, GitHub Stars, Summarize) live in `docs/`. The canonical reference for rule criteria, triggers, and actions is `README.md`.
+Smart rule scripts live in `../stow/devonthink/Library/Application Scripts/com.devon-technologies.think/Smart Rules/`. Standalone Python helpers called by those scripts live in `../stow/devonthink/.local/bin/`. Standalone AppleScript utilities live in `utils/`. Integration docs (Granola, GitHub Stars, Summarize, Journal) live in `docs/`. The canonical reference for rule criteria, triggers, and actions is `README.md`.
 
 The **entity layer** (`/20_ENTITIES` — Person/Place/Event records, morning briefing, AI fact filing) sits outside the smart-rule state machine: two launchd-driven tier-1 Python orchestrators (`dt-morning-brief.py`, `entity-filing.py`) do all DEVONthink I/O through a single JXA gateway, `entity-dt-bridge.js`, invoked via `/usr/bin/osascript -l JavaScript` with a JSON ops file. Anything JSON-heavy that talks to DT should go through (or extend) that bridge rather than round-tripping JSON through AppleScript records. Design doc: `docs/entities.md`. JXA gotcha learned there: never probe speculative properties on a DT object specifier (`typeof rec.isNil`) — any property access fires an AppleEvent; commands return `null` for missing records, so null-check instead.
 

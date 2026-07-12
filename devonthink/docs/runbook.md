@@ -240,6 +240,28 @@ A parked source retries automatically when its content changes, or on demand:
 Fix the underlying note first if the extraction kept failing on bad input.
 Detail: [entities.md](entities.md).
 
+## Journal page parked or missing
+
+A day's journal entry never appeared in `/15_JOURNAL`, or the log shows
+`parked <notebook> page N`. Parked pages never retry on their own — same
+input, same misread.
+
+```bash
+# Which pages are parked, and why (weekday mismatch, no date, out of order).
+~/.local/bin/journal-process.py --status
+
+# Re-queue parked pages and run now (bypasses battery/idle gates).
+~/.local/bin/journal-process.py --force
+
+# Nothing staged at all? The notebook must be named "<year> Journal" on the
+# device — unnamed exports are deleted by the watcher, never staged.
+rg 'journal-(import|process)' ~/Library/Logs/devonthink-pipeline.log | tail
+```
+
+A weekday-mismatch park usually means the handwritten date really is
+ambiguous; fix the page on the device and re-export. Detail:
+[journal.md](journal.md).
+
 ## Driver / follower mistake
 
 Two Macs mutating the synced database (accidental co-driver), or a demoted Mac

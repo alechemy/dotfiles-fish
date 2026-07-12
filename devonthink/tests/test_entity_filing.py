@@ -277,7 +277,7 @@ class PickTransport(unittest.TestCase):
         ef.omlx_available, ef.ollama_available = self.saved
 
     def test_off_disables_every_kind(self):
-        for kind in ("meeting", "handwritten", "daily"):
+        for kind in ("meeting", "handwritten", "daily", "journal"):
             self.assertIsNone(ef.pick_transport({"TRANSPORT": "off"}, kind), kind)
 
     def test_local_never_returns_dtchat(self):
@@ -292,6 +292,12 @@ class PickTransport(unittest.TestCase):
         ef.omlx_available = lambda c: False
         ef.ollama_available = lambda c: False
         self.assertIsNone(ef.pick_transport({"TRANSPORT": "auto"}, "daily"))
+
+    def test_journal_never_reaches_dtchat(self):
+        self.assertIsNone(ef.pick_transport({"TRANSPORT": "dtchat"}, "journal"))
+        ef.omlx_available = lambda c: False
+        ef.ollama_available = lambda c: False
+        self.assertIsNone(ef.pick_transport({"TRANSPORT": "auto"}, "journal"))
 
     def test_auto_falls_back_to_dtchat_for_meetings(self):
         ef.omlx_available = lambda c: False
