@@ -12,11 +12,25 @@ for the full pipeline.
 - `src/half_vertical.liquid` — 400×480: stacked meetings, birthdays, reconnect
 - `src/half_horizontal.liquid` — 800×240: meetings / birthdays / reconnect side by side
 - `src/quadrant.liquid` — 400×240: next meetings only
+- `src/shared.liquid` — captures the title_bar sunrise SVG (`svg_logo`), prepended to every size
 - `src/settings.yml` — plugin settings (webhook strategy)
+
+Framework gotchas baked into these templates (learned against v3.1.2):
+`.layout` is a **centering flex row** — always add direction/alignment
+(`layout--col`, `layout--top`); `.col--span-N` cells are `display:flex`
+rows, so each cell's content lives in a single `stretch-x` wrapper div;
+column layouts need a `w--full` wrapper or `align-items: center` shrinks
+items; `data-group-header` produces side-labels for the overflow engine,
+not section headings.
 
 ## Local preview
 
-Needs the [trmnlp](https://github.com/usetrmnl/trmnlp) gem (Ruby ≥ 3.4) or Docker:
+`bin/preview [outdir]` renders every size against the sample variables and
+screenshots them with headless Chromium (needs `gem install --user-install
+liquid -v 4.0.4`; system Ruby 2.6 is fine). Layout-accurate; the framework's
+clamp/overflow JS may not settle, so confirm text truncation server-side.
+
+The official tool, [trmnlp](https://github.com/usetrmnl/trmnlp), needs Ruby ≥ 3.4 or Docker:
 
 ```bash
 cd trmnl/dt-brief

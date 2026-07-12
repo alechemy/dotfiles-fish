@@ -1,0 +1,57 @@
+#!/usr/bin/env ruby
+# Renders src/*.liquid against .trmnlp.yml sample variables and screenshots
+# each size with headless Chromium — a stand-in for `trmnlp serve` on machines
+# without Ruby >= 3.4. Needs: gem install --user-install liquid -v 4.0.4
+# (plain liquid lacks base64_encode; registered below). Layout-accurate, but
+# framework JS engines (clamp/overflow) may not settle — treat truncation
+# artifacts as suspect and confirm via TRMNL's MarkupsScreenshotTool.
+require "liquid"
+require "yaml"
+require "base64"
+require "fileutils"
+require "tmpdir"
+
+module TrmnlFilters
+  def base64_encode(input)
+    Base64.strict_encode64(input.to_s)
+  end
+end
+Liquid::Template.register_filter(TrmnlFilters)
+
+root = File.expand_path("..", __dir__)
+out = ARGV[0] || Dir.mktmpdir("dt-brief-preview")
+FileUtils.mkdir_p(out)
+vars = YAML.safe_load(File.read("#{root}/.trmnlp.yml"), aliases: true)["variables"]
+shared = File.read("#{root}/src/shared.liquid")
+chromium = "/Applications/Chromium.app/Contents/MacOS/Chromium"
+
+{ "full" => "800,480", "half_vertical" => "400,480",
+  "half_horizontal" => "800,240", "quadrant" => "400,240" }.each do |size, dims|
+  tpl = Liquid::Template.parse(shared + File.read("#{root}/src/#{size}.liquid"),
+                               error_mode: :strict)
+  body = tpl.render(vars, strict_variables: false)
+  warn "#{size}: #{tpl.errors}" unless tpl.errors.empty?
+  html = <<~HTML
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="utf-8">
+      <link rel="stylesheet" href="https://trmnl.com/css/latest/plugins.css">
+      <script src="https://trmnl.com/js/latest/plugins.js"></script>
+    </head>
+    <body class="environment trmnl">
+      <div class="screen">
+        <div class="view view--#{size}">
+    #{body}
+        </div>
+      </div>
+    </body>
+    </html>
+  HTML
+  page = "#{out}/#{size}.html"
+  File.write(page, html)
+  system(chromium, "--headless", "--disable-gpu", "--window-size=#{dims}",
+         "--virtual-time-budget=3000", "--screenshot=#{out}/#{size}.png",
+         "file://#{page}", err: File::NULL)
+  puts "#{out}/#{size}.png"
+end

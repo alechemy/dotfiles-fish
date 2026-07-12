@@ -1,33 +1,30 @@
-<div class="layout">
-  <div class="grid gap stretch-x">
+<div class="layout layout--top">
+  <div class="grid grid--cols-12 gap stretch-x">
     <div class="col--span-7">
-      <span class="label label--medium group-header" data-group-header="true">Meetings</span>
+      <div class="stretch-x">
+      <span class="label label--medium">Meetings</span>
       {% if meetings and meetings != empty %}
-      <div class="columns">
-        <div class="column">
-          {% for m in meetings limit: 6 %}
-          <div class="item">
-            <div class="meta"></div>
-            <div class="content">
-              <span class="title title--small" data-clamp="1">{{ m.title }}</span>
-              {% assign who = m.people | map: "name" | join: " · " %}
-              {% if m.unmatched and m.unmatched != empty %}
-                {% assign extra = m.unmatched | join: " · " %}
-                {% if who == "" %}{% assign who = extra %}{% else %}{% assign who = who | append: " · " | append: extra %}{% endif %}
-              {% endif %}
-              {% if m.more_unmatched %}{% assign who = who | append: " +" | append: m.more_unmatched %}{% endif %}
-              {% if who != "" %}<span class="description" data-clamp="1">{{ who }}</span>{% endif %}
-              <div class="flex gap--xsmall">
-                <span class="label label--small label--underline">{{ m.time }}</span>
-                {% if m.people.first.role %}
-                <span class="label label--small label--gray" data-clamp="1">{{ m.people.first.role }}{% if m.people.first.employer %} · {{ m.people.first.employer }}{% endif %}</span>
-                {% endif %}
-              </div>
-            </div>
+      {% for m in meetings limit: 5 %}
+      <div class="item">
+        <div class="meta"></div>
+        <div class="content">
+          <span class="title title--small" data-clamp="1">{{ m.title }}</span>
+          {% assign who = m.people | map: "name" | join: " · " %}
+          {% if m.unmatched and m.unmatched != empty %}
+            {% assign extra = m.unmatched | join: " · " %}
+            {% if who == "" %}{% assign who = extra %}{% else %}{% assign who = who | append: " · " | append: extra %}{% endif %}
+          {% endif %}
+          {% if m.more_unmatched %}{% assign who = who | append: " +" | append: m.more_unmatched %}{% endif %}
+          {% if who != "" %}<span class="description" data-clamp="1">{{ who }}</span>{% endif %}
+          <div class="flex gap--xsmall">
+            <span class="label label--small label--underline">{{ m.time }}</span>
+            {% if m.people.first.role %}
+            <span class="label label--small label--gray" data-clamp="1">{{ m.people.first.role }}{% if m.people.first.employer %} · {{ m.people.first.employer }}{% endif %}</span>
+            {% endif %}
           </div>
-          {% endfor %}
         </div>
       </div>
+      {% endfor %}
       {% else %}
       <div class="item">
         <div class="meta"></div>
@@ -37,25 +34,28 @@
         </div>
       </div>
       {% endif %}
+      </div>
     </div>
     <div class="col--span-5">
+      <div class="stretch-x">
       {% if birthdays and birthdays != empty %}
-      <span class="label label--medium group-header" data-group-header="true">Birthdays</span>
+      <span class="label label--medium">Birthdays</span>
       {% for b in birthdays limit: 3 %}
       <div class="item">
         <div class="meta"></div>
         <div class="content">
+          <span class="title title--small" data-clamp="1">{{ b.name }}</span>
           <div class="flex gap--xsmall">
-            <span class="title title--small" data-clamp="1">{{ b.name }}</span>
-            {% if b.today %}<span class="label label--small label--inverted">Today</span>{% endif %}
+            <span class="label label--small label--gray">{{ b.date | date: "%b %-d" }}{% if b.age %} · turns {{ b.age }}{% endif %}</span>
+            {% if b.today %}<span class="label label--small label--inverted">today</span>{% endif %}
           </div>
-          <span class="label label--small label--gray">{{ b.date | date: "%b %-d" }}{% if b.age %} · turns {{ b.age }}{% endif %}</span>
         </div>
       </div>
       {% endfor %}
+      <div class="divider"></div>
       {% endif %}
       {% if reconnect and reconnect != empty %}
-      <span class="label label--medium group-header" data-group-header="true">Reconnect</span>
+      <span class="label label--medium">Reconnect</span>
       {% for r in reconnect limit: 3 %}
       <div class="item">
         <div class="meta"></div>
@@ -65,9 +65,10 @@
         </div>
       </div>
       {% endfor %}
+      <div class="divider"></div>
       {% endif %}
       {% if on_this_day and on_this_day != empty %}
-      <span class="label label--medium group-header" data-group-header="true">On This Day</span>
+      <span class="label label--medium">On This Day</span>
       {% for o in on_this_day limit: 2 %}
       <div class="item">
         <div class="meta"></div>
@@ -90,12 +91,13 @@
       {% if review and review.pending > 0 %}
       <span class="label label--small label--gray">Entity review: {{ review.pending }} proposal{% if review.pending != 1 %}s{% endif %} waiting{% if review.parked > 0 %} · {{ review.parked }} parked{% endif %}</span>
       {% endif %}
+      </div>
     </div>
   </div>
 </div>
 
 <div class="title_bar">
-  <img class="image" src="https://trmnl.com/images/plugins/trmnl--render.svg">
+  <img class="image image-stroke" src="data:image/svg+xml;base64,{{ svg_logo | base64_encode }}">
   <span class="title">Daily Brief</span>
   <span class="instance">{{ date | date: "%A, %B %-d" }}</span>
 </div>

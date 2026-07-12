@@ -1,7 +1,8 @@
-<div class="layout">
-  <div class="grid gap stretch-x">
+<div class="layout layout--top">
+  <div class="grid grid--cols-12 gap stretch-x">
     <div class="col--span-6">
-      <span class="label label--small group-header" data-group-header="true">Meetings</span>
+      <div class="stretch-x">
+      <span class="label label--small">Meetings</span>
       {% if meetings and meetings != empty %}
       {% for m in meetings limit: 2 %}
       <div class="item">
@@ -21,10 +22,12 @@
         </div>
       </div>
       {% endif %}
+      </div>
     </div>
     <div class="col--span-3">
+      <div class="stretch-x">
       {% if birthdays and birthdays != empty %}
-      <span class="label label--small group-header" data-group-header="true">Birthdays</span>
+      <span class="label label--small">Birthdays</span>
       {% for b in birthdays limit: 2 %}
       <div class="item">
         <div class="meta"></div>
@@ -35,10 +38,12 @@
       </div>
       {% endfor %}
       {% endif %}
+      </div>
     </div>
     <div class="col--span-3">
+      <div class="stretch-x">
       {% if reconnect and reconnect != empty %}
-      <span class="label label--small group-header" data-group-header="true">Reconnect</span>
+      <span class="label label--small">Reconnect</span>
       {% for r in reconnect limit: 2 %}
       <div class="item">
         <div class="meta"></div>
@@ -49,12 +54,13 @@
       </div>
       {% endfor %}
       {% endif %}
+      </div>
     </div>
   </div>
 </div>
 
 <div class="title_bar">
-  <img class="image" src="https://trmnl.com/images/plugins/trmnl--render.svg">
+  <img class="image image-stroke" src="data:image/svg+xml;base64,{{ svg_logo | base64_encode }}">
   <span class="title">Daily Brief</span>
   <span class="instance">{{ date | date: "%b %-d" }}</span>
 </div>
