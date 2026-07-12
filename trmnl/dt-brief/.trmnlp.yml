@@ -1,0 +1,84 @@
+---
+# Local preview config for `trmnlp serve` (http://localhost:4567).
+# The variables below mirror what trmnl-push-brief.py POSTs — all names are
+# fictional (same convention as devonthink/tests: no real people, *@x.com).
+watch:
+  - src
+
+variables:
+  trmnl:
+    plugin_settings:
+      instance_name: Daily Brief
+  date: "2026-07-12"
+  generated_at: "2026-07-12T05:15:00"
+  truncated: false
+  meetings:
+    - time: "9:00am"
+      title: UI Sync
+      people:
+        - name: Anthony Fielding
+          role: Senior Architect
+          employer: Globex
+          city: Chicago
+          last: "2026-06-20"
+        - name: Jake Pendry
+          role: Product Manager
+          employer: Initech
+          last: "2026-07-01"
+      unmatched:
+        - Ghost Person (g@x.com)
+    - time: "11:30am"
+      title: Quarterly roadmap review with the platform group
+      people:
+        - name: Marisa Voss
+          role: Director of Engineering
+          employer: Globex
+          last: "2026-05-14"
+      unmatched: []
+    - time: "3:00pm"
+      title: Call with Bob
+      people:
+        - name: Bob Marsh
+          role: Architect
+          employer: Globex
+          city: Chicago
+          last: "2026-06-20"
+      unmatched: []
+  reconnect:
+    - name: Victoria Cole
+      relationship: close-friend
+      days: 74
+      last: "2026-04-29"
+    - name: Jonathan Marsh
+      relationship: friend
+      days: null
+      last: null
+    - name: Aaron Brooks
+      relationship: colleague
+      days: 121
+      last: "2026-03-13"
+  birthdays:
+    - date: "2026-07-12"
+      name: Tam Okafor
+      age: 38
+      today: true
+    - date: "2026-07-19"
+      name: Jake Pendry
+      age: null
+      today: false
+  review:
+    pending: 3
+    approved: 1
+    parked: 2
+  journal:
+    state: pending
+    pending: 1
+    parked: 0
+    staged: 0
+  on_this_day:
+    - years: 2
+      name: Kyoto trip photos
+      kind: markdown
+    - years: 1
+      name: "2025-07-12"
+      kind: daily note

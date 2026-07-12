@@ -43,6 +43,13 @@ osascript, Apple-signed TCC identity), Contacts access through
 contacts-json.js (same pattern), and DEVONthink access through
 entity-dt-bridge.js. All are invoked via /usr/bin/osascript.
 
+Besides the daily note, each run writes the sections' structured data to
+~/.local/state/devonthink/morning-brief.json and hands it to
+trmnl-push-brief.py, which mirrors the brief onto a TRMNL e-ink dashboard
+(silent no-op until its webhook is configured). The snapshot carries
+Reconnect every day, not just Mondays — a glance surface benefits from it
+daily and the data is computed on every run anyway.
+
 Usage:
     dt-morning-brief.py              # normal launchd-driven run
     dt-morning-brief.py --dry-run    # print the sections, write nothing
@@ -152,6 +159,9 @@ UNMATCHED_LIST_MAX = 8
 CONFIG_FILE = os.path.expanduser("~/.config/dt-pipeline/entities.conf")
 ENTITY_STATE_FILE = os.path.expanduser(
     "~/.local/state/devonthink/entity-filing-state.json")
+SNAPSHOT_FILE = os.path.expanduser(
+    "~/.local/state/devonthink/morning-brief.json")
+TRMNL_PUSH = os.path.expanduser("~/.local/bin/trmnl-push-brief.py")
 DEFAULT_SKIP_ATTENDEE = r"\bVC\b|\bConference\b|\bRoom\b|\d+\s?ppl"
 BACKFILL_DAYS = 365
 PARKED_LIST_MAX = 5
@@ -316,7 +326,9 @@ def title_matches(people, title):
     return hits
 
 
-def build_brief(events, people, today, skip_re):
+def brief_blocks(events, people, skip_re):
+    """Structured briefing blocks per briefable event: matched roster people
+    (attendee order, then title matches) and unmatched-attendee labels."""
     index = person_index(people)
     blocks = []
     for ev in events:
@@ -328,8 +340,8 @@ def build_brief(events, people, today, skip_re):
         by_title = title_matches(people, ev["title"])
         if not others and not by_title:
             continue
-        lines = [f"### {fmt_time(ev['start'])} — {ev['title']}", ""]
         seen = set()
+        matched = []
         unmatched = []
         for a in others:
             ident = a["email"] or norm(a["name"])
@@ -341,26 +353,42 @@ def build_brief(events, people, today, skip_re):
                 if p["uuid"] in seen:
                     continue
                 seen.add(p["uuid"])
-                lines.append(person_summary_line(p))
-                lines.extend(recent_log_bullets(p))
+                matched.append(p)
             else:
                 who = a["name"] or a["email"]
                 detail = f" ({a['email']})" if a["name"] and a["email"] else ""
-                unmatched.append(f"- {who}{detail} — no entity record yet")
+                unmatched.append(f"{who}{detail}")
         for p in by_title:
             if p["uuid"] in seen:
                 continue
             seen.add(p["uuid"])
-            lines.append(person_summary_line(p))
-            lines.extend(recent_log_bullets(p))
-        if len(unmatched) <= UNMATCHED_LIST_MAX:
-            lines.extend(unmatched)
-        else:
-            lines.append(f"- {len(unmatched)} attendees without entity records")
-        blocks.append("\n".join(lines))
+            matched.append(p)
+        blocks.append({"time": fmt_time(ev["start"]), "title": ev["title"],
+                       "people": matched, "unmatched": unmatched})
+    return blocks
+
+
+def render_brief(blocks, today):
     if not blocks:
         return None
-    return f"<!-- brief:{today} -->\n\n" + "\n\n".join(blocks)
+    out = []
+    for b in blocks:
+        lines = [f"### {b['time']} — {b['title']}", ""]
+        for p in b["people"]:
+            lines.append(person_summary_line(p))
+            lines.extend(recent_log_bullets(p))
+        if len(b["unmatched"]) <= UNMATCHED_LIST_MAX:
+            lines.extend(f"- {u} — no entity record yet"
+                         for u in b["unmatched"])
+        else:
+            lines.append(
+                f"- {len(b['unmatched'])} attendees without entity records")
+        out.append("\n".join(lines))
+    return f"<!-- brief:{today} -->\n\n" + "\n\n".join(out)
+
+
+def build_brief(events, people, today, skip_re):
+    return render_brief(brief_blocks(events, people, skip_re), today)
 
 
 def contact_bumps(events, people, day, skip_re):
@@ -388,7 +416,10 @@ def contact_bumps(events, people, day, skip_re):
     return ops
 
 
-def build_reconnect(people, today):
+def reconnect_overdue(people, today):
+    """Active tiered people past their contact threshold, most overdue first:
+    (overdue_ratio, days_since_contact, person); days None means no recorded
+    contact at all (maximally overdue)."""
     today_d = date.fromisoformat(today)
     overdue = []
     for p in people:
@@ -435,9 +466,13 @@ def build_reconnect(people, today):
             continue
         if days > threshold:
             overdue.append((days / threshold, days, p))
+    overdue.sort(key=lambda x: -x[0])
+    return overdue
+
+
+def render_reconnect(overdue, today):
     if not overdue:
         return None
-    overdue.sort(key=lambda x: -x[0])
     lines = [f"<!-- reconnect:{today} -->", ""]
     for _, days, p in overdue[:RECONNECT_LIMIT]:
         md = p.get("md", {})
@@ -451,6 +486,10 @@ def build_reconnect(people, today):
                 f" {md.get('mdlastcontact')} ({days} days)"
             )
     return "\n".join(lines)
+
+
+def build_reconnect(people, today):
+    return render_reconnect(reconnect_overdue(people, today), today)
 
 
 def match_contact(index, contact):
@@ -479,11 +518,12 @@ def birthday_occurrence(month, day, start, lookahead):
     return None
 
 
-def build_birthdays(contacts, people, today, lookahead=BIRTHDAY_LOOKAHEAD):
+def birthday_rows(contacts, people, today, lookahead=BIRTHDAY_LOOKAHEAD):
     """Upcoming birthdays for roster-matched Contacts cards only — the whole
     point vs. the skipped all-of-Contacts Birthdays calendar. Read live from
     Contacts each run, never stored on the Person record: identifiers are
-    matching keys, not knowledge, and a stored copy would drift."""
+    matching keys, not knowledge, and a stored copy would drift. Rows are
+    (celebration_date, age_or_None, person), soonest first."""
     index = person_index(people)
     start = date.fromisoformat(today)
     rows = []
@@ -505,9 +545,14 @@ def build_birthdays(contacts, people, today, lookahead=BIRTHDAY_LOOKAHEAD):
         # sentinel year (1604) rather than omitting it.
         age = when.year - year if year and 1900 <= year <= when.year else None
         rows.append((when, age, p))
+    rows.sort(key=lambda r: (r[0], norm(r[2]["name"])))
+    return rows
+
+
+def render_birthdays(rows, today):
     if not rows:
         return None
-    rows.sort(key=lambda r: (r[0], norm(r[2]["name"])))
+    start = date.fromisoformat(today)
     lines = [f"<!-- birthdays:{today} -->", ""]
     for when, age, p in rows:
         link = f"[{p['name']}](x-devonthink-item://{p['uuid']})"
@@ -515,6 +560,11 @@ def build_birthdays(contacts, people, today, lookahead=BIRTHDAY_LOOKAHEAD):
         suffix = " (today!)" if when == start else ""
         lines.append(f"- {when.isoformat()} — {link} — {what}{suffix}")
     return "\n".join(lines)
+
+
+def build_birthdays(contacts, people, today, lookahead=BIRTHDAY_LOOKAHEAD):
+    return render_birthdays(
+        birthday_rows(contacts, people, today, lookahead), today)
 
 
 def apple_ns(day):
@@ -632,13 +682,10 @@ def parked_lines(parked):
     return lines
 
 
-def review_nudge(today):
-    """Surface the filing review backlog so proposals don't sit unseen — the
-    Approved subgroup is the apply drop-zone, so it isn't a backlog, but a
-    proposal filing refused to apply stays there and would otherwise be
-    invisible: nothing counts it and its log line is only a WARNING. Parked
-    sources are included for the same reason: a note that repeatedly failed
-    extraction would otherwise vanish from every review surface."""
+def review_backlog(today):
+    """Filing review backlog counts: (pending, approved, parked) — pending and
+    approved are counts, parked is the state-file dict. None when the bridge
+    count failed (BridgeUnavailable still propagates)."""
     try:
         children, approved = run_bridge([
             {"op": "list_group", "path": REVIEW_PATH},
@@ -650,27 +697,43 @@ def review_nudge(today):
         log.warning("could not count review proposals: %s", exc)
         return None
     pending = [c for c in children if c["name"] != "Approved"]
-    parked = parked_sources()
+    return len(pending), len(approved), parked_sources()
+
+
+def render_review(backlog, today):
+    """Surface the filing review backlog so proposals don't sit unseen — the
+    Approved subgroup is the apply drop-zone, so it isn't a backlog, but a
+    proposal filing refused to apply stays there and would otherwise be
+    invisible: nothing counts it and its log line is only a WARNING. Parked
+    sources are included for the same reason: a note that repeatedly failed
+    extraction would otherwise vanish from every review surface."""
+    if backlog is None:
+        return None
+    pending, approved, parked = backlog
     if not pending and not approved and not parked:
         return None
     lines = [f"<!-- review-nudge:{today} -->", ""]
     if pending:
-        noun = "proposal" if len(pending) == 1 else "proposals"
-        lines.append(f"- {len(pending)} filing {noun} awaiting review in "
+        noun = "proposal" if pending == 1 else "proposals"
+        lines.append(f"- {pending} filing {noun} awaiting review in "
                      f"`20_ENTITIES/_Review`")
     if approved:
-        noun = "proposal" if len(approved) == 1 else "proposals"
-        lines.append(f"- {len(approved)} approved {noun} did not apply — see "
+        noun = "proposal" if approved == 1 else "proposals"
+        lines.append(f"- {approved} approved {noun} did not apply — see "
                      f"`entity-filing` in the pipeline log")
     lines.extend(parked_lines(parked))
     return "\n".join(lines)
 
 
-def journal_status_lines(today, state, staged_count):
-    """One line when yesterday's journal page never arrived, so a broken
+def review_nudge(today):
+    return render_review(review_backlog(today), today)
+
+
+def journal_status_info(today, state, staged_count):
+    """Non-None only when yesterday's journal page never arrived, so a broken
     Boox→Dropbox sync is distinguishable from simply not journaling — the
     watchdog only catches dead agents, not an empty staging folder. Quiet
-    unless the habit is active: no line before the first entry ever files,
+    unless the habit is active: no report before the first entry ever files,
     and none once the newest entry is older than JOURNAL_LAPSE_DAYS."""
     notebooks = {name: nb for name, nb in
                  (state or {}).get("notebooks", {}).items()
@@ -688,8 +751,15 @@ def journal_status_lines(today, state, staged_count):
                   if not p.get("date") and not p.get("parked"))
     parked = sum(1 for nb in notebooks.values() for p in nb.get("pages", [])
                  if p.get("parked"))
+    return {"pending": pending, "parked": parked, "staged": staged_count}
+
+
+def render_journal(info, today):
+    if info is None:
+        return None
+    pending, parked, staged = info["pending"], info["parked"], info["staged"]
     lines = [f"<!-- journal-status:{today} -->", ""]
-    if pending or staged_count:
+    if pending or staged:
         detail = f"{pending} page(s) pending OCR" if pending else \
             "an export is staged"
         if parked:
@@ -706,7 +776,15 @@ def journal_status_lines(today, state, staged_count):
     return "\n".join(lines)
 
 
-def build_journal_status(today):
+def journal_status_lines(today, state, staged_count):
+    return render_journal(journal_status_info(today, state, staged_count),
+                          today)
+
+
+def load_journal_state():
+    """(state, staged_export_count) from the Boox pipeline's files, or None
+    when there is no readable state — the brief then stays silent rather
+    than reporting a broken habit it can't see."""
     try:
         with open(JOURNAL_STATE) as f:
             state = json.load(f)
@@ -717,13 +795,21 @@ def build_journal_status(today):
                       if n.endswith(".pdf")])
     except OSError:
         staged = 0
-    return journal_status_lines(today, state, staged)
+    return state, staged
 
 
-def build_on_this_day(today):
+def build_journal_status(today):
+    loaded = load_journal_state()
+    if loaded is None:
+        return None
+    return journal_status_lines(today, *loaded)
+
+
+def on_this_day_rows(today):
     """Anniversary resurfacing from metadata the pipeline already writes:
     records whose EventDate falls on this day in past years, plus the daily
-    note from one year ago."""
+    note from one year ago. Returns (rows, last_year_daily_or_None), or None
+    when the lookup failed."""
     t = date.fromisoformat(today)
     ops = []
     year_dates = []
@@ -746,22 +832,120 @@ def build_on_this_day(today):
     except Exception as exc:
         log.warning("on-this-day lookup failed: %s", exc)
         return None
-    lines = [f"<!-- on-this-day:{today} -->", ""]
-    found = False
+    rows = []
     for past, hits in zip(year_dates, results):
         back = t.year - date.fromisoformat(past).year
-        noun = "year" if back == 1 else "years"
         for h in hits or []:
-            found = True
-            kind = f" ({h['documenttype']})" if h.get("documenttype") else ""
-            lines.append(f"- {back} {noun} ago: "
-                         f"[{h['name']}](x-devonthink-item://{h['uuid']}){kind}")
-    daily = results[-1]
+            rows.append({"years": back, "name": h["name"], "uuid": h["uuid"],
+                         "kind": h.get("documenttype") or ""})
+    return rows, results[-1]
+
+
+def render_on_this_day(got, today):
+    if got is None:
+        return None
+    rows, daily = got
+    lines = [f"<!-- on-this-day:{today} -->", ""]
+    for r in rows:
+        noun = "year" if r["years"] == 1 else "years"
+        kind = f" ({r['kind']})" if r["kind"] else ""
+        lines.append(f"- {r['years']} {noun} ago: "
+                     f"[{r['name']}](x-devonthink-item://{r['uuid']}){kind}")
     if daily:
-        found = True
         lines.append(f"- One year ago today: "
                      f"[{daily['name']}](x-devonthink-item://{daily['uuid']})")
-    return "\n".join(lines) if found else None
+    return "\n".join(lines) if rows or daily else None
+
+
+def build_on_this_day(today):
+    return render_on_this_day(on_this_day_rows(today), today)
+
+
+def person_snapshot(p):
+    md = p.get("md", {})
+    out = {"name": p["name"]}
+    for key, field in (("role", "mdrole"), ("employer", "mdemployer"),
+                       ("city", "mdcity"), ("last", "mdlastcontact")):
+        if md.get(field):
+            out[key] = md[field]
+    return out
+
+
+def build_snapshot(today, blocks, overdue, bdays, backlog, journal_info, otd):
+    """Everything the TRMNL screen renders, unabridged — trmnl-push-brief.py
+    owns fitting it to the webhook byte budget. Reconnect is included every
+    day even though the daily note carries it only on Mondays: the e-ink
+    dashboard is a glance surface and the data is computed anyway."""
+    start = date.fromisoformat(today)
+    snap = {
+        "date": today,
+        "generated_at": datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
+        "meetings": [
+            {"time": b["time"], "title": b["title"],
+             "people": [person_snapshot(p) for p in b["people"]],
+             "unmatched": b["unmatched"]}
+            for b in blocks
+        ],
+        "reconnect": [
+            {"name": p["name"],
+             "relationship": p.get("md", {}).get("mdrelationship", ""),
+             "days": days,
+             "last": p.get("md", {}).get("mdlastcontact") or None}
+            for _, days, p in overdue[:RECONNECT_LIMIT]
+        ],
+        "birthdays": [
+            {"date": when.isoformat(), "name": p["name"], "age": age,
+             "today": when == start}
+            for when, age, p in bdays
+        ],
+        "review": None,
+        "journal": None,
+        "on_this_day": [],
+    }
+    if backlog is not None:
+        pending, approved, parked = backlog
+        snap["review"] = {"pending": pending, "approved": approved,
+                          "parked": len(parked)}
+    if journal_info is not None:
+        state = ("pending" if journal_info["pending"] or journal_info["staged"]
+                 else "parked" if journal_info["parked"] else "missing")
+        snap["journal"] = {"state": state, **journal_info}
+    if otd is not None:
+        rows, daily = otd
+        snap["on_this_day"] = [
+            {"years": r["years"], "name": r["name"], "kind": r["kind"]}
+            for r in rows
+        ]
+        if daily:
+            snap["on_this_day"].append(
+                {"years": 1, "name": daily["name"], "kind": "daily note"})
+    return snap
+
+
+def write_snapshot(snap):
+    snap_dir = os.path.dirname(SNAPSHOT_FILE)
+    os.makedirs(snap_dir, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=snap_dir, suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump(snap, f, ensure_ascii=False, indent=1)
+        os.replace(tmp, SNAPSHOT_FILE)
+    finally:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+
+
+def push_snapshot():
+    """Hand the snapshot to the TRMNL pusher, which no-ops without a webhook
+    config. Fire-and-forget: the pusher does its own pipeline logging, and a
+    failed push must never take the daily-note write down with it."""
+    if not os.path.exists(TRMNL_PUSH):
+        return
+    try:
+        subprocess.run(["/usr/bin/python3", TRMNL_PUSH],
+                       capture_output=True, timeout=120, check=False)
+    except Exception as exc:
+        log.info("TRMNL push failed to launch: %s", exc)
 
 
 def backfill_contacts(today, days, skip_re, dry_run):
@@ -940,13 +1124,30 @@ def main():
     # Every section is upserted (not append-once): the 05:45/06:30/08:00
     # retries refresh a 05:15 brief built from incomplete calendar sync, and
     # a cleared review backlog removes its stale nudge (empty content).
-    sections = [(BRIEF_HEADER, build_brief(events, people, today, skip_re))]
+    blocks = brief_blocks(events, people, skip_re)
+    overdue = reconnect_overdue(people, today)
+    bdays = birthday_rows(contacts, people, today)
+    backlog = review_backlog(today)
+    journal_loaded = load_journal_state()
+    journal_info = (journal_status_info(today, *journal_loaded)
+                    if journal_loaded else None)
+    otd = on_this_day_rows(today)
+
+    sections = [(BRIEF_HEADER, render_brief(blocks, today))]
     if weekly or date.fromisoformat(today).weekday() == 0:
-        sections.append((RECONNECT_HEADER, build_reconnect(people, today)))
-    sections.append((BIRTHDAYS_HEADER, build_birthdays(contacts, people, today)))
-    sections.append((REVIEW_HEADER, review_nudge(today)))
-    sections.append((JOURNAL_HEADER, build_journal_status(today)))
-    sections.append((ON_THIS_DAY_HEADER, build_on_this_day(today)))
+        sections.append((RECONNECT_HEADER, render_reconnect(overdue, today)))
+    sections.append((BIRTHDAYS_HEADER, render_birthdays(bdays, today)))
+    sections.append((REVIEW_HEADER, render_review(backlog, today)))
+    sections.append((JOURNAL_HEADER, render_journal(journal_info, today)))
+    sections.append((ON_THIS_DAY_HEADER, render_on_this_day(otd, today)))
+
+    # The TRMNL screen updates even on an empty day — "no meetings" is a
+    # displayable state — and never for a --date replay, which would clobber
+    # the device with a stale day.
+    if not dry_run and today == date.today().isoformat():
+        write_snapshot(build_snapshot(today, blocks, overdue, bdays,
+                                      backlog, journal_info, otd))
+        push_snapshot()
 
     if not any(content for _, content in sections):
         log.info("nothing to write (no briefable meetings, no reconnects)")

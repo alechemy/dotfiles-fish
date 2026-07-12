@@ -468,6 +468,86 @@ class RecentLogBullets(unittest.TestCase):
         self.assertIn("moved.", got[0])
 
 
+class BuildSnapshot(unittest.TestCase):
+    TODAY = "2026-07-09"
+
+    def snap(self, blocks=(), overdue=(), bdays=(), backlog=None,
+             journal_info=None, otd=None):
+        return mb.build_snapshot(self.TODAY, list(blocks), list(overdue),
+                                 list(bdays), backlog, journal_info, otd)
+
+    def test_meetings_carry_people_and_unmatched(self):
+        people = [person("Bob Marsh", role="Architect", employer="Globex",
+                         city="Chicago", lastcontact="2026-06-20",
+                         email="bob@x.com")]
+        ev = event("UI Sync", [attendee("Bob Marsh", "bob@x.com"),
+                               attendee("Ghost Person", "g@x.com")],
+                   date=self.TODAY)
+        blocks = mb.brief_blocks([ev], people, ROOM_RE)
+        snap = self.snap(blocks=blocks)
+        m = snap["meetings"][0]
+        self.assertEqual(m["time"], "9:00am")
+        self.assertEqual(m["title"], "UI Sync")
+        self.assertEqual(m["people"], [
+            {"name": "Bob Marsh", "role": "Architect", "employer": "Globex",
+             "city": "Chicago", "last": "2026-06-20"}])
+        self.assertEqual(m["unmatched"], ["Ghost Person (g@x.com)"])
+
+    def test_person_snapshot_omits_empty_fields(self):
+        self.assertEqual(mb.person_snapshot(person("Bob")), {"name": "Bob"})
+
+    def test_reconnect_capped_with_null_days_for_never_contacted(self):
+        people = [person(f"P{i}", relationship="family") for i in range(15)]
+        snap = self.snap(overdue=mb.reconnect_overdue(people, self.TODAY))
+        self.assertEqual(len(snap["reconnect"]), mb.RECONNECT_LIMIT)
+        self.assertIsNone(snap["reconnect"][0]["days"])
+        self.assertEqual(snap["reconnect"][0]["relationship"], "family")
+
+    def test_birthday_today_flag_and_date(self):
+        rows = mb.birthday_rows(
+            [contact("Jake Pendry", birthday={"month": 7, "day": 9})],
+            [person("Jake Pendry")], self.TODAY)
+        snap = self.snap(bdays=rows)
+        self.assertEqual(snap["birthdays"], [
+            {"date": self.TODAY, "name": "Jake Pendry", "age": None,
+             "today": True}])
+
+    def test_review_counts_parked_dict_becomes_count(self):
+        snap = self.snap(backlog=(2, 1, {"u1": {}, "u2": {}}))
+        self.assertEqual(snap["review"],
+                         {"pending": 2, "approved": 1, "parked": 2})
+
+    def test_review_none_when_backlog_unknown(self):
+        self.assertIsNone(self.snap()["review"])
+
+    def test_journal_state_token(self):
+        cases = [({"pending": 2, "parked": 0, "staged": 0}, "pending"),
+                 ({"pending": 0, "parked": 0, "staged": 1}, "pending"),
+                 ({"pending": 0, "parked": 3, "staged": 0}, "parked"),
+                 ({"pending": 0, "parked": 0, "staged": 0}, "missing")]
+        for info, expected in cases:
+            snap = self.snap(journal_info=info)
+            self.assertEqual(snap["journal"]["state"], expected, info)
+        self.assertIsNone(self.snap()["journal"])
+
+    def test_on_this_day_appends_last_years_daily_note(self):
+        otd = ([{"years": 2, "name": "Trip", "uuid": "U", "kind": "markdown"}],
+               {"name": "2025-07-09", "uuid": "D"})
+        snap = self.snap(otd=otd)
+        self.assertEqual(snap["on_this_day"], [
+            {"years": 2, "name": "Trip", "kind": "markdown"},
+            {"years": 1, "name": "2025-07-09", "kind": "daily note"}])
+
+    def test_snapshot_is_json_serializable(self):
+        import json
+        people = [person("Bob Marsh")]
+        ev = event("Sync", [attendee("Bob Marsh")], date=self.TODAY)
+        snap = self.snap(blocks=mb.brief_blocks([ev], people, ROOM_RE),
+                         overdue=mb.reconnect_overdue(
+                             [person("X", relationship="family")], self.TODAY))
+        json.dumps(snap)
+
+
 class JournalStatusLines(unittest.TestCase):
     TODAY = "2026-07-11"
 

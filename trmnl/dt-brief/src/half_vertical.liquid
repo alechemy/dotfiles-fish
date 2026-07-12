@@ -1,0 +1,54 @@
+<div class="layout layout--col">
+  <span class="label label--medium group-header" data-group-header="true">Meetings</span>
+  {% if meetings and meetings != empty %}
+  {% for m in meetings limit: 4 %}
+  <div class="item">
+    <div class="meta"></div>
+    <div class="content">
+      <span class="title title--small" data-clamp="1">{{ m.title }}</span>
+      {% assign who = m.people | map: "name" | join: " · " %}
+      {% if who != "" %}<span class="description" data-clamp="1">{{ who }}</span>{% endif %}
+      <span class="label label--small label--underline">{{ m.time }}</span>
+    </div>
+  </div>
+  {% endfor %}
+  {% else %}
+  <div class="item">
+    <div class="meta"></div>
+    <div class="content">
+      <span class="title title--small">Clear calendar</span>
+      <span class="description">No people-facing meetings today.</span>
+    </div>
+  </div>
+  {% endif %}
+  {% if birthdays and birthdays != empty %}
+  <span class="label label--medium group-header" data-group-header="true">Birthdays</span>
+  {% for b in birthdays limit: 2 %}
+  <div class="item">
+    <div class="meta"></div>
+    <div class="content">
+      <span class="title title--small" data-clamp="1">{{ b.name }}</span>
+      <span class="label label--small label--gray">{{ b.date | date: "%b %-d" }}{% if b.today %} · today{% endif %}</span>
+    </div>
+  </div>
+  {% endfor %}
+  {% endif %}
+  {% if reconnect and reconnect != empty %}
+  <span class="label label--medium group-header" data-group-header="true">Reconnect</span>
+  {% for r in reconnect limit: 2 %}
+  <div class="item">
+    <div class="meta"></div>
+    <div class="content">
+      <span class="title title--small" data-clamp="1">{{ r.name }}</span>
+      <span class="label label--small label--gray">{% if r.days %}{{ r.days }} days ago{% else %}no contact logged{% endif %}</span>
+    </div>
+  </div>
+  {% endfor %}
+  {% endif %}
+</div>
+
+<div class="title_bar">
+  <img class="image" src="https://trmnl.com/images/plugins/trmnl--render.svg">
+  <span class="title">Daily Brief</span>
+  <span class="instance">{{ date | date: "%b %-d" }}</span>
+</div>

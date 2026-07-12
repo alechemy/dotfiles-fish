@@ -1,0 +1,31 @@
+<div class="layout">
+  {% if meetings and meetings != empty %}
+  <div class="columns">
+    <div class="column">
+      {% for m in meetings limit: 2 %}
+      <div class="item">
+        <div class="meta"></div>
+        <div class="content">
+          <span class="title title--small" data-clamp="1">{{ m.title }}</span>
+          <span class="label label--small">{{ m.time }}</span>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% else %}
+  <div class="item">
+    <div class="meta"></div>
+    <div class="content">
+      <span class="title title--small">Clear calendar</span>
+      <span class="label label--small label--gray">No people-facing meetings</span>
+    </div>
+  </div>
+  {% endif %}
+</div>
+
+<div class="title_bar">
+  <img class="image" src="https://trmnl.com/images/plugins/trmnl--render.svg">
+  <span class="title">Daily Brief</span>
+  <span class="instance">{{ date | date: "%b %-d" }}</span>
+</div>

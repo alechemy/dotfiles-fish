@@ -1,0 +1,5 @@
+---
+name: DEVONthink Daily Brief
+strategy: webhook
+dark_mode: 'no'
+no_screen_padding: 'no'
