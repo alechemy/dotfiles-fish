@@ -820,5 +820,45 @@
 		<key>type</key>
 		<string>bool</string>
 	</dict>
+	<dict>
+		<key>date</key>
+		<real>804923472.79104698</real>
+		<key>identifier</key>
+		<string>mditemlink</string>
+		<key>index</key>
+		<integer>71</integer>
+		<key>type</key>
+		<string>crosslink</string>
+	</dict>
+	<dict>
+		<key>date</key>
+		<real>805515040.17305696</real>
+		<key>identifier</key>
+		<string>mdjournalentry</string>
+		<key>index</key>
+		<integer>72</integer>
+		<key>type</key>
+		<string>real</string>
+	</dict>
+	<dict>
+		<key>date</key>
+		<real>805515040.18972301</real>
+		<key>identifier</key>
+		<string>mdpageindex</string>
+		<key>index</key>
+		<integer>73</integer>
+		<key>type</key>
+		<string>real</string>
+	</dict>
+	<dict>
+		<key>date</key>
+		<real>805515040.20639896</real>
+		<key>identifier</key>
+		<string>mdpagesignature</string>
+		<key>index</key>
+		<integer>74</integer>
+		<key>type</key>
+		<string>string</string>
+	</dict>
 </array>
 </plist>
