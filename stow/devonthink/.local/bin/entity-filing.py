@@ -5,7 +5,9 @@ entity-filing.py — AI filing step for the entity layer.
 Scans processed pipeline documents (Granola meeting notes, handwritten
 notes, past daily notes) for facts about people, resolves each mention
 against Lorebook/20_ENTITIES/People, and files dated, provenance-linked
-bullets into each person's `## Biographical Log`. The LLM only performs
+bullets into each person's `## Biographical Log`. Daily notes are
+stripped of the morning brief's generated sections first, so extraction
+only ever sees human-authored content. The LLM only performs
 the messy-text -> structured-JSON extraction; everything that writes to
 DEVONthink is deterministic (entity-dt-bridge.js ops built here).
 
@@ -82,6 +84,18 @@ Config (~/.config/dt-pipeline/entities.conf, KEY=VALUE):
                                      the user has been idle this long, so
                                      inference never spins fans mid-work;
                                      default 10, 0 disables the gate
+  THINGS_SYNC=on|off                 default off. Mirror each pending
+                                     proposal as a to-do in Things 3: the
+                                     note carries an editable line-format
+                                     rendering of the proposal, completing
+                                     the to-do approves it (edits included),
+                                     canceling or deleting it rejects it.
+                                     Person names and facts sync through
+                                     Things Cloud — an explicit exception
+                                     to the entity layer's local-only rule.
+  THINGS_PROJECT=<title>             Things project holding the proposal
+                                     to-dos, created on demand; default
+                                     "Entity Filing"
 
 Usage:
     entity-filing.py                 # launchd-driven scan + apply
@@ -109,6 +123,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path.home() / ".local" / "bin"))
 from pipeline_log import setup as setup_log
 
+import things_bridge
+
 log = setup_log("entity-filing")
 
 BRIDGE = os.path.expanduser("~/.local/bin/entity-dt-bridge.js")
@@ -123,6 +139,13 @@ APPROVED_PATH = "/20_ENTITIES/_Review/Approved"
 MAX_ATTEMPTS = 5
 UPDATE_FIELDS = ("employer", "role", "city", "email")
 BUMP_WINDOW_DAYS = 60
+THINGS_MAP_FILE = os.path.join(STATE_DIR, "things-filing-map.json")
+THINGS_MAP_VERSION = 1
+THINGS_URL_LIMIT = 3500
+THINGS_WHEN = "today"
+SPEC_SENTINEL = "=== proposed v1 ==="
+BANNER_PREFIX = "⚠ entity-filing:"
+PROPOSAL_MARKER = "Proposal: x-devonthink-item://"
 
 CHAT_ROLE = (
     "You are a personal-CRM extraction assistant that responds only with JSON."
@@ -248,6 +271,8 @@ def load_config():
         "SELF_NAME": "",
         "SKIP_SOURCE_TITLES": "",
         "IDLE_MINUTES": "10",
+        "THINGS_SYNC": "off",
+        "THINGS_PROJECT": "Entity Filing",
     }
     if os.path.exists(CONFIG_FILE):
         with open(CONFIG_FILE) as f:
@@ -961,6 +986,719 @@ def apply_approved(dry_run):
 
 
 # ---------------------------------------------------------------------------
+# Things review loop — note spec
+# ---------------------------------------------------------------------------
+
+
+class SpecParseError(ValueError):
+    """An edited Things note no longer matches the spec grammar. Always
+    bounced back to the user verbatim — the parser never guesses."""
+
+
+SPEC_KINDS = {"existing", "new", "ambiguous"}
+SPEC_FACT_RE = re.compile(r"^(\d{4}-\d{2}-\d{2})\s+(?:—|–|--|-)\s+(.+)$")
+SPEC_PAREN_RE = re.compile(r"^(.*)\s*\(([^()]*)\)$")
+SPEC_EVENT_RE = re.compile(r"^(.*)\s+\((\d{4}-\d{2}-\d{2})( at (.*))?\)$")
+SPEC_FIELD_RE = re.compile(r"^([A-Za-z]+)\s*=\s*(.+)$")
+TASK_MARKER_RE = re.compile(re.escape(PROPOSAL_MARKER) + r"([A-Za-z0-9-]+)")
+
+
+def things_note_body(source_uuid, proposal_uuid, plans):
+    lines = [
+        "Review, edit if needed, then complete this to-do to file it.",
+        "Delete a line to drop it. Cancel or delete the to-do to reject.",
+        f"Source: x-devonthink-item://{source_uuid}",
+        f"{PROPOSAL_MARKER}{proposal_uuid}",
+        "",
+        SPEC_SENTINEL,
+    ]
+    for plan in plans:
+        if plan["kind"] == "event":
+            where = f" at {plan['location']}" if plan["location"] else ""
+            lines.append(f"EVENT {plan['name']} ({plan['date']}{where})")
+            if plan["attendees"]:
+                lines.append("- with: " + ", ".join(plan["attendees"]))
+            if plan["summary"]:
+                lines.append(f"- {plan['date']} — {plan['summary']}")
+        else:
+            kind = plan["kind"] if plan["kind"] in SPEC_KINDS else "new"
+            met = ", met" if plan.get("interacted") else ""
+            lines.append(f"PERSON {plan['name']} ({kind}{met})")
+            for d, fact in plan.get("facts", []):
+                lines.append(f"- {d} — {fact}")
+            for field, value in plan.get("updates", {}).items():
+                lines.append(f"- {field} = {value}")
+    return "\n".join(lines)
+
+
+def things_note_stub(source_uuid, proposal_uuid):
+    return "\n".join([
+        "This proposal can't be edited here — review it in DEVONthink, then",
+        "complete this to-do to apply it as written, or cancel to reject.",
+        f"Source: x-devonthink-item://{source_uuid}",
+        f"{PROPOSAL_MARKER}{proposal_uuid}",
+    ])
+
+
+def _spec_fact(body, facts):
+    m = SPEC_FACT_RE.match(body)
+    if m:
+        if not valid_date(m.group(1)):
+            raise SpecParseError(f"invalid date in line: {body!r}")
+        text = m.group(2).strip()
+        if len(text) > 400:
+            raise SpecParseError(f"fact too long (>400 chars): {text[:60]!r}…")
+        facts.append({"date": m.group(1), "fact": text})
+        return True
+    return False
+
+
+def parse_things_note(text):
+    """(people, events) extraction-shaped dicts from an edited task note.
+
+    The grammar is deliberately strict: every line below the sentinel must
+    parse exactly, and structural limits the plan builders would otherwise
+    enforce by *silently dropping* content (fact length, event name length,
+    attendee count) are hard errors here instead — an edit must never be
+    half-applied.
+    """
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    lines = [line.rstrip() for line in text.split("\n")]
+    sentinels = [i for i, line in enumerate(lines) if line.strip() == SPEC_SENTINEL]
+    if len(sentinels) != 1:
+        raise SpecParseError(
+            f"expected exactly one {SPEC_SENTINEL!r} line, found {len(sentinels)}")
+
+    people, events = [], []
+    current = None
+    for line in lines[sentinels[0] + 1:]:
+        if any(ord(c) < 32 and c != "\t" for c in line):
+            raise SpecParseError("line contains control characters")
+        if not line.strip():
+            continue
+        if line.startswith("PERSON "):
+            rest = line[len("PERSON "):].strip()
+            met = False
+            m = SPEC_PAREN_RE.match(rest)
+            if m:
+                tokens = [t.strip().lower() for t in m.group(2).split(",") if t.strip()]
+                if tokens and all(t in SPEC_KINDS or t == "met" for t in tokens):
+                    rest = m.group(1).strip()
+                    met = "met" in tokens
+            if not rest:
+                raise SpecParseError(f"PERSON line has no name: {line!r}")
+            if any(norm(p["name"]) == norm(rest) for p in people):
+                raise SpecParseError(f"duplicate person: {rest!r}")
+            current = {"name": rest, "match": None, "interacted": met,
+                       "facts": [], "updates": {}}
+            people.append(current)
+        elif line.startswith("EVENT "):
+            rest = line[len("EVENT "):].strip()
+            m = SPEC_EVENT_RE.match(rest)
+            if not m or not valid_date(m.group(2)):
+                raise SpecParseError(
+                    f"EVENT line must end with (YYYY-MM-DD[ at Location]): {line!r}")
+            name = m.group(1).strip()
+            if not name:
+                raise SpecParseError(f"EVENT line has no name: {line!r}")
+            if len(name) > 80:
+                raise SpecParseError(f"event name too long (>80 chars): {name!r}")
+            if any(norm(e["name"]) == norm(name) and e["date"] == m.group(2)
+                   for e in events):
+                raise SpecParseError(f"duplicate event: {name!r}")
+            current = {"name": name, "date": m.group(2),
+                       "location": (m.group(4) or "").strip() or None,
+                       "attendees": [], "summary": None}
+            events.append(current)
+        elif line.startswith("- "):
+            body = line[2:].strip()
+            if current is None:
+                raise SpecParseError(f"line belongs to no PERSON/EVENT: {line!r}")
+            if "facts" in current:
+                facts = []
+                if _spec_fact(body, facts):
+                    current["facts"].extend(facts)
+                    if len(current["facts"]) > 12:
+                        raise SpecParseError(
+                            f"more than 12 facts for {current['name']!r}")
+                    continue
+                m = SPEC_FIELD_RE.match(body)
+                if m and m.group(1).lower() in UPDATE_FIELDS:
+                    field = m.group(1).lower()
+                    if field in current["updates"]:
+                        raise SpecParseError(
+                            f"duplicate {field!r} for {current['name']!r}")
+                    current["updates"][field] = m.group(2).strip()
+                    continue
+                raise SpecParseError(f"unparseable line: {line!r}")
+            else:
+                if body.startswith("with:"):
+                    if current["attendees"]:
+                        raise SpecParseError(
+                            f"duplicate with: line for {current['name']!r}")
+                    names = [a.strip() for a in body[len("with:"):].split(",")
+                             if a.strip()]
+                    if len(names) > 20:
+                        raise SpecParseError(
+                            f"more than 20 attendees for {current['name']!r}")
+                    current["attendees"] = names
+                    continue
+                facts = []
+                if _spec_fact(body, facts):
+                    if current["summary"] is not None:
+                        raise SpecParseError(
+                            f"more than one summary line for {current['name']!r}")
+                    if len(facts[0]["fact"]) > 300:
+                        raise SpecParseError(
+                            f"event summary too long (>300 chars) for "
+                            f"{current['name']!r}")
+                    current["summary"] = facts[0]["fact"]
+                    continue
+                raise SpecParseError(f"unparseable line: {line!r}")
+        else:
+            raise SpecParseError(f"unparseable line: {line!r}")
+
+    if not people and not events:
+        raise SpecParseError("no PERSON or EVENT entries below the sentinel")
+    return people, events
+
+
+# ---------------------------------------------------------------------------
+# Things review loop — ops inversion / state
+# ---------------------------------------------------------------------------
+
+
+FACT_LINE_RE = re.compile(
+    r"^- (\d{4}-\d{2}-\d{2}) — (.+?) "
+    r"\(\[source\]\(x-devonthink-item://[^)]*\)\) <!-- fact:[0-9a-f]{8} -->$")
+
+
+def plans_from_ops(ops, people):
+    """Plan dicts back out of a proposal's ops fence, for rendering the
+    Things note spec. Returns (plans, editable, source_uuid): editable goes
+    False when any op can't be inverted faithfully (hand-edited fact line,
+    uuid gone from the roster, unknown op) — the task is then created
+    edit-disabled and completing it applies the frozen ops unchanged.
+    """
+    by_uuid = {p["uuid"]: p for p in people}
+    plans, order = {}, []
+    editable = True
+    source_uuid = None
+
+    def plan_for(key, name, kind):
+        if key not in plans:
+            plans[key] = {"kind": kind, "name": name, "interacted": False,
+                          "facts": [], "updates": {}}
+            order.append(key)
+        return plans[key]
+
+    def take_facts(plan, fact_lines):
+        nonlocal editable
+        for line in fact_lines or []:
+            m = FACT_LINE_RE.match(line)
+            if m:
+                plan["facts"].append((m.group(1), m.group(2)))
+            else:
+                editable = False
+
+    for op in ops:
+        name = op.get("op")
+        if name == "mark_filed":
+            source_uuid = op.get("uuid")
+        elif name == "ensure_person":
+            person = str(op.get("name", "")).strip()
+            plan = plan_for("name:" + norm(person), person, "new")
+            fields = dict(op.get("fields") or {})
+            if fields.pop("lastcontact", None):
+                plan["interacted"] = True
+            for field, value in fields.items():
+                if field in UPDATE_FIELDS:
+                    plan["updates"][field] = value
+                else:
+                    editable = False
+            take_facts(plan, op.get("log_lines"))
+        elif name in ("append_log", "set_field", "bump_lastcontact"):
+            person = by_uuid.get(op.get("uuid"))
+            if person is None:
+                editable = False
+                continue
+            plan = plan_for("uuid:" + op["uuid"], person["name"], "existing")
+            if name == "append_log":
+                take_facts(plan, op.get("lines"))
+            elif name == "set_field":
+                if op.get("field") in UPDATE_FIELDS:
+                    plan["updates"][op["field"]] = op.get("value")
+                else:
+                    editable = False
+            else:
+                plan["interacted"] = True
+        elif name == "ensure_event":
+            key = "event:" + norm(str(op.get("name", ""))) + "|" + str(op.get("date", ""))
+            plans[key] = {"kind": "event", "name": str(op.get("name", "")),
+                          "date": str(op.get("date", "")),
+                          "location": str(op.get("location") or ""),
+                          "attendees": list(op.get("attendees") or []),
+                          "summary": str(op.get("summary") or "")}
+            if key not in order:
+                order.append(key)
+        else:
+            editable = False
+    return [plans[k] for k in order], editable, source_uuid
+
+
+def ops_hash(ops):
+    return hashlib.sha256(
+        json.dumps(ops, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+
+
+def settle_snapshot(row):
+    """What must hold still across two ticks before a terminal task state is
+    acted on: Things Cloud can deliver a completion before the final notes
+    revision from another device, and acting immediately would file stale
+    content."""
+    return {"status": row["status"], "trashed": row["trashed"],
+            "notes_sha": hashlib.sha256((row["notes"] or "").encode()).hexdigest(),
+            "mod": row["userModificationDate"]}
+
+
+def proposal_uuid_from_notes(notes):
+    m = TASK_MARKER_RE.search(notes or "")
+    return m.group(1) if m else None
+
+
+def strip_banner(notes):
+    lines = notes.split("\n")
+    while lines and lines[0].startswith(BANNER_PREFIX):
+        lines.pop(0)
+        if lines and not lines[0].strip():
+            lines.pop(0)
+    return "\n".join(lines)
+
+
+def load_things_map():
+    """None means the map is unusable; the Things phases skip this run.
+    Recovery is moving the file aside — the marker in every task's notes
+    lets the next run rebuild the map from Things itself."""
+    if not os.path.exists(THINGS_MAP_FILE):
+        return {"version": THINGS_MAP_VERSION, "project_uuid": None, "tasks": {}}
+    try:
+        with open(THINGS_MAP_FILE) as f:
+            data = json.load(f)
+    except (OSError, json.JSONDecodeError) as exc:
+        log.warning("Things map %s is unreadable (%s); move it aside to rebuild",
+                    THINGS_MAP_FILE, exc)
+        return None
+    if not (isinstance(data, dict) and data.get("version") == THINGS_MAP_VERSION
+            and isinstance(data.get("tasks"), dict)):
+        log.warning("Things map %s has an unrecognized schema; move it aside "
+                    "to rebuild", THINGS_MAP_FILE)
+        return None
+    data.setdefault("project_uuid", None)
+    return data
+
+
+def save_things_map(m):
+    os.makedirs(STATE_DIR, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=STATE_DIR, prefix=".things-map.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump(m, f, indent=2, sort_keys=True)
+        os.replace(tmp, THINGS_MAP_FILE)
+    except Exception:
+        try:
+            os.unlink(tmp)
+        except FileNotFoundError:
+            pass
+        raise
+
+
+# ---------------------------------------------------------------------------
+# Things review loop — phases
+# ---------------------------------------------------------------------------
+
+
+def _things_project(config, m, dry_run):
+    if m.get("project_uuid") and things_bridge.project_alive(m["project_uuid"]):
+        return m["project_uuid"]
+    if dry_run:
+        log.info("[dry-run] would resolve/create Things project %r",
+                 config["THINGS_PROJECT"])
+        return None
+    uuid = things_bridge.ensure_project(config["THINGS_PROJECT"])
+    m["project_uuid"] = uuid
+    save_things_map(m)
+    return uuid
+
+
+def things_decisions(config, dry_run):
+    if config["THINGS_SYNC"] != "on":
+        return
+    try:
+        _things_decisions(config, dry_run)
+    except BridgeUnavailable:
+        raise
+    except Exception as exc:
+        log.warning("Things decisions phase failed: %s: %s",
+                    type(exc).__name__, exc)
+
+
+def _things_decisions(config, dry_run):
+    m = load_things_map()
+    if m is None:
+        return
+    project = _things_project(config, m, dry_run)
+    if project is None:
+        return
+    tasks = m["tasks"]
+    token = things_bridge.auth_token()
+
+    review = run_bridge([{"op": "list_group", "path": REVIEW_PATH}])[0]
+    approved = run_bridge([{"op": "list_group", "path": APPROVED_PATH}])[0]
+    # Rebuild only markers whose proposal still exists: every processed
+    # decision leaves its task in the Logbook with the marker intact, and
+    # resurrecting those would churn rebuild -> settle -> drop every run.
+    live_proposals = ({r["uuid"] for r in review if r["name"] != "Approved"}
+                      | {r["uuid"] for r in approved})
+    rows_by_proposal = {}
+    for row in things_bridge.read_project_tasks(project):
+        puuid = proposal_uuid_from_notes(row["notes"])
+        if puuid and puuid in live_proposals:
+            rows_by_proposal.setdefault(puuid, []).append(row)
+    rebuilt = 0
+    for puuid, rows in rows_by_proposal.items():
+        if puuid in tasks:
+            continue
+        live = [r for r in rows if not r["trashed"]]
+        if len(live) > 1:
+            log.warning("two live Things tasks carry proposal %s; trash one "
+                        "of them to proceed", puuid)
+            continue
+        row = live[0] if live else rows[0]
+        tasks[puuid] = {"task_uuid": row["uuid"], "source_uuid": None,
+                        "fence_hash": None, "prepared_hash": None,
+                        "warned": {}, "edit_disabled": False,
+                        "created": datetime.now().strftime("%Y-%m-%dT%H:%M:%S")}
+        rebuilt += 1
+    if rebuilt:
+        log.info("rebuilt %d Things map entries from task notes", rebuilt)
+        if not dry_run:
+            save_things_map(m)
+
+    for rec in approved:
+        entry = tasks.get(rec["uuid"])
+        if not entry:
+            continue
+        if dry_run:
+            log.info("[dry-run] would complete the Things task for %s "
+                     "(approved in DEVONthink)", rec["name"])
+            continue
+        if things_bridge.update_todo(entry["task_uuid"], token,
+                                     {"completed": "true"}, {"status": 3}):
+            tasks.pop(rec["uuid"])
+            save_things_map(m)
+            log.info("proposal approved in DEVONthink; completed its Things task",
+                     extra={"record_name": rec["name"], "record_uuid": rec["uuid"]})
+        else:
+            log.info("could not complete the Things task for %s (missing auth "
+                     "token?); will retry", rec["name"])
+
+    rows = things_bridge.read_tasks([e["task_uuid"] for e in tasks.values()])
+    for puuid in list(tasks):
+        entry = tasks[puuid]
+        try:
+            _decide_task(config, m, puuid, entry,
+                         rows.get(entry["task_uuid"]), token, dry_run)
+        except BridgeUnavailable:
+            raise
+        except Exception as exc:
+            log.warning("Things decision for proposal %s failed: %s: %s",
+                        puuid, type(exc).__name__, exc)
+
+
+def _decide_task(config, m, puuid, entry, row, token, dry_run):
+    tasks = m["tasks"]
+    if row is None:
+        log.info("Things task for proposal %s is gone (emptied trash?); "
+                 "dropping the mapping — a still-pending proposal gets a new "
+                 "task", puuid)
+        if not dry_run:
+            tasks.pop(puuid)
+            save_things_map(m)
+        return
+    if row["status"] == 0 and not row["trashed"]:
+        if entry.pop("settle", None) is not None and not dry_run:
+            save_things_map(m)
+        return
+    snap = settle_snapshot(row)
+    if entry.get("settle") != snap:
+        entry["settle"] = snap
+        if not dry_run:
+            save_things_map(m)
+        log.info("Things task for proposal %s reached a terminal state; "
+                 "acting next run once it settles", puuid)
+        return
+    if row["status"] == 3 and not row["trashed"]:
+        _approve_completed(config, m, puuid, entry, row, token, dry_run)
+        return
+    if dry_run:
+        log.info("[dry-run] would trash proposal %s (task canceled/deleted "
+                 "in Things)", puuid)
+        return
+    try:
+        run_bridge([{"op": "trash", "uuid": puuid}])
+        log.info("proposal rejected from Things; trashed",
+                 extra={"record_uuid": puuid})
+    except BridgeUnavailable:
+        raise
+    except Exception as exc:
+        log.info("proposal %s already gone from DEVONthink (%s)", puuid, exc)
+    tasks.pop(puuid)
+    save_things_map(m)
+
+
+def _bounce(m, puuid, entry, row, token, dry_run, message):
+    log.warning("Things approval for proposal %s bounced: %s", puuid, message)
+    entry.pop("settle", None)
+    if dry_run:
+        return
+    notes = f"{BANNER_PREFIX} {message}\n\n{strip_banner(row['notes'] or '')}"
+    if not things_bridge.update_todo(
+            entry["task_uuid"], token,
+            {"completed": "false", "notes": notes},
+            {"status": 0, "notes": notes}):
+        log.warning("could not re-open the Things task for %s (missing auth "
+                    "token?); the proposal stays in _Review", puuid)
+    save_things_map(m)
+
+
+def _approve_completed(config, m, puuid, entry, row, token, dry_run):
+    tasks = m["tasks"]
+    try:
+        text = run_bridge([{"op": "get_text", "uuid": puuid}])[0]["text"]
+    except BridgeUnavailable:
+        raise
+    except Exception:
+        log.warning("proposal %s vanished from DEVONthink but its Things task "
+                    "was completed; dropping the mapping", puuid)
+        if not dry_run:
+            tasks.pop(puuid)
+            save_things_map(m)
+        return
+    try:
+        ops = proposal_ops(text)
+    except ValueError:
+        ops = None
+    if not ops:
+        _bounce(m, puuid, entry, row, token, dry_run,
+                "the proposal's ops block is missing or invalid; review it in "
+                "DEVONthink")
+        return
+    current = ops_hash(ops)
+    if entry.get("fence_hash") is None:
+        entry["fence_hash"] = current
+        log.info("baselined the ops fence for rebuilt mapping %s (edits made "
+                 "in DEVONthink before this run can't be detected)", puuid)
+    if current == entry.get("prepared_hash"):
+        if not dry_run:
+            run_bridge([{"op": "move_to", "uuid": puuid, "group": APPROVED_PATH}])
+            tasks.pop(puuid)
+            save_things_map(m)
+        log.info("resumed an interrupted approval for proposal %s", puuid)
+        return
+    if current != entry["fence_hash"]:
+        _bounce(m, puuid, entry, row, token, dry_run,
+                "the proposal was edited in DEVONthink after this task was "
+                "created; review and approve it there instead")
+        return
+    if entry.get("edit_disabled"):
+        if dry_run:
+            log.info("[dry-run] would move proposal %s to Approved (frozen ops)",
+                     puuid)
+            return
+        run_bridge([{"op": "move_to", "uuid": puuid, "group": APPROVED_PATH}])
+        tasks.pop(puuid)
+        save_things_map(m)
+        log.info("proposal approved from Things (frozen ops)",
+                 extra={"record_uuid": puuid})
+        return
+
+    source_uuid = entry.get("source_uuid") or next(
+        (op.get("uuid") for op in ops if op.get("op") == "mark_filed"), None)
+    if not source_uuid:
+        _bounce(m, puuid, entry, row, token, dry_run,
+                "the proposal has no mark_filed op; review it in DEVONthink")
+        return
+    try:
+        source = run_bridge([{"op": "get_source", "uuid": source_uuid}])[0]
+    except BridgeUnavailable:
+        raise
+    except Exception:
+        _bounce(m, puuid, entry, row, token, dry_run,
+                "the source record is missing; review in DEVONthink")
+        return
+    source_date = source_date_of(source)
+
+    try:
+        people_ext, events_ext = parse_things_note(row["notes"] or "")
+    except SpecParseError as exc:
+        _bounce(m, puuid, entry, row, token, dry_run,
+                f"could not parse the edited note ({exc})")
+        return
+
+    people = run_bridge([{"op": "dump_people", "include_bodies": False}])[0]
+    index = roster_index(people)
+    selves = self_names(config)
+    plans = build_person_plans(people_ext, index, selves, people, source_date)
+    plans += build_event_plans(events_ext, selves, source_date)
+    if not plans:
+        _bounce(m, puuid, entry, row, token, dry_run,
+                "nothing left to file after edits; cancel the task to reject "
+                "instead")
+        return
+    ambiguous = [p for p in plans if p["kind"] == "ambiguous"]
+    if ambiguous:
+        detail = "; ".join(f"{p['name']!r} matches {', '.join(p['candidates'])}"
+                           for p in ambiguous)
+        _bounce(m, puuid, entry, row, token, dry_run,
+                f"ambiguous name — {detail}; edit to the exact roster name")
+        return
+
+    new_ops = []
+    for plan in plans:
+        new_ops.extend(ops_for_plan(plan, source, source_date))
+    new_ops.append({"op": "mark_filed", "uuid": source_uuid})
+
+    stale = stale_person_ops(new_ops, index, people)
+    if stale:
+        warned = entry.setdefault("warned", {})
+        to_warn = [(n, near) for n, near in stale if norm(n) not in warned]
+        if to_warn:
+            notes_sha = hashlib.sha256((row["notes"] or "").encode()).hexdigest()
+            for n, _ in to_warn:
+                warned[norm(n)] = notes_sha
+            detail = "; ".join(f'"{n}" resembles {", ".join(near)}'
+                               for n, near in to_warn)
+            _bounce(m, puuid, entry, row, token, dry_run,
+                    f"{detail} — edit to the exact roster name to file into "
+                    "the existing record, or complete again unchanged to "
+                    "confirm a separate new person")
+            return
+        confirmed = {norm(n) for n, _ in stale}
+        for op in new_ops:
+            if op.get("op") == "ensure_person" \
+                    and norm(op.get("name", "")) in confirmed:
+                op["confirm_new"] = True
+
+    body = proposal_body(source, source_date, plans, new_ops)
+    if dry_run:
+        log.info("[dry-run] would apply %d regenerated ops for proposal %s",
+                 len(new_ops), puuid)
+        return
+    entry["prepared_hash"] = ops_hash(new_ops)
+    save_things_map(m)
+    run_bridge([{"op": "set_text", "uuid": puuid, "text": body},
+                {"op": "move_to", "uuid": puuid, "group": APPROVED_PATH}])
+    tasks.pop(puuid)
+    save_things_map(m)
+    log.info("proposal approved from Things (%d plans)", len(plans),
+             extra={"record_name": source.get("name"), "record_uuid": puuid})
+
+
+def things_reconcile(config, dry_run):
+    if config["THINGS_SYNC"] != "on":
+        return
+    try:
+        _things_reconcile(config, dry_run)
+    except BridgeUnavailable:
+        raise
+    except Exception as exc:
+        log.warning("Things reconcile phase failed: %s: %s",
+                    type(exc).__name__, exc)
+
+
+def _things_reconcile(config, dry_run):
+    m = load_things_map()
+    if m is None:
+        return
+    project = _things_project(config, m, dry_run)
+    if project is None and not dry_run:
+        return
+    tasks = m["tasks"]
+    token = things_bridge.auth_token()
+
+    children = run_bridge([{"op": "list_group", "path": REVIEW_PATH}])[0]
+    pending = {r["uuid"]: r for r in children if r["name"] != "Approved"}
+    approved = {r["uuid"] for r in
+                run_bridge([{"op": "list_group", "path": APPROVED_PATH}])[0]}
+
+    people = None
+    for puuid, rec in pending.items():
+        if puuid in tasks:
+            continue
+        text = run_bridge([{"op": "get_text", "uuid": puuid}])[0]["text"]
+        try:
+            ops = proposal_ops(text)
+        except ValueError:
+            ops = None
+        if not ops:
+            log.warning("proposal has no usable ops block; not mirroring it "
+                        "to Things",
+                        extra={"record_name": rec["name"], "record_uuid": puuid})
+            continue
+        if people is None:
+            people = run_bridge([{"op": "dump_people",
+                                  "include_bodies": False}])[0]
+        plans, editable, source_uuid = plans_from_ops(ops, people)
+        if not source_uuid:
+            editable = False
+        note = things_note_body(source_uuid, puuid, plans) if editable \
+            else things_note_stub(source_uuid, puuid)
+        if editable and len(things_bridge.build_url(
+                "add", things_bridge.add_todo_params(
+                    project, rec["name"], note, THINGS_WHEN))) > THINGS_URL_LIMIT:
+            note = things_note_stub(source_uuid, puuid)
+            editable = False
+        if dry_run:
+            log.info("[dry-run] would mirror proposal %s to Things%s",
+                     rec["name"], "" if editable else " (edit-disabled)")
+            continue
+        task_uuid = things_bridge.add_todo(project, rec["name"], note, puuid,
+                                           when=THINGS_WHEN)
+        tasks[puuid] = {"task_uuid": task_uuid, "source_uuid": source_uuid,
+                        "fence_hash": ops_hash(ops), "prepared_hash": None,
+                        "warned": {}, "edit_disabled": not editable,
+                        "created": datetime.now().strftime("%Y-%m-%dT%H:%M:%S")}
+        save_things_map(m)
+        log.info("mirrored proposal to Things%s",
+                 "" if editable else " (edit-disabled)",
+                 extra={"record_name": rec["name"], "record_uuid": puuid})
+
+    resolved = [p for p in list(tasks) if p not in pending and p not in approved]
+    rows = things_bridge.read_tasks(
+        [tasks[p]["task_uuid"] for p in resolved]) if resolved else {}
+    for puuid in resolved:
+        row = rows.get(tasks[puuid]["task_uuid"])
+        if dry_run:
+            log.info("[dry-run] would cancel the Things task for resolved "
+                     "proposal %s", puuid)
+            continue
+        if row is None or row["trashed"] or row["status"] != 0:
+            tasks.pop(puuid)
+            save_things_map(m)
+            continue
+        if things_bridge.update_todo(tasks[puuid]["task_uuid"], token,
+                                     {"canceled": "true"}, {"status": 2}):
+            tasks.pop(puuid)
+            save_things_map(m)
+            log.info("proposal %s resolved in DEVONthink; canceled its Things "
+                     "task", puuid)
+        else:
+            log.info("could not cancel the Things task for %s (missing auth "
+                     "token?); will retry", puuid)
+
+
+# ---------------------------------------------------------------------------
 # Scan
 # ---------------------------------------------------------------------------
 
@@ -970,6 +1708,32 @@ def cap_words(text, head=6000, tail=1000):
     if len(words) <= head + tail:
         return text
     return " ".join(words[:head]) + "\n[...truncated...]\n" + " ".join(words[-tail:])
+
+
+# Section headers dt-morning-brief.py upserts into daily notes — keep in sync.
+GENERATED_SECTIONS = frozenset({
+    "## Briefing", "## Reconnect", "## Birthdays", "## Entity Review",
+    "## Journal", "## On This Day",
+})
+
+
+def strip_generated_sections(text):
+    """Daily-note text minus the brief's machine-written sections (each
+    spans its header through the next `##` header, matching the bridge's
+    upsert_section). Extraction must only see human-authored content:
+    the briefing's attendee scaffolding otherwise round-trips into
+    attendance pseudo-facts, and On This Day re-surfaces old entries as
+    if they were dated today."""
+    out, skipping = [], False
+    for line in text.split("\n"):
+        stripped = line.strip()
+        if stripped.startswith("## "):
+            skipping = stripped in GENERATED_SECTIONS
+            if skipping:
+                continue
+        if not skipping:
+            out.append(line)
+    return "\n".join(out)
 
 
 LOCAL_TRANSPORTS = ("omlx", "ollama")
@@ -1141,6 +1905,8 @@ def scan(config, state, dry_run, force_uuid, user_invoked):
 
         source_date = source_date_of(source)
         text = run_bridge([{"op": "get_text", "uuid": uuid}])[0]["text"]
+        if source["kind"] == "daily":
+            text = strip_generated_sections(text)
         entry = state["processed"].get(uuid)
         if entry is not None and entry.get("hash") == \
                 hashlib.sha256(text.encode()).hexdigest():
@@ -1339,9 +2105,12 @@ def main():
             if rebuild_state:
                 return
         if not scan_only:
+            things_decisions(config, dry_run)
             apply_approved(dry_run)
         if not apply_only:
             scan(config, state, dry_run, force_uuid, user_invoked)
+        if not scan_only:
+            things_reconcile(config, dry_run)
     except BridgeUnavailable as exc:
         log.info("skipping: %s", exc)
 

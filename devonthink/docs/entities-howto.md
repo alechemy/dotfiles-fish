@@ -136,6 +136,61 @@ place, and attendee list. Attendees who have Person records become links;
 the rest stay plain names — and that's fine. Trim the attendee list or fix
 the title in the JSON just like anything else.
 
+## Reviewing from Things — any device
+
+If you'd rather process proposals from your phone (or just from your task
+list), turn the Things mirror on:
+
+```
+echo "THINGS_SYNC=on" >> ~/.config/dt-pipeline/entities.conf
+```
+
+Within a tick every pending proposal appears as a to-do in the **Entity
+Filing** project in Things (the project is created for you; rename it via
+`THINGS_PROJECT=` if you like — it's tracked by identity afterwards, so
+renaming in Things is also fine). Then:
+
+- **Approve:** complete the to-do. One to two ticks later the filing runs —
+  the same apply path as dragging the proposal to `Approved` in DEVONthink.
+- **Reject:** cancel or delete the to-do. The proposal is trashed.
+- **Edit first:** the note below `=== proposed v1 ===` *is* the proposal.
+  Delete a line to drop it, fix a name/date/fact/field inline, then
+  complete. What you left in the note is exactly what gets filed — the ops
+  are regenerated from it against the current roster.
+
+The note's line format, by example:
+
+```
+PERSON Maya Chen (new, met)
+- 2026-06-13 — Graduated from law school.
+- city = Chicago
+EVENT Maya's Graduation Weekend (2026-06-13 at Chicago)
+- with: Maya Chen, Bob Carter
+- 2026-06-13 — Weekend celebrating the graduation.
+```
+
+`met` on the header is what bumps `LastContact`; the four editable fields
+are `employer`, `role`, `city`, `email`. If an edit doesn't parse, or a name
+is ambiguous or shadows an existing record, the to-do **pops back to open
+with a `⚠` banner** explaining exactly what to fix; for a genuinely new
+person who happens to share a name, completing a second time with the name
+unchanged says "yes, really new". A proposal too gnarly to edit as text
+(very long, or hand-crafted ops) arrives as a review-in-DEVONthink stub —
+completing it applies the ops exactly as written.
+
+Both sides stay honest: approve or delete a proposal inside DEVONthink and
+its Things to-do is completed or cancelled for you; delete the to-do's task
+in Things and only that proposal is rejected. If the pipeline ever seems to
+ignore a decision, check that Things.app is running on the Mac (the poller
+launches it hidden, but it can't read cloud pushes that never arrived) and
+that the morning brief isn't flagging a stuck approval. If
+`~/.local/state/devonthink/things-filing-map.json` is ever corrupted, move
+it aside — the next run rebuilds it from the to-dos themselves.
+
+Know the trade: proposal names and facts sync through Things Cloud. The
+rest of the entity layer stays on-device; this mirror is the one deliberate
+exception, and it's off by default.
+
 ## Places, events, and automatic linking
 
 Whenever a fact is filed, the first mention of any *existing* entity's name

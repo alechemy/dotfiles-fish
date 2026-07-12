@@ -34,6 +34,8 @@ def _stub_pipeline_log():
 
 def load(filename, module_name):
     _stub_pipeline_log()
+    if str(BIN) not in sys.path:
+        sys.path.insert(0, str(BIN))
     spec = importlib.util.spec_from_file_location(module_name, BIN / filename)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)

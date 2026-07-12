@@ -203,6 +203,19 @@ Sources: records with `DocumentType` containing "Meeting", records with
 `Handwritten=1`, and past daily notes in `/10_DAILY` (never today's — it's
 still being written), each gated on its upstream pipeline being finished
 (`NeedsProcessing` clear — a Boox record mid-OCR has no text yet).
+Daily-note text is stripped of the brief's machine-generated sections
+(`## Briefing`, `## Reconnect`, `## Birthdays`, `## Entity Review`,
+`## Journal`, `## On This Day`) before hashing and extraction, so the model
+only sees the human-authored remainder. Without the strip, briefing
+scaffolding round-trips into pseudo-facts: attendee lists become "X attended
+the 9:00am meeting" log entries (complete with "no entity record yet" echoed
+from the brief's own annotation), attendee emails become email/employer
+updates, an event canceled after the 05:15 brief becomes "was scheduled to
+attend a canceled meeting", and On This Day re-surfaces old entries as if
+dated today — all while `SKIP_SOURCE_TITLES` is bypassed, since the skipped
+meeting's title re-enters through a source named after the date. A note that
+is all scaffolding now falls under the minimum-word gate instead of spending
+an extraction.
 Completion state lives in
 `~/.local/state/devonthink/entity-filing-state.json` (fail-closed, like the
 Granola importer) and is keyed on a content hash plus DEVONthink's
@@ -290,6 +303,66 @@ two really are different people. This is the same near-match check that
 writes the "possible existing match" hints into a proposal, applied a second
 time at the moment the ops actually run.
 
+### Things review loop (optional, `THINGS_SYNC=on`)
+
+The review loop above requires being at the Mac inside DEVONthink. With
+`THINGS_SYNC=on`, every pending proposal is mirrored as a to-do in a Things 3
+project (`THINGS_PROJECT`, default "Entity Filing") and scheduled for **Today**
+so it surfaces without opening the project, and the decision travels
+back: **complete** the to-do to approve, **cancel or delete** it to reject —
+from any device Things syncs to. Both new phases ride the existing 30-minute
+entity-filing tick (no new launchd agent, same battery/driver gates);
+`--scan-only` skips them, `--dry-run` logs without firing anything.
+
+The to-do's note is an *editable* rendering of the proposal below a
+`=== proposed v1 ===` sentinel — one `PERSON Name (kind[, met])` or
+`EVENT Name (YYYY-MM-DD[ at Location])` header per entity, with
+`- YYYY-MM-DD — fact`, `- field = value`, and `- with: a, b` lines under it.
+Delete a line to drop that assertion, edit a line to correct it, then
+complete the to-do. On approval the ops are **regenerated from the parsed
+note against the live roster** (via the same `build_person_plans` /
+`ops_for_plan` path as extraction), written back into the proposal's ops
+fence, and the proposal is moved to `Approved` — so the apply pass, including
+its live-roster re-verification, is byte-identical to a hand-drag in
+DEVONthink. The grammar is strict on purpose: any line that doesn't parse
+(and structural limits the plan builders would otherwise enforce by silently
+dropping content) **bounces** — the to-do is re-opened with a `⚠` banner
+naming the offending line, never half-applied. Ambiguous or near-matching
+names bounce too; completing again with the name unchanged confirms a
+genuinely new person (`confirm_new`), tracked per person, not per proposal.
+
+Mechanics worth knowing (mostly in `things_bridge.py`):
+
+- Writes are `open -g things:///…` URLs (no Automation grant, no focus
+  steal); every write is confirmed by reading Things' SQLite store, and a
+  to-do is identified by the `Proposal: x-devonthink-item://…` marker in its
+  note — the state map at `~/.local/state/devonthink/things-filing-map.json`
+  is only a cache and rebuilds from those markers if lost or moved aside.
+- Terminal task states **settle for one tick** before acting: Things Cloud
+  can deliver a completion before the final note revision from another
+  device, so acting immediately could file stale content. Approval latency is
+  therefore one to two ticks.
+- The `set_text` + `move_to` apply is crash-safe: the regenerated fence hash
+  is persisted (`prepared_hash`) before touching DEVONthink, so a retry can
+  tell "nothing happened" from "retry the move" from "someone else edited
+  the proposal" (which bounces rather than clobbering the DT-side edit).
+- A task row that *vanishes* (emptied Things trash) is **not** a rejection —
+  the mapping is dropped and a still-pending proposal gets a fresh task.
+  Only an explicit cancel/trash rejects.
+- Closing/re-opening tasks needs `THINGS_AUTH_TOKEN` (read from the managed
+  block in `~/.zshenv`; launchd sources no shell profile). Without it the
+  loop degrades: proposals still apply, but bounced tasks stay completed and
+  the brief's `## Entity Review` section remains the backstop.
+- Reading the Things DB needs Full Disk Access on `/usr/bin/python3` — the
+  same grant the Messages→LastContact pass established. The local DB only
+  receives cloud pushes while Things.app runs, so the poller pre-warms it
+  hidden (`open -g -j -a Things3`).
+
+**Privacy trade, stated plainly:** task titles and notes carry person names
+and facts, and they sync through Things Cloud. The entity layer is otherwise
+deliberately local-only; `THINGS_SYNC=on` is an explicit, documented
+exception scoped to proposal content (never the roster, never source bodies).
+
 ### Transports and privacy
 
 `~/.config/dt-pipeline/entities.conf` (KEY=VALUE, all optional):
@@ -309,6 +382,8 @@ SKIP_ATTENDEE_PATTERN=\bVC\b|\bConference\b|\bRoom\b|\d+\s?ppl
                       # calendar attendees that are rooms, not people
 SKIP_SOURCE_TITLES=Round ?Table|Standup|…   # sources never extracted
 IDLE_MINUTES=10       # local extraction waits for user inactivity; 0 = off
+THINGS_SYNC=off       # on = mirror proposals to Things 3 (see review loop)
+THINGS_PROJECT=Entity Filing   # Things project holding the proposal to-dos
 ```
 
 Resource behavior: a run with nothing to extract never loads the model (the

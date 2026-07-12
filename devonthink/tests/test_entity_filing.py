@@ -394,5 +394,57 @@ class CapWords(unittest.TestCase):
         self.assertIn("[...truncated...]", out)
 
 
+class StripGeneratedSections(unittest.TestCase):
+    DAILY = "\n".join([
+        "# Thursday, March 16, 2026",
+        "",
+        "## Today's Notes",
+        "",
+        "- Coffee with Alison Vance, she starts at Delphi Labs Monday",
+        "",
+        "## Briefing",
+        "",
+        "9:00 AM Planning Roundtable",
+        "- Miles Archer (miles@x.com) — no entity record yet",
+        "",
+        "## Birthdays",
+        "",
+        "- Alison Vance turns 40",
+        "",
+        "## Journal",
+        "",
+        "2 page(s) pending OCR",
+    ])
+
+    def test_strips_every_generated_section(self):
+        out = ef.strip_generated_sections(self.DAILY)
+        self.assertIn("Coffee with Alison Vance", out)
+        for leaked in ("## Briefing", "Miles Archer", "no entity record yet",
+                       "## Birthdays", "turns 40", "## Journal", "pending OCR"):
+            self.assertNotIn(leaked, out)
+
+    def test_skip_ends_at_next_human_section(self):
+        text = "## Briefing\n\nstuff\n\n## Today's Notes\n\n- real note"
+        out = ef.strip_generated_sections(text)
+        self.assertNotIn("stuff", out)
+        self.assertIn("- real note", out)
+
+    def test_subheaders_do_not_end_the_skip(self):
+        text = "## On This Day\n\n### 2025\n\n- old entry\n\n## Today's Notes\n\n- now"
+        out = ef.strip_generated_sections(text)
+        self.assertNotIn("old entry", out)
+        self.assertIn("- now", out)
+
+    def test_generated_section_at_eof_strips_to_end(self):
+        text = "## Today's Notes\n\n- kept\n\n## Reconnect\n\n- Maya Chen: 90 days"
+        out = ef.strip_generated_sections(text)
+        self.assertIn("- kept", out)
+        self.assertNotIn("Maya Chen", out)
+
+    def test_text_without_generated_sections_is_unchanged(self):
+        text = "# Note\n\n## Today's Notes\n\n- a\n- b"
+        self.assertEqual(ef.strip_generated_sections(text), text)
+
+
 if __name__ == "__main__":
     unittest.main()
