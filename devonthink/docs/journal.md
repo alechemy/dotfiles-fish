@@ -65,15 +65,16 @@ DEVONthink MCP server.
 
 ## RAM: one model at a time
 
-Entity extraction (`Qwen3.5-35B-A3B-4bit`) and journal OCR
-(`Qwen3-VL-32B-Instruct-4bit`) are both ~18 GB resident. oMLX loads
-models on demand with LRU eviction, so nothing crashes if both are
-requested — but interleaving them would thrash load/evict cycles. Both
-pipelines therefore serialize local inference through a shared
-non-blocking flock (`~/.local/state/devonthink/local-llm.lock`): whoever
-finds it held defers to its next tick. To consolidate on a single model
-instead, set `OMLX_MODEL` in `entities.conf` to the VL model — its text
-extraction quality is comparable and it removes the swap entirely.
+Entity extraction and journal OCR share a single model:
+`Qwen3-VL-32B-Instruct-4bit` (~18 GB), set as `OMLX_MODEL` in
+`entities.conf` after an A/B showed its text-extraction quality
+comparable to `Qwen3.5-35B-A3B-4bit`. Both pipelines also serialize
+local inference through a shared non-blocking flock
+(`~/.local/state/devonthink/local-llm.lock`) — with one model this only
+prevents concurrent heavy inference, but if the configs ever diverge
+again it is what keeps two ~18 GB models from interleaving load/evict
+cycles (oMLX's LRU eviction handles sequential swaps; nothing crashes,
+it just thrashes).
 
 ## Config
 
@@ -87,7 +88,28 @@ OMLX_MODEL=Qwen3-VL-32B-Instruct-4bit
 MAX_PER_RUN=5        # pages OCR'd per tick
 IDLE_MINUTES=10      # 0 disables the idle gate
 DENSITY=200          # page render dpi
+THINGS_TASKS=off     # on: bullets under a Tasks:/Action Items: section
+                     # become Things to-dos (via the URL scheme, no
+                     # AppleEvents); off because journal musings are not
+                     # usually deliberate task lists
 ```
+
+## Downstream surfaces
+
+- **Morning brief `## Journal` line** (`dt-morning-brief.py`): warns when
+  yesterday's entry never arrived, distinguishing "staged/pending OCR"
+  and "parked" from "nothing synced — check the Boox's Dropbox sync".
+  Dormant until the first entry files, and goes quiet again when the
+  newest entry is older than a week, so a lapsed habit never nags.
+- **`## On This Day`** picks up journal entries automatically — they
+  carry `EventDate`, which is exactly what that section queries (bridge
+  search is not filtered by chat exclusion; verified). Needs no code,
+  just a past year of entries.
+- **Things** (opt-in, `THINGS_TASKS=on`): bullets under a
+  `Tasks:`/`Action Items:` header — the same section grammar
+  Post-Enrich & Archive uses for regular notebooks — become to-dos with
+  a backlink to the day's record, deduplicated per entry across
+  re-OCRs.
 
 ## Debugging
 

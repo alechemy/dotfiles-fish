@@ -55,6 +55,23 @@ class ParseDateLine(unittest.TestCase):
             self.parse("# planning the trip")
 
 
+class ExtractTasks(unittest.TestCase):
+    def test_bullets_under_tasks_header(self):
+        text = ("# Sat, Jul 4\n\nprose\n\n## Tasks\n"
+                "- fix the bike tire\n- [ ] call the plumber\n"
+                "* renew passport\n\n## Later\n- not a task")
+        self.assertEqual(
+            jp.extract_tasks(text),
+            ["fix the bike tire", "call the plumber", "renew passport"])
+
+    def test_no_section_no_tasks(self):
+        self.assertEqual(jp.extract_tasks("# Sat, Jul 4\n\n- groceries"), [])
+
+    def test_action_items_variant_and_colon(self):
+        text = "Action Items:\n- send the deck"
+        self.assertEqual(jp.extract_tasks(text), ["send the deck"])
+
+
 class FirstHeadingLine(unittest.TestCase):
     def test_skips_leading_blanks(self):
         self.assertEqual(

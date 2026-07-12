@@ -41,6 +41,10 @@ configured once):
   IDLE_MINUTES=<n>       run OCR only after this much user inactivity,
                          default 10, 0 disables the gate
   DENSITY=<dpi>          page render density, default 200
+  THINGS_TASKS=on|off    send bullets under a Tasks:/Action Items: section
+                         to Things 3, default off — journal musings are
+                         not usually deliberate task lists; opt in only
+                         if you write explicit task sections
 
 Usage:
     journal-process.py                  # launchd-driven tick
@@ -97,7 +101,13 @@ DEFAULTS = {
     "MAX_PER_RUN": "5",
     "IDLE_MINUTES": "10",
     "DENSITY": "200",
+    "THINGS_TASKS": "off",
 }
+
+TASK_HEADER_RE = re.compile(
+    r"^\s*#*\s*(Action Items|Todos|To-Dos|To Do|Tasks):?\s*$", re.IGNORECASE)
+TASK_BULLET_RE = re.compile(r"^\s*[-*•]\s*(?:\[\s?[xX]?\]\s*)?(.+)")
+MD_HEADER_RE = re.compile(r"^\s*#+\s")
 
 OCR_ROLE = "You transcribe handwritten journal pages into clean Markdown."
 OCR_PROMPT = """\
@@ -467,6 +477,48 @@ def upsert_entry(notebook_name, entry_date, page_index, sig, text, entries):
     return uuid, True
 
 
+def extract_tasks(text):
+    """Bullets under a Tasks:/Action Items: header, ending at the next
+    markdown header. Same section grammar as Post-Enrich & Archive uses
+    for regular handwritten notebooks."""
+    tasks = []
+    in_section = False
+    for line in text.splitlines():
+        if TASK_HEADER_RE.match(line):
+            in_section = True
+            continue
+        if in_section:
+            if MD_HEADER_RE.match(line):
+                in_section = False
+                continue
+            m = TASK_BULLET_RE.match(line.strip())
+            if m and m.group(1).strip():
+                tasks.append(m.group(1).strip())
+    return tasks
+
+
+def send_tasks_to_things(entry_date, uuid, text, entry):
+    """Send unseen tasks via the Things URL scheme. /usr/bin/open -g adds
+    in the background without stealing focus and — unlike Things
+    AppleEvents — carries no per-app Automation grant that a headless
+    launchd prompt could fumble."""
+    from urllib.parse import quote
+    sent = entry.setdefault("tasks_sent", [])
+    new = [t for t in extract_tasks(text) if t not in sent]
+    for task in new:
+        notes = (f"From journal {entry_date.isoformat()}\n"
+                 f"x-devonthink-item://{uuid}")
+        url = (f"things:///add?title={quote(task)}&notes={quote(notes)}")
+        result = subprocess.run(["/usr/bin/open", "-g", url],
+                                capture_output=True, text=True)
+        if result.returncode != 0:
+            log.warning("Things add failed for %r: %s", task,
+                        result.stderr.strip())
+            continue
+        sent.append(task)
+    return len(new)
+
+
 def link_daily_note(entry_date, uuid):
     heading = (f"{entry_date:%A}, {entry_date:%B} {entry_date.day}, "
                f"{entry_date.year}")
@@ -612,6 +664,12 @@ def process_notebook(pdf_path, state, config, dry_run, force, budget,
         uuid, changed = upsert_entry(stem, entry_date, i, page["sig"], text,
                                      nb["entries"])
         link_daily_note(entry_date, uuid)
+        if config["THINGS_TASKS"].strip().lower() == "on":
+            sent = send_tasks_to_things(entry_date, uuid, text,
+                                        nb["entries"][entry_date.isoformat()])
+            if sent:
+                log.info("sent %d task(s) to Things from %s", sent,
+                         entry_date.isoformat())
         page["date"] = entry_date.isoformat()
         page["parked"] = ""
         page["attempts"] = 0

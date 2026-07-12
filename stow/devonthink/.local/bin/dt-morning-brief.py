@@ -115,6 +115,12 @@ REVIEW_HEADER = "## Entity Review"
 ON_THIS_DAY_HEADER = "## On This Day"
 ON_THIS_DAY_YEARS = 5
 ON_THIS_DAY_PER_YEAR = 5
+JOURNAL_HEADER = "## Journal"
+JOURNAL_STATE = os.path.expanduser(
+    "~/.local/state/devonthink/journal/state.json")
+JOURNAL_STAGING = os.path.expanduser(
+    "~/.local/state/devonthink/journal/staging")
+JOURNAL_LAPSE_DAYS = 7
 REVIEW_PATH = "/20_ENTITIES/_Review"
 APPROVED_PATH = REVIEW_PATH + "/Approved"
 LOG_BULLET_RE = re.compile(r"^- \d{4}-\d{2}-\d{2} — ")
@@ -659,6 +665,58 @@ def review_nudge(today):
     return "\n".join(lines)
 
 
+def journal_status_lines(today, state, staged_count):
+    """One line when yesterday's journal page never arrived, so a broken
+    Boox→Dropbox sync is distinguishable from simply not journaling — the
+    watchdog only catches dead agents, not an empty staging folder. Quiet
+    unless the habit is active: no line before the first entry ever files,
+    and none once the newest entry is older than JOURNAL_LAPSE_DAYS."""
+    notebooks = (state or {}).get("notebooks", {})
+    entry_dates = {d for nb in notebooks.values() for d in nb.get("entries", {})}
+    if not entry_dates:
+        return None
+    t = date.fromisoformat(today)
+    yesterday = (t - timedelta(days=1)).isoformat()
+    if yesterday in entry_dates:
+        return None
+    if (t - date.fromisoformat(max(entry_dates))).days > JOURNAL_LAPSE_DAYS:
+        return None
+    pending = sum(1 for nb in notebooks.values() for p in nb.get("pages", [])
+                  if not p.get("date") and not p.get("parked"))
+    parked = sum(1 for nb in notebooks.values() for p in nb.get("pages", [])
+                 if p.get("parked"))
+    lines = [f"<!-- journal-status:{today} -->", ""]
+    if pending or staged_count:
+        detail = f"{pending} page(s) pending OCR" if pending else \
+            "an export is staged"
+        if parked:
+            detail += f", {parked} parked"
+        lines.append(f"- Yesterday's journal entry hasn't been processed "
+                     f"yet ({detail}) — journal-process catches up on "
+                     f"AC/idle")
+    elif parked:
+        lines.append(f"- {parked} journal page(s) are parked — "
+                     f"`journal-process.py --status` has the reasons")
+    else:
+        lines.append("- No journal entry arrived for yesterday — if you "
+                     "wrote one, check the Boox's Dropbox sync")
+    return "\n".join(lines)
+
+
+def build_journal_status(today):
+    try:
+        with open(JOURNAL_STATE) as f:
+            state = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return None
+    try:
+        staged = len([n for n in os.listdir(JOURNAL_STAGING)
+                      if n.endswith(".pdf")])
+    except OSError:
+        staged = 0
+    return journal_status_lines(today, state, staged)
+
+
 def build_on_this_day(today):
     """Anniversary resurfacing from metadata the pipeline already writes:
     records whose EventDate falls on this day in past years, plus the daily
@@ -884,6 +942,7 @@ def main():
         sections.append((RECONNECT_HEADER, build_reconnect(people, today)))
     sections.append((BIRTHDAYS_HEADER, build_birthdays(contacts, people, today)))
     sections.append((REVIEW_HEADER, review_nudge(today)))
+    sections.append((JOURNAL_HEADER, build_journal_status(today)))
     sections.append((ON_THIS_DAY_HEADER, build_on_this_day(today)))
 
     if not any(content for _, content in sections):

@@ -468,5 +468,56 @@ class RecentLogBullets(unittest.TestCase):
         self.assertIn("moved.", got[0])
 
 
+class JournalStatusLines(unittest.TestCase):
+    TODAY = "2026-07-11"
+
+    def state(self, entry_dates, pages=()):
+        return {"notebooks": {"2026 Journal": {
+            "entries": {d: {"uuid": "U", "text_sha": "S"} for d in entry_dates},
+            "pages": list(pages),
+        }}}
+
+    def test_silent_before_first_entry(self):
+        self.assertIsNone(mb.journal_status_lines(self.TODAY, {}, 0))
+        self.assertIsNone(
+            mb.journal_status_lines(self.TODAY, self.state([]), 0))
+
+    def test_silent_when_yesterday_filed(self):
+        got = mb.journal_status_lines(
+            self.TODAY, self.state(["2026-07-10"]), 0)
+        self.assertIsNone(got)
+
+    def test_missing_yesterday_warns(self):
+        got = mb.journal_status_lines(
+            self.TODAY, self.state(["2026-07-09"]), 0)
+        self.assertIn("No journal entry arrived", got)
+
+    def test_silent_after_habit_lapses(self):
+        got = mb.journal_status_lines(
+            self.TODAY, self.state(["2026-07-01"]), 0)
+        self.assertIsNone(got)
+
+    def test_pending_pages_soften_the_warning(self):
+        got = mb.journal_status_lines(
+            self.TODAY,
+            self.state(["2026-07-09"],
+                       pages=[{"date": "", "parked": ""}]), 0)
+        self.assertIn("pending OCR", got)
+        self.assertNotIn("No journal entry arrived", got)
+
+    def test_staged_export_softens_the_warning(self):
+        got = mb.journal_status_lines(
+            self.TODAY, self.state(["2026-07-09"]), 1)
+        self.assertIn("staged", got)
+
+    def test_parked_pages_surface(self):
+        got = mb.journal_status_lines(
+            self.TODAY,
+            self.state(["2026-07-09"],
+                       pages=[{"date": "", "parked": "weekday mismatch"}]), 0)
+        self.assertIn("parked", got)
+        self.assertIn("--status", got)
+
+
 if __name__ == "__main__":
     unittest.main()
