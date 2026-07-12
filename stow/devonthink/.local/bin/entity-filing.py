@@ -508,6 +508,11 @@ def _omlx_headers(config):
 
 
 def extract_omlx(config, prompt):
+    # No response_format: oMLX's strict json_schema decoding degenerates
+    # with some models (Qwen3-VL burns the full max_tokens per call and
+    # returns an empty object). Free-form decode at temperature 0 yields
+    # valid JSON from every model tested, and parse_extraction already
+    # validates the dtchat transport's unconstrained output the same way.
     payload = json.dumps({
         "model": config["OMLX_MODEL"],
         "messages": [
@@ -516,16 +521,8 @@ def extract_omlx(config, prompt):
         ],
         "temperature": 0,
         "max_tokens": 4096,
-        "response_format": {
-            "type": "json_schema",
-            "json_schema": {
-                "name": "extraction",
-                "strict": True,
-                "schema": EXTRACTION_SCHEMA,
-            },
-        },
-        # Qwen3.5 thinks by default; constrained extraction neither needs
-        # nor wants a reasoning phase.
+        # Qwen3.5 thinks by default; extraction neither needs nor wants a
+        # reasoning phase. Unused by templates without the variable.
         "chat_template_kwargs": {"enable_thinking": False},
     }).encode()
     req = urllib.request.Request(

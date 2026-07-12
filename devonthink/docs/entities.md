@@ -296,7 +296,7 @@ time at the moment the ops actually run.
 
 ```
 TRANSPORT=local       # auto | local | omlx | ollama | dtchat | off
-OMLX_MODEL=Qwen3.5-35B-A3B-4bit
+OMLX_MODEL=Qwen3-VL-32B-Instruct-4bit
 OMLX_URL=http://127.0.0.1:8000
 OMLX_API_KEY=…        # oMLX auth key (Settings → auth.api_key); conf is 600
 OLLAMA_MODEL=         # optional fallback server; empty = not installed
@@ -323,7 +323,9 @@ The deployed posture is **local-only** (`TRANSPORT=local`), and `local` is
 also the **code default** — the value the script uses when `entities.conf` is
 missing or unreadable — so a lost or damaged config fails safe on-device
 rather than silently widening the privacy boundary. Extraction runs on
-**oMLX** (`Qwen3.5-35B-A3B-4bit`, MLX backend, ~2–10 s per extraction) and
+**oMLX** (`Qwen3-VL-32B-Instruct-4bit`, MLX backend, ~10–60 s per
+extraction — the model is shared with journal OCR so only one ~18 GB set
+of weights is ever resident) and
 *waits* when the server is down rather than ever falling back to a cloud
 provider — filing is latency-tolerant by design, so an outage costs nothing
 but delay. The code also carries an Ollama transport (same `local` chain,
@@ -340,32 +342,37 @@ DT chat's configured provider. Because that is a real privacy-boundary change,
 selecting `auto` or `dtchat` logs a prominent notice on every run; leave it on
 `local` unless you have decided availability matters more than keeping the
 roster on-device. oMLX serves an OpenAI-compatible API on :8000
-(`extract_omlx` uses `response_format: json_schema` +
-`chat_template_kwargs: {enable_thinking: false}`); models are MLX builds
+(`extract_omlx` decodes free-form at temperature 0 with
+`chat_template_kwargs: {enable_thinking: false}` — do **not** add
+`response_format: json_schema`: oMLX's strict constrained decoding
+degenerates with some models, burning the full `max_tokens` per call and
+returning an empty object, observed with Qwen3-VL; `parse_extraction`
+validates the output instead); models are MLX builds
 from HuggingFace in `~/.omlx/models/`. The oMLX app (menu-bar,
 auto-updating; the Homebrew formula does not build on macOS 27) manages the
 server across reboots once its first-run setup has been completed in the
 GUI; set a per-model idle TTL in the admin panel
 (`http://localhost:8000/admin`) so weights unload between batches.
 
-The model was picked by a three-way bake-off on real notes (same production
-prompt/schema): Qwen3.5 was the only candidate with correct per-person fact
-attribution (the baseline `qwen3:30b-a3b`, still installed as rollback,
-merged one person's fact onto another — the most dangerous failure class);
-`gemma4:26b` was disqualified outright (extracted the author with workflow
-trivia, and hard-failed JSON generation under Ollama's constrained decoding).
-Swapping models is a one-line change (`OLLAMA_MODEL=` + `ollama pull`), but
-any replacement must pass the same gate: run a few `--force --dry-run`
-extractions on known notes and check attribution, omissions, and schema
-validity before trusting it unattended. Requirements: instruction-tuned,
-strict JSON-schema adherence under Ollama structured outputs, ≥16k usable
-context, ≤~25 GB quantized.
+Model history: `Qwen3.5-35B-A3B-4bit` won a three-way bake-off on real
+notes (the baseline `qwen3:30b-a3b` merged one person's fact onto another —
+the most dangerous failure class; `gemma4:26b` extracted the author with
+workflow trivia and hard-failed constrained JSON). Extraction then
+consolidated onto `Qwen3-VL-32B-Instruct-4bit` — the journal-OCR vision
+model — after an A/B on the production prompt showed comparable
+attribution quality (~2.7× slower per token, irrelevant at background
+cadence), trading a little speed for a single resident model. Any future
+replacement must pass the same gate: run a few extractions on known notes
+and check attribution, omissions, and JSON validity before trusting it
+unattended. Requirements: instruction-tuned, reliable JSON output at
+temperature 0, ≥16k usable context, ≤~25 GB quantized.
 
 Boundaries hard-coded regardless of config:
 
-- **Daily notes are local-only.** `/10_DAILY` is excluded from DT's AI chat
-  by design, and the filing step honors that: daily notes are only ever
-  extracted through Ollama, never DT chat.
+- **Daily notes and journal entries are local-only.** `/10_DAILY` and
+  `/15_JOURNAL` are excluded from DT's AI chat by design, and the filing
+  step honors that: the `daily` and `journal` kinds are only ever
+  extracted through a local transport, never DT chat.
 - **`/20_ENTITIES/People` and `_Review` are excluded from DT's AI chat**
   (`excludeFromChat`), because Person records are distilled dossiers — more
   sensitive than any single source note. The automation is unaffected
