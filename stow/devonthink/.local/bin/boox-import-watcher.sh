@@ -11,7 +11,7 @@
 
 set -euo pipefail
 
-WATCH_DIR="$HOME/Dropbox (Maestral)/onyx/NoteMax/Notebooks"
+BOOX_PATHS="$HOME/.local/bin/boox-paths.sh"
 STAGER="$HOME/.local/bin/boox-stage.sh"
 PIPELINE_LOG="$HOME/.local/bin/pipeline-log"
 
@@ -22,6 +22,17 @@ log() {
 warn() {
     "$PIPELINE_LOG" boox-import-watcher WARN "$*"
 }
+
+# Unlike a missing watch dir (below), this is a broken install rather than a
+# transient sync race — there is no correct folder to fall back to, so fail
+# loudly instead of importing from a guessed path.
+if [[ ! -r "$BOOX_PATHS" ]]; then
+    warn "cannot read $BOOX_PATHS (is the devonthink package stowed?)"
+    exit 1
+fi
+# shellcheck source=boox-paths.sh
+source "$BOOX_PATHS"
+WATCH_DIR="$BOOX_NOTEBOOKS_DIR"
 
 # Record startup time, never alert (interval 0): this only runs on
 # (re)start, so the recorded gap is the previous instance's healthy uptime

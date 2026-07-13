@@ -125,10 +125,19 @@ if [[ "$IS_DRIVER" == 1 ]]; then
 
     # Stale Boox exports: the watcher sweeps its backlog before subscribing
     # to fswatch, so a PDF that finalized in that gap (or a failed import
-    # left in place) sits unnoticed until the next watcher restart.
-    while IFS= read -r stuck; do
-        surface_line "stale Boox export awaiting import: $(basename "$stuck")"
-    done < <(find "$HOME/Dropbox (Maestral)/onyx/NoteMax/Notebooks" -type f -name '*.pdf' -mmin +15 2>/dev/null || true)
+    # left in place) sits unnoticed until the next watcher restart. The folder
+    # is shared with the watcher; surface a missing definition rather than
+    # skipping the check, which would look identical to "no stale exports".
+    BOOX_PATHS="$HOME/.local/bin/boox-paths.sh"
+    if [[ -r "$BOOX_PATHS" ]]; then
+        # shellcheck source=boox-paths.sh
+        source "$BOOX_PATHS"
+        while IFS= read -r stuck; do
+            surface_line "stale Boox export awaiting import: $(basename "$stuck")"
+        done < <(find "$BOOX_NOTEBOOKS_DIR" -type f -name '*.pdf' -mmin +15 2>/dev/null || true)
+    else
+        surface_line "cannot read $BOOX_PATHS — Boox stale-export check skipped"
+    fi
 fi
 
 # ── 2. Ensure DEVONthink is running ──────────────────────────────────────────
