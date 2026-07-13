@@ -7,8 +7,6 @@
 		<true/>
 		<key>IndexOffset</key>
 		<integer>0</integer>
-		<key>LastExecution</key>
-		<real>0.0</real>
 		<key>UseUUIDKey</key>
 		<true/>
 		<key>data</key>
@@ -52,8 +50,6 @@
 		<true/>
 		<key>IndexOffset</key>
 		<integer>0</integer>
-		<key>LastExecution</key>
-		<real>0.0</real>
 		<key>UseUUIDKey</key>
 		<true/>
 		<key>data</key>
@@ -92,8 +88,6 @@
 		<true/>
 		<key>IndexOffset</key>
 		<integer>0</integer>
-		<key>LastExecution</key>
-		<real>0.0</real>
 		<key>UseUUIDKey</key>
 		<true/>
 		<key>data</key>
@@ -131,8 +125,6 @@
 		<true/>
 		<key>IndexOffset</key>
 		<integer>0</integer>
-		<key>LastExecution</key>
-		<real>0.0</real>
 		<key>UseUUIDKey</key>
 		<true/>
 		<key>data</key>
@@ -157,8 +149,6 @@
 		<true/>
 		<key>IndexOffset</key>
 		<integer>0</integer>
-		<key>LastExecution</key>
-		<real>0.0</real>
 		<key>UseUUIDKey</key>
 		<true/>
 		<key>data</key>
@@ -187,8 +177,6 @@
 		<true/>
 		<key>IndexOffset</key>
 		<integer>0</integer>
-		<key>LastExecution</key>
-		<real>0.0</real>
 		<key>UseUUIDKey</key>
 		<true/>
 		<key>data</key>
@@ -217,8 +205,6 @@
 		<true/>
 		<key>IndexOffset</key>
 		<integer>0</integer>
-		<key>LastExecution</key>
-		<real>0.0</real>
 		<key>UseUUIDKey</key>
 		<true/>
 		<key>data</key>
@@ -247,8 +233,6 @@
 		<true/>
 		<key>IndexOffset</key>
 		<integer>0</integer>
-		<key>LastExecution</key>
-		<real>0.0</real>
 		<key>UseUUIDKey</key>
 		<true/>
 		<key>data</key>

@@ -4,7 +4,7 @@
 <array>
 	<dict>
 		<key>date</key>
-		<real>804568442.99987304</real>
+		<real>804568442.999873</real>
 		<key>disabled</key>
 		<integer>1</integer>
 		<key>identifier</key>
@@ -20,7 +20,7 @@
 	</dict>
 	<dict>
 		<key>date</key>
-		<real>804801971.84934604</real>
+		<real>804801971.849346</real>
 		<key>identifier</key>
 		<string>mdcompany</string>
 		<key>index</key>
@@ -34,7 +34,7 @@
 	</dict>
 	<dict>
 		<key>date</key>
-		<real>804568442.99991405</real>
+		<real>804568442.999914</real>
 		<key>disabled</key>
 		<integer>1</integer>
 		<key>identifier</key>
@@ -50,7 +50,7 @@
 	</dict>
 	<dict>
 		<key>date</key>
-		<real>804801971.84934902</real>
+		<real>804801971.849349</real>
 		<key>identifier</key>
 		<string>mdabstract</string>
 		<key>index</key>
@@ -64,7 +64,7 @@
 	</dict>
 	<dict>
 		<key>date</key>
-		<real>791826493.55405605</real>
+		<real>791826493.554056</real>
 		<key>disabled</key>
 		<true/>
 		<key>identifier</key>
@@ -86,7 +86,7 @@
 	</dict>
 	<dict>
 		<key>date</key>
-		<real>804568443.00000596</real>
+		<real>804568443.000006</real>
 		<key>disabled</key>
 		<integer>1</integer>
 		<key>identifier</key>
@@ -102,7 +102,7 @@
 	</dict>
 	<dict>
 		<key>date</key>
-		<real>804568443.00002003</real>
+		<real>804568443.00002</real>
 		<key>disabled</key>
 		<integer>1</integer>
 		<key>identifier</key>
@@ -118,7 +118,7 @@
 	</dict>
 	<dict>
 		<key>date</key>
-		<real>787858506.83775604</real>
+		<real>787858506.837756</real>
 		<key>disabled</key>
 		<integer>1</integer>
 		<key>identifier</key>
@@ -134,7 +134,7 @@
 	</dict>
 	<dict>
 		<key>date</key>
-		<real>787858506.87106299</real>
+		<real>787858506.871063</real>
 		<key>disabled</key>
 		<integer>1</integer>
 		<key>identifier</key>
@@ -150,7 +150,7 @@
 	</dict>
 	<dict>
 		<key>date</key>
-		<real>787858506.88357198</real>
+		<real>787858506.883572</real>
 		<key>disabled</key>
 		<integer>1</integer>
 		<key>identifier</key>
@@ -166,7 +166,7 @@
 	</dict>
 	<dict>
 		<key>date</key>
-		<real>787858506.90861905</real>
+		<real>787858506.908619</real>
 		<key>disabled</key>
 		<integer>1</integer>
 		<key>identifier</key>
@@ -208,7 +208,7 @@
 	</dict>
 	<dict>
 		<key>date</key>
-		<real>787858507.95854294</real>
+		<real>787858507.958543</real>
 		<key>disabled</key>
 		<integer>1</integer>
 		<key>identifier</key>
@@ -224,7 +224,7 @@
 	</dict>
 	<dict>
 		<key>date</key>
-		<real>787858507.95854902</real>
+		<real>787858507.958549</real>
 		<key>disabled</key>
 		<integer>1</integer>
 		<key>identifier</key>
@@ -240,7 +240,7 @@
 	</dict>
 	<dict>
 		<key>date</key>
-		<real>787858507.95855403</real>
+		<real>787858507.958554</real>
 		<key>disabled</key>
 		<integer>1</integer>
 		<key>identifier</key>
@@ -270,7 +270,7 @@
 	</dict>
 	<dict>
 		<key>date</key>
-		<real>792174048.62019503</real>
+		<real>792174048.620195</real>
 		<key>disabled</key>
 		<integer>1</integer>
 		<key>identifier</key>
@@ -286,7 +286,7 @@
 		<key>currency</key>
 		<string>$</string>
 		<key>date</key>
-		<real>792111614.62291598</real>
+		<real>792111614.622916</real>
 		<key>format</key>
 		<string>currency</string>
 		<key>identifier</key>
@@ -304,7 +304,7 @@
 		<key>currency</key>
 		<string>$</string>
 		<key>date</key>
-		<real>787858507.95857096</real>
+		<real>787858507.958571</real>
 		<key>disabled</key>
 		<integer>1</integer>
 		<key>format</key>
@@ -324,7 +324,7 @@
 		<key>currency</key>
 		<string>$</string>
 		<key>date</key>
-		<real>787858507.95857501</real>
+		<real>787858507.958575</real>
 		<key>disabled</key>
 		<integer>1</integer>
 		<key>format</key>
@@ -342,7 +342,7 @@
 	</dict>
 	<dict>
 		<key>date</key>
-		<real>787858507.95858002</real>
+		<real>787858507.95858</real>
 		<key>disabled</key>
 		<integer>1</integer>
 		<key>identifier</key>
@@ -358,7 +358,7 @@
 	</dict>
 	<dict>
 		<key>date</key>
-		<real>799533112.43449497</real>
+		<real>799533112.434495</real>
 		<key>identifier</key>
 		<string>mdaichattranscript</string>
 		<key>index</key>
@@ -370,7 +370,7 @@
 	</dict>
 	<dict>
 		<key>date</key>
-		<real>794620376.91737401</real>
+		<real>794620376.917374</real>
 		<key>identifier</key>
 		<string>mdaienriched</string>
 		<key>index</key>
@@ -394,7 +394,7 @@
 	</dict>
 	<dict>
 		<key>date</key>
-		<real>793679907.18682694</real>
+		<real>793679907.186827</real>
 		<key>identifier</key>
 		<string>mddailynotelinked</string>
 		<key>index</key>
@@ -406,7 +406,7 @@
 	</dict>
 	<dict>
 		<key>date</key>
-		<real>793381047.80678594</real>
+		<real>793381047.806786</real>
 		<key>identifier</key>
 		<string>mddocumenttype</string>
 		<key>index</key>
@@ -418,7 +418,7 @@
 	</dict>
 	<dict>
 		<key>date</key>
-		<real>798676097.64124298</real>
+		<real>798676097.641243</real>
 		<key>identifier</key>
 		<string>mdenrichinputhash</string>
 		<key>index</key>
@@ -430,7 +430,7 @@
 	</dict>
 	<dict>
 		<key>date</key>
-		<real>793212362.09710598</real>
+		<real>793212362.097106</real>
 		<key>identifier</key>
 		<string>mdenrichstartedat</string>
 		<key>index</key>
@@ -442,7 +442,7 @@
 	</dict>
 	<dict>
 		<key>date</key>
-		<real>793237590.90473199</real>
+		<real>793237590.904732</real>
 		<key>identifier</key>
 		<string>mderrorcount</string>
 		<key>index</key>
@@ -454,7 +454,7 @@
 	</dict>
 	<dict>
 		<key>date</key>
-		<real>793381124.50053501</real>
+		<real>793381124.500535</real>
 		<key>identifier</key>
 		<string>mdeventdate</string>
 		<key>index</key>
@@ -466,7 +466,7 @@
 	</dict>
 	<dict>
 		<key>date</key>
-		<real>797296728.29808497</real>
+		<real>797296728.298085</real>
 		<key>identifier</key>
 		<string>mdgranolaid</string>
 		<key>index</key>
@@ -500,7 +500,7 @@
 	</dict>
 	<dict>
 		<key>date</key>
-		<real>797296710.76672494</real>
+		<real>797296710.766725</real>
 		<key>identifier</key>
 		<string>mdgranolaparticipants</string>
 		<key>index</key>
@@ -512,7 +512,7 @@
 	</dict>
 	<dict>
 		<key>date</key>
-		<real>793381061.24650002</real>
+		<real>793381061.2465</real>
 		<key>identifier</key>
 		<string>mdlowconfidence</string>
 		<key>index</key>
@@ -524,7 +524,7 @@
 	</dict>
 	<dict>
 		<key>date</key>
-		<real>792611738.13634098</real>
+		<real>792611738.136341</real>
 		<key>identifier</key>
 		<string>mdnamelocked</string>
 		<key>index</key>
@@ -536,7 +536,7 @@
 	</dict>
 	<dict>
 		<key>date</key>
-		<real>792265414.34870803</real>
+		<real>792265414.348708</real>
 		<key>identifier</key>
 		<string>mdneedsprocessing</string>
 		<key>index</key>
@@ -548,7 +548,7 @@
 	</dict>
 	<dict>
 		<key>date</key>
-		<real>797967411.77411306</real>
+		<real>797967411.774113</real>
 		<key>identifier</key>
 		<string>mdneedssinglefile</string>
 		<key>index</key>
@@ -560,7 +560,7 @@
 	</dict>
 	<dict>
 		<key>date</key>
-		<real>793679916.92847395</real>
+		<real>793679916.928474</real>
 		<key>identifier</key>
 		<string>mdpreviousdailynotes</string>
 		<key>index</key>
@@ -572,7 +572,7 @@
 	</dict>
 	<dict>
 		<key>date</key>
-		<real>792688364.02971399</real>
+		<real>792688364.029714</real>
 		<key>identifier</key>
 		<string>mdpreviousname</string>
 		<key>index</key>
@@ -584,7 +584,7 @@
 	</dict>
 	<dict>
 		<key>date</key>
-		<real>793249155.44135797</real>
+		<real>793249155.441358</real>
 		<key>identifier</key>
 		<string>mdprevioustasks</string>
 		<key>index</key>
@@ -596,7 +596,7 @@
 	</dict>
 	<dict>
 		<key>date</key>
-		<real>793164414.35727799</real>
+		<real>793164414.357278</real>
 		<key>identifier</key>
 		<string>mdrecognizedat</string>
 		<key>index</key>
@@ -608,7 +608,7 @@
 	</dict>
 	<dict>
 		<key>date</key>
-		<real>792118711</real>
+		<real>792118711.0</real>
 		<key>disabled</key>
 		<integer>0</integer>
 		<key>identifier</key>
@@ -632,7 +632,7 @@
 	</dict>
 	<dict>
 		<key>date</key>
-		<real>798760401.93952703</real>
+		<real>798760401.939527</real>
 		<key>identifier</key>
 		<string>mdsinglefiletoolarge</string>
 		<key>index</key>
@@ -644,7 +644,7 @@
 	</dict>
 	<dict>
 		<key>date</key>
-		<real>798763038.36489999</real>
+		<real>798763038.3649</real>
 		<key>identifier</key>
 		<string>mdskipsinglefile</string>
 		<key>index</key>
@@ -656,7 +656,7 @@
 	</dict>
 	<dict>
 		<key>date</key>
-		<real>792118711</real>
+		<real>792118711.0</real>
 		<key>disabled</key>
 		<integer>0</integer>
 		<key>identifier</key>
@@ -684,7 +684,7 @@
 	</dict>
 	<dict>
 		<key>date</key>
-		<real>797799962.30274498</real>
+		<real>797799962.302745</real>
 		<key>identifier</key>
 		<string>mdsummarysource</string>
 		<key>index</key>
@@ -696,7 +696,7 @@
 	</dict>
 	<dict>
 		<key>date</key>
-		<real>794940272.77913594</real>
+		<real>794940272.779136</real>
 		<key>identifier</key>
 		<string>mdwebclipsnapshot</string>
 		<key>index</key>
@@ -708,7 +708,7 @@
 	</dict>
 	<dict>
 		<key>date</key>
-		<real>794940264.43401897</real>
+		<real>794940264.434019</real>
 		<key>identifier</key>
 		<string>mdwebclipmarkdown</string>
 		<key>index</key>
@@ -720,7 +720,7 @@
 	</dict>
 	<dict>
 		<key>date</key>
-		<real>794940587.23779297</real>
+		<real>794940587.237793</real>
 		<key>identifier</key>
 		<string>mdwebclipsource</string>
 		<key>index</key>
@@ -732,7 +732,7 @@
 	</dict>
 	<dict>
 		<key>date</key>
-		<real>804833019.08445895</real>
+		<real>804833019.084459</real>
 		<key>identifier</key>
 		<string>mdentitytype</string>
 		<key>index</key>
@@ -742,7 +742,7 @@
 	</dict>
 	<dict>
 		<key>date</key>
-		<real>804833019.09270298</real>
+		<real>804833019.092703</real>
 		<key>identifier</key>
 		<string>mdentitystatus</string>
 		<key>index</key>
@@ -752,7 +752,7 @@
 	</dict>
 	<dict>
 		<key>date</key>
-		<real>804833019.10102797</real>
+		<real>804833019.101028</real>
 		<key>identifier</key>
 		<string>mdcity</string>
 		<key>index</key>
@@ -762,7 +762,7 @@
 	</dict>
 	<dict>
 		<key>date</key>
-		<real>804833019.10931206</real>
+		<real>804833019.109312</real>
 		<key>identifier</key>
 		<string>mdemployer</string>
 		<key>index</key>
@@ -772,7 +772,7 @@
 	</dict>
 	<dict>
 		<key>date</key>
-		<real>804833019.11767805</real>
+		<real>804833019.117678</real>
 		<key>identifier</key>
 		<string>mdrole</string>
 		<key>index</key>
@@ -782,7 +782,7 @@
 	</dict>
 	<dict>
 		<key>date</key>
-		<real>804833019.12598097</real>
+		<real>804833019.125981</real>
 		<key>identifier</key>
 		<string>mdrelationship</string>
 		<key>index</key>
@@ -792,7 +792,7 @@
 	</dict>
 	<dict>
 		<key>date</key>
-		<real>804833019.13461006</real>
+		<real>804833019.13461</real>
 		<key>identifier</key>
 		<string>mdemail</string>
 		<key>index</key>
@@ -802,7 +802,7 @@
 	</dict>
 	<dict>
 		<key>date</key>
-		<real>804833019.14284503</real>
+		<real>804833019.142845</real>
 		<key>identifier</key>
 		<string>mdlastcontact</string>
 		<key>index</key>
@@ -812,7 +812,7 @@
 	</dict>
 	<dict>
 		<key>date</key>
-		<real>804833019.15103805</real>
+		<real>804833019.151038</real>
 		<key>identifier</key>
 		<string>mdentityfiled</string>
 		<key>index</key>
@@ -822,7 +822,7 @@
 	</dict>
 	<dict>
 		<key>date</key>
-		<real>804923472.79104698</real>
+		<real>804923472.791047</real>
 		<key>identifier</key>
 		<string>mditemlink</string>
 		<key>index</key>
@@ -832,7 +832,7 @@
 	</dict>
 	<dict>
 		<key>date</key>
-		<real>805515040.17305696</real>
+		<real>805515040.173057</real>
 		<key>identifier</key>
 		<string>mdjournalentry</string>
 		<key>index</key>
@@ -842,7 +842,7 @@
 	</dict>
 	<dict>
 		<key>date</key>
-		<real>805515040.18972301</real>
+		<real>805515040.189723</real>
 		<key>identifier</key>
 		<string>mdpageindex</string>
 		<key>index</key>
@@ -852,7 +852,7 @@
 	</dict>
 	<dict>
 		<key>date</key>
-		<real>805515040.20639896</real>
+		<real>805515040.206399</real>
 		<key>identifier</key>
 		<string>mdpagesignature</string>
 		<key>index</key>
@@ -862,7 +862,7 @@
 	</dict>
 	<dict>
 		<key>date</key>
-		<real>805654347.08059597</real>
+		<real>805654347.080596</real>
 		<key>identifier</key>
 		<string>mdbriefingsuppressed</string>
 		<key>index</key>

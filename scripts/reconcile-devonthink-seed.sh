@@ -59,8 +59,9 @@ status_of() {
   fi
   case "$seed_file" in
     *.plist)
-      if diff -q <(plutil -convert xml1 -o - "$seed_file" 2>/dev/null) \
-                 <(plutil -convert xml1 -o - "$live" 2>/dev/null) >/dev/null 2>&1; then
+      if diff -q <("$DOTFILES/scripts/normalize-devonthink-plist.py" "$seed_file" 2>/dev/null) \
+                 <("$DOTFILES/scripts/normalize-devonthink-plist.py" "$live" 2>/dev/null) \
+                 >/dev/null 2>&1; then
         echo "same"
       else
         echo "differs"

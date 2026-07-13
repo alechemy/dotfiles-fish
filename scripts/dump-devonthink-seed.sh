@@ -36,14 +36,33 @@ while IFS= read -r seed_file; do
     echo "  MISSING live counterpart, skipping: ~/$rel" >&2
     continue
   fi
-  if cmp -s "$live" "$seed_file"; then
-    unchanged=$((unchanged + 1))
-    continue
-  fi
   plutil -lint "$live" >/dev/null
-  cp -p "$live" "$seed_file"
-  # cp -p copies DEVONthink's delete-protection ACL; git can't unlink such a
-  # file on the next pull. Strip it so the seed is always replaceable.
+  case "$rel" in
+    *.plist)
+      # The seed carries configuration, never machine state: a rule that fires
+      # rewrites its own LastExecution, which would otherwise re-drift the seed
+      # forever and commit one machine's execution history.
+      # XML, not DEVONthink's native binary: a seed exists to be reviewed, and a
+      # rule edit has to show up as a readable diff rather than "Bin 91k -> 56k".
+      tmp="$(mktemp)"
+      "$DOTFILES/scripts/normalize-devonthink-plist.py" "$live" > "$tmp"
+      if cmp -s "$tmp" "$seed_file"; then
+        rm -f "$tmp"
+        unchanged=$((unchanged + 1))
+        continue
+      fi
+      mv "$tmp" "$seed_file"
+      ;;
+    *)
+      if cmp -s "$live" "$seed_file"; then
+        unchanged=$((unchanged + 1))
+        continue
+      fi
+      cp -p "$live" "$seed_file"
+      ;;
+  esac
+  # DEVONthink's delete-protection ACL rides along on a copy; git can't unlink
+  # such a file on the next pull. Strip it so the seed is always replaceable.
   chmod -N "$seed_file"
   echo "  dumped $rel"
   updated=$((updated + 1))
