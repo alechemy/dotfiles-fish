@@ -40,7 +40,11 @@ Two of those are enums that DEVONthink stores as free text, so a hand-typed
 value can miss silently. `Relationship` resolves to `family` / `close-friend`
 (30 days), `friend` (60), `colleague` (90) — its Reconnect threshold — or
 `acquaintance`, which is recognized but never surfaces. `EntityStatus` is
-`active`, `dormant`, `archived`, or `deceased`; only `active` surfaces. The
+`active`, `dormant`, `archived`, or `deceased`; only `active` surfaces **in
+Reconnect** — `reconnect_overdue()` is the only consumer that reads the field,
+so a non-`active` person is still briefed, still matched, and still gets their
+`LastContact` bumped. Status is lifecycle, not suppression; to stop briefing
+someone entirely, see `BriefingSuppressed` below. The
 brief folds case, spaces, and underscores before matching, then warns on
 anything left unresolved: an unknown `Relationship` skips Reconnect (as a
 blank one does), while an unknown `EntityStatus` is treated as `active` —
@@ -102,22 +106,137 @@ stay stdlib-only (tier-1 `/usr/bin/python3`, stable TCC identity):
 
 ### Morning brief (resurfacing + contact tracking)
 
-For each timed, non-declined calendar event, attendees are matched against
-Person records by email, name, or alias — and person names are also matched
-against the **event title** ("Call with Jake"), because personal-calendar
-events rarely carry structured attendees. Matched people get their header
-facts plus the three most recent Biographical Log entries; unmatched attendees
-are listed as "no entity record yet" (collapsed to a count past
-`UNMATCHED_LIST_MAX`, so a 200-person CAB invite costs one line). The brief
-reads live from records, so it can never go stale.
+The `## Briefing` section is the **whole day's timeline**, in start order:
+every timed, non-declined event on a calendar not in `SKIP_CALENDARS`,
+including the ones with nobody attached. A day reads as a day, so a solo
+dentist appointment lists as a bare heading rather than vanishing.
 
-Attendees only exist on the Exchange calendar; iCloud events carry none, which
-is why title matching exists. Exchange also reports **conference rooms with
-`participantType` Person** — identical to a human on every EventKit field — so
-rooms are excluded by name via `SKIP_ATTENDEE_PATTERN`. Note that EventKit's
-enums come back from JXA as *strings*: `calendar-events-json.js` compares them
-with `Number(...)`, and dropping that coercion silently makes `is_person` and
-`declined` false for everyone.
+`calendar-events-json.js` passes a nil calendars predicate to EventKit, so
+**every** calendar is already queried — Exchange and iCloud alike. Nothing
+selects a calendar at fetch time; the only filtering is `SKIP_CALENDARS`.
+
+Roster people are attached to an event two ways, deduped: from its **attendees**
+(matched by email, name, or alias) and from a roster name or alias appearing in
+the **title** ("Call with Jake"). Attendees exist only on Exchange events —
+iCloud events carry none — which is why title matching exists at all.
+
+There is deliberately **no heuristic name extraction** for people the roster has
+never heard of. An earlier version parsed unknown names out of titles, anchored
+on `X <> Y` / `with X` / `Call X`, and flagged them "no entity record yet". Once
+every event lists, that earns almost nothing: the heading already reads *"Lunch
+with Delphine Marsh"*, so repeating the name below it adds a line, a curated
+stopword list that rots, and a false-positive surface where a band, a film, or a
+clinic ("Hollow Coves presale", "Project Hail Mary", "Fernbrook Clinic") reads as
+a person. **Showing the whole timeline is what solved the problem; the parser was
+solving it twice.** If unknown-person discovery is wanted later, do it
+asynchronously and proposal-only, and start from structured attendees — which
+carry an email and are therefore evidence — not from a guess at a title.
+
+Matched people get their header facts plus the three most recent Biographical
+Log entries. Unrecognised **attendees** are listed as "no entity record yet"
+(collapsed to a count past `UNMATCHED_LIST_MAX`, so a 200-person CAB invite costs
+one line); this is render-only and never creates a record or a proposal. The
+brief reads live from records, so it can never go stale.
+
+Exchange reports **conference rooms with `participantType` Person** — identical
+to a human on every EventKit field — so rooms are excluded by name via
+`SKIP_ATTENDEE_PATTERN`. Note that EventKit's enums come back from JXA as
+*strings*: `calendar-events-json.js` compares them with `Number(...)`, and
+dropping that coercion silently makes `is_person` and `declined` false for
+everyone.
+
+#### Suppressing a person (BriefingSuppressed)
+
+**The policy lives on the Person record, not in config.** `BriefingSuppressed` is
+a boolean custom-metadata flag, keyed by the record's stable **UUID**. That is the
+point: a name list in a file can be defeated by a stale entry, drift out of sync
+with the record, or vanish when the file does. There is exactly one authority, and
+clearing the flag is sufficient to undo it. (`EntityStatus` is *not* that
+authority — `reconnect_overdue()` is its only reader, so an `archived` person is
+still briefed and still bumped. Lifecycle and privacy are different policies.)
+
+It takes **two** mechanisms, and it needs both. Getting this wrong is easy and the
+failure is silent.
+
+1. **Roster drop** (`load_people()`). Flagged people are removed before any
+   person-derived consumer sees them, which silences `Briefing`, `Reconnect`,
+   `Birthdays`, and `LastContact` bumps in one place.
+
+2. **Text redaction** (`suppression_keys` → `excluded_re` / `names_excluded`).
+   Filtering the roster **cannot redact raw calendar data.** An event title, an
+   attendee label, and a past record's name are plain strings that no roster
+   filter ever reads — so on a timeline that renders every event, dropping the
+   Person record still leaves `### 2:30pm — <name>: flight to LAX` on the page.
+   This was a real regression: showing every event is exactly what turned a
+   harmless "no roster match" into a rendered name. **If you add a surface that
+   renders text the pipeline did not compose, it needs this filter.**
+
+**The redaction vocabulary is identity-derived, never guessed.** It is built from
+the flagged record's own fields — filed name, explicit aliases, email — and then
+widened by its matched Contacts card (a card-only nickname, a second address, a
+phone the entity layer deliberately never stores). Contacts only *augments*; a
+nickname whose suppression must be guaranteed belongs on the record as an alias.
+This is what makes it work in practice, because a calendar title uses the
+nickname while an attendee arrives as a bare email or a `tel:` URL, and only the
+record knows they are one person.
+
+Absorption runs to a **fixed point** so it cannot depend on the order Contacts
+returns cards in, but it only ever traverses an identifier that **exactly one
+card claims**. A handle two cards share — a household landline — proves nothing
+about identity, and traversing it would drag an unrelated person's name and
+address into the vocabulary, silently redacting *their* events. The shared number
+is still redacted (it is the suppressed person's too); what it must not do is
+link the other card in. The cost of this conservatism is that a genuine duplicate
+card reachable *only* through a shared address is not absorbed — which is why the
+record, not Contacts, is the authority: put the alias on the record.
+
+Phone identifiers need one more step. A key is canonical digits (`norm_handle`
+folds to the last 10), so it can never match the punctuation a human actually
+writes. Every phone-shaped run in a title, an attendee name, or an attendee email
+is therefore folded through `norm_handle` before it is judged — `Call +1 (212)
+555-0101` redacts, and a flight number does not.
+
+Two boundaries matter, and both were bugs once:
+
+- **Bare first names are never synthesised.** Deriving `Robin` from
+  `Robin Sandoval` would suppress every unrelated Robin — silently deleting events
+  from a timeline that promises the whole day. A first name earns a key only by
+  being a *recorded alias*.
+- **The trailing word boundary is `\w`, not `[\w']`.** An apostrophe there exempts
+  the possessive — `Robin's flight` — which is exactly the form a personal
+  calendar tends to use. The `\w` boundaries still keep a longer name that merely
+  *contains* a suppressed one (`Robinson`) from matching.
+
+**Suppression is narrow, and it is not deletion.** Redaction applies to the
+smallest thing that carries the name:
+
+| what names them | result |
+| --- | --- |
+| the event **title** | the slot survives as `Private event` at its original time; title, people and location are dropped. Deleting the event would leave a silent hole in a timeline that promises the whole day |
+| only an **attendee** | the event renders normally, minus that attendee |
+| an On This Day record, or a parked source (name *or* `last_error`) | the row is dropped |
+
+A redacted title is never mined for `LastContact`, so nobody is credited with
+contact from it; a structured attendee still is. If Contacts is unavailable while
+anyone is flagged, the run warns — a card-only nickname cannot be redacted that
+run.
+
+Suppressing a *calendar* is the one privacy control that does live in config:
+`SKIP_CALENDARS` excludes whole calendars by name, added to the built-in
+defaults, in `~/.config/dt-pipeline/entities.conf` (machine-local, mode 600,
+never tracked — a real calendar name belongs there and nowhere in this repo).
+Because it is a privacy control, a config file that exists but **cannot be read
+is fatal**: degrading to an empty dict would quietly brief a calendar the user
+asked never to see. A file that is simply absent means "never configured", which
+is different, and fine.
+
+Suppressing a *person* never touches config — see `BriefingSuppressed` above.
+
+`BriefingSuppressed` must exist as a custom-metadata field for the flag to be
+settable in the GUI, so `seed-devonthink-config.sh` **merges** missing field
+definitions into an existing `CustomMetaData.plist` rather than copy-if-absent
+(which would strand every machine that already owns the file on an old schema).
+DEVONthink needs a restart to pick up a newly added field.
 
 Sections are appended *after* `## Today's Notes` (created if missing) because
 `insert-jot-into-daily-note.py` targets the last bullet *before* that header —
@@ -380,6 +499,8 @@ MIN_ROSTER=1          # extract only once People holds this many records
 SELF_NAME=            # extra self-alias to exclude from extraction
 SKIP_ATTENDEE_PATTERN=\bVC\b|\bConference\b|\bRoom\b|\d+\s?ppl
                       # calendar attendees that are rooms, not people
+SKIP_CALENDARS=       # calendar names never briefed on (comma-separated),
+                      # added to the built-in defaults
 SKIP_SOURCE_TITLES=Round ?Table|Standup|…   # sources never extracted
 IDLE_MINUTES=10       # local extraction waits for user inactivity; 0 = off
 THINGS_SYNC=off       # on = mirror proposals to Things 3 (see review loop)

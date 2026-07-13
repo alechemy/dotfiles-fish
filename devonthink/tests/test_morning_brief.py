@@ -1,4 +1,8 @@
+import json
+import os
 import re
+import shutil
+import tempfile
 import unittest
 
 from helpers import attendee, capture_logs, contact, event, load, person
@@ -637,6 +641,402 @@ class JournalStatusLines(unittest.TestCase):
             "entries": {}, "pages": [{"date": "", "text": "", "parked": ""}]}
         got = mb.journal_status_lines(self.TODAY, state, 0)
         self.assertIn("No journal entry arrived", got)
+
+
+class BriefingSuppressed(unittest.TestCase):
+    """Suppression is a durable, UUID-keyed policy on the Person record — not a
+    name list in a file that can go stale or be deleted."""
+
+    def setUp(self):
+        self.people = [person("Wendell Boon", aliases="Wen, Wendy",
+                              email="wb@x.com", briefingsuppressed="1"),
+                       person("Priya Raman")]
+
+    def test_the_flag_reads_both_ways_devonthink_writes_it(self):
+        """Set by script it reads back '1'; ticked in the GUI, 'true'."""
+        for raw in ("1", "true", "True"):
+            self.assertTrue(mb.md_flag(raw), raw)
+        for raw in ("", "0", "false", None):
+            self.assertFalse(mb.md_flag(raw), raw)
+
+    def test_the_record_supplies_aliases_and_email(self):
+        """A calendar title uses the nickname and an attendee arrives as a bare
+        email — only the record knows all three are one person."""
+        keys = mb.suppression_keys(self.people)
+        self.assertIn("wen", keys)
+        self.assertIn("wendy", keys)
+        self.assertIn("wb@x.com", keys)
+        self.assertEqual([p["name"] for p in mb.exclude_people(self.people)],
+                         ["Priya Raman"])
+
+    def test_a_bare_first_name_is_never_synthesised(self):
+        """"Wendell" would suppress every unrelated Wendell, silently punching a
+        hole in a timeline that promises the whole day. A first name earns a key
+        only by being a recorded alias."""
+        keys = mb.suppression_keys(self.people)
+        self.assertNotIn("wendell", keys)
+        self.assertFalse(mb.names_excluded("Lunch with Wendell Crane",
+                                           mb.excluded_re(keys)))
+
+    def test_contacts_card_only_widens_the_vocabulary(self):
+        cards = [contact("Wendell Boon", nickname="Wubs", emails=["w2@x.com"]),
+                 contact("Priya Raman", nickname="Pree")]
+        keys = mb.suppression_keys(self.people, cards)
+        self.assertIn("wubs", keys)
+        self.assertIn("w2@x.com", keys)
+        self.assertNotIn("pree", keys)
+
+    def test_nobody_flagged_keeps_everyone(self):
+        people = [person("Priya Raman")]
+        self.assertEqual(mb.suppression_keys(people), set())
+        self.assertEqual(len(mb.exclude_people(people)), 1)
+
+    def test_suppressed_person_never_reaches_reconnect(self):
+        people = [person("Wendell Boon", relationship="friend",
+                         lastcontact="2020-01-01", entitystatus="active",
+                         briefingsuppressed="1")]
+        self.assertEqual(
+            mb.reconnect_overdue(mb.exclude_people(people), "2026-07-13"), [])
+
+
+class LoadConfig(unittest.TestCase):
+    def setUp(self):
+        self.original = mb.CONFIG_FILE
+        self.dir = tempfile.mkdtemp()
+        mb.CONFIG_FILE = os.path.join(self.dir, "entities.conf")
+
+    def tearDown(self):
+        if os.path.exists(mb.CONFIG_FILE):
+            os.chmod(mb.CONFIG_FILE, 0o600)
+        shutil.rmtree(self.dir, ignore_errors=True)
+        mb.CONFIG_FILE = self.original
+
+    def test_absent_config_means_never_configured(self):
+        self.assertEqual(mb.load_config(), {})
+
+    def test_unreadable_config_raises_rather_than_briefing_everyone(self):
+        """SKIP_CALENDARS is a privacy control; degrading to {} would silently
+        brief a calendar the user asked never to see."""
+        with open(mb.CONFIG_FILE, "w") as f:
+            f.write("SKIP_CALENDARS=Some Shared Calendar\n")
+        os.chmod(mb.CONFIG_FILE, 0o000)
+        if os.access(mb.CONFIG_FILE, os.R_OK):
+            self.skipTest("running as root; mode bits do not apply")
+        with self.assertRaises(OSError):
+            mb.load_config()
+
+    def test_comments_and_blank_lines_are_ignored(self):
+        with open(mb.CONFIG_FILE, "w") as f:
+            f.write("# a comment\n\nSKIP_CALENDARS=Shared\nnot-a-pair\n")
+        self.assertEqual(mb.load_config(), {"SKIP_CALENDARS": "Shared"})
+
+
+class ExcludedPersonNeverReachesOutput(unittest.TestCase):
+    """Rendered-output tests, deliberately. Filtering the roster does not redact
+    raw calendar text, and an implementation test that inspects the key set
+    cannot see that: the title, the attendee label and a past record's name are
+    strings no roster filter ever reads."""
+
+    KEYS = {"tamsin", "tamsin quill", "tq"}
+
+    def render(self, events, people=()):
+        blocks = mb.brief_blocks(events, list(people), ROOM_RE, self.KEYS)
+        return mb.render_brief(blocks, "2026-07-13") or ""
+
+    def test_a_title_naming_them_keeps_its_slot_but_loses_its_content(self):
+        """Deleting the event outright would leave a silent hole in a timeline
+        that promises the whole day."""
+        got = self.render([event("Lunch with Tamsin Quill"),
+                           event("Tamsin: flight to LAX"),
+                           event("Perio cleaning")])
+        self.assertNotIn("Tamsin", got)
+        self.assertEqual(got.count(mb.REDACTED_TITLE), 2)
+        self.assertIn("9:00am", got)
+        self.assertIn("Perio cleaning", got)
+
+    def test_an_event_they_merely_attend_survives_minus_them(self):
+        """Suppression is narrow: the event is not theirs, only their presence."""
+        ev = event("Planning", [attendee("Tamsin Quill", "tq@x.com"),
+                                attendee("Rhea Sandoval", "rs@x.com")])
+        got = self.render([ev])
+        self.assertNotIn("Tamsin", got)
+        self.assertNotIn("tq@x.com", got)
+        self.assertIn("Planning", got)
+        self.assertIn("Rhea Sandoval", got)
+        self.assertNotIn(mb.REDACTED_TITLE, got)
+
+    def test_no_lastcontact_bump_from_a_title_naming_them(self):
+        people = [person("Tamsin Quill", aliases="Tamsin",
+                         briefingsuppressed="1")]
+        keys = mb.suppression_keys(people)
+        ops = mb.contact_bumps([event("Dinner with Tamsin")],
+                               mb.exclude_people(people), "2026-07-13",
+                               ROOM_RE, mb.SKIP_CALENDARS, keys)
+        self.assertEqual(ops, [])
+
+    def test_a_similar_name_is_not_over_suppressed(self):
+        got = self.render([event("Sync with Tamsina Reyes")])
+        self.assertIn("Tamsina Reyes", got)
+
+    def test_a_possessive_title_is_suppressed(self):
+        """An apostrophe in the trailing boundary would exempt exactly the form
+        a personal calendar tends to use."""
+        for title in ["Tamsin's birthday", "Tamsin’s flight", "TQ's appt"]:
+            got = self.render([event(title)])
+            self.assertNotIn("amsin", got, title)
+            self.assertIn(mb.REDACTED_TITLE, got, title)
+
+    def test_an_email_only_attendee_is_suppressed(self):
+        got = self.render([event("Planning", [attendee("", "tq@x.com")])])
+        self.assertNotIn("tq@x.com", got)
+        self.assertIn("Planning", got)
+
+    def test_a_redacted_event_leaks_no_location_or_people(self):
+        ev = event("Dinner with Tamsin", [attendee("Rhea Sandoval", "rs@x.com")])
+        ev["location"] = "14 Alder Street"
+        got = self.render([ev])
+        self.assertNotIn("Alder", got)
+        self.assertNotIn("Rhea", got)
+        self.assertIn(mb.REDACTED_TITLE, got)
+
+
+class SuppressedNameInSomeoneElsesRecord(unittest.TestCase):
+    """A visible person's own record can name a suppressed one. Those fields and
+    log bullets render into the daily note and the TRMNL snapshot, so the roster
+    is scrubbed at the boundary rather than at each place that renders it."""
+
+    def setUp(self):
+        self.roster = [
+            person("Avery North", email="an@x.com", briefingsuppressed="1"),
+            person("Taylor Reed", role="Assistant to Avery North",
+                   city="Chicago"),
+        ]
+        self.roster[1]["body"] = (
+            "# Taylor Reed\n\n**Partner:** Avery North\n\n## Biographical Log\n\n"
+            "- 2026-05-01 — Met Avery North for lunch.\n"
+            "- 2026-05-02 — Shipped the reporting service.\n")
+        self.ex_re = mb.excluded_re(mb.suppression_keys(self.roster))
+        self.visible = mb.redact_person(
+            mb.exclude_people(self.roster)[0], self.ex_re)
+
+    def test_a_field_naming_them_is_dropped(self):
+        self.assertEqual(self.visible["md"]["mdrole"], "")
+
+    def test_an_unrelated_field_survives(self):
+        self.assertEqual(self.visible["md"]["mdcity"], "Chicago")
+
+    def test_a_log_bullet_naming_them_is_dropped(self):
+        bullets = mb.recent_log_bullets(self.visible)
+        self.assertFalse(any("Avery" in b for b in bullets), bullets)
+        self.assertTrue(any("reporting service" in b for b in bullets))
+
+    def test_the_rendered_summary_line_never_names_them(self):
+        self.assertNotIn("Avery", mb.person_summary_line(self.visible))
+
+    def test_the_trmnl_snapshot_never_names_them(self):
+        self.assertNotIn("Avery", json.dumps(mb.person_snapshot(self.visible)))
+
+    def test_a_body_line_outside_the_log_is_scrubbed_too(self):
+        self.assertNotIn("Avery", self.visible["body"])
+
+
+class SuppressionKeyClosure(unittest.TestCase):
+    """Absorption is a fixed point, so it cannot depend on the order Contacts
+    happens to return cards in — but it only ever traverses an identifier that
+    exactly one card claims. A handle two cards share (a household landline)
+    proves nothing about identity, so it links nothing."""
+
+    CARD = {"name": "Avery North", "nickname": "Ave", "id": "a",
+            "emails": ["an@x.com"], "phones": ["+1 (555) 010-1234"]}
+    SHARED = {"name": "Rhea Sandoval", "nickname": "Rhe", "id": "b",
+              "emails": ["rs@x.com"], "phones": ["+1 (555) 010-1234"]}
+
+    def people(self):
+        return [person("Avery North", email="an@x.com", briefingsuppressed="1")]
+
+    def test_absorption_is_order_independent(self):
+        forward = mb.suppression_keys(self.people(), [self.CARD, self.SHARED])
+        reverse = mb.suppression_keys(self.people(), [self.SHARED, self.CARD])
+        self.assertEqual(forward, reverse)
+        self.assertIn("ave", forward)
+
+    def test_phones_are_folded_through_norm_handle(self):
+        keys = mb.suppression_keys(self.people(), [self.CARD])
+        self.assertIn(mb.norm_handle("+1 (555) 010-1234"), keys)
+
+    def test_a_tel_attendee_url_is_suppressed(self):
+        """EventKit hands a phone participant back as a tel: URL, which no name
+        regex would ever match."""
+        keys = mb.suppression_keys(self.people(), [self.CARD])
+        a = attendee("", "tel:+1-555-010-1234")
+        self.assertTrue(mb.attendee_excluded(a, mb.excluded_re(keys), keys))
+
+    def test_a_shared_handle_never_links_a_second_card_in(self):
+        keys = mb.suppression_keys(self.people(), [self.CARD, self.SHARED])
+        self.assertNotIn("rhea sandoval", keys)
+        self.assertNotIn("rs@x.com", keys)
+        self.assertNotIn("rhe", keys)
+
+    def test_an_unrelated_card_is_not_absorbed(self):
+        other = {"name": "Priya Raman", "nickname": "Pree", "id": "c",
+                 "emails": ["pr@x.com"], "phones": ["+1 555-010-9999"]}
+        keys = mb.suppression_keys(self.people(), [self.CARD, other])
+        self.assertNotIn("pree", keys)
+        self.assertNotIn("pr@x.com", keys)
+
+
+class SuppressedPhoneInFreeText(unittest.TestCase):
+    """A phone key is canonical digits and can never match the punctuation a
+    human actually writes, so every phone-shaped run has to fold through
+    norm_handle before it is judged."""
+
+    def setUp(self):
+        self.people = [person("Avery North", email="an@x.com",
+                              briefingsuppressed="1")]
+        self.cards = [contact("Avery North", emails=["an@x.com"],
+                              phones=["212-555-0101"])]
+        self.keys = mb.suppression_keys(self.people, self.cards)
+        self.ex_re = mb.excluded_re(self.keys)
+
+    def excluded(self, text):
+        return mb.text_excluded(text, self.ex_re, self.keys)
+
+    def test_a_formatted_number_in_a_title_is_suppressed(self):
+        for title in ["Call +1 (212) 555-0101", "Dial 212.555.0101 at noon",
+                      "(212) 555 0101", "call 2125550101"]:
+            self.assertTrue(self.excluded(title), title)
+
+    def test_a_bare_number_in_the_attendee_name_field_is_suppressed(self):
+        """A client that resolved nothing puts the number in the name, not the
+        email — and EventKit puts it in the email as a tel: URL."""
+        self.assertTrue(mb.attendee_excluded(
+            attendee("+1 (212) 555-0101", ""), self.ex_re, self.keys))
+        self.assertTrue(mb.attendee_excluded(
+            attendee("", "tel:+1-212-555-0101"), self.ex_re, self.keys))
+
+    def test_an_unrelated_number_is_not_suppressed(self):
+        self.assertFalse(self.excluded("Call 415-555-9999"))
+
+    def test_a_flight_number_is_not_a_phone(self):
+        self.assertFalse(self.excluded("SAN to BNA - WN 3478"))
+
+
+class SharedHandleIsAmbiguous(unittest.TestCase):
+    def test_a_household_phone_does_not_absorb_the_other_card(self):
+        """A landline on both partners' cards proves nothing about identity."""
+        people = [person("Avery North", email="an@x.com",
+                         briefingsuppressed="1")]
+        cards = [contact("Avery North", emails=["an@x.com"],
+                         phones=["212-555-0101"]),
+                 contact("Rhea Sandoval", nickname="Rhe", emails=["rs@x.com"],
+                         phones=["212-555-0101"])]
+        keys = mb.suppression_keys(people, cards)
+        self.assertNotIn("rhea sandoval", keys)
+        self.assertNotIn("rs@x.com", keys)
+        self.assertNotIn("rhe", keys)
+        # the number is still theirs, so it stays redacted
+        self.assertIn(mb.norm_handle("212-555-0101"), keys)
+
+    def test_an_unshared_handle_still_absorbs(self):
+        people = [person("Avery North", email="an@x.com",
+                         briefingsuppressed="1")]
+        cards = [contact("Avery North", nickname="Ave", emails=["an@x.com"],
+                         phones=["212-555-0102"])]
+        keys = mb.suppression_keys(people, cards)
+        self.assertIn("ave", keys)
+
+
+class TitleMatchAmbiguity(unittest.TestCase):
+    def test_an_alias_shared_by_two_people_identifies_neither(self):
+        """A title carries no email to disambiguate with, so matching both would
+        bump LastContact on someone who was never there."""
+        people = [person("Jordan Vale", aliases="Jordan"),
+                  person("Jordan Reyes", aliases="Jordan")]
+        self.assertEqual(mb.title_matches(people, "Call with Jordan"), [])
+        self.assertEqual(
+            mb.contact_bumps([event("Call with Jordan")], people, "2026-07-13",
+                             ROOM_RE), [])
+
+    def test_an_unambiguous_alias_still_matches(self):
+        people = [person("Jordan Vale", aliases="Jordan")]
+        got = mb.title_matches(people, "Call with Jordan")
+        self.assertEqual([p["name"] for p in got], ["Jordan Vale"])
+
+    def test_a_span_swallowed_by_a_longer_name_loses(self):
+        """"Call with Avery North" names one person, not two — the record aliased
+        "Avery" is not in the room, and bumping them would be a false write."""
+        people = [person("Avery North"), person("Cleo Fenn", aliases="Avery")]
+        got = mb.title_matches(people, "Call with Avery North")
+        self.assertEqual([p["name"] for p in got], ["Avery North"])
+        ops = mb.contact_bumps([event("Call with Avery North")], people,
+                               "2026-07-13", ROOM_RE)
+        self.assertEqual(len(ops), 1)
+
+    def test_disjoint_names_still_match_separately(self):
+        people = [person("Avery North"), person("Bram Vale")]
+        got = mb.title_matches(people, "Lunch with Avery North and Bram Vale")
+        self.assertEqual([p["name"] for p in got], ["Avery North", "Bram Vale"])
+
+    def test_an_alias_repeated_outside_a_longer_name_still_matches(self):
+        """The alias occurs twice: once swallowed by the longer name, once
+        standing alone. Judging only the first occurrence made this depend on
+        which way round the title was written."""
+        people = [person("Zorplin Alpha"), person("Bram Vale", aliases="Zorplin")]
+        for title in ["Zorplin Alpha and Zorplin", "Zorplin and Zorplin Alpha"]:
+            got = [p["name"] for p in mb.title_matches(people, title)]
+            self.assertEqual(sorted(got), ["Bram Vale", "Zorplin Alpha"], title)
+
+
+class ParkedSourceRedaction(unittest.TestCase):
+    def test_an_excluded_name_in_last_error_is_suppressed(self):
+        """parked_lines renders last_error, and an extraction error quotes the
+        text it choked on."""
+        parked = {"u1": {"name": "Generic Note",
+                         "last_error": "ambiguous person: Tamsin Quill"}}
+        got = mb.render_review(backlog(parked=parked), "2026-07-13") or ""
+        self.assertIn("Tamsin", got)
+        ex_re = mb.excluded_re({"tamsin quill"})
+        kept = {u: i for u, i in parked.items()
+                if not mb.names_excluded(f"{i['name']} {i['last_error']}", ex_re)}
+        self.assertEqual(kept, {})
+
+
+class BriefBlocksTimeline(unittest.TestCase):
+    def setUp(self):
+        self.people = [person("Priya Raman", aliases="Priya", email="p@x.com")]
+
+    def blocks(self, events, **kw):
+        return mb.brief_blocks(events, self.people, ROOM_RE, set(), **kw)
+
+    def test_an_event_with_nobody_still_briefs(self):
+        """The timeline is the day, not just the people in it."""
+        got = self.blocks([event("Perio cleaning")])
+        self.assertEqual(len(got), 1)
+        self.assertEqual(got[0]["people"], [])
+        self.assertEqual(got[0]["unmatched"], [])
+
+    def test_roster_person_named_in_a_title_is_enriched(self):
+        got = self.blocks([event("Lunch with Priya")])
+        self.assertEqual([p["name"] for p in got[0]["people"]], ["Priya Raman"])
+        self.assertEqual(got[0]["unmatched"], [])
+
+    def test_attendee_and_title_naming_the_same_person_is_not_doubled(self):
+        ev = event("Lunch with Priya", [attendee("Priya Raman", "p@x.com")])
+        got = self.blocks([ev])
+        self.assertEqual([p["name"] for p in got[0]["people"]], ["Priya Raman"])
+
+    def test_configured_skip_calendar_is_dropped(self):
+        got = self.blocks([event("Date night", calendar="Shared")],
+                          skip_cals=mb.SKIP_CALENDARS | {"Shared"})
+        self.assertEqual(got, [])
+
+    def test_all_day_and_declined_still_never_brief(self):
+        evs = [event("Holiday", all_day=True), event("Skipped", declined=True)]
+        self.assertEqual(self.blocks(evs), [])
+
+    def test_person_less_event_renders_without_a_trailing_blank(self):
+        got = mb.render_brief(self.blocks([event("Perio cleaning")]), "2026-07-13")
+        self.assertTrue(got.endswith("### 9:00am — Perio cleaning"), repr(got))
 
 
 if __name__ == "__main__":

@@ -78,13 +78,30 @@ rather than `raise`. The entity layer's bugs have all been silent skips, which
 produce exactly the output an idle-but-healthy pipeline produces. Those are the
 ones that need a test.
 
-**Test fixtures must never contain real people.** This repo is public and its
-history has already been scrubbed once. No name from the People roster or from
-macOS Contacts, no real phone number or address-book email — it is easy to
-absorb one from a live dump while writing tests against real data. Use
+**No tracked file may contain a real person.** This repo is public, and a
+commit is forever: treat a leaked identifier as unrecallable the moment it is
+pushed. No name from the People roster, macOS Contacts, or a calendar — and no
+real phone number or address-book email — in *any* tracked text: test fixtures,
+code, comments, docstrings, docs, config defaults, or commit messages. Use
 clearly fictional names, `*@x.com` emails, and phones from the reserved
 fictional range (`XXX-555-01xx`). The user's own name/work email in docs is
 fine (it is the repo's git author); other people's identifiers never are.
+
+The way this rule actually gets broken is not by writing a fixture. It is by
+tuning a heuristic against a live dump — a calendar range, a Contacts export,
+a chat.db query — and then *illustrating* the heuristic with an example
+pasted from that dump ("matches `Jane Roe, MD`"). A comment is as public as a
+fixture. When real data motivates a rule, fabricate the example that documents
+it, and grep the diff for roster and Contacts names before committing.
+
+Personal identifiers the pipeline genuinely needs — a calendar name to skip, an
+attendee pattern — belong in `~/.config/dt-pipeline/entities.conf`, which is
+machine-local, mode 600, and never tracked. Tracked defaults stay generic.
+
+**Suppressing a person is not config.** It is `BriefingSuppressed`, a boolean
+custom-metadata flag on their Person record, keyed by a stable UUID so it cannot
+be defeated by a stale config line or lost with a deleted file. See
+`docs/entities.md`.
 
 ## Manual runs must not page the user
 

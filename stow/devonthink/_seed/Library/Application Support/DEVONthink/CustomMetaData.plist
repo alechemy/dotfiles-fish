@@ -860,5 +860,15 @@
 		<key>type</key>
 		<string>string</string>
 	</dict>
+	<dict>
+		<key>date</key>
+		<real>805654347.08059597</real>
+		<key>identifier</key>
+		<string>mdbriefingsuppressed</string>
+		<key>index</key>
+		<integer>75</integer>
+		<key>type</key>
+		<string>bool</string>
+	</dict>
 </array>
 </plist>

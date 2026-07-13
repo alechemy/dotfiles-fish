@@ -2,9 +2,19 @@
 """
 dt-morning-brief.py — contextual resurfacing for the entity layer.
 
-Builds a "who am I about to meet" briefing from today's calendar plus the
-Person records in Lorebook/20_ENTITIES/People and appends it to today's
-daily note as a `## Briefing` section. On Mondays (or with --weekly) it
+Builds a briefing of today's calendar from every calendar EventKit exposes,
+enriched with the Person records in Lorebook/20_ENTITIES/People, and appends
+it to today's daily note as a `## Briefing` section. The section is the whole
+day's timeline: an event with nobody attached still lists, because a day reads
+as a day.
+
+Roster people are attached to an event two ways: from its Exchange attendees,
+and from their name or alias appearing in the title. iCloud events carry no
+attendees at all, so for a personal event the title is the only signal — and
+since every event now lists, a title that names someone the roster has never
+heard of already says so on its own face.
+
+On Mondays (or with --weekly) it
 also appends a `## Reconnect` section listing people whose LastContact
 has drifted past their relationship tier's threshold. A `## Birthdays`
 section lists roster-matched macOS Contacts whose birthday falls within
@@ -64,15 +74,29 @@ Usage:
                                      # replay Messages history into
                                      # LastContact (default 365); run once
 
-Config (~/.config/dt-pipeline/entities.conf, shared with entity-filing.py):
+Config (~/.config/dt-pipeline/entities.conf, shared with entity-filing.py).
+This file is machine-local and never tracked, which is the point: real
+calendar names and real people's names belong here and nowhere in the repo.
+
     SKIP_ATTENDEE_PATTERN=<regex>    attendee names matching this are not
                                      people. Exchange reports conference
                                      rooms with participantType Person and
                                      is otherwise indistinguishable from a
                                      human, so the name is the only signal.
+    SKIP_CALENDARS=<a,b,c>           calendar names never briefed on, added to
+                                     the built-in SKIP_CALENDARS defaults.
+A config that exists but cannot be read is fatal rather than ignored, since
+SKIP_CALENDARS is a privacy control and degrading to an empty dict would
+silently brief a calendar the user asked never to see.
+
+Suppressing a person is NOT configured here. It is a durable, private policy on
+the Person record itself — the boolean custom-metadata flag BriefingSuppressed,
+keyed by a stable UUID rather than a name, so it cannot be defeated by a stale
+config line or lost with a deleted file. See suppression_keys().
 """
 
 import calendar as calmod
+import collections
 import json
 import os
 import re
@@ -148,13 +172,21 @@ RECONNECT_LIMIT = 10
 # Only "active" surfaces in Reconnect; the rest are recognized ways to be silent.
 ENTITY_STATUSES = {"active", "dormant", "archived", "deceased"}
 
-# Calendars that never contain meetings worth briefing on.
+# Calendars that never contain events worth briefing on. Extended per-machine
+# by SKIP_CALENDARS in entities.conf, which is where personal calendar names
+# belong — this repo is public, so no real calendar name is tracked here.
 SKIP_CALENDARS = {"Birthdays", "Siri Suggestions", "US Holidays", "Holidays"}
 
 # Unmatched attendees are listed individually (they prompt record creation)
 # only up to this many; past it, one summary line — a 38-person CAB meeting
 # must not dump 38 noise lines into the daily note.
 UNMATCHED_LIST_MAX = 8
+
+# A suppressed event keeps its place on the timeline under this title.
+REDACTED_TITLE = "Private event"
+
+# Phone-shaped runs in free text, punctuation and all, for norm_handle to fold.
+PHONE_RUN_RE = re.compile(r"(?<!\d)\+?[\d][\d\s().\-]{6,}\d(?!\d)")
 
 CONFIG_FILE = os.path.expanduser("~/.config/dt-pipeline/entities.conf")
 ENTITY_STATE_FILE = os.path.expanduser(
@@ -204,14 +236,36 @@ def run_bridge(ops):
     return out["results"]
 
 
-def load_skip_attendee_re():
-    pattern = DEFAULT_SKIP_ATTENDEE
-    if os.path.exists(CONFIG_FILE):
-        with open(CONFIG_FILE) as f:
-            for line in f:
-                line = line.strip()
-                if line.startswith("SKIP_ATTENDEE_PATTERN="):
-                    pattern = line.partition("=")[2].strip()
+def load_config():
+    """entities.conf as a dict. Shared with entity-filing.py, which reads its
+    own keys and ignores the rest, so adding a key here is safe.
+
+    A file that exists but cannot be read is fatal, not a warning: SKIP_CALENDARS
+    is a privacy control, so degrading to an empty dict would quietly brief a
+    calendar the user asked never to see. Absent entirely means never configured,
+    which is a different thing and fine."""
+    conf = {}
+    if not os.path.exists(CONFIG_FILE):
+        return conf
+    with open(CONFIG_FILE) as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, value = line.partition("=")
+            conf[key.strip()] = value.strip()
+    return conf
+
+
+def conf_list(conf, key):
+    """A comma-separated config value as a list of non-empty items."""
+    return [s.strip() for s in conf.get(key, "").split(",") if s.strip()]
+
+
+def load_skip_attendee_re(conf=None):
+    if conf is None:
+        conf = load_config()
+    pattern = conf.get("SKIP_ATTENDEE_PATTERN", DEFAULT_SKIP_ATTENDEE)
     if not pattern:
         return None
     try:
@@ -219,6 +273,156 @@ def load_skip_attendee_re():
     except re.error as exc:
         log.warning("bad SKIP_ATTENDEE_PATTERN regex, ignoring: %s", exc)
         return None
+
+
+def load_skip_calendars(conf):
+    return SKIP_CALENDARS | set(conf_list(conf, "SKIP_CALENDARS"))
+
+
+def person_keys(p):
+    """Every identifier a Person record is known by: name, aliases, email."""
+    keys = {norm(p["name"])}
+    keys |= {norm(a) for a in p.get("aliases", "").split(",") if a.strip()}
+    email = norm(p.get("md", {}).get("mdemail", "")).removeprefix("mailto:")
+    keys.add(email)
+    return {k for k in keys if k}
+
+
+def contact_keys(c):
+    """Every identifier a Contacts card is reachable by. Phones fold through
+    norm_handle so a `tel:` participant URL and a formatted card number agree."""
+    keys = {norm(c.get("name", "")), norm(c.get("nickname", ""))}
+    keys |= {norm(e) for e in c.get("emails") or []}
+    keys |= {norm_handle(p) for p in c.get("phones") or []}
+    return {k for k in keys if k}
+
+
+def md_flag(value):
+    """A flag set by script reads back as '1'; the same flag ticked in
+    DEVONthink's Info panel reads back as 'true'. Comparing against either
+    alone silently ignores flags set the other way."""
+    return str(value or "").strip().lower() in {"1", "true"}
+
+
+def is_suppressed(p):
+    return md_flag(p.get("md", {}).get("mdbriefingsuppressed", ""))
+
+
+def suppression_keys(people, contacts=()):
+    """Every identifier a BriefingSuppressed person could be written under.
+
+    The Person record is the single authority — a UUID, not a name, so the
+    policy cannot be defeated by a stale config line or lost with a deleted
+    file. The record's own fields are the vocabulary: filed name, explicit
+    aliases, email. A matched Contacts card only *widens* it (a card-only
+    nickname, a second address); any nickname whose suppression must be
+    guaranteed belongs on the record as an alias, not left to Contacts.
+
+    Bare first names are deliberately NOT synthesised: "Robin" would suppress
+    every unrelated Robin, silently punching a hole in a timeline that promises
+    to show the whole day. A first name earns a key only by being a recorded
+    alias.
+
+    Contacts absorption runs to a fixed point, not in one pass: a card reachable
+    only through an address learned from *another* card would otherwise be
+    included or missed depending on the order Contacts happened to return them.
+
+    A handle claimed by more than one card proves nothing about identity — a
+    household landline is on both partners' cards — so it never links a card in.
+    The shared number is still redacted (it is theirs too); what it must not do
+    is drag an unrelated person's name and address into the vocabulary."""
+    keys = set()
+    for p in people:
+        if is_suppressed(p):
+            keys |= person_keys(p)
+    if not keys:
+        return set()
+    cards = [contact_keys(c) for c in contacts]
+    claims = collections.Counter(k for ck in cards for k in ck)
+    growing = True
+    while growing:
+        growing = False
+        for ck in cards:
+            if ck <= keys:
+                continue
+            if any(claims[k] == 1 for k in ck & keys):
+                keys |= ck
+                growing = True
+    return keys
+
+
+def excluded_re(keys):
+    """Matches an excluded person's identifiers anywhere in free text.
+
+    Dropping them from the roster is not enough: an event title, an attendee
+    label and a record name are raw strings that no roster filter ever reads,
+    and a timeline that renders every event renders those verbatim.
+
+    The trailing boundary is `\\w`, not `[\\w']`, so a possessive still matches
+    ("Robin's flight" names Robin); an apostrophe there would exempt exactly the
+    form a personal calendar tends to use."""
+    if not keys:
+        return None
+    alt = "|".join(re.escape(k) for k in sorted(keys, key=len, reverse=True))
+    return re.compile(rf"(?<!\w)(?:{alt})(?!\w)")
+
+
+def names_excluded(text, ex_re):
+    return bool(ex_re and ex_re.search(norm(strip_symbols(text))))
+
+
+def phone_excluded(text, keys):
+    """A phone key is canonical digits, so it can never match the punctuation a
+    human (or EventKit's `tel:` URL) actually writes. Every phone-shaped run in
+    the text folds through norm_handle before it is judged."""
+    if not keys or not text:
+        return False
+    for run in PHONE_RUN_RE.findall(str(text)):
+        handle = norm_handle(run)
+        if handle and handle in keys:
+            return True
+    return False
+
+
+def text_excluded(text, ex_re, keys=()):
+    return names_excluded(text, ex_re) or phone_excluded(text, keys)
+
+
+def attendee_excluded(a, ex_re, keys):
+    """A phone participant can arrive in either field: EventKit gives a `tel:`
+    URL in the email slot, and a calendar client that resolved nothing puts the
+    bare number in the name."""
+    return text_excluded(f"{a['name']} {a['email']}", ex_re, keys)
+
+
+def redact_person(p, ex_re, keys=()):
+    """A visible person's own record can name a suppressed one — a role reading
+    "Assistant to <name>", a log bullet reading "Met <name> for lunch". Those
+    render into the daily note and the TRMNL snapshot, so the roster is scrubbed
+    at the boundary rather than at each of the places that renders it."""
+    if not ex_re:
+        return p
+    p = dict(p)
+    p["md"] = {k: ("" if isinstance(v, str) and text_excluded(v, ex_re, keys)
+                   else v)
+               for k, v in (p.get("md") or {}).items()}
+    body = p.get("body")
+    if body:
+        p["body"] = "\n".join(ln for ln in body.split("\n")
+                              if not text_excluded(ln, ex_re, keys))
+    return p
+
+
+def exclude_people(people):
+    """Drop everyone flagged BriefingSuppressed. Filtering at the roster
+    boundary is what makes the policy hold for person-derived output: Briefing,
+    LastContact bumps, Reconnect and Birthdays all read the roster, so none of
+    them can quietly reintroduce someone."""
+    kept = [p for p in people if not is_suppressed(p)]
+    if len(kept) != len(people):
+        log.info("suppressed %d people from the brief (BriefingSuppressed)",
+                 len(people) - len(kept))
+    return kept
 
 
 def real_attendees(ev, skip_re):
@@ -314,32 +518,70 @@ def recent_log_bullets(p, limit=3):
 def title_matches(people, title):
     """People whose name or alias appears in the event title. Personal
     calendars rarely carry structured attendees ("Call with Jake"), so the
-    title is a first-class matching surface, not a fallback."""
+    title is a first-class matching surface, not a fallback.
+
+    A key shared by two records identifies neither. Unlike an attendee, a title
+    carries no email to disambiguate with, so matching both would bump
+    LastContact on a person who was never there — match_person refuses the same
+    ambiguity, and a write path must not be more credulous than a read one."""
+    index = person_index(people)
     hay = f" {norm(title)} "
-    hits = []
+    spans = []
     for p in people:
         keys = [norm(p["name"])] + [norm(a) for a in p.get("aliases", "").split(",")]
         for k in keys:
-            if k and re.search(rf"(?<![a-z0-9]){re.escape(k)}(?![a-z0-9])", hay):
-                hits.append(p)
-                break
+            if not k or len(index.get(k, ())) != 1:
+                continue
+            for m in re.finditer(rf"(?<![a-z0-9]){re.escape(k)}(?![a-z0-9])", hay):
+                spans.append((m.start(), m.end(), p))
+    # "Call with Avery North" contains "Avery": one person is named, not two, so
+    # a span swallowed by a longer one loses. Every occurrence is judged on its
+    # own, because a name can appear both inside a longer one and standing alone
+    # ("Avery North and Avery" names two people, in either order).
+    hits = []
+    for p in people:
+        mine = [(s, e) for s, e, q in spans if q is p]
+        if any(not any(s2 <= s and e <= e2 and e2 - s2 > e - s
+                       for s2, e2, q in spans if q is not p)
+               for s, e in mine):
+            hits.append(p)
     return hits
 
 
-def brief_blocks(events, people, skip_re):
-    """Structured briefing blocks per briefable event: matched roster people
-    (attendee order, then title matches) and unmatched-attendee labels."""
+def strip_symbols(s):
+    """Emoji, dingbats and the zero-width joiners airlines pad titles with."""
+    s = re.sub(r"[​-‏﻿]", "", s or "")
+    s = "".join(c for c in s if not unicodedata.category(c).startswith("So"))
+    return re.sub(r"\s+", " ", s).strip()
+
+
+def brief_blocks(events, people, skip_re, excluded=(),
+                 skip_cals=SKIP_CALENDARS):
+    """One block per event on the day's timeline, in start order.
+
+    Every event is briefed, not only the ones with people: a day reads as a
+    day, and an event with nobody attached still says what it is. Blocks carry
+    matched roster people (attendee order, then title matches) and labels for
+    attendees who have no entity record yet.
+    """
     index = person_index(people)
+    ex_re = excluded_re(excluded)
     blocks = []
     for ev in events:
         if ev["all_day"] or ev["declined"]:
             continue
-        if ev["calendar"] in SKIP_CALENDARS:
+        if ev["calendar"] in skip_cals:
             continue
-        others = real_attendees(ev, skip_re)
-        by_title = title_matches(people, ev["title"])
-        if not others and not by_title:
+        if text_excluded(ev["title"], ex_re, excluded):
+            # The slot survives, the content does not: deleting it outright
+            # would leave a silent hole in a timeline that promises the day,
+            # and a redacted event must not leak its title, people or location.
+            blocks.append({"time": fmt_time(ev["start"]),
+                           "title": REDACTED_TITLE, "people": [],
+                           "unmatched": []})
             continue
+        others = [a for a in real_attendees(ev, skip_re)
+                  if not attendee_excluded(a, ex_re, excluded)]
         seen = set()
         matched = []
         unmatched = []
@@ -357,8 +599,9 @@ def brief_blocks(events, people, skip_re):
             else:
                 who = a["name"] or a["email"]
                 detail = f" ({a['email']})" if a["name"] and a["email"] else ""
+                seen.add(norm(who))
                 unmatched.append(f"{who}{detail}")
-        for p in by_title:
+        for p in title_matches(people, ev["title"]):
             if p["uuid"] in seen:
                 continue
             seen.add(p["uuid"])
@@ -373,40 +616,56 @@ def render_brief(blocks, today):
         return None
     out = []
     for b in blocks:
-        lines = [f"### {b['time']} — {b['title']}", ""]
+        body = []
         for p in b["people"]:
-            lines.append(person_summary_line(p))
-            lines.extend(recent_log_bullets(p))
+            body.append(person_summary_line(p))
+            body.extend(recent_log_bullets(p))
         if len(b["unmatched"]) <= UNMATCHED_LIST_MAX:
-            lines.extend(f"- {u} — no entity record yet"
-                         for u in b["unmatched"])
+            body.extend(f"- {u} — no entity record yet" for u in b["unmatched"])
         else:
-            lines.append(
-                f"- {len(b['unmatched'])} attendees without entity records")
+            body.append(f"- {len(b['unmatched'])} people without entity records")
+        lines = [f"### {b['time']} — {b['title']}"]
+        if body:
+            lines.append("")
+            lines.extend(body)
         out.append("\n".join(lines))
     return f"<!-- brief:{today} -->\n\n" + "\n\n".join(out)
 
 
-def build_brief(events, people, today, skip_re):
-    return render_brief(brief_blocks(events, people, skip_re), today)
+def load_people(include_bodies=True, contacts=()):
+    """The roster minus anyone suppressed, scrubbed of any mention of them, and
+    the identifiers they are known by — the caller needs those to redact raw
+    calendar text, which no roster filter ever reads."""
+    people = run_bridge(
+        [{"op": "dump_people", "include_bodies": include_bodies}])[0]
+    keys = suppression_keys(people, contacts)
+    ex_re = excluded_re(keys)
+    return [redact_person(p, ex_re, keys)
+            for p in exclude_people(people)], keys
 
 
-def contact_bumps(events, people, day, skip_re):
+def contact_bumps(events, people, day, skip_re, skip_cals=SKIP_CALENDARS,
+                  excluded=()):
     """One bump op per person per day. `day` is the fallback for a single-day
     dump; a range dump tags each event with its own date."""
     index = person_index(people)
+    ex_re = excluded_re(excluded)
     ops = []
     seen = set()
     for ev in events:
-        if ev["all_day"] or ev["declined"] or ev["calendar"] in SKIP_CALENDARS:
+        if ev["all_day"] or ev["declined"] or ev["calendar"] in skip_cals:
             continue
         when = ev.get("date") or day
         matched = [
             p for p in (match_person(index, a["name"], a["email"])
-                        for a in real_attendees(ev, skip_re))
+                        for a in real_attendees(ev, skip_re)
+                        if not attendee_excluded(a, ex_re, excluded))
             if p
         ]
-        matched.extend(title_matches(people, ev["title"]))
+        # A redacted title is not evidence: it is never read, so nobody is
+        # credited with contact from it. A structured attendee still is.
+        if not text_excluded(ev["title"], ex_re, excluded):
+            matched.extend(title_matches(people, ev["title"]))
         for p in matched:
             key = (p["uuid"], when)
             if key in seen:
@@ -682,7 +941,7 @@ def parked_lines(parked):
     return lines
 
 
-def review_backlog(today):
+def review_backlog(today, excluded=()):
     """Filing review backlog: pending/approved counts, the parked state-file
     dict, and each review group's UUID so the nudge can link straight to it.
     None when the bridge count failed (BridgeUnavailable still propagates)."""
@@ -698,11 +957,19 @@ def review_backlog(today):
     except Exception as exc:
         log.warning("could not count review proposals: %s", exc)
         return None
+    ex_re = excluded_re(excluded)
+    # parked_lines renders last_error too, and an extraction error quotes the
+    # text it choked on ("ambiguous person: <name>").
     pending = [c for c in children if c["name"] != "Approved"]
+    parked = {
+        u: i for u, i in parked_sources().items()
+        if not text_excluded(f"{i.get('name') or ''} {i.get('last_error') or ''}",
+                             ex_re, excluded)
+    }
     return {
         "pending": len(pending),
         "approved": len(approved),
-        "parked": parked_sources(),
+        "parked": parked,
         "review_uuid": (review_group or {}).get("uuid"),
         "approved_uuid": (approved_group or {}).get("uuid"),
     }
@@ -743,10 +1010,6 @@ def render_review(backlog, today):
                      f"— see `entity-filing` in the pipeline log")
     lines.extend(parked_lines(parked))
     return "\n".join(lines)
-
-
-def review_nudge(today):
-    return render_review(review_backlog(today), today)
 
 
 def journal_status_info(today, state, staged_count):
@@ -825,7 +1088,7 @@ def build_journal_status(today):
     return journal_status_lines(today, *loaded)
 
 
-def on_this_day_rows(today):
+def on_this_day_rows(today, excluded=()):
     """Anniversary resurfacing from metadata the pipeline already writes:
     records whose EventDate falls on this day in past years, plus the daily
     note from one year ago. Returns (rows, last_year_daily_or_None), or None
@@ -852,10 +1115,13 @@ def on_this_day_rows(today):
     except Exception as exc:
         log.warning("on-this-day lookup failed: %s", exc)
         return None
+    ex_re = excluded_re(excluded)
     rows = []
     for past, hits in zip(year_dates, results):
         back = t.year - date.fromisoformat(past).year
         for h in hits or []:
+            if text_excluded(h["name"], ex_re, excluded):
+                continue
             rows.append({"years": back, "name": h["name"], "uuid": h["uuid"],
                          "kind": h.get("documenttype") or ""})
     return rows, results[-1]
@@ -875,10 +1141,6 @@ def render_on_this_day(got, today):
         lines.append(f"- One year ago today: "
                      f"[{daily['name']}](x-devonthink-item://{daily['uuid']})")
     return "\n".join(lines) if rows or daily else None
-
-
-def build_on_this_day(today):
-    return render_on_this_day(on_this_day_rows(today), today)
 
 
 def person_snapshot(p):
@@ -968,7 +1230,7 @@ def push_snapshot():
         log.info("TRMNL push failed to launch: %s", exc)
 
 
-def backfill_contacts(today, days, skip_re, dry_run):
+def backfill_contacts(today, days, skip_re, dry_run, conf):
     """Replay past calendar days into LastContact. Meeting attendance is the
     only historical source of contact dates — Granola's copy of the calendar
     carries no attendees — and the daily run only ever looks at yesterday, so
@@ -979,13 +1241,16 @@ def backfill_contacts(today, days, skip_re, dry_run):
     if not cal.get("ok"):
         log.error("calendar unavailable: %s", cal.get("error"))
         return
-    people = run_bridge([{"op": "dump_people", "include_bodies": False}])[0]
+    cj = run_osascript(CONTACTS, [], timeout=60)
+    people, keys = load_people(include_bodies=False,
+                               contacts=cj.get("contacts") or [])
     if not people:
         log.info("no Person records yet, nothing to backfill")
         return
 
     latest = {}
-    for op in contact_bumps(cal["events"], people, end, skip_re):
+    for op in contact_bumps(cal["events"], people, end, skip_re,
+                            load_skip_calendars(conf), keys):
         if op["date"] > latest.get(op["uuid"], ""):
             latest[op["uuid"]] = op["date"]
     ops = [{"op": "bump_lastcontact", "uuid": u, "date": d}
@@ -1006,7 +1271,7 @@ def backfill_contacts(today, days, skip_re, dry_run):
              changed, len(ops), start, end)
 
 
-def backfill_messages(today, days, dry_run):
+def backfill_messages(today, days, dry_run, conf):
     """Replay Messages history into LastContact — the non-work contact
     signal the calendar never carries. Run once; the daily pass covers
     everything from then on."""
@@ -1019,7 +1284,8 @@ def backfill_messages(today, days, dry_run):
     if not cj.get("ok"):
         log.error("contacts unavailable: %s", cj.get("error"))
         return
-    people = run_bridge([{"op": "dump_people", "include_bodies": False}])[0]
+    people, _ = load_people(include_bodies=False,
+                            contacts=cj["contacts"])
     if not people:
         log.info("no Person records yet, nothing to backfill")
         return
@@ -1080,13 +1346,20 @@ def main():
             log.info("skipping: follower machine")
             return
 
-    skip_re = load_skip_attendee_re()
+    try:
+        conf = load_config()
+    except OSError as exc:
+        log.error("cannot read %s: %s — refusing to run, because SKIP_CALENDARS "
+                  "cannot be honored without it", CONFIG_FILE, exc)
+        sys.exit(1)
+    skip_re = load_skip_attendee_re(conf)
+    skip_cals = load_skip_calendars(conf)
 
     if backfill:
-        backfill_contacts(today, days, skip_re, dry_run)
+        backfill_contacts(today, days, skip_re, dry_run, conf)
         return
     if backfill_msgs:
-        backfill_messages(today, days, dry_run)
+        backfill_messages(today, days, dry_run, conf)
         return
 
     events = []
@@ -1109,15 +1382,19 @@ def main():
     except Exception as exc:
         log.warning("contacts query failed: %s", exc)
 
-    people = run_bridge([{"op": "dump_people"}])[0]
+    people, excluded = load_people(contacts=contacts)
+    if excluded and not contacts:
+        log.warning("Contacts unavailable while someone is BriefingSuppressed "
+                    "— a card-only nickname or address cannot be redacted from "
+                    "raw calendar text this run")
     log.info("loaded %d people, %d events, %d contacts",
              len(people), len(events), len(contacts))
 
     yesterday = (date.fromisoformat(today) - timedelta(days=1)).isoformat()
     try:
         ycal = run_osascript(CALENDAR, [yesterday], timeout=60)
-        bumps = contact_bumps(ycal["events"], people, yesterday, skip_re) \
-            if ycal.get("ok") else []
+        bumps = contact_bumps(ycal["events"], people, yesterday, skip_re,
+                              skip_cals, excluded) if ycal.get("ok") else []
     except Exception as exc:
         log.warning("yesterday's calendar query failed: %s", exc)
         bumps = []
@@ -1144,14 +1421,14 @@ def main():
     # Every section is upserted (not append-once): the 05:45/06:30/08:00
     # retries refresh a 05:15 brief built from incomplete calendar sync, and
     # a cleared review backlog removes its stale nudge (empty content).
-    blocks = brief_blocks(events, people, skip_re)
+    blocks = brief_blocks(events, people, skip_re, excluded, skip_cals)
     overdue = reconnect_overdue(people, today)
     bdays = birthday_rows(contacts, people, today)
-    backlog = review_backlog(today)
+    backlog = review_backlog(today, excluded)
     journal_loaded = load_journal_state()
     journal_info = (journal_status_info(today, *journal_loaded)
                     if journal_loaded else None)
-    otd = on_this_day_rows(today)
+    otd = on_this_day_rows(today, excluded)
 
     sections = [(BRIEF_HEADER, render_brief(blocks, today))]
     if weekly or date.fromisoformat(today).weekday() == 0:
