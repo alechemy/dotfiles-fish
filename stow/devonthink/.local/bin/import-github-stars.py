@@ -20,6 +20,7 @@ Usage:
 
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -35,8 +36,15 @@ INBOX_GROUP = "/00_INBOX"
 STATE_DIR = os.path.expanduser("~/.local/state/devonthink")
 STATE_FILE = os.path.join(STATE_DIR, "github-stars-imported.json")
 OLD_STATE_FILE = os.path.expanduser("~/.github-stars-dt-imported.json")
+STALL_FILE = os.path.join(STATE_DIR, "github-stars-stalls")
 LOG_FILE = os.path.expanduser("~/Library/Logs/github-stars-import.log")
 GH_BIN = "/opt/homebrew/bin/gh"
+GH_TIMEOUT = 30
+
+# A stalled tick is routine (the agent re-runs every 30 minutes and the import
+# is idempotent), so it stays quiet. An outage that survives this many
+# consecutive ticks is not routine and pages instead.
+STALL_ALERT_AFTER = 6
 
 DRY_RUN = "--dry-run" in sys.argv
 BACKFILL = "--backfill" in sys.argv
@@ -59,6 +67,8 @@ _COMPONENT = (
     if sys.stdout.isatty() or os.environ.get("PIPELINE_MANUAL") == "1"
     else "github-stars"
 )
+
+MANUAL_RUN = _COMPONENT.endswith("/manual")
 
 
 def log(msg):
@@ -172,15 +182,163 @@ def merge_pending(stars, retry, imported):
     ]
 
 
+def record_stall(reason, scheduled):
+    """Log a retryable fetch failure, escalating once it has outlived
+    STALL_ALERT_AFTER consecutive scheduled ticks.
+
+    Below the threshold the wording deliberately avoids dt-watchdog's failure
+    tokens: a lone stall on a job that re-ticks every 30 minutes loses nothing
+    and must not page. Above it, a WARNING pages (the watchdog dedups it to once
+    a day) so a persistent stall can't skip forever in silence.
+
+    Only scheduled runs touch the counter. A hand-run failure is exempt from the
+    watchdog (it logs as <component>/manual), so counting it would let six failed
+    --dry-run attempts make the next scheduled failure page as the seventh.
+    """
+    if not scheduled:
+        log(f"skipping: {reason}; retrying next run")
+        return
+
+    try:
+        with open(STALL_FILE) as f:
+            count = int(f.read().strip())
+    except FileNotFoundError:
+        count = 0
+    except (OSError, ValueError) as exc:
+        log(f"WARNING stall counter unreadable ({exc}); restarting the count")
+        count = 0
+    count += 1
+
+    try:
+        os.makedirs(STATE_DIR, exist_ok=True)
+        with open(STALL_FILE, "w") as f:
+            f.write(str(count))
+    except OSError as exc:
+        log(f"WARNING could not record the stall counter ({exc})")
+
+    if count >= STALL_ALERT_AFTER:
+        log(f"WARNING gh has not completed a fetch in {count} consecutive runs — {reason}")
+    else:
+        log(f"skipping: {reason}; retrying next run")
+
+
+def clear_stalls(scheduled):
+    """Reset the counter on every outcome that is not a retryable failure, so
+    "consecutive" keeps meaning consecutive."""
+    if not scheduled:
+        return
+    try:
+        os.unlink(STALL_FILE)
+    except FileNotFoundError:
+        pass
+    except OSError as exc:
+        log(f"WARNING could not clear the stall counter ({exc})")
+
+
 # ---------------------------------------------------------------------------
 # GitHub API
 # ---------------------------------------------------------------------------
 
 
-class FetchError(RuntimeError):
-    """A pagination request failed mid-fetch. The star list is incomplete, so
-    the run must import nothing rather than commit an earlier page and advance
-    the frontier past the repos it never saw."""
+class GhError(RuntimeError):
+    """Base for a failed gh invocation."""
+
+
+class GhUnavailable(GhError):
+    """The fetch failed in a way that retrying can fix — a stall, a transport
+    failure, a rate limit, a 5xx. This is the *only* outcome the stall counter
+    tracks: it counts consecutive retryable failures, not unreachability, so
+    every other outcome resets it."""
+
+
+class FetchError(GhError):
+    """A pagination request failed unretryably mid-fetch. The star list is
+    incomplete, so the run must import nothing rather than commit an earlier
+    page and advance the frontier past the repos it never saw."""
+
+
+class GhAuthError(GhError):
+    """gh has no usable credentials. Actionable by the user, so it pages."""
+
+
+class GhLocalError(GhError):
+    """gh is missing or unusable on this machine."""
+
+
+# gh's documented exit code for "no authentication configured". It never
+# reaches the network, so it is not a stall.
+GH_EXIT_NO_AUTH = 4
+
+_HTTP_STATUS_RE = re.compile(r"\(HTTP (\d{3})\)")
+
+# Transport failures gh surfaces as a bare Go error. Matching them explicitly
+# (rather than inferring "transient" from the *absence* of an HTTP status) keeps
+# an unrecognized statusless failure fatal instead of silently skipping forever.
+_TRANSPORT_MARKERS = (
+    "dial tcp",
+    "no such host",
+    "i/o timeout",
+    "tls handshake timeout",
+    "connection refused",
+    "connection reset",
+    "connection timed out",
+    "network is unreachable",
+    "network is down",
+    "no route to host",
+    "broken pipe",
+    "unexpected eof",
+    "context deadline exceeded",
+    "proxyconnect",
+    "server misbehaving",
+    "operation timed out",
+)
+
+
+def classify_gh_failure(returncode, stderr):
+    """Sort a failed `gh api` into "auth", "transient", or "fatal".
+
+    Order matters: the exit code settles missing credentials before any parsing,
+    an HTTP status decides the rest, and only a recognized transport marker
+    earns "transient". Anything left is fatal — an unknown failure must surface,
+    not masquerade as a retryable blip.
+    """
+    if returncode == GH_EXIT_NO_AUTH:
+        return "auth"
+
+    match = _HTTP_STATUS_RE.search(stderr)
+    if match:
+        code = int(match.group(1))
+        if code == 401:
+            return "auth"
+        if code in (408, 429) or code >= 500:
+            return "transient"
+        if code == 403 and "rate limit" in stderr.lower():
+            return "transient"
+        return "fatal"
+
+    lowered = stderr.lower()
+    if any(marker in lowered for marker in _TRANSPORT_MARKERS):
+        return "transient"
+    return "fatal"
+
+
+def run_gh(args):
+    """Run gh, converting a stall into GhUnavailable.
+
+    A timeout only proves gh did not finish — it must not reach the top-level
+    handler, which logs FATAL and pages the user via dt-watchdog.
+    """
+    try:
+        return subprocess.run(
+            [GH_BIN, *args],
+            capture_output=True,
+            text=True,
+            timeout=GH_TIMEOUT,
+        )
+    except subprocess.TimeoutExpired:
+        raise GhUnavailable(f"gh {args[0]} did not complete within {GH_TIMEOUT}s")
+    except OSError as exc:
+        raise GhLocalError(f"cannot run gh at {GH_BIN}: {exc}")
 
 
 def fetch_stars(imported, first_run):
@@ -193,7 +351,7 @@ def fetch_stars(imported, first_run):
     to avoid flooding the inbox. Use --backfill to import the full history.
 
     Raises FetchError if any page request fails, so a partial fetch is never
-    committed.
+    committed, or GhUnavailable if GitHub was never reached at all.
     """
     if first_run and not BACKFILL:
         cutoff = datetime.utcnow().replace(microsecond=0) - timedelta(hours=24)
@@ -213,20 +371,20 @@ def fetch_stars(imported, first_run):
         url = (
             f"/user/starred?per_page={per_page}&page={page}&sort=created&direction=desc"
         )
-        try:
-            result = subprocess.run(
-                [GH_BIN, "api", url, "-H", "Accept: application/vnd.github.star+json"],
-                capture_output=True,
-                text=True,
-                timeout=30,
-            )
-        except FileNotFoundError:
-            log(f"ERROR gh CLI not found at {GH_BIN}")
-            sys.exit(1)
+        result = run_gh(
+            ["api", url, "-H", "Accept: application/vnd.github.star+json"]
+        )
 
         if result.returncode != 0:
-            log(f"ERROR from GitHub API: {result.stderr.strip()}")
-            raise FetchError("GitHub API request failed")
+            stderr = result.stderr.strip()
+            kind = classify_gh_failure(result.returncode, stderr)
+            if kind == "auth":
+                raise GhAuthError(
+                    f"gh CLI not authenticated — run 'gh auth login' first ({stderr})"
+                )
+            if kind == "transient":
+                raise GhUnavailable(stderr)
+            raise FetchError(f"GitHub API request failed: {stderr}")
 
         try:
             stars = json.loads(result.stdout)
@@ -443,21 +601,11 @@ def main():
             log("skipping: this Mac is a pipeline follower (should-run-dt-driver)")
             return
 
-    # Verify gh CLI is authenticated
-    try:
-        auth_check = subprocess.run(
-            [GH_BIN, "auth", "status"],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-    except FileNotFoundError:
-        log(f"ERROR gh CLI not found at {GH_BIN}")
-        sys.exit(1)
-
-    if auth_check.returncode != 0:
-        log("ERROR gh CLI not authenticated — run 'gh auth login' first")
-        sys.exit(1)
+    # Deliberately no `gh auth status` preflight: it reports an unreachable
+    # network as "The token in keyring is invalid" — indistinguishable from a
+    # genuinely bad token — so it would send the user to re-authenticate a
+    # perfectly good one. The fetch below is the real test, and `gh api` does
+    # separate the two (HTTP 401 vs. a transport error carrying no status).
 
     if REBUILD_STATE:
         rebuilt = rebuild_ids_from_devonthink()
@@ -491,11 +639,23 @@ def main():
     first_run = len(imported) == 0
     log(f"Fetching starred repos ({len(imported)} already imported)")
 
+    scheduled = not (MANUAL_RUN or user_invoked)
+
     try:
         fetched = fetch_stars(imported, first_run)
-    except FetchError as exc:
-        log(f"Aborting: {exc}; nothing imported this run")
+    except GhUnavailable as exc:
+        record_stall(str(exc), scheduled)
         return
+    except (GhAuthError, GhLocalError) as exc:
+        clear_stalls(scheduled)
+        log(f"ERROR {exc}")
+        sys.exit(1)
+    except FetchError as exc:
+        clear_stalls(scheduled)
+        log(f"ERROR {exc}; nothing imported this run")
+        return
+
+    clear_stalls(scheduled)
 
     stars = merge_pending(fetched, retry, imported)
     if not stars:
