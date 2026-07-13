@@ -80,7 +80,12 @@ def body_bytes(payload):
 
 def _cap(key, n):
     def fn(p):
+        dropped = len(p[key]) - n
         del p[key][n:]
+        if dropped > 0:
+            # A screen that silently omits half the day reads as an empty
+            # afternoon, so every cap has to be able to say so.
+            p[f"more_{key}"] = p.get(f"more_{key}", 0) + dropped
     return fn
 
 
@@ -133,7 +138,8 @@ LADDER = [
     ("people:-role", _drop_person_field("role")),
     ("on_this_day:0", _cap("on_this_day", 0)),
     ("people:3", _cap_people(3)),
-    ("meetings:6", _cap("meetings", 6)),
+    # The widest template renders 5 (full.liquid); a 6th costs bytes nothing shows.
+    ("meetings:5", _cap("meetings", 5)),
     ("unmatched:0", _cap_unmatched(0)),
     ("birthdays:3", _cap("birthdays", 3)),
     ("reconnect:0", _cap("reconnect", 0)),

@@ -1,6 +1,13 @@
-<div class="layout layout--col layout--top">
+<div class="layout layout--col layout--center-y">
   <div class="w--full">
-    {% if meetings and meetings != empty %}
+    {% assign shown_meetings = meetings.size %}
+    {% if shown_meetings > 2 %}{% assign shown_meetings = 2 %}{% endif %}
+    {% assign hidden_meetings = meetings.size | minus: shown_meetings %}
+    {% if more_meetings %}{% assign hidden_meetings = hidden_meetings | plus: more_meetings %}{% endif %}
+    {% assign show_meetings = false %}
+    {% if meetings != empty %}{% assign show_meetings = true %}{% endif %}
+    {% if hidden_meetings > 0 %}{% assign show_meetings = true %}{% endif %}
+    {% if show_meetings %}
     {% for m in meetings limit: 2 %}
     <div class="item">
       <div class="meta"></div>
@@ -10,12 +17,15 @@
       </div>
     </div>
     {% endfor %}
+    {% if hidden_meetings > 0 %}
+    <span class="label label--small label--gray">+{{ hidden_meetings }} more later today</span>
+    {% endif %}
     {% else %}
     <div class="item">
       <div class="meta"></div>
       <div class="content">
-        <span class="title title--small">Clear calendar</span>
-        <span class="label label--small label--gray">No people-facing meetings</span>
+        <span class="title title--small">None</span>
+        <span class="label label--small label--gray">Nothing scheduled</span>
       </div>
     </div>
     {% endif %}

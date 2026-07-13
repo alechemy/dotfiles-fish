@@ -1,7 +1,14 @@
-<div class="layout layout--col layout--top">
+<div class="layout layout--col layout--center-y">
   <div class="w--full">
-    <span class="label label--medium">Meetings</span>
-    {% if meetings and meetings != empty %}
+    <span class="label label--medium">Today</span>
+    {% assign shown_meetings = meetings.size %}
+    {% if shown_meetings > 3 %}{% assign shown_meetings = 3 %}{% endif %}
+    {% assign hidden_meetings = meetings.size | minus: shown_meetings %}
+    {% if more_meetings %}{% assign hidden_meetings = hidden_meetings | plus: more_meetings %}{% endif %}
+    {% assign show_meetings = false %}
+    {% if meetings != empty %}{% assign show_meetings = true %}{% endif %}
+    {% if hidden_meetings > 0 %}{% assign show_meetings = true %}{% endif %}
+    {% if show_meetings %}
     {% for m in meetings limit: 3 %}
     <div class="item">
       <div class="meta"></div>
@@ -11,16 +18,26 @@
       </div>
     </div>
     {% endfor %}
+    {% if hidden_meetings > 0 %}
+    <span class="label label--small label--gray">+{{ hidden_meetings }} more later today</span>
+    {% endif %}
     {% else %}
     <div class="item">
       <div class="meta"></div>
       <div class="content">
-        <span class="title title--small">Clear calendar</span>
-        <span class="description">No people-facing meetings today.</span>
+        <span class="title title--small">None</span>
+        <span class="description">Nothing on the calendar today.</span>
       </div>
     </div>
     {% endif %}
-    {% if birthdays and birthdays != empty %}
+    {% assign shown_birthdays = birthdays.size %}
+    {% if shown_birthdays > 2 %}{% assign shown_birthdays = 2 %}{% endif %}
+    {% assign hidden_birthdays = birthdays.size | minus: shown_birthdays %}
+    {% if more_birthdays %}{% assign hidden_birthdays = hidden_birthdays | plus: more_birthdays %}{% endif %}
+    {% assign show_birthdays = false %}
+    {% if birthdays != empty %}{% assign show_birthdays = true %}{% endif %}
+    {% if hidden_birthdays > 0 %}{% assign show_birthdays = true %}{% endif %}
+    {% if show_birthdays %}
     <div class="divider"></div>
     <span class="label label--medium">Birthdays</span>
     {% for b in birthdays limit: 2 %}
@@ -32,12 +49,22 @@
       </div>
     </div>
     {% endfor %}
+    {% if hidden_birthdays > 0 %}
+    <span class="label label--small label--gray">+{{ hidden_birthdays }} more</span>
     {% endif %}
-    {% if reconnect and reconnect != empty %}
+    {% endif %}
+    {% assign rec_limit = 2 %}
+    {% if show_birthdays %}{% assign rec_limit = 1 %}{% endif %}
+    {% assign shown_reconnect = reconnect.size %}
+    {% if shown_reconnect > rec_limit %}{% assign shown_reconnect = rec_limit %}{% endif %}
+    {% assign hidden_reconnect = reconnect.size | minus: shown_reconnect %}
+    {% if more_reconnect %}{% assign hidden_reconnect = hidden_reconnect | plus: more_reconnect %}{% endif %}
+    {% assign show_reconnect = false %}
+    {% if reconnect != empty %}{% assign show_reconnect = true %}{% endif %}
+    {% if hidden_reconnect > 0 %}{% assign show_reconnect = true %}{% endif %}
+    {% if show_reconnect %}
     <div class="divider"></div>
     <span class="label label--medium">Reconnect</span>
-    {% assign rec_limit = 2 %}
-    {% if birthdays and birthdays != empty %}{% assign rec_limit = 1 %}{% endif %}
     {% for r in reconnect limit: rec_limit %}
     <div class="item">
       <div class="meta"></div>
@@ -47,6 +74,9 @@
       </div>
     </div>
     {% endfor %}
+    {% if hidden_reconnect > 0 %}
+    <span class="label label--small label--gray">+{{ hidden_reconnect }} more overdue</span>
+    {% endif %}
     {% endif %}
   </div>
 </div>
