@@ -69,8 +69,22 @@ sketchybar --add item volume right \
   click_script="$PLUGIN_DIR/volume_click.sh" \
   --subscribe volume volume_change display_change
 
-# Aerospace Workspace Indicators (explicit 1-4; added right-to-left so they render 1..4)
+# Aerospace Workspace Indicators (explicit 1-5; added right-to-left so they render 1..5)
 sketchybar --add event aerospace_workspace_change
+
+sketchybar --add item space.5 right \
+  --subscribe space.5 aerospace_workspace_change display_change \
+  --set space.5 \
+  background.color=0x44ffffff \
+  background.corner_radius=5 \
+  background.height=25 \
+  background.drawing=off \
+  icon="✏️" \
+  label="5" \
+  label.padding_left=7 \
+  label.padding_right=7 \
+  click_script="aerospace workspace 5" \
+  script="$PLUGIN_DIR/aerospace.sh 5"
 
 sketchybar --add item space.4 right \
   --subscribe space.4 aerospace_workspace_change display_change \
