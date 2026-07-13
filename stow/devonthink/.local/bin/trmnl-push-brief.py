@@ -110,7 +110,10 @@ def _cap_unmatched(n):
 def _cap_people(n):
     def fn(p):
         for m in p["meetings"]:
-            del m["people"][n:]
+            extra = len(m["people"]) - n
+            if extra > 0:
+                del m["people"][n:]
+                m["more_people"] = m.get("more_people", 0) + extra
     return fn
 
 

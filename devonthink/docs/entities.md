@@ -158,9 +158,17 @@ still briefed and still bumped. Lifecycle and privacy are different policies.)
 It takes **two** mechanisms, and it needs both. Getting this wrong is easy and the
 failure is silent.
 
-1. **Roster drop** (`load_people()`). Flagged people are removed before any
-   person-derived consumer sees them, which silences `Briefing`, `Reconnect`,
-   `Birthdays`, and `LastContact` bumps in one place.
+1. **Roster rejection.** Flagged people are rejected by every person-derived
+   consumer — `match_person`, `match_contact`, `title_matches`,
+   `reconnect_overdue` — which silences `Briefing`, `Reconnect`, `Birthdays`,
+   and `LastContact` bumps.
+
+   They are *not* deleted from the roster, and that is deliberate. A suppressed
+   record still **owns its keys**: an alias it shares with a visible person must
+   stay ambiguous. Drop it and the visible person becomes sole owner of that
+   alias — at which point the suppressed person's own Contacts card resolves to
+   them, handing over their birthday and their Messages handle. Ambiguity is
+   computed against the *whole* roster; rejection happens at the match sites.
 
 2. **Text redaction** (`suppression_keys` → `excluded_re` / `names_excluded`).
    Filtering the roster **cannot redact raw calendar data.** An event title, an
@@ -195,6 +203,16 @@ folds to the last 10), so it can never match the punctuation a human actually
 writes. Every phone-shaped run in a title, an attendee name, or an attendee email
 is therefore folded through `norm_handle` before it is judged — `Call +1 (212)
 555-0101` redacts, and a flight number does not.
+
+`norm()` **casefolds**, it does not lowercase. Only casefold folds the case pairs
+that are not one-to-one, so `STRASSE` and `Straße` reach the same key; with
+`lower()`, a suppressed name could be written past its own redaction just by
+shouting it.
+
+**Contacts is load-bearing, so its failure is fatal.** The card carries the
+nickname, the second address and the phone the record never stores — half the
+vocabulary. If the Contacts query fails while anyone is flagged, the run exits
+non-zero rather than briefing with identifiers it cannot recognize.
 
 Two boundaries matter, and both were bugs once:
 

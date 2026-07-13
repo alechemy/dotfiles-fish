@@ -21,7 +21,10 @@
             {% assign extra = m.unmatched | join: " · " %}
             {% if who == "" %}{% assign who = extra %}{% else %}{% assign who = who | append: " · " | append: extra %}{% endif %}
           {% endif %}
-          {% if m.more_unmatched %}{% assign who = who | append: " +" | append: m.more_unmatched %}{% endif %}
+          {% assign hidden_who = 0 %}
+          {% if m.more_people %}{% assign hidden_who = hidden_who | plus: m.more_people %}{% endif %}
+          {% if m.more_unmatched %}{% assign hidden_who = hidden_who | plus: m.more_unmatched %}{% endif %}
+          {% if hidden_who > 0 %}{% assign who = who | append: " +" | append: hidden_who %}{% endif %}
           {% if who != "" %}<span class="description" data-clamp="1">{{ who }}</span>{% endif %}
           <div class="flex gap--xsmall">
             <span class="label label--small label--underline">{{ m.time }}</span>

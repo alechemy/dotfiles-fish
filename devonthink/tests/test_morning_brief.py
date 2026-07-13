@@ -666,7 +666,7 @@ class BriefingSuppressed(unittest.TestCase):
         self.assertIn("wen", keys)
         self.assertIn("wendy", keys)
         self.assertIn("wb@x.com", keys)
-        self.assertEqual([p["name"] for p in mb.exclude_people(self.people)],
+        self.assertEqual([p["name"] for p in [p for p in self.people if not mb.is_suppressed(p)]],
                          ["Priya Raman"])
 
     def test_a_bare_first_name_is_never_synthesised(self):
@@ -689,14 +689,14 @@ class BriefingSuppressed(unittest.TestCase):
     def test_nobody_flagged_keeps_everyone(self):
         people = [person("Priya Raman")]
         self.assertEqual(mb.suppression_keys(people), set())
-        self.assertEqual(len(mb.exclude_people(people)), 1)
+        self.assertEqual(len([p for p in people if not mb.is_suppressed(p)]), 1)
 
     def test_suppressed_person_never_reaches_reconnect(self):
         people = [person("Wendell Boon", relationship="friend",
                          lastcontact="2020-01-01", entitystatus="active",
                          briefingsuppressed="1")]
         self.assertEqual(
-            mb.reconnect_overdue(mb.exclude_people(people), "2026-07-13"), [])
+            mb.reconnect_overdue([p for p in people if not mb.is_suppressed(p)], "2026-07-13"), [])
 
 
 class LoadConfig(unittest.TestCase):
@@ -770,7 +770,7 @@ class ExcludedPersonNeverReachesOutput(unittest.TestCase):
                          briefingsuppressed="1")]
         keys = mb.suppression_keys(people)
         ops = mb.contact_bumps([event("Dinner with Tamsin")],
-                               mb.exclude_people(people), "2026-07-13",
+                               [p for p in people if not mb.is_suppressed(p)], "2026-07-13",
                                ROOM_RE, mb.SKIP_CALENDARS, keys)
         self.assertEqual(ops, [])
 
@@ -817,7 +817,7 @@ class SuppressedNameInSomeoneElsesRecord(unittest.TestCase):
             "- 2026-05-02 — Shipped the reporting service.\n")
         self.ex_re = mb.excluded_re(mb.suppression_keys(self.roster))
         self.visible = mb.redact_person(
-            mb.exclude_people(self.roster)[0], self.ex_re)
+            [p for p in self.roster if not mb.is_suppressed(p)][0], self.ex_re)
 
     def test_a_field_naming_them_is_dropped(self):
         self.assertEqual(self.visible["md"]["mdrole"], "")
@@ -883,6 +883,72 @@ class SuppressionKeyClosure(unittest.TestCase):
         keys = mb.suppression_keys(self.people(), [self.CARD, other])
         self.assertNotIn("pree", keys)
         self.assertNotIn("pr@x.com", keys)
+
+
+class UnicodeCaseFolding(unittest.TestCase):
+    def test_a_case_pair_that_is_not_one_to_one_still_folds(self):
+        """lower() leaves "Straße" as "straße", so "STRASSE" would sail past the
+        redaction. Only casefold() folds the pair."""
+        self.assertEqual(mb.norm("Test Straße"), mb.norm("Test STRASSE"))
+        people = [person("Test Straße", briefingsuppressed="1")]
+        keys = mb.suppression_keys(people)
+        ex_re = mb.excluded_re(keys)
+        for title in ["Call with Test STRASSE", "Call with Test Straße",
+                      "call with test strasse"]:
+            self.assertTrue(mb.text_excluded(title, ex_re, keys), title)
+
+    def test_a_merely_similar_name_still_does_not_match(self):
+        people = [person("Test Straße", briefingsuppressed="1")]
+        keys = mb.suppression_keys(people)
+        self.assertFalse(mb.text_excluded("Call with Testa Strassen",
+                                          mb.excluded_re(keys), keys))
+
+
+class SuppressedRecordsStayInTheIndex(unittest.TestCase):
+    """A suppressed person still owns their keys. Dropping them from the roster
+    would promote a visible person to sole owner of a shared alias, and the
+    suppressed person's Contacts card would then resolve to them — handing over
+    their birthday and their Messages handle."""
+
+    def setUp(self):
+        self.roster = [
+            person("Robin Sandoval", aliases="Robin", email="rs@x.com",
+                   briefingsuppressed="1"),
+            person("Robin Chen", aliases="Robin", relationship="friend",
+                   lastcontact="2020-01-01"),
+        ]
+        self.index = mb.person_index(self.roster)
+
+    def test_a_shared_alias_stays_ambiguous(self):
+        self.assertEqual(len(self.index["robin"]), 2)
+        self.assertIsNone(mb.match_person(self.index, "Robin", ""))
+
+    def test_their_contacts_card_resolves_to_nobody(self):
+        card = contact("Robin S", nickname="Robin", phones=["555-0100"])
+        self.assertIsNone(mb.match_contact(self.index, card))
+
+    def test_a_card_matching_them_uniquely_also_resolves_to_nobody(self):
+        card = contact("Robin Sandoval", emails=["rs@x.com"])
+        self.assertIsNone(mb.match_contact(self.index, card))
+
+    def test_they_never_reach_reconnect(self):
+        overdue = mb.reconnect_overdue(self.roster, "2026-12-01")
+        self.assertNotIn("Robin Sandoval", [p["name"] for _, _, p in overdue])
+
+    def test_they_never_match_a_title(self):
+        got = mb.title_matches(self.roster, "Call with Robin Sandoval")
+        self.assertEqual(got, [])
+
+    def test_they_never_take_a_lastcontact_bump(self):
+        ops = mb.contact_bumps(
+            [event("Sync", [attendee("Robin Sandoval", "rs@x.com")])],
+            self.roster, "2026-07-13", ROOM_RE)
+        self.assertEqual(ops, [])
+
+    def test_load_people_keeps_them_so_the_caller_can_fail_closed(self):
+        """main() refuses to brief when Contacts is unavailable and anyone is
+        suppressed, which it can only detect if they are still in the list."""
+        self.assertTrue(any(mb.is_suppressed(p) for p in self.roster))
 
 
 class SuppressedPhoneInFreeText(unittest.TestCase):

@@ -413,18 +413,6 @@ def redact_person(p, ex_re, keys=()):
     return p
 
 
-def exclude_people(people):
-    """Drop everyone flagged BriefingSuppressed. Filtering at the roster
-    boundary is what makes the policy hold for person-derived output: Briefing,
-    LastContact bumps, Reconnect and Birthdays all read the roster, so none of
-    them can quietly reintroduce someone."""
-    kept = [p for p in people if not is_suppressed(p)]
-    if len(kept) != len(people):
-        log.info("suppressed %d people from the brief (BriefingSuppressed)",
-                 len(people) - len(kept))
-    return kept
-
-
 def real_attendees(ev, skip_re):
     """Other humans on an event. Rooms and resources are indistinguishable
     from people on every EventKit field under Exchange, so they are excluded
@@ -442,9 +430,12 @@ def real_attendees(ev, skip_re):
 
 
 def norm(s):
+    """casefold, not lower: only casefold folds the case *pairs* that are not
+    one-to-one, so "STRASSE" and "Straße" reach the same key and a suppressed
+    name cannot be written past its own redaction."""
     s = unicodedata.normalize("NFKD", s or "")
     s = "".join(c for c in s if not unicodedata.combining(c))
-    return re.sub(r"\s+", " ", s).strip().lower()
+    return re.sub(r"\s+", " ", s).strip().casefold()
 
 
 def md_enum(value):
@@ -476,7 +467,9 @@ def match_person(index, name, email):
     for key in (norm(email), norm(name)):
         hits = index.get(key)
         if key and hits:
-            return hits[0] if len(hits) == 1 else None
+            if len(hits) != 1 or is_suppressed(hits[0]):
+                return None
+            return hits[0]
     return None
 
 
@@ -528,6 +521,8 @@ def title_matches(people, title):
     hay = f" {norm(title)} "
     spans = []
     for p in people:
+        if is_suppressed(p):
+            continue
         keys = [norm(p["name"])] + [norm(a) for a in p.get("aliases", "").split(",")]
         for k in keys:
             if not k or len(index.get(k, ())) != 1:
@@ -633,15 +628,24 @@ def render_brief(blocks, today):
 
 
 def load_people(include_bodies=True, contacts=()):
-    """The roster minus anyone suppressed, scrubbed of any mention of them, and
-    the identifiers they are known by — the caller needs those to redact raw
-    calendar text, which no roster filter ever reads."""
+    """The roster, scrubbed of any mention of a suppressed person, and the
+    identifiers those people are known by — the caller needs those to redact raw
+    calendar text, which no roster filter ever reads.
+
+    Suppressed records stay IN the list on purpose. They still own their keys, so
+    an alias they share with a visible person stays ambiguous; dropping them here
+    would silently promote the other person to sole owner of that alias, and the
+    suppressed person's Contacts card would then resolve to them — handing over
+    their birthday and their Messages handle. Every consumer rejects them
+    instead: match_person, match_contact, title_matches, reconnect_overdue."""
     people = run_bridge(
         [{"op": "dump_people", "include_bodies": include_bodies}])[0]
     keys = suppression_keys(people, contacts)
     ex_re = excluded_re(keys)
-    return [redact_person(p, ex_re, keys)
-            for p in exclude_people(people)], keys
+    if keys:
+        log.info("suppressed %d people from the brief (BriefingSuppressed)",
+                 sum(1 for p in people if is_suppressed(p)))
+    return [redact_person(p, ex_re, keys) for p in people], keys
 
 
 def contact_bumps(events, people, day, skip_re, skip_cals=SKIP_CALENDARS,
@@ -682,6 +686,8 @@ def reconnect_overdue(people, today):
     today_d = date.fromisoformat(today)
     overdue = []
     for p in people:
+        if is_suppressed(p):
+            continue
         md = p.get("md", {})
         status = md_enum(md.get("mdentitystatus", "")) or "active"
         if status not in ENTITY_STATUSES:
@@ -760,7 +766,9 @@ def match_contact(index, contact):
     for key in (norm(k) for k in keys):
         hits = index.get(key)
         if key and hits:
-            return hits[0] if len(hits) == 1 else None
+            if len(hits) != 1 or is_suppressed(hits[0]):
+                return None
+            return hits[0]
     return None
 
 
@@ -1244,6 +1252,10 @@ def backfill_contacts(today, days, skip_re, dry_run, conf):
     cj = run_osascript(CONTACTS, [], timeout=60)
     people, keys = load_people(include_bodies=False,
                                contacts=cj.get("contacts") or [])
+    if not cj.get("ok") and any(is_suppressed(p) for p in people):
+        log.error("contacts unavailable while someone is BriefingSuppressed — "
+                  "refusing to backfill: %s", cj.get("error"))
+        return
     if not people:
         log.info("no Person records yet, nothing to backfill")
         return
@@ -1373,22 +1385,31 @@ def main():
         log.warning("calendar query failed: %s", exc)
 
     contacts = []
+    contacts_ok = False
     try:
         cj = run_osascript(CONTACTS, [], timeout=60)
         if cj.get("ok"):
             contacts = cj["contacts"]
+            contacts_ok = True
         else:
             log.warning("contacts unavailable: %s", cj.get("error"))
     except Exception as exc:
         log.warning("contacts query failed: %s", exc)
 
     people, excluded = load_people(contacts=contacts)
-    if excluded and not contacts:
-        log.warning("Contacts unavailable while someone is BriefingSuppressed "
-                    "— a card-only nickname or address cannot be redacted from "
-                    "raw calendar text this run")
-    log.info("loaded %d people, %d events, %d contacts",
-             len(people), len(events), len(contacts))
+    if not contacts_ok and any(is_suppressed(p) for p in people):
+        # Contacts is half the redaction vocabulary — the card carries the
+        # nickname, the second address and the phone the record never stores. A
+        # brief built without it would print identifiers it cannot recognize, so
+        # this fails closed rather than degrading.
+        log.error("Contacts unavailable while someone is BriefingSuppressed — "
+                  "refusing to brief, because their card-only nickname, email "
+                  "or phone cannot be redacted from raw calendar text")
+        sys.exit(1)
+    log.info("loaded %d people (%d suppressed), %d events, %d contacts",
+             sum(1 for p in people if not is_suppressed(p)),
+             sum(1 for p in people if is_suppressed(p)), len(events),
+             len(contacts))
 
     yesterday = (date.fromisoformat(today) - timedelta(days=1)).isoformat()
     try:

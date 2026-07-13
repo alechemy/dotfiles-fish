@@ -166,5 +166,34 @@ class StateRoundtrip(unittest.TestCase):
                 tp.STATE_FILE = old
 
 
+class OmittedRowsAreCounted(unittest.TestCase):
+    """A screen that silently omits half a meeting's attendees reads as a small
+    meeting, so every cap has to be able to say what it dropped."""
+
+    def test_capping_attendees_records_how_many_were_dropped(self):
+        snap = snapshot(meetings=1, people=9)
+        tp._cap_people(3)(snap)
+        m = snap["meetings"][0]
+        self.assertEqual(len(m["people"]), 3)
+        self.assertEqual(m["more_people"], 6)
+
+    def test_capping_below_the_count_records_nothing(self):
+        snap = snapshot(meetings=1, people=2)
+        tp._cap_people(3)(snap)
+        self.assertNotIn("more_people", snap["meetings"][0])
+
+    def test_the_cap_is_idempotent(self):
+        snap = snapshot(meetings=1, people=9)
+        tp._cap_people(3)(snap)
+        tp._cap_people(3)(snap)
+        self.assertEqual(snap["meetings"][0]["more_people"], 6)
+
+    def test_a_capped_list_reports_its_own_overflow(self):
+        snap = snapshot(meetings=8)
+        tp._cap("meetings", 5)(snap)
+        self.assertEqual(len(snap["meetings"]), 5)
+        self.assertEqual(snap["more_meetings"], 3)
+
+
 if __name__ == "__main__":
     unittest.main()
