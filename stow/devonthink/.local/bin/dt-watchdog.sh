@@ -128,7 +128,7 @@ if [[ "$IS_DRIVER" == 1 ]]; then
     # left in place) sits unnoticed until the next watcher restart.
     while IFS= read -r stuck; do
         surface_line "stale Boox export awaiting import: $(basename "$stuck")"
-    done < <(find "$HOME/Dropbox (Maestral)/onyx/Go103/Notebooks" -type f -name '*.pdf' -mmin +15 2>/dev/null || true)
+    done < <(find "$HOME/Dropbox (Maestral)/onyx/NoteMax/Notebooks" -type f -name '*.pdf' -mmin +15 2>/dev/null || true)
 fi
 
 # ── 2. Ensure DEVONthink is running ──────────────────────────────────────────

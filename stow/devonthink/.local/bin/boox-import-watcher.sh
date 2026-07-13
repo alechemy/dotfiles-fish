@@ -11,7 +11,7 @@
 
 set -euo pipefail
 
-WATCH_DIR="$HOME/Dropbox (Maestral)/onyx/Go103/Notebooks"
+WATCH_DIR="$HOME/Dropbox (Maestral)/onyx/NoteMax/Notebooks"
 STAGER="$HOME/.local/bin/boox-stage.sh"
 PIPELINE_LOG="$HOME/.local/bin/pipeline-log"
 
@@ -74,12 +74,13 @@ wait_for_stable_size() {
     return 0
 }
 
-# An unnamed notebook on the Boox is exported as "Notebook-<n>.pdf", where <n> is
-# the device's incrementing counter. These are throwaway quick notes the user
-# never titled, so the watcher drops them instead of importing — naming a note on
-# the device is the deliberate signal that it should enter DEVONthink.
+# An unnamed notebook on the Boox is exported as "<Template>-<n>.pdf", where
+# <Template> is the notebook's template type and <n> the device's incrementing
+# counter. These are throwaway quick notes the user never titled, so the watcher
+# drops them instead of importing — naming a note on the device is the deliberate
+# signal that it should enter DEVONthink.
 is_untitled_notebook() {
-    [[ "$(basename "$1" .pdf)" =~ ^Notebook-[0-9]+$ ]]
+    [[ "$(basename "$1" .pdf)" =~ ^(Notebook|Infinite)-[0-9]+$ ]]
 }
 
 # Stage one .pdf: wait for quiescence, then hand off to boox-stage.sh. Skips

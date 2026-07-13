@@ -9,9 +9,9 @@ for markdown, bookmarks, and other non-handwritten record types.
 ## Flow
 
 1. `boox-import-watcher.sh` hands every named `.pdf` export to
-   `boox-stage.sh` (untitled `Notebook-<n>` exports are deleted — naming a
-   notebook on the device is the deliberate signal that it enters
-   DEVONthink).
+   `boox-stage.sh` (untitled `Notebook-<n>` / `Infinite-<n>` exports are
+   deleted — naming a notebook on the device is the deliberate signal that
+   it enters DEVONthink).
 2. `boox-stage.sh` byte-hashes the export (the Boox re-emits unchanged
    notebooks on every sync), short-circuits against the done marker and
    any already-staged copy, then atomically stages it in
