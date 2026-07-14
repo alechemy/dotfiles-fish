@@ -447,11 +447,14 @@ class PersonIndexEmail(unittest.TestCase):
                 mb.match_person(index, "", "jane.doe@example.com"), p, stored)
 
 
-class RecentLogBullets(unittest.TestCase):
-    def body_person(self, *bullets):
-        p = person("Bob")
+class NewsBullets(unittest.TestCase):
+    def body_person(self, *bullets, **kw):
+        p = person("Bob", **kw)
         p["body"] = "# Bob\n\n## Biographical Log\n\n" + "\n".join(bullets)
         return p
+
+    def news(self, p, told=None, **kw):
+        return mb.news_bullets(p, set() if told is None else told, **kw)
 
     def test_selects_newest_by_date_not_append_order(self):
         """A backlog drain appends old facts after current ones; the brief
@@ -462,7 +465,7 @@ class RecentLogBullets(unittest.TestCase):
             "- 2024-01-01 — backfilled old fact.",
             "- 2024-02-01 — another old fact.",
         )
-        got = mb.recent_log_bullets(p, limit=2)
+        got = self.news(p, limit=2)
         self.assertEqual([ln.strip()[2:12] for ln in got],
                          ["2026-06-01", "2026-07-01"])
 
@@ -471,7 +474,7 @@ class RecentLogBullets(unittest.TestCase):
             "- 2026-07-01 — later fact filed first.",
             "- 2026-06-01 — earlier fact filed second.",
         )
-        got = mb.recent_log_bullets(p, limit=2)
+        got = self.news(p, limit=2)
         self.assertEqual([ln.strip()[2:12] for ln in got],
                          ["2026-07-01", "2026-06-01"])
 
@@ -481,17 +484,62 @@ class RecentLogBullets(unittest.TestCase):
             "prose line",
             "- 2026-06-01 — real fact.",
         )
-        self.assertEqual(len(mb.recent_log_bullets(p)), 1)
+        self.assertEqual(len(self.news(p)), 1)
 
     def test_strips_fact_provenance_markers(self):
         p = self.body_person(
             "- 2026-06-01 — moved. ([source](x-devonthink-item://S))"
             " <!-- fact:ab12cd34 -->",
         )
-        got = mb.recent_log_bullets(p)
+        got = self.news(p)
         self.assertEqual(len(got), 1)
         self.assertNotIn("fact:", got[0])
         self.assertIn("moved.", got[0])
+
+    def test_a_fact_older_than_your_last_meeting_is_not_news(self):
+        """The complaint that started this: an April note about a colleague you
+        sit with weekly, resurfacing every week in July."""
+        p = self.body_person("- 2026-04-16 — took a sick day.",
+                             lastcontact="2026-07-10")
+        self.assertEqual(self.news(p), [])
+
+    def test_a_fact_filed_since_you_last_met_is_news(self):
+        p = self.body_person("- 2026-07-13 — moved to Denver.",
+                             lastcontact="2026-07-10")
+        self.assertEqual(len(self.news(p)), 1)
+
+    def test_a_fact_from_the_day_you_last_met_is_still_news(self):
+        """It came out of that meeting; you have not been told it yet."""
+        p = self.body_person("- 2026-07-10 — is changing teams.",
+                             lastcontact="2026-07-10")
+        self.assertEqual(len(self.news(p)), 1)
+
+    def test_someone_you_have_never_met_has_no_old_news(self):
+        p = self.body_person("- 2024-01-01 — founded the company.")
+        self.assertEqual(len(self.news(p)), 1)
+
+    def test_an_unparseable_last_contact_hides_nothing(self):
+        p = self.body_person("- 2024-01-01 — founded the company.",
+                             lastcontact="last spring")
+        self.assertEqual(len(self.news(p)), 1)
+
+    def test_a_fact_already_told_today_is_not_told_again(self):
+        """The same fact under both meetings a person attends today."""
+        p = self.body_person("- 2026-07-13 — moved to Denver.",
+                             lastcontact="2026-07-10")
+        told = set()
+        self.assertEqual(len(self.news(p, told)), 1)
+        self.assertEqual(self.news(p, told), [])
+
+    def test_one_fact_filed_to_two_people_is_told_once(self):
+        marker = " <!-- fact:ab12cd34 -->"
+        told = set()
+        a = self.body_person("- 2026-07-13 — closed the Acme deal." + marker,
+                             lastcontact="2026-07-10")
+        b = self.body_person("- 2026-07-13 — closed the Acme deal." + marker,
+                             lastcontact="2026-07-10")
+        self.assertEqual(len(self.news(a, told)), 1)
+        self.assertEqual(self.news(b, told), [])
 
 
 class RenderReview(unittest.TestCase):
@@ -842,7 +890,7 @@ class SuppressedNameInSomeoneElsesRecord(unittest.TestCase):
         self.assertEqual(self.visible["md"]["mdcity"], "Chicago")
 
     def test_a_log_bullet_naming_them_is_dropped(self):
-        bullets = mb.recent_log_bullets(self.visible)
+        bullets = mb.news_bullets(self.visible, set())
         self.assertFalse(any("Avery" in b for b in bullets), bullets)
         self.assertTrue(any("reporting service" in b for b in bullets))
 
@@ -1044,6 +1092,19 @@ class TitleMatchAmbiguity(unittest.TestCase):
         got = mb.title_matches(people, "Call with Jordan")
         self.assertEqual([p["name"] for p in got], ["Jordan Vale"])
 
+    def test_a_bare_alias_does_not_claim_an_unknown_full_name(self):
+        people = [person("Jordan Vale", aliases="Jordan")]
+        got = mb.title_matches(people, "Meeting with Jordan Pike")
+        self.assertEqual(got, [])
+        self.assertEqual(
+            mb.contact_bumps([event("Meeting with Jordan Pike")], people,
+                             "2026-07-13", ROOM_RE), [])
+
+    def test_a_standalone_alias_still_matches_beside_an_unknown_full_name(self):
+        people = [person("Jordan Vale", aliases="Jordan")]
+        got = mb.title_matches(people, "Jordan Pike and Jordan")
+        self.assertEqual([p["name"] for p in got], ["Jordan Vale"])
+
     def test_a_span_swallowed_by_a_longer_name_loses(self):
         """"Call with Avery North" names one person, not two — the record aliased
         "Avery" is not in the room, and bumping them would be a false write."""
@@ -1120,6 +1181,68 @@ class SeriesDetection(unittest.TestCase):
         self.assertEqual(mb.repeat_series(hist, self.TODAY), set())
 
 
+class BriefNews(unittest.TestCase):
+    """The roster ages, the news does not: a standing meeting drops who is in
+    the room but keeps what has been filed about them since you last met."""
+
+    def setUp(self):
+        self.priya = person("Priya Raman", aliases="Priya", email="p@x.com",
+                            lastcontact="2026-07-10")
+        self.priya["body"] = ("## Biographical Log\n\n"
+                              "- 2026-04-01 — old news. <!-- fact:aaaa1111 -->\n"
+                              "- 2026-07-13 — moved to Denver."
+                              " <!-- fact:bbbb2222 -->")
+        self.people = [self.priya]
+
+    def blocks(self, events, **kw):
+        return mb.brief_blocks(events, self.people, ROOM_RE, set(), **kw)
+
+    def rendered(self, events, **kw):
+        return mb.render_brief(self.blocks(events, **kw), "2026-07-14") or ""
+
+    def test_a_repeat_occurrence_still_carries_the_news(self):
+        ev = event("Weekly Sync", [attendee("Priya Raman", "p@x.com")])
+        got = self.rendered([ev], repeats={mb.series_key(ev)})
+        self.assertIn("moved to Denver", got)
+        self.assertNotIn("old news", got)
+
+    def test_news_on_a_repeat_is_attributed_without_the_roster_line(self):
+        """With no roster to hang it on, the fact still has to say who it is
+        about — but not re-state their role, city and last contact."""
+        ev = event("Weekly Sync", [attendee("Priya Raman", "p@x.com")])
+        got = self.rendered([ev], repeats={mb.series_key(ev)})
+        self.assertIn("- [Priya Raman](x-devonthink-item://uuid-priya-raman)",
+                      got)
+        self.assertNotIn("last contact", got)
+
+    def test_a_first_occurrence_carries_the_roster_and_the_news(self):
+        got = self.rendered([event("Kickoff",
+                                   [attendee("Priya Raman", "p@x.com")])])
+        self.assertIn("last contact 2026-07-10", got)
+        self.assertIn("moved to Denver", got)
+
+    def test_a_person_in_two_meetings_is_briefed_under_the_first_only(self):
+        """The reported bug: one fact printed under both of the day's meetings."""
+        evs = [event("Standup", [attendee("Priya Raman", "p@x.com")]),
+               event("Retro", [attendee("Priya Raman", "p@x.com")])]
+        evs[1]["start"] = "2026-07-14T14:00:00"
+        got = self.rendered(evs)
+        self.assertEqual(got.count("moved to Denver"), 1)
+
+    def test_a_repeat_with_no_news_is_a_bare_heading(self):
+        self.priya["md"]["mdlastcontact"] = "2026-07-14"
+        ev = event("Weekly Sync", [attendee("Priya Raman", "p@x.com")])
+        got = self.rendered([ev], repeats={mb.series_key(ev)})
+        self.assertEqual(got.strip().splitlines()[-1],
+                         "### 9:00am — Weekly Sync")
+
+    def test_a_redacted_event_never_carries_news(self):
+        ev = event("Lunch with Priya Raman", [attendee("Priya Raman", "p@x.com")])
+        got = mb.brief_blocks([ev], self.people, ROOM_RE, {"priya raman"})
+        self.assertEqual(got[0]["title"], mb.REDACTED_TITLE)
+        self.assertEqual(got[0]["news"], [])
+
+
 class BriefBlocksTimeline(unittest.TestCase):
     def setUp(self):
         self.people = [person("Priya Raman", aliases="Priya", email="p@x.com")]
@@ -1187,7 +1310,7 @@ class BriefBlocksTimeline(unittest.TestCase):
                                  attendees=[attendee("Priya Raman", "p@x.com")])])
         self.assertEqual(got[0]["title"], "Roadmap review (tentative)")
 
-    def test_a_repeat_occurrence_keeps_its_slot_but_sheds_its_people(self):
+    def test_a_repeat_occurrence_keeps_its_slot_but_sheds_its_roster(self):
         ev = event("Weekly Sync", [attendee("Priya Raman", "p@x.com")])
         got = self.blocks([ev], repeats={mb.series_key(ev)})
         self.assertEqual(len(got), 1)

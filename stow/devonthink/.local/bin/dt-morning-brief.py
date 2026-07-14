@@ -157,6 +157,10 @@ JOURNAL_LAPSE_DAYS = 7
 REVIEW_PATH = "/20_ENTITIES/_Review"
 APPROVED_PATH = REVIEW_PATH + "/Approved"
 LOG_BULLET_RE = re.compile(r"^- \d{4}-\d{2}-\d{2} — ")
+ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+# Word-shaped runs in an event title: letters, no digits, kept together across
+# the punctuation a name carries ("O'Neill", "Alec/Priya" splits, "Tamsin:" does).
+NAME_TOKEN_RE = re.compile(r"[^\W\d_]+(?:['’-][^\W\d_]+)*")
 FACT_MARKER_RE = re.compile(r"\s*<!--\s*fact:[0-9a-f]+\s*-->")
 
 # Days without contact before a person surfaces in the Reconnect digest,
@@ -194,6 +198,9 @@ RSVP_ATTENDING = {"accepted", "tentative"}
 # How far back to look for a previous run of the same meeting. Comfortably
 # clears a monthly series, which would otherwise read as new on every occurrence.
 SERIES_LOOKBACK_DAYS = 180
+
+# Most facts to carry about one person in one day, however much has piled up.
+RECENT_FACTS = 3
 
 # Phone-shaped runs in free text, punctuation and all, for norm_handle to fold.
 PHONE_RUN_RE = re.compile(r"(?<!\d)\+?[\d][\d\s().\-]{6,}\d(?!\d)")
@@ -470,6 +477,29 @@ def series_key(ev):
     return (ev["calendar"], norm(strip_symbols(ev["title"])))
 
 
+def apply_bumps(people, ops, before):
+    """Fold the day's LastContact writes back into the roster in memory.
+
+    The roster is read before the bumps are written, so the news cutoff would
+    otherwise still be the day before yesterday's, and a fact filed out of
+    yesterday's meeting would brief again today as though nobody had told you.
+
+    Only contact that happened strictly `before` today counts. A text you send
+    this morning is contact, but it is not a chance to have read anything: were
+    it folded in, it would age out a fact filed yesterday that no brief has ever
+    shown you.
+    """
+    latest = {}
+    for op in ops:
+        if op["date"] < before and op["date"] > latest.get(op["uuid"], ""):
+            latest[op["uuid"]] = op["date"]
+    for p in people:
+        when = latest.get(p["uuid"], "")
+        md = p.setdefault("md", {})
+        if when > (md.get("mdlastcontact") or ""):
+            md["mdlastcontact"] = when
+
+
 def repeat_series(history, today):
     """Meetings that have run at least once before `today`.
 
@@ -563,17 +593,51 @@ def person_summary_line(p):
     return f"- {link} — {' · '.join(bits)}" if bits else f"- {link}"
 
 
-def recent_log_bullets(p, limit=3):
-    """Newest bullets by fact date, not append order — a backlog drain can
-    append years-old facts after current ones. Renders in document order."""
-    lines = (p.get("body") or "").splitlines()
-    bullets = [
-        ln for ln in lines
-        if LOG_BULLET_RE.match(ln) and not ln.rstrip().endswith("— Created.")
-    ]
-    by_date = sorted(enumerate(bullets), key=lambda t: (t[1][2:12], t[0]))
+def log_bullets(p):
+    """Every fact filed on a Person record, as (date, identity, rendered line).
+
+    Identity is the filer's provenance hash where there is one and the bullet's
+    own text otherwise, so one fact filed to each of the two people it mentions
+    is still recognized as one fact, and told once.
+    """
+    out = []
+    for ln in (p.get("body") or "").splitlines():
+        if not LOG_BULLET_RE.match(ln) or ln.rstrip().endswith("— Created."):
+            continue
+        marker = FACT_MARKER_RE.search(ln)
+        text = FACT_MARKER_RE.sub("", ln).rstrip()
+        out.append((ln[2:12], marker.group(0).strip() if marker else norm(text),
+                    "  " + text))
+    return out
+
+
+def news_bullets(p, told, limit=RECENT_FACTS):
+    """The facts about someone that you have not already been told.
+
+    A fact is news exactly once. Facts are filed with the date they happened,
+    and LastContact is the day you last saw the person, so "filed on or after
+    LastContact" is precisely "arrived since you last met" — which is why an
+    April note about a colleague you sit with weekly stops resurfacing in July,
+    while the note from the meeting you last had with them is still worth
+    carrying into the next one. Someone you have never met has no cutoff and no
+    history you have heard, so their most recent facts are all news.
+
+    `told` accumulates across the day's blocks, so a person in two of today's
+    meetings is briefed under the first and not repeated under the second.
+
+    Newest by fact date, not by append order — a backlog drain can append
+    years-old facts after current ones — but rendered in document order.
+    """
+    since = (p.get("md") or {}).get("mdlastcontact") or ""
+    if not ISO_DATE_RE.match(since):
+        # Free text, or never contacted: no honest cutoff, so nothing is old news.
+        since = ""
+    fresh = [f for f in log_bullets(p)
+             if f[1] not in told and (not since or f[0] >= since)]
+    by_date = sorted(enumerate(fresh), key=lambda t: (t[1][0], t[0]))
     newest = sorted(by_date[-limit:] if limit else [], key=lambda t: t[0])
-    return ["  " + FACT_MARKER_RE.sub("", ln).rstrip() for _, ln in newest]
+    told.update(f[1] for _, f in newest)
+    return [f[2] for _, f in newest]
 
 
 def title_matches(people, title):
@@ -584,19 +648,40 @@ def title_matches(people, title):
     A key shared by two records identifies neither. Unlike an attendee, a title
     carries no email to disambiguate with, so matching both would bump
     LastContact on a person who was never there — match_person refuses the same
-    ambiguity, and a write path must not be more credulous than a read one."""
+    ambiguity, and a write path must not be more credulous than a read one.
+
+    For the same reason an alias is not allowed to claim a full name the roster
+    has never heard of: "Meeting with Jordan Pike" names a stranger who happens
+    to share a first name with Jordan Vale, and briefing Jordan Vale there —
+    and dating their LastContact to a meeting they were never in — is a write
+    made on a coincidence. So an occurrence immediately followed by a
+    capitalized word survives only if the two words together are themselves a
+    roster key, which is what keeps "Priya Raman" matching Priya Raman and lets
+    "Avery North" outrank the person merely aliased "Avery". The cost is a
+    title like "Jordan Retro", where a capitalized word that is not a surname
+    follows a bare alias and the match is lost — a missed enrichment, which is
+    the failure worth having when the alternative is a false write.
+    """
     index = person_index(people)
-    hay = f" {norm(title)} "
+    tokens = NAME_TOKEN_RE.findall(title or "")
+    words = [norm(t) for t in tokens]
     spans = []
     for p in people:
         if is_suppressed(p):
             continue
         keys = [norm(p["name"])] + [norm(a) for a in p.get("aliases", "").split(",")]
         for k in keys:
-            if not k or len(index.get(k, ())) != 1:
+            key_words = k.split()
+            if not key_words or len(index.get(k, ())) != 1:
                 continue
-            for m in re.finditer(rf"(?<![a-z0-9]){re.escape(k)}(?![a-z0-9])", hay):
-                spans.append((m.start(), m.end(), p))
+            for i in range(len(words) - len(key_words) + 1):
+                if words[i:i + len(key_words)] != key_words:
+                    continue
+                j = i + len(key_words)
+                if (j < len(tokens) and tokens[j][:1].isupper()
+                        and f"{k} {words[j]}" not in index):
+                    continue
+                spans.append((i, j, p))
     # "Call with Avery North" contains "Avery": one person is named, not two, so
     # a span swallowed by a longer one loses. Every occurrence is judged on its
     # own, because a name can appear both inside a longer one and standing alone
@@ -627,14 +712,20 @@ def brief_blocks(events, people, skip_re, excluded=(),
     matched roster people (attendee order, then title matches) and labels for
     attendees who have no entity record yet.
 
-    Who is coming is only news the first time. A standing meeting keeps its
-    slot but sheds its body on every occurrence after the first (`repeats`,
-    from `repeat_series`): the roster of a weekly thirteen-person sync is the
-    same thirteen people it was last week, and reprinting them daily buries the
-    one ad-hoc meeting where knowing the room actually matters.
+    A block separates two kinds of content that read alike and age nothing
+    alike. The **roster** — who is in the room, and their standing details — is
+    only news the first time: a standing meeting keeps its slot but sheds its
+    roster on every occurrence after the first (`repeats`, from
+    `repeat_series`), because the thirteen people in a weekly sync are the same
+    thirteen as last week, and reprinting them daily buries the one ad-hoc
+    meeting where knowing the room actually matters. The **news** — what has
+    been filed about those people since you last saw them — survives on every
+    occurrence, attributed by name, because it is different every time and is
+    the entire point of briefing a meeting you have already had.
     """
     index = person_index(people)
     ex_re = excluded_re(excluded)
+    told = set()
     blocks = []
     for ev in events:
         if ev["all_day"] or not attending(ev):
@@ -647,12 +738,7 @@ def brief_blocks(events, people, skip_re, excluded=(),
             # and a redacted event must not leak its title, people or location.
             blocks.append({"time": fmt_time(ev["start"]),
                            "title": REDACTED_TITLE, "people": [],
-                           "unmatched": []})
-            continue
-        if series_key(ev) in repeats:
-            blocks.append({"time": fmt_time(ev["start"]),
-                           "title": event_title(ev), "people": [],
-                           "unmatched": []})
+                           "unmatched": [], "news": []})
             continue
         others = [a for a in real_attendees(ev, skip_re)
                   if not attendee_excluded(a, ex_re, excluded)]
@@ -680,8 +766,14 @@ def brief_blocks(events, people, skip_re, excluded=(),
                 continue
             seen.add(p["uuid"])
             matched.append(p)
+        news = [{"uuid": p["uuid"], "name": p["name"], "bullets": bullets}
+                for p, bullets in ((p, news_bullets(p, told)) for p in matched)
+                if bullets]
+        repeat = series_key(ev) in repeats
         blocks.append({"time": fmt_time(ev["start"]), "title": event_title(ev),
-                       "people": matched, "unmatched": unmatched})
+                       "people": [] if repeat else matched,
+                       "unmatched": [] if repeat else unmatched,
+                       "news": news})
     return blocks
 
 
@@ -691,9 +783,16 @@ def render_brief(blocks, today):
     out = []
     for b in blocks:
         body = []
+        news = {n["uuid"]: n for n in b["news"]}
         for p in b["people"]:
             body.append(person_summary_line(p))
-            body.extend(recent_log_bullets(p))
+            body.extend(news.pop(p["uuid"], {}).get("bullets", []))
+        # Whoever is left is news without a roster to hang it on — a standing
+        # meeting — so their own line carries the attribution.
+        for n in b["news"]:
+            if n["uuid"] in news:
+                body.append(f"- [{n['name']}](x-devonthink-item://{n['uuid']})")
+                body.extend(n["bullets"])
         if len(b["unmatched"]) <= UNMATCHED_LIST_MAX:
             body.extend(f"- {u} — no entity record yet" for u in b["unmatched"])
         else:
@@ -1517,6 +1616,8 @@ def main():
             changed = sum(1 for r in run_bridge(mops) if r.get("changed"))
             log.info("bumped LastContact for %d people from Messages "
                      "(since %s)", changed, yesterday)
+
+    apply_bumps(people, bumps + mops, today)
 
     # A failed lookback shows every attendee rather than none: a noisy brief is
     # recoverable, a brief that silently drops the people is not.

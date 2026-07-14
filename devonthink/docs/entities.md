@@ -141,13 +141,46 @@ Roster people are attached to an event two ways, deduped: from its **attendees**
 the **title** ("Call with Jake"). Attendees exist only on Exchange events —
 iCloud events carry none — which is why title matching exists at all.
 
-#### Who is coming is only news the first time
+#### The roster ages; the news does not
 
-A standing meeting keeps its slot on the timeline but sheds its body on every
-occurrence after the first: the roster of a weekly thirteen-person sync is the
-same thirteen people it was last week, and reprinting them daily buries the one
-ad-hoc meeting where knowing the room actually matters. Only **ad-hoc meetings
-and the first occurrence of a series** carry people.
+A block carries two kinds of content that read alike and age nothing alike, and
+conflating them is what made the briefing unreadable.
+
+The **roster** — who is in the room, with their role, city and last contact — is
+only news the first time. A standing meeting keeps its slot but sheds its roster
+on every occurrence after the first: the thirteen people in a weekly sync are the
+same thirteen as last week, and reprinting them daily buries the one ad-hoc
+meeting where knowing the room actually matters. Only **ad-hoc meetings and the
+first occurrence of a series** carry a roster.
+
+The **news** — what has been filed about those people since you last saw them —
+survives on every occurrence, because it is different every time and is the whole
+reason to brief a meeting you have already had. With no roster to hang it on, a
+repeat's news is attributed by a bare name link rather than a full summary line.
+
+`news_bullets` decides what counts, and a fact is news exactly once:
+
+- **Filed on or after the person's `LastContact`.** Facts carry the date they
+  happened and LastContact is the day you last met, so this is precisely "arrived
+  since we last spoke". It is what stops an April note about a colleague you sit
+  with weekly from resurfacing every week in July. Inclusive of LastContact
+  itself, because a fact filed out of your last meeting is one you have not been
+  told yet. Someone you have **never met** has no cutoff — all of their facts are
+  news, capped at `RECENT_FACTS`.
+- **Told once per day.** A `told` set threads through every block, so a person in
+  two of today's meetings is briefed under the first and not repeated under the
+  second. Identity is the filer's `<!-- fact:… -->` provenance hash where there
+  is one, so one fact filed to both people it mentions is still told once.
+- **`apply_bumps` folds the day's LastContact writes back into the in-memory
+  roster first**, or the cutoff would still be the day before yesterday's and
+  yesterday's news would brief twice. Only contact *strictly before today*
+  counts: a text you send this morning is contact, but it is not a chance to
+  have read anything, and folding it in would age out a fact no brief has shown
+  you.
+
+The known cost: a fact is dated when it *happened*, not when it was *filed*, so a
+backlog drain that files an old fact today lands before the cutoff and is never
+briefed. Facts filed about the recent past are unaffected.
 
 Recognizing a series is the hard part, because **EventKit cannot tell you**.
 An Exchange series does not arrive as a series: each occurrence is an
@@ -167,6 +200,18 @@ not read as new every time. Consequences worth knowing:
   itself, which is correct — it is not new to you.
 - Two genuinely unrelated one-offs sharing a title on one calendar ("Interview")
   read as a series, and the second loses its people. Widen the key if that bites.
+
+An alias may not claim a full name the roster has never heard of. "Meeting with
+Jordan Pike" names a stranger who happens to share a first name with Jordan Vale,
+and briefing Jordan Vale there — dating their LastContact to a meeting they were
+never in — is a write made on a coincidence. `title_matches` therefore matches on
+*tokens*, not characters, and an occurrence immediately followed by a capitalized
+word survives only if the two words together are themselves a roster key: that is
+what keeps "Priya Raman" matching Priya Raman, and lets "Avery North" outrank the
+person merely aliased "Avery". The cost is a title like "Jordan Retro", where a
+capitalized non-surname follows a bare alias and the match is lost — a missed
+enrichment, which is the failure worth having when the alternative is a false
+write.
 
 There is deliberately **no heuristic name extraction** for people the roster has
 never heard of. An earlier version parsed unknown names out of titles, anchored
