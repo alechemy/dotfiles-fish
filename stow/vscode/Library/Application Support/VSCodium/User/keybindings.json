@@ -90,20 +90,47 @@
     "command": "workbench.action.closeEditorsInGroup"
   },
   {
-    "key": "ctrl+alt+cmd+right",
-    "command": "workbench.action.moveEditorToNextGroup"
+    "key": "cmd+alt+d",
+    "command": "workbench.action.moveEditorToRightGroup"
+  },
+
+  // AeroSpace parity, behind a cmd+k chord: hjkl focuses a group, the arrows
+  // move the editor into one.
+  {
+    "key": "cmd+k h",
+    "command": "workbench.action.focusLeftGroup"
   },
   {
-    "key": "ctrl+alt+cmd+left",
-    "command": "workbench.action.moveEditorToPreviousGroup"
+    "key": "cmd+k j",
+    "command": "workbench.action.focusBelowGroup"
   },
   {
-    "key": "ctrl+alt+cmd+down",
+    "key": "cmd+k k",
+    "command": "workbench.action.focusAboveGroup"
+  },
+  {
+    "key": "cmd+k l",
+    "command": "workbench.action.focusRightGroup"
+  },
+  {
+    "key": "cmd+k left",
+    "command": "workbench.action.moveEditorToLeftGroup"
+  },
+  {
+    "key": "cmd+k down",
     "command": "workbench.action.moveEditorToBelowGroup"
   },
   {
-    "key": "ctrl+alt+cmd+up",
+    "key": "cmd+k up",
     "command": "workbench.action.moveEditorToAboveGroup"
+  },
+  {
+    "key": "cmd+k right",
+    "command": "workbench.action.moveEditorToRightGroup"
+  },
+  {
+    "key": "cmd+k 0",
+    "command": "workbench.action.evenEditorWidths"
   },
   {
     "key": "alt+space",
