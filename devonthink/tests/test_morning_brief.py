@@ -103,12 +103,28 @@ class ContactBumps(unittest.TestCase):
                event("b", [attendee("Anthony Fielding")], date="2026-07-07")]
         self.assertEqual(len(mb.contact_bumps(evs, self.people, "x", ROOM_RE)), 2)
 
-    def test_skips_all_day_declined_and_skip_calendars(self):
+    def test_skips_all_day_unanswered_and_skip_calendars(self):
         cal = sorted(mb.SKIP_CALENDARS)[0]
         evs = [event("a", [attendee("Anthony Fielding")], all_day=True),
-               event("b", [attendee("Anthony Fielding")], declined=True),
+               event("b", [attendee("Anthony Fielding")], rsvp="unknown"),
                event("c", [attendee("Anthony Fielding")], calendar=cal)]
         self.assertEqual(mb.contact_bumps(evs, self.people, "x", ROOM_RE), [])
+
+    def test_an_event_you_never_accepted_is_not_contact(self):
+        """Sitting in an invite you ignored is not evidence you met someone."""
+        for rsvp in ("unknown", "pending", "declined", None):
+            with self.subTest(rsvp=rsvp):
+                ev = event("a", [attendee("Anthony Fielding")], rsvp=rsvp)
+                self.assertEqual(
+                    mb.contact_bumps([ev], self.people, "x", ROOM_RE), [])
+
+    def test_tentative_still_bumps(self):
+        ev = event("a", [attendee("Anthony Fielding")], rsvp="tentative")
+        self.assertEqual(len(mb.contact_bumps([ev], self.people, "x", ROOM_RE)), 1)
+
+    def test_a_cancelled_meeting_is_not_contact(self):
+        ev = event("a", [attendee("Anthony Fielding")], canceled=True)
+        self.assertEqual(mb.contact_bumps([ev], self.people, "x", ROOM_RE), [])
 
     def test_room_never_bumps(self):
         ev = event("a", [attendee("Conference Room B", "cr@x.com")])
@@ -1096,9 +1112,43 @@ class BriefBlocksTimeline(unittest.TestCase):
                           skip_cals=mb.SKIP_CALENDARS | {"Shared"})
         self.assertEqual(got, [])
 
-    def test_all_day_and_declined_still_never_brief(self):
-        evs = [event("Holiday", all_day=True), event("Skipped", declined=True)]
+    def test_all_day_and_unaccepted_still_never_brief(self):
+        evs = [event("Holiday", all_day=True),
+               event("Ignored", [attendee("Priya Raman", "p@x.com")],
+                     rsvp="unknown")]
         self.assertEqual(self.blocks(evs), [])
+
+    def test_only_an_accepted_invitation_briefs(self):
+        """An invite you never answered looks exactly like one you accepted on
+        every other field, so RSVP is the only thing separating them."""
+        for rsvp, briefs in [("accepted", True), ("tentative", True),
+                             ("unknown", False), ("pending", False),
+                             ("declined", False), (None, False)]:
+            with self.subTest(rsvp=rsvp):
+                ev = event("CAB", [attendee("Priya Raman", "p@x.com")],
+                           rsvp=rsvp)
+                self.assertEqual(len(self.blocks([ev])), 1 if briefs else 0)
+
+    def test_your_own_event_has_no_rsvp_and_always_briefs(self):
+        """No attendees means nobody invited you: it is your own calendar entry."""
+        self.assertEqual(len(self.blocks([event("Perio cleaning", rsvp=None)])), 1)
+
+    def test_an_event_you_organize_briefs_even_without_your_rsvp(self):
+        ev = event("Standup", [attendee("Priya Raman", "p@x.com")],
+                   rsvp=None, organizer_is_self=True)
+        self.assertEqual(len(self.blocks([ev])), 1)
+
+    def test_a_cancelled_event_never_briefs(self):
+        """Exchange leaves a cancelled meeting on the calendar with your
+        acceptance intact, so RSVP alone would still brief it."""
+        ev = event("Product Sync", [attendee("Priya Raman", "p@x.com")],
+                   rsvp="accepted", canceled=True)
+        self.assertEqual(self.blocks([ev]), [])
+
+    def test_tentative_briefs_and_says_so(self):
+        got = self.blocks([event("Roadmap review", rsvp="tentative",
+                                 attendees=[attendee("Priya Raman", "p@x.com")])])
+        self.assertEqual(got[0]["title"], "Roadmap review (tentative)")
 
     def test_person_less_event_renders_without_a_trailing_blank(self):
         got = mb.render_brief(self.blocks([event("Perio cleaning")]), "2026-07-13")

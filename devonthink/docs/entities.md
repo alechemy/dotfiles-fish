@@ -106,10 +106,31 @@ stay stdlib-only (tier-1 `/usr/bin/python3`, stable TCC identity):
 
 ### Morning brief (resurfacing + contact tracking)
 
-The `## Briefing` section is the **whole day's timeline**, in start order:
-every timed, non-declined event on a calendar not in `SKIP_CALENDARS`,
-including the ones with nobody attached. A day reads as a day, so a solo
-dentist appointment lists as a bare heading rather than vanishing.
+The `## Briefing` section is **the day you agreed to**, in start order: every
+timed event you accepted, on a calendar not in `SKIP_CALENDARS`, including the
+ones with nobody attached. A day reads as a day, so a solo dentist appointment
+lists as a bare heading rather than vanishing.
+
+What does *not* list is an invitation you never answered, and the distinction
+is subtler than it looks. Declining an Exchange invite **removes the event from
+the calendar outright**, so `declined` is a status that essentially never
+arrives — the state that actually has to be filtered is `unknown` (invited,
+never responded), which is otherwise indistinguishable from an acceptance on
+every field EventKit exposes. Filtering on `declined`, as this did originally,
+is therefore a no-op that briefs every mass invite you ever ignored. The rule
+now lives in one predicate, `attending()`, shared by the briefing and the
+LastContact bumps (sitting in an invite you ignored is not evidence you met
+anyone):
+
+| Event | Briefs? | Why |
+| --- | --- | --- |
+| RSVP `accepted` | yes | — |
+| RSVP `tentative` | yes, titled `… (tentative)` | a maybe is still on your day, but says so |
+| RSVP `unknown` / `pending` / `declined` | no | you never said yes |
+| No attendees at all | yes | nobody invited you; it is your own calendar entry |
+| Attendees, but you are not among them | no | a distribution-list invite: Exchange lists the list, never you, so it has no RSVP of yours and never will |
+| Organizer is you | yes | your own meeting, whatever your participant entry says |
+| `EKEventStatusCanceled` | no | Exchange keeps a cancelled meeting on the calendar, retitled `Canceled: …`, **with your acceptance intact** — so it has to be caught on status, not RSVP |
 
 `calendar-events-json.js` passes a nil calendars predicate to EventKit, so
 **every** calendar is already queried — Exchange and iCloud alike. Nothing
@@ -141,9 +162,11 @@ brief reads live from records, so it can never go stale.
 Exchange reports **conference rooms with `participantType` Person** — identical
 to a human on every EventKit field — so rooms are excluded by name via
 `SKIP_ATTENDEE_PATTERN`. Note that EventKit's enums come back from JXA as
-*strings*: `calendar-events-json.js` compares them with `Number(...)`, and
-dropping that coercion silently makes `is_person` and `declined` false for
-everyone.
+*strings*: `calendar-events-json.js` coerces them with `Number(...)`, and
+dropping that coercion silently makes `is_person` false for everyone and every
+`rsvp` read as `unknown` — which now **empties the briefing** rather than
+merely flattening it, so `test_calendar_canary.py` asserts against the live
+calendar that some invitation still reads as `accepted`.
 
 #### Suppressing a person (BriefingSuppressed)
 

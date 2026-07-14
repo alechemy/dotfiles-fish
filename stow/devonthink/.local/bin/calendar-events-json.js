@@ -13,11 +13,20 @@
 //        one day (default: today, local time), or an inclusive day range.
 //
 // stdout: {"ok": true, "date": "...", "events": [{title, calendar, date,
-//          start, end, all_day, location, declined, attendees: [{name,
-//          email, is_self, is_person}]}]}
+//          start, end, all_day, location, rsvp, organizer_is_self,
+//          attendees: [{name, email, is_self, is_person}]}]}
 //         {"ok": false, "error": "..."} on denied/undetermined access.
 //
 // Each event carries its own local `date` so a range dump stays usable.
+//
+// `rsvp` is your own participant status, and is null when the event carries
+// no invitation for you personally: either it has no attendees (your own
+// event) or it reached you through a distribution list, where Exchange lists
+// the list, never you, and so has no RSVP of yours to report. Note that
+// declining an Exchange invite removes the event from the calendar outright,
+// so "declined" is essentially never seen here — "unknown" (invited, never
+// responded) is the status that actually distinguishes a meeting you are
+// going to from one you ignored.
 //
 // Exchange reports conference rooms with participantType Person, identical
 // to humans on every EventKit field, so `is_person` cannot exclude them —
@@ -25,6 +34,10 @@
 
 ObjC.import('EventKit')
 ObjC.import('Foundation')
+
+// EKParticipantStatus, in enum order.
+const RSVP = ['unknown', 'pending', 'accepted', 'declined', 'tentative',
+              'delegated', 'completed', 'in-process']
 
 function str(nsvalue) {
   try {
@@ -108,15 +121,14 @@ function run(argv) {
   for (let i = 0; i < events.count; i++) {
     const ev = events.objectAtIndex(i)
     const attendees = []
-    let declined = false
+    let rsvp = null
     const atts = ev.attendees
     if (atts && !atts.isNil()) {
       for (let j = 0; j < atts.count; j++) {
         const p = atts.objectAtIndex(j)
         const isSelf = !!p.isCurrentUser
-        // JXA hands these NSInteger enums back as strings, so compare on Number().
-        // EKParticipantStatusDeclined = 3
-        if (isSelf && Number(p.participantStatus) === 3) declined = true
+        // JXA hands these NSInteger enums back as strings, so coerce on Number().
+        if (isSelf) rsvp = RSVP[Number(p.participantStatus)] || 'unknown'
         let email = ''
         const url = p.URL
         if (url && !url.isNil()) {
@@ -131,6 +143,7 @@ function run(argv) {
         })
       }
     }
+    const org = ev.organizer
     out.push({
       title: str(ev.title),
       calendar: str(ev.calendar.title),
@@ -139,7 +152,11 @@ function run(argv) {
       end: isoLocal(ev.endDate),
       all_day: !!ev.allDay,
       location: str(ev.location),
-      declined: declined,
+      rsvp: rsvp,
+      organizer_is_self: org && !org.isNil() ? !!org.isCurrentUser : false,
+      // EKEventStatusCanceled = 3. Exchange keeps a cancelled meeting on the
+      // calendar, retitled "Canceled: …", with your acceptance intact.
+      canceled: Number(ev.status) === 3,
       attendees: attendees,
     })
   }

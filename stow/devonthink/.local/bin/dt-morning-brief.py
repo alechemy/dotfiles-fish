@@ -4,9 +4,10 @@ dt-morning-brief.py — contextual resurfacing for the entity layer.
 
 Builds a briefing of today's calendar from every calendar EventKit exposes,
 enriched with the Person records in Lorebook/20_ENTITIES/People, and appends
-it to today's daily note as a `## Briefing` section. The section is the whole
-day's timeline: an event with nobody attached still lists, because a day reads
-as a day.
+it to today's daily note as a `## Briefing` section. The section is the day
+you agreed to: every event you accepted lists, an event with nobody attached
+still lists (because a day reads as a day), and an invitation you never
+answered does not — see `attending`.
 
 Roster people are attached to an event two ways: from its Exchange attendees,
 and from their name or alias appearing in the title. iCloud events carry no
@@ -184,6 +185,11 @@ UNMATCHED_LIST_MAX = 8
 
 # A suppressed event keeps its place on the timeline under this title.
 REDACTED_TITLE = "Private event"
+
+# RSVP states that mean you are going. Tentative counts, and says so in the
+# title; every other state (notably "unknown" — invited, never responded) does
+# not brief and does not bump LastContact.
+RSVP_ATTENDING = {"accepted", "tentative"}
 
 # Phone-shaped runs in free text, punctuation and all, for norm_handle to fold.
 PHONE_RUN_RE = re.compile(r"(?<!\d)\+?[\d][\d\s().\-]{6,}\d(?!\d)")
@@ -413,6 +419,38 @@ def redact_person(p, ex_re, keys=()):
     return p
 
 
+def attending(ev):
+    """Whether you actually said yes to an event.
+
+    An invitation you never answered is indistinguishable from one you accepted
+    on every other field, and Exchange deletes an event outright when you
+    decline it — so `declined` is never observed in practice and "unknown"
+    (invited, never responded) is the state that has to be filtered, or every
+    mass invite you ignored briefs as if you were attending it.
+
+    Two events carry no RSVP at all and are judged on where they came from
+    instead. One with no attendees is your own calendar entry, and briefs. One
+    with attendees you are not among reached you through a distribution list —
+    Exchange lists the list, never you, so it has no RSVP of yours to record
+    and never will — and does not.
+
+    A cancelled event keeps both its slot and your acceptance under Exchange,
+    so it has to be excluded on its status: you are not attending a meeting
+    that no longer exists.
+    """
+    if ev.get("canceled"):
+        return False
+    if not ev["attendees"] or ev.get("organizer_is_self"):
+        return True
+    return ev.get("rsvp") in RSVP_ATTENDING
+
+
+def event_title(ev):
+    if ev.get("rsvp") == "tentative":
+        return f"{ev['title']} (tentative)"
+    return ev["title"]
+
+
 def real_attendees(ev, skip_re):
     """Other humans on an event. Rooms and resources are indistinguishable
     from people on every EventKit field under Exchange, so they are excluded
@@ -563,7 +601,7 @@ def brief_blocks(events, people, skip_re, excluded=(),
     ex_re = excluded_re(excluded)
     blocks = []
     for ev in events:
-        if ev["all_day"] or ev["declined"]:
+        if ev["all_day"] or not attending(ev):
             continue
         if ev["calendar"] in skip_cals:
             continue
@@ -601,7 +639,7 @@ def brief_blocks(events, people, skip_re, excluded=(),
                 continue
             seen.add(p["uuid"])
             matched.append(p)
-        blocks.append({"time": fmt_time(ev["start"]), "title": ev["title"],
+        blocks.append({"time": fmt_time(ev["start"]), "title": event_title(ev),
                        "people": matched, "unmatched": unmatched})
     return blocks
 
@@ -657,7 +695,7 @@ def contact_bumps(events, people, day, skip_re, skip_cals=SKIP_CALENDARS,
     ops = []
     seen = set()
     for ev in events:
-        if ev["all_day"] or ev["declined"] or ev["calendar"] in skip_cals:
+        if ev["all_day"] or not attending(ev) or ev["calendar"] in skip_cals:
             continue
         when = ev.get("date") or day
         matched = [

@@ -97,7 +97,11 @@ def attendee(name, email="", is_self=False, is_person=True):
 
 
 def event(title, attendees=(), date="2026-07-07", calendar="Calendar",
-          all_day=False, declined=False):
+          all_day=False, rsvp="accepted", organizer_is_self=False,
+          canceled=False):
+    """`rsvp` mirrors calendar-events-json.js: your own participant status, or
+    None when the event carries no invitation for you (no attendees at all, or
+    a distribution-list invite that never lists you individually)."""
     return {
         "title": title,
         "calendar": calendar,
@@ -105,7 +109,9 @@ def event(title, attendees=(), date="2026-07-07", calendar="Calendar",
         "start": f"{date}T09:00:00",
         "end": f"{date}T10:00:00",
         "all_day": all_day,
-        "declined": declined,
+        "rsvp": rsvp,
+        "organizer_is_self": organizer_is_self,
+        "canceled": canceled,
         "location": "",
         "attendees": list(attendees),
     }

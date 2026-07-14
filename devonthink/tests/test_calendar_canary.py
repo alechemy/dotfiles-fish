@@ -1,7 +1,7 @@
 """Live checks against the real macOS Calendar.
 
-Everything else in this suite runs on fixtures. These two cannot: the bug they
-guard lives in the JXA/ObjC bridge, where `p.participantType` comes back as the
+Everything else in this suite runs on fixtures. These cannot: the bugs they
+guard live in the JXA/ObjC bridge, where `p.participantType` comes back as the
 string "1" and `=== 1` is silently false. A fixture can't reproduce that — only
 a real EventKit round trip can. Skips (rather than fails) when there is no data
 or no Calendars grant, so a fresh machine or a follower Mac stays green.
@@ -15,6 +15,8 @@ from datetime import date, timedelta
 
 CALENDAR = os.path.expanduser("~/.local/bin/calendar-events-json.js")
 WINDOW_DAYS = 120
+RSVP_STATES = {None, "unknown", "pending", "accepted", "declined", "tentative",
+               "delegated", "completed", "in-process"}
 
 
 def dump(start, end):
@@ -63,9 +65,26 @@ class CalendarCanary(unittest.TestCase):
             self.assertRegex(e["date"], r"^\d{4}-\d{2}-\d{2}$")
             self.assertEqual(e["date"], e["start"][:10])
 
-    def test_declined_is_a_real_boolean(self):
+    def test_rsvp_is_a_known_state(self):
         for e in self.events:
-            self.assertIsInstance(e["declined"], bool)
+            self.assertIn(e["rsvp"], RSVP_STATES)
+            self.assertIsInstance(e["organizer_is_self"], bool)
+            self.assertIsInstance(e["canceled"], bool)
+
+    def test_some_invitation_reads_as_accepted(self):
+        """The brief drops every event whose RSVP is not `accepted` (or
+        `tentative`), so an EventKit or JXA regression that stopped resolving
+        participantStatus would not fail loudly — it would quietly empty the
+        briefing of exactly the meetings that matter most."""
+        invited = [e for e in self.events
+                   if any(a["is_self"] for a in e["attendees"])]
+        if not invited:
+            self.skipTest("no events invite you in the window")
+        self.assertTrue(
+            any(e["rsvp"] == "accepted" for e in invited),
+            f"you are an attendee on {len(invited)} events but accepted none — "
+            "participantStatus is not resolving, and the brief is now empty",
+        )
 
     def test_range_is_honored(self):
         dates = {e["date"] for e in self.events}
