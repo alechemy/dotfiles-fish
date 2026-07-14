@@ -21,7 +21,11 @@ Framework gotchas baked into these templates (learned against v3.1.2):
 rows, so each cell's content lives in a single `stretch-x` wrapper div;
 column layouts need a `w--full` wrapper or `align-items: center` shrinks
 items; `data-group-header` produces side-labels for the overflow engine,
-not section headings.
+not section headings; `.item` carries no margin of its own — the inter-item
+gap comes from a `.list` parent (`--list-gap-small`, 8px), so a bare run of
+`.item`s stacks flush. `full.liquid`'s right column deliberately has no
+`.list`: three sections plus the status lines already fill the height, and
+8px gaps clip the last line at max data.
 
 ## Local preview
 

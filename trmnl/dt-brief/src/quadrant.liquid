@@ -8,6 +8,7 @@
     {% if meetings != empty %}{% assign show_meetings = true %}{% endif %}
     {% if hidden_meetings > 0 %}{% assign show_meetings = true %}{% endif %}
     {% if show_meetings %}
+    <div class="list">
     {% for m in meetings limit: 2 %}
     <div class="item">
       <div class="meta"></div>
@@ -20,6 +21,7 @@
     {% if hidden_meetings > 0 %}
     <span class="label label--small label--gray">+{{ hidden_meetings }} more later today</span>
     {% endif %}
+    </div>
     {% else %}
     <div class="item">
       <div class="meta"></div>
