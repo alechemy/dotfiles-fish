@@ -265,10 +265,20 @@ satisfies both readings.
 Adding facts eventually needs a fourth shard — `build.js` handles that on its own,
 but the new URL has to be added to `polling_url` by hand.
 
-## Unverified
+## The cache-buster URL
 
-- **Whether the dedup runs before or after the transform.** The documented pipeline
-  is `response → transform → merge variables → template`, and the dedup is described
-  in terms of merge variables, so a time-varying transform output should defeat it.
-  If the screen renders once and then goes stale, that is the cause — the fix is a
-  fourth polling URL whose response always changes, purely as a cache-buster.
+**TRMNL dedups on the polled payload, before the transform runs** — not on the
+merge variables it produces. Observed: the plugin synced every 15 min for hours
+while the screen stayed on a fact the deck had not selected in three days. The
+corpus is static, so TRMNL saw identical bytes, skipped screen generation, and the
+transform never got to pick a new fact.
+
+So `polling_url` carries a fourth URL that returns the current time. It is not data
+— `transform.js` skips any polled entry with no `facts` array — its only job is to
+make each poll's payload differ, so TRMNL regenerates the screen and the transform
+runs.
+
+If the fact ever freezes again, check that endpoint first. Swapping it is a
+one-line settings change; the transform tolerates it being absent, in any position,
+or replaced. (`worldtimeapi.org` was dead when this was picked — verify a
+replacement actually returns changing bytes before trusting it.)

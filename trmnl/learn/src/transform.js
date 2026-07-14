@@ -22,8 +22,13 @@ function mix32(x) {
  * The corpus arrives either whole (one polling URL, `input.facts`) or split
  * across shards (several newline-separated URLs, which TRMNL delivers as
  * `IDX_0`, `IDX_1`, …). Shards exist because a single endpoint may not exceed
- * 100 kB; they are concatenated in URL order, which is the order the build
+ * 100 kB; they are concatenated in index order, which is the order the build
  * wrote them, so the interleaving survives.
+ *
+ * Entries without a `facts` array are skipped rather than terminating the scan:
+ * one polling URL is a cache-buster whose only job is to return something
+ * different each poll, so TRMNL sees changed data and actually regenerates the
+ * screen instead of deduping it away.
  */
 function gather(input) {
   if (!input) return { facts: [], meta: {} };
@@ -33,8 +38,8 @@ function gather(input) {
   var meta = {};
   for (var i = 0; i < 64; i++) {
     var shard = input['IDX_' + i];
-    if (!shard || !Array.isArray(shard.facts)) break;
-    if (i === 0) meta = shard.meta || {};
+    if (!shard || !Array.isArray(shard.facts)) continue;
+    if (!meta.rotationMinutes && shard.meta) meta = shard.meta;
     facts = facts.concat(shard.facts);
   }
   return { facts: facts, meta: meta };

@@ -5,10 +5,14 @@ polling_verb: get
 # Newline-separated: TRMNL fetches each and delivers them as IDX_0, IDX_1, IDX_2,
 # which transform.js concatenates back into the deck. Split because a single
 # polling endpoint may not exceed 100 kB and the full corpus is ~166 kB.
+# The last URL is a cache-buster, not data. TRMNL skips screen generation when
+# the polled payload is unchanged, and the corpus is static — without a response
+# that differs every poll, the transform never re-runs and the fact never rotates.
 polling_url: |-
   https://alechemy.github.io/trmnl-learn/corpus-0.json
   https://alechemy.github.io/trmnl-learn/corpus-1.json
   https://alechemy.github.io/trmnl-learn/corpus-2.json
+  https://timeapi.io/api/time/current/zone?timeZone=UTC
 # Minutes; the floor on how often TRMNL will re-sync this plugin. 15 is the
 # free-account minimum — leave it there so rotation is capped by the playlist,
 # not by the plugin.
