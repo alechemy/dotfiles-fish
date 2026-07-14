@@ -1083,6 +1083,43 @@ class ParkedSourceRedaction(unittest.TestCase):
         self.assertEqual(kept, {})
 
 
+class SeriesDetection(unittest.TestCase):
+    """Exchange sends each occurrence of a series as an independent event with
+    its own identifier and no recurrence rule, so a series is only ever
+    recognized by having run before."""
+
+    TODAY = "2026-07-14"
+
+    def test_the_same_meeting_on_an_earlier_day_is_a_repeat(self):
+        hist = [event("Platform Sync", date="2026-07-07")]
+        self.assertIn(mb.series_key(event("Platform Sync", date=self.TODAY)),
+                      mb.repeat_series(hist, self.TODAY))
+
+    def test_case_and_emoji_do_not_split_a_series(self):
+        hist = [event("board game night 🎲", date="2026-07-07")]
+        self.assertIn(mb.series_key(event("Board Game Night")),
+                      mb.repeat_series(hist, self.TODAY))
+
+    def test_the_same_title_on_another_calendar_is_another_meeting(self):
+        hist = [event("Standup", date="2026-07-07", calendar="Personal")]
+        self.assertNotIn(mb.series_key(event("Standup", date=self.TODAY)),
+                         mb.repeat_series(hist, self.TODAY))
+
+    def test_an_invite_you_ignored_still_proves_the_series_is_not_new(self):
+        hist = [event("All Hands", date="2026-07-07", rsvp="unknown")]
+        self.assertIn(mb.series_key(event("All Hands", date=self.TODAY)),
+                      mb.repeat_series(hist, self.TODAY))
+
+    def test_today_never_marks_itself_a_repeat(self):
+        """Otherwise a first occurrence would suppress its own attendees."""
+        hist = [event("Kickoff", date=self.TODAY)]
+        self.assertEqual(mb.repeat_series(hist, self.TODAY), set())
+
+    def test_an_all_day_event_starts_no_series(self):
+        hist = [event("Holiday", date="2026-07-07", all_day=True)]
+        self.assertEqual(mb.repeat_series(hist, self.TODAY), set())
+
+
 class BriefBlocksTimeline(unittest.TestCase):
     def setUp(self):
         self.people = [person("Priya Raman", aliases="Priya", email="p@x.com")]
@@ -1149,6 +1186,31 @@ class BriefBlocksTimeline(unittest.TestCase):
         got = self.blocks([event("Roadmap review", rsvp="tentative",
                                  attendees=[attendee("Priya Raman", "p@x.com")])])
         self.assertEqual(got[0]["title"], "Roadmap review (tentative)")
+
+    def test_a_repeat_occurrence_keeps_its_slot_but_sheds_its_people(self):
+        ev = event("Weekly Sync", [attendee("Priya Raman", "p@x.com")])
+        got = self.blocks([ev], repeats={mb.series_key(ev)})
+        self.assertEqual(len(got), 1)
+        self.assertEqual(got[0]["title"], "Weekly Sync")
+        self.assertEqual(got[0]["people"], [])
+        self.assertEqual(got[0]["unmatched"], [])
+
+    def test_a_first_occurrence_still_carries_its_people(self):
+        ev = event("Kickoff", [attendee("Priya Raman", "p@x.com")])
+        got = self.blocks([ev], repeats={("Calendar", "some other meeting")})
+        self.assertEqual([p["name"] for p in got[0]["people"]], ["Priya Raman"])
+
+    def test_a_title_match_is_suppressed_on_a_repeat_too(self):
+        """Whoever the body names, a standing meeting names them every time."""
+        ev = event("Lunch with Priya")
+        got = self.blocks([ev], repeats={mb.series_key(ev)})
+        self.assertEqual(got[0]["people"], [])
+
+    def test_a_repeating_tentative_event_keeps_its_marker(self):
+        ev = event("Team Social", [attendee("Priya Raman", "p@x.com")],
+                   rsvp="tentative")
+        got = self.blocks([ev], repeats={mb.series_key(ev)})
+        self.assertEqual(got[0]["title"], "Team Social (tentative)")
 
     def test_person_less_event_renders_without_a_trailing_blank(self):
         got = mb.render_brief(self.blocks([event("Perio cleaning")]), "2026-07-13")

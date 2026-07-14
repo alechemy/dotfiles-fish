@@ -191,6 +191,10 @@ REDACTED_TITLE = "Private event"
 # not brief and does not bump LastContact.
 RSVP_ATTENDING = {"accepted", "tentative"}
 
+# How far back to look for a previous run of the same meeting. Comfortably
+# clears a monthly series, which would otherwise read as new on every occurrence.
+SERIES_LOOKBACK_DAYS = 180
+
 # Phone-shaped runs in free text, punctuation and all, for norm_handle to fold.
 PHONE_RUN_RE = re.compile(r"(?<!\d)\+?[\d][\d\s().\-]{6,}\d(?!\d)")
 
@@ -451,6 +455,32 @@ def event_title(ev):
     return ev["title"]
 
 
+def series_key(ev):
+    """What makes two events the same meeting.
+
+    EventKit is no help here. An Exchange series does not arrive as a series:
+    every occurrence is an independent event with its own identifier and
+    `hasRecurrenceRules` false, and even a stable-looking series splits
+    identifiers whenever the organizer edits it — the work calendar's weekly
+    meetings come through as nine separate events under five identifiers. Only
+    iCloud events model recurrence honestly. So a series is recognized the one
+    way that holds for both: the same meeting, on the same calendar, having
+    already happened.
+    """
+    return (ev["calendar"], norm(strip_symbols(ev["title"])))
+
+
+def repeat_series(history, today):
+    """Meetings that have run at least once before `today`.
+
+    RSVP is deliberately not consulted: an invitation you ignored still proves
+    the series is not new to you, and a meeting you attend after skipping the
+    first few is still not something you need re-introduced.
+    """
+    return {series_key(ev) for ev in history
+            if not ev["all_day"] and ev["date"] < today}
+
+
 def real_attendees(ev, skip_re):
     """Other humans on an event. Rooms and resources are indistinguishable
     from people on every EventKit field under Exchange, so they are excluded
@@ -589,13 +619,19 @@ def strip_symbols(s):
 
 
 def brief_blocks(events, people, skip_re, excluded=(),
-                 skip_cals=SKIP_CALENDARS):
+                 skip_cals=SKIP_CALENDARS, repeats=()):
     """One block per event on the day's timeline, in start order.
 
     Every event is briefed, not only the ones with people: a day reads as a
     day, and an event with nobody attached still says what it is. Blocks carry
     matched roster people (attendee order, then title matches) and labels for
     attendees who have no entity record yet.
+
+    Who is coming is only news the first time. A standing meeting keeps its
+    slot but sheds its body on every occurrence after the first (`repeats`,
+    from `repeat_series`): the roster of a weekly thirteen-person sync is the
+    same thirteen people it was last week, and reprinting them daily buries the
+    one ad-hoc meeting where knowing the room actually matters.
     """
     index = person_index(people)
     ex_re = excluded_re(excluded)
@@ -611,6 +647,11 @@ def brief_blocks(events, people, skip_re, excluded=(),
             # and a redacted event must not leak its title, people or location.
             blocks.append({"time": fmt_time(ev["start"]),
                            "title": REDACTED_TITLE, "people": [],
+                           "unmatched": []})
+            continue
+        if series_key(ev) in repeats:
+            blocks.append({"time": fmt_time(ev["start"]),
+                           "title": event_title(ev), "people": [],
                            "unmatched": []})
             continue
         others = [a for a in real_attendees(ev, skip_re)
@@ -1477,10 +1518,27 @@ def main():
             log.info("bumped LastContact for %d people from Messages "
                      "(since %s)", changed, yesterday)
 
+    # A failed lookback shows every attendee rather than none: a noisy brief is
+    # recoverable, a brief that silently drops the people is not.
+    repeats = ()
+    since = (date.fromisoformat(today)
+             - timedelta(days=SERIES_LOOKBACK_DAYS)).isoformat()
+    try:
+        hist = run_osascript(CALENDAR, [since, yesterday], timeout=180)
+        if hist.get("ok"):
+            repeats = repeat_series(hist["events"], today)
+            log.info("series lookback %s..%s: %d meetings already seen",
+                     since, yesterday, len(repeats))
+        else:
+            log.warning("series lookback unavailable, briefing every attendee: "
+                        "%s", hist.get("error"))
+    except Exception as exc:
+        log.warning("series lookback failed, briefing every attendee: %s", exc)
+
     # Every section is upserted (not append-once): the 05:45/06:30/08:00
     # retries refresh a 05:15 brief built from incomplete calendar sync, and
     # a cleared review backlog removes its stale nudge (empty content).
-    blocks = brief_blocks(events, people, skip_re, excluded, skip_cals)
+    blocks = brief_blocks(events, people, skip_re, excluded, skip_cals, repeats)
     overdue = reconnect_overdue(people, today)
     bdays = birthday_rows(contacts, people, today)
     backlog = review_backlog(today, excluded)

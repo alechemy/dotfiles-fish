@@ -141,6 +141,33 @@ Roster people are attached to an event two ways, deduped: from its **attendees**
 the **title** ("Call with Jake"). Attendees exist only on Exchange events —
 iCloud events carry none — which is why title matching exists at all.
 
+#### Who is coming is only news the first time
+
+A standing meeting keeps its slot on the timeline but sheds its body on every
+occurrence after the first: the roster of a weekly thirteen-person sync is the
+same thirteen people it was last week, and reprinting them daily buries the one
+ad-hoc meeting where knowing the room actually matters. Only **ad-hoc meetings
+and the first occurrence of a series** carry people.
+
+Recognizing a series is the hard part, because **EventKit cannot tell you**.
+An Exchange series does not arrive as a series: each occurrence is an
+independent event with `hasRecurrenceRules` false and its own identifier, and
+the identifier splits again whenever the organizer edits the series — one
+weekly meeting was observed as nine events under five identifiers. Only iCloud
+events model recurrence honestly. So `series_key` ignores EventKit's recurrence
+metadata entirely and identifies a meeting as `(calendar, folded title)`, and
+`repeat_series` calls it a repeat if it already ran inside a
+`SERIES_LOOKBACK_DAYS` (180) window — long enough that a monthly series does
+not read as new every time. Consequences worth knowing:
+
+- The lookback is a **third calendar dump** per run. If it fails, the brief
+  **shows every attendee** rather than none: a noisy brief is recoverable, one
+  that silently drops the people is not.
+- A series whose first occurrence predates the window never re-introduces
+  itself, which is correct — it is not new to you.
+- Two genuinely unrelated one-offs sharing a title on one calendar ("Interview")
+  read as a series, and the second loses its people. Widen the key if that bites.
+
 There is deliberately **no heuristic name extraction** for people the roster has
 never heard of. An earlier version parsed unknown names out of titles, anchored
 on `X <> Y` / `with X` / `Call X`, and flagged them "no entity record yet". Once
