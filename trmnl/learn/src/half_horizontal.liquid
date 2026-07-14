@@ -1,0 +1,21 @@
+<div class="layout layout--col layout--center-y gap--xsmall">
+  <div class="w--full">
+    <span class="title title--small" data-clamp="2">{{ title | escape }}</span>
+  </div>
+
+  {% if has_code and code_lines <= 4 and code_cols <= 100 %}
+  <div class="w--full">
+    <pre class="code code--sm">{{ code | escape }}</pre>
+  </div>
+  {% else %}
+  <div class="w--full">
+    <span class="description" data-clamp="3">{{ fact | escape }}</span>
+  </div>
+  {% endif %}
+</div>
+
+<div class="title_bar">
+  <img class="image image-stroke" src="data:image/svg+xml;base64,{{ svg_logo | base64_encode }}">
+  <span class="title">{{ topic | escape }}</span>
+  <span class="instance">{{ level | escape }}</span>
+</div>

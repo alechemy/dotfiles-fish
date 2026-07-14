@@ -1,0 +1,42 @@
+{
+  "project": "react-native-expo",
+  "note": "Input manifest for sourcing facts. Each topic is pinned to the version actually installed in the app — facts are only worth showing if they are true for the version you are running. Regenerate versions with: pnpm ls --depth 0 --filter <app>",
+  "excluded": [
+    "ESLint, Prettier, lefthook, git — general dev tooling, already familiar",
+    "Anything not in package.json (see `planned` below)"
+  ],
+  "topics": [
+    { "key": "react-native-core", "label": "React Native", "version": "react-native 0.86.0", "scope": "New Architecture (Fabric, TurboModules, JSI, Codegen), Hermes V1, core primitives vs web, flexbox defaults, Platform APIs, shadows, keyboard" },
+    { "key": "react-19", "label": "React 19", "version": "react 19.2.3", "scope": "ref as prop, use(), Actions, useOptimistic, <Activity>, useEffectEvent, Suspense in RN, React Compiler" },
+    { "key": "expo-sdk-core", "label": "Expo SDK", "version": "expo 57.0.4", "scope": "config plugins, CNG/prebuild, app.json, EXPO_PUBLIC_ inlining, expo/fetch, expo-doctor, dev builds" },
+    { "key": "expo-router", "label": "Expo Router", "version": "expo-router 57.0.4", "scope": "file routing, Stack/Tabs/NativeTabs, params hooks, typed routes, modals, auth gating; no @react-navigation imports" },
+    { "key": "expo-image", "label": "expo-image", "version": "expo-image 57.0.0", "scope": "contentFit, blurhash/thumbhash, cachePolicy, recyclingKey in lists, prefetch" },
+    { "key": "expo-updates", "label": "EAS Update", "version": "expo-updates 57.0.6", "scope": "runtimeVersion policies, branch vs channel, useUpdates, rollbacks, what OTA cannot change" },
+    { "key": "eas-build", "label": "EAS Build", "version": "eas-cli", "scope": "eas.json profiles, env vars, credentials, local builds, submit, workflows" },
+    { "key": "expo-modules", "label": "Expo modules", "version": "Expo SDK 57", "scope": "device, font, glass-effect, linking, splash-screen, status-bar, symbols, system-ui, web-browser, constants" },
+    { "key": "expo-ui", "label": "@expo/ui", "version": "@expo/ui 57.0.4", "scope": "SwiftUI/Jetpack Compose native primitives, import paths, modifiers, alpha status" },
+    { "key": "nativewind", "label": "NativeWind", "version": "nativewind 5.0.0-preview.4", "scope": "v5 vs v4, cssInterop/remapProps, platform + dark variants, the Tailwind subset, rem baseline" },
+    { "key": "tailwind-v4", "label": "Tailwind v4", "version": "tailwindcss 4.3.2", "scope": "CSS-first config, @theme, @utility, @source, no tailwind.config.js" },
+    { "key": "gluestack", "label": "Gluestack UI", "version": "@gluestack-ui/core 5.0.15", "scope": "own-your-code components, CLI add, provider + tokens" },
+    { "key": "tanstack-query", "label": "TanStack Query", "version": "@tanstack/react-query 5.101.2", "scope": "queryOptions, staleTime/gcTime, v5 signature changes, infinite queries, mutations + optimistic, RN focus/online managers" },
+    { "key": "zustand", "label": "Zustand", "version": "zustand 5.0.14", "scope": "selectors, useShallow and the v5 snapshot trap, middleware (persist/immer/devtools), slices" },
+    { "key": "valibot", "label": "Valibot", "version": "valibot 1.4.2", "scope": "pipe model, safeParse, fallback (invalid vs absent), unions, transforms, to-json-schema" },
+    { "key": "flashlist", "label": "FlashList", "version": "@shopify/flash-list 2.0.2", "scope": "v2 is estimate-free, recycling, getItemType, useRecyclingState, New-Arch only" },
+    { "key": "reanimated", "label": "Reanimated", "version": "react-native-reanimated 4.5.0 + react-native-worklets 0.10.0", "scope": "worklets split into its own package, UI vs JS thread, shared values, layout animations, CSS animations API" },
+    { "key": "gesture-handler", "label": "Gesture Handler", "version": "react-native-gesture-handler 2.32.0", "scope": "modern Gesture API + GestureDetector, GestureHandlerRootView, composition, worklet callbacks" },
+    { "key": "screens-safearea", "label": "Screens & Safe Area", "version": "react-native-screens 4.25.2, react-native-safe-area-context 5.7.0", "scope": "useSafeAreaInsets vs SafeAreaView, initialWindowMetrics, screen freezing" },
+    { "key": "react-native-svg", "label": "react-native-svg", "version": "react-native-svg 15.15.4", "scope": "primitives, SvgXml, animating with Reanimated, sizing" },
+    { "key": "typescript-6", "label": "TypeScript 6", "version": "typescript 6.0.3", "scope": "noUncheckedIndexedAccess in practice, satisfies, const type params, erasableSyntaxOnly, TS6 changes" },
+    { "key": "testing", "label": "Testing", "version": "jest 29.7 + jest-expo 57.0.1 + @testing-library/react-native 14.0.1 + Maestro", "scope": "jest-expo preset, RNTL v14 queries + userEvent, testing TanStack Query, Maestro flows" },
+    { "key": "metro-monorepo", "label": "Metro & pnpm", "version": "Metro (SDK 57) + pnpm 11", "scope": "auto-detected workspace root, why disableHierarchicalLookup breaks pnpm, cache, withNativeWind, package exports" },
+    { "key": "tmdb-api", "label": "TMDB API", "version": "TMDB API v3", "scope": "v3 api_key auth only, append_to_response, image CDN + /configuration, rate limits, session_id writes, attribution" },
+    { "key": "hermes-perf", "label": "Performance", "version": "Hermes V1 / RN 0.86", "scope": "Hermes vs JSC, thread model, profiling, bundle analysis, list perf" },
+    { "key": "config-system", "label": "Config system", "version": "remote-config architecture", "scope": "two-layer model (bundled defaults + one remote override), safeParse at the boundary, per-field fallback, invalid vs absent, the hardcoded boot floor, _schemaVersion sunsetting, OTA vs remote config" },
+    { "key": "accessibility", "label": "Accessibility", "version": "React Native 0.86 / RNTL 14", "scope": "accessibilityRole/Label/State, collapsing children, tap targets, reduce-motion, font scaling, focus after navigation" }
+  ],
+  "planned": [
+    { "key": "react-hook-form", "label": "React Hook Form", "note": "add once it is in package.json" },
+    { "key": "sentry", "label": "Sentry", "note": "error tracking; the config system's onDegraded seam depends on a reporter existing" },
+    { "key": "posthog", "label": "PostHog", "note": "analytics only — never config/flags" }
+  ]
+}

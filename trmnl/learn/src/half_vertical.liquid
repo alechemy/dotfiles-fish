@@ -1,0 +1,29 @@
+<div class="layout layout--col layout--center-y gap--small">
+  <div class="w--full">
+    <span class="label label--gray">{{ topic | escape }}</span>
+  </div>
+
+  <div class="w--full">
+    <span class="title title--small" data-clamp="3">{{ title | escape }}</span>
+  </div>
+
+  {% comment %} 46 cols is what fits a 400px column at 11px once the rule and gutter are paid for. {% endcomment %}
+  {% assign code_fits = false %}
+  {% if has_code and code_cols <= 46 %}{% assign code_fits = true %}{% endif %}
+
+  <div class="w--full">
+    <span class="description" data-clamp="{% if code_fits %}3{% else %}8{% endif %}">{{ fact | escape }}</span>
+  </div>
+
+  {% if code_fits %}
+  <div class="w--full">
+    <pre class="code code--sm">{{ code | escape }}</pre>
+  </div>
+  {% endif %}
+</div>
+
+<div class="title_bar">
+  <img class="image image-stroke" src="data:image/svg+xml;base64,{{ svg_logo | base64_encode }}">
+  <span class="title">{{ topic | escape }}</span>
+  <span class="instance">{{ level | escape }}</span>
+</div>

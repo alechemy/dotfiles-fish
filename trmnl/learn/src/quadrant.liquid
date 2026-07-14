@@ -1,0 +1,14 @@
+<div class="layout layout--col layout--center-y gap--xsmall">
+  <div class="w--full">
+    <span class="title title--small" data-clamp="3">{{ title | escape }}</span>
+  </div>
+
+  <div class="w--full">
+    <span class="description" data-clamp="3">{{ fact | escape }}</span>
+  </div>
+</div>
+
+<div class="title_bar">
+  <img class="image image-stroke" src="data:image/svg+xml;base64,{{ svg_logo | base64_encode }}">
+  <span class="title">{{ topic | escape }}</span>
+</div>

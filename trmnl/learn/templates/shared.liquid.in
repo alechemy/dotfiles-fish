@@ -1,0 +1,43 @@
+{%- capture svg_logo %}
+<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <path d="M9 8 L5 12 L9 16" stroke="black" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <path d="M15 8 L19 12 L15 16" stroke="black" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <line x1="13" y1="6" x2="11" y2="18" stroke="black" stroke-width="2" stroke-linecap="round"/>
+</svg>
+{%- endcapture %}
+<style>
+  /* The framework ships no monospace face, so code would fall back to whatever
+     the render container happens to have and get anti-aliased into mush at
+     1-bit. Departure Mono (SIL OFL) is fixed-pitch with integer pixel advances
+     at 11px multiples, which is what keeps the glyph edges on the pixel grid. */
+  @font-face {
+    font-family: "DepartureMono";
+    src: url(data:font/woff2;base64,__FONT_WOFF2_BASE64__) format("woff2");
+    font-weight: 400;
+    font-style: normal;
+    font-display: block;
+  }
+
+  /* Flex items default to min-width:auto, so an unwrappable <pre> would set the
+     column's min-content width and push the title and prose off-screen. */
+  .layout > * {
+    min-width: 0;
+  }
+
+  .code {
+    font-family: "DepartureMono", monospace;
+    white-space: pre;
+    overflow: hidden;
+    max-width: 100%;
+    border-left: 3px solid black;
+    padding-left: 10px;
+    -webkit-font-smoothing: none;
+    font-smooth: never;
+    text-rendering: optimizeSpeed;
+  }
+
+  /* Sizes must be exact multiples of 11px; anything else reintroduces the
+     sub-pixel blur the pixel font exists to avoid. */
+  .code--lg { font-size: 22px; line-height: 26px; }
+  .code--sm { font-size: 11px; line-height: 15px; }
+</style>

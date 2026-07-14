@@ -1,0 +1,30 @@
+---
+# Local preview config for `trmnlp serve` (http://localhost:4567).
+#
+# These variables are the POST-transform shape — what src/transform.js hands to
+# Liquid after picking a fact. selectFact() passes an input with no `facts`
+# array straight through, so previewing against them does not double-select.
+#
+# For a preview driven by the real corpus instead, use bin/vars.js + bin/preview.rb
+# (see README §Preview) — it runs the shipped transform over dist/corpus.json.
+watch:
+  - src
+
+variables:
+  trmnl:
+    plugin_settings:
+      instance_name: Learning
+  id: flashlist-01
+  topic: FlashList
+  title: FlashList v2 is estimate-free — no estimatedItemSize
+  fact: v2 removed estimatedItemSize, estimatedListSize and estimatedFirstItemOffset. They're gone from FlashListProps, so passing one is now a TS error.
+  code: ''
+  lang: ''
+  level: core
+  version: '@shopify/flash-list 2.0.2'
+  has_code: false
+  code_lines: 0
+  code_cols: 0
+  seq: 1
+  total: 261
+  project: ''

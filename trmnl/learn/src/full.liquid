@@ -1,0 +1,30 @@
+<div class="layout layout--col layout--center-y gap--small">
+  <div class="w--full">
+    <span class="label label--gray">{{ level | escape }}</span>
+  </div>
+
+  {% if has_code %}
+  <div class="w--full">
+    <span class="title" data-clamp="2">{{ title | escape }}</span>
+  </div>
+  <div class="w--full">
+    <span class="description description--large" data-clamp="2">{{ fact | escape }}</span>
+  </div>
+  <div class="w--full">
+    <pre class="code code--lg">{{ code | escape }}</pre>
+  </div>
+  {% else %}
+  <div class="w--full">
+    <span class="title title--large" data-clamp="3">{{ title | escape }}</span>
+  </div>
+  <div class="w--full">
+    <span class="description description--xlarge" data-clamp="6">{{ fact | escape }}</span>
+  </div>
+  {% endif %}
+</div>
+
+<div class="title_bar">
+  <img class="image image-stroke" src="data:image/svg+xml;base64,{{ svg_logo | base64_encode }}">
+  <span class="title">{{ topic | escape }}</span>
+  <span class="instance">{{ version | escape }}</span>
+</div>
