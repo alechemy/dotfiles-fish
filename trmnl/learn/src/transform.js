@@ -40,6 +40,32 @@ function gather(input) {
   return { facts: facts, meta: meta };
 }
 
+/**
+ * Minutes of "active" time elapsed since the epoch, where active means inside
+ * the local daily window. Outside it the count is pinned, so the deck holds
+ * instead of dealing facts to an empty room overnight.
+ *
+ * Local time comes from a fixed `utcOffsetMinutes`, not a timezone database —
+ * the default transform runtime exposes no Intl. That costs an hour of drift
+ * across a DST boundary, which a window this wide absorbs.
+ */
+function activeMinutes(nowMs, meta) {
+  var startH = typeof meta.activeStartHour === 'number' ? meta.activeStartHour : 0;
+  var endH = typeof meta.activeEndHour === 'number' ? meta.activeEndHour : 24;
+  var perDay = (endH - startH) * 60;
+  if (perDay <= 0 || perDay >= 1440) return Math.floor(nowMs / 60000);
+
+  var localMs = nowMs + (meta.utcOffsetMinutes || 0) * 60000;
+  var day = Math.floor(localMs / 86400000);
+  var intoDay = Math.floor((localMs - day * 86400000) / 60000);
+
+  var into = intoDay - startH * 60;
+  if (into < 0) into = 0;
+  if (into > perDay) into = perDay;
+
+  return day * perDay + into;
+}
+
 function selectFact(input) {
   var gathered = gather(input);
   var facts = gathered.facts;
@@ -47,9 +73,9 @@ function selectFact(input) {
 
   var meta = gathered.meta;
   var n = facts.length;
-  var periodMs = Math.max(1, meta.rotationMinutes || 60) * 60000;
+  var period = Math.max(1, meta.rotationMinutes || 60);
 
-  var tick = Math.floor(Date.now() / periodMs);
+  var tick = Math.floor(activeMinutes(Date.now(), meta) / period);
   var cycle = Math.floor(tick / n);
 
   // The device only samples every s-th tick, where s is the display interval in

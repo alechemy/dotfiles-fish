@@ -67,16 +67,42 @@ bijection, so a cycle still shows each fact exactly once.
 The one cost: because the offset jumps at a cycle boundary, a fact can repeat
 near the wrap — about once per full deck (~11 days), rather than never.
 
-**Tuning `rotationMinutes`** (in `corpus/<project>.facts.json`, `meta`): a plugin
-is displayed once every `playlist_size × device_refresh_rate`. Set
-`rotationMinutes` **at or above** that interval:
+### Active hours
 
-- rotation **shorter** than the display interval → facts advance between
-  displays and you never see the skipped ones.
-- rotation **longer** → you occasionally see the same fact twice in a row, which
-  is harmless (and not bad for retention).
+The deck advances only inside a local daily window, so it holds overnight rather
+than dealing facts to an empty room. Without it, a 15-minute rotation burns ~60%
+of the corpus while nobody is looking.
 
-Erring long is the safe direction. Default is 60.
+Local time comes from a fixed `utcOffsetMinutes`, not a timezone database — the
+default transform runtime exposes no `Intl`. That costs an hour of drift across a
+DST boundary, which a window this wide absorbs. Set `activeStartHour` /
+`activeEndHour` to `0` / `24` to rotate around the clock.
+
+### Tuning
+
+Both live in `corpus/<project>.facts.json` under `meta`:
+
+| key | |
+|---|---|
+| `rotationMinutes` | how long one fact stays up |
+| `activeStartHour` / `activeEndHour` | local window the deck advances in |
+| `utcOffsetMinutes` | e.g. `-420` for PDT |
+
+A fact can only change when the **screen redraws**, so the real ceiling is the
+device refresh rate — and the plugin is only *shown* once every
+`playlist_size × refresh_rate`. Set `rotationMinutes` **at or above** that:
+
+- rotation **shorter** than the display interval → facts advance between showings
+  and you never see the skipped ones.
+- rotation **longer** → you occasionally see the same fact twice, which is
+  harmless (and not bad for retention).
+
+To actually see facts quickly, shorten the *display* interval, not just the
+rotation: drop the device refresh rate (15 min is the free-account floor, 5 min on
+TRMNL+) and give the other playlist items custom schedules that hide them during
+your desk hours — a plugin that is the only visible item shows on every refresh.
+Current setup: 15 min refresh, solo during the day → 48 facts/day, full deck in
+7.6 days.
 
 ## Code snippets
 

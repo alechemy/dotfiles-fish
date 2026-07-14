@@ -1,8 +1,11 @@
 {
  "meta": {
   "project": "",
-  "rotationMinutes": 120,
-  "generated": "2026-07-13"
+  "rotationMinutes": 15,
+  "generated": "2026-07-13",
+  "activeStartHour": 8,
+  "activeEndHour": 20,
+  "utcOffsetMinutes": -420
  },
  "facts": [
   {

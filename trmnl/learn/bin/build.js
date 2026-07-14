@@ -153,12 +153,7 @@ function main() {
   const ordered = interleave(facts);
 
   const payload = {
-    meta: {
-      project: meta.project,
-      rotationMinutes: meta.rotationMinutes,
-      count: ordered.length,
-      generated: meta.generated || '',
-    },
+    meta: { ...meta, count: ordered.length },
     facts: ordered.map((f) => ({
       id: f.id,
       topic: f.topic,
@@ -200,7 +195,15 @@ function main() {
   for (let i = 1; i < ordered.length; i++) {
     if (ordered[i].topic === ordered[i - 1].topic) repeats++;
   }
-  console.log(`rotation           ${meta.rotationMinutes} min · full deck in ${((ordered.length * meta.rotationMinutes) / 60 / 24).toFixed(1)} days · ${repeats} back-to-back same-topic`);
+  const startH = meta.activeStartHour ?? 0;
+  const endH = meta.activeEndHour ?? 24;
+  const activeHours = endH - startH > 0 && endH - startH < 24 ? endH - startH : 24;
+  const perDay = Math.floor((activeHours * 60) / meta.rotationMinutes);
+  const deckDays = ordered.length / perDay;
+  const window = activeHours === 24 ? '24/7' : `${String(startH).padStart(2, '0')}:00–${String(endH).padStart(2, '0')}:00 local`;
+
+  console.log(`rotation           ${meta.rotationMinutes} min · active ${window} · ${perDay} facts/day · full deck in ${deckDays.toFixed(1)} days`);
+  console.log(`interleave         ${repeats} back-to-back same-topic`);
 }
 
 main();
