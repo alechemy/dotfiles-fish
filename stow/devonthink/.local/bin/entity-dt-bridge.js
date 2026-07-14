@@ -100,6 +100,16 @@ function normName(s) {
     .replace(/[̀-ͯ]/g, '').replace(/\s+/g, ' ').trim()
 }
 
+// A body can come back CR-delimited: AppleScript's `do shell script` coerces
+// LF to CR, so a smart rule that pipes a body through a helper and writes the
+// result back stores CRs. Splitting on \n alone would then see the whole note
+// as one line, no `##` header would match, and upsert_section would append a
+// duplicate section instead of replacing it. Writes always emit \n, so a body
+// self-heals on the next edit.
+function bodyLines(rec) {
+  return rec.plainText().split(/\r\n|\r|\n/)
+}
+
 function personBrief(rec, includeBody) {
   const out = {
     uuid: rec.uuid(),
@@ -122,26 +132,24 @@ function personKeys(rec) {
 }
 
 function insertUnderSection(body, header, lines) {
-  const bodyLines = body.split('\n')
+  const out = body.slice()
   let headerIdx = -1
-  for (let i = 0; i < bodyLines.length; i++) {
-    if (bodyLines[i].trim() === header) { headerIdx = i; break }
+  for (let i = 0; i < out.length; i++) {
+    if (out[i].trim() === header) { headerIdx = i; break }
   }
   if (headerIdx === -1) {
-    while (bodyLines.length && bodyLines[bodyLines.length - 1].trim() === '')
-      bodyLines.pop()
-    return bodyLines.concat(['', header, ''], lines).join('\n') + '\n'
+    while (out.length && out[out.length - 1].trim() === '') out.pop()
+    return out.concat(['', header, ''], lines).join('\n') + '\n'
   }
-  let end = bodyLines.length
-  for (let i = headerIdx + 1; i < bodyLines.length; i++) {
-    if (/^#{1,2}\s/.test(bodyLines[i])) { end = i; break }
+  let end = out.length
+  for (let i = headerIdx + 1; i < out.length; i++) {
+    if (/^#{1,2}\s/.test(out[i])) { end = i; break }
   }
   let insertAt = end
-  while (insertAt > headerIdx + 1 && bodyLines[insertAt - 1].trim() === '')
-    insertAt--
+  while (insertAt > headerIdx + 1 && out[insertAt - 1].trim() === '') insertAt--
   const block = insertAt === headerIdx + 1 ? [''].concat(lines) : lines
-  bodyLines.splice(insertAt, 0, ...block)
-  return bodyLines.join('\n')
+  out.splice(insertAt, 0, ...block)
+  return out.join('\n')
 }
 
 // Set by run(); lets module-level helpers reach the DT session.
@@ -221,10 +229,10 @@ function factSignature(line) {
 // Skip lines already filed (by fact signature), link known entities in the
 // remainder, then insert under the given section header.
 function appendLogLines(rec, lines, section) {
-  const body = rec.plainText()
+  const body = bodyLines(rec)
   const uuid = rec.uuid()
   const seen = Object.create(null)
-  for (const bl of body.split('\n')) seen[factSignature(bl)] = true
+  for (const bl of body) seen[factSignature(bl)] = true
   const fresh = []
   let skipped = 0
   for (const line of lines || []) {
@@ -644,7 +652,7 @@ function run(argv) {
       }
       if (rec !== null) {
         const uuid = rec.uuid()
-        const lines = rec.plainText().split('\n')
+        const lines = bodyLines(rec)
         let changed = false
         for (let i = 0; i < lines.length; i++) {
           const bare = v => v === '' || v === '—'
@@ -821,7 +829,7 @@ function run(argv) {
           if (String(rec.type()) !== 'markdown') continue
           records++
           const uuid = rec.uuid()
-          const lines = rec.plainText().split('\n')
+          const lines = bodyLines(rec)
           let changed = false
           for (let i = 0; i < lines.length; i++) {
             if (!/^- /.test(lines[i])) continue
@@ -849,7 +857,7 @@ function run(argv) {
     // refresh retries don't churn sync.
     upsert_section(op) {
       const rec = byUuid(op.uuid)
-      const lines = rec.plainText().split('\n')
+      const lines = bodyLines(rec)
       const content = String(op.content || '')
       let start = -1
       for (let i = 0; i < lines.length; i++) {

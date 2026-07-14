@@ -1725,7 +1725,7 @@ def strip_generated_sections(text):
     attendance pseudo-facts, and On This Day re-surfaces old entries as
     if they were dated today."""
     out, skipping = [], False
-    for line in text.split("\n"):
+    for line in text.splitlines():
         stripped = line.strip()
         if stripped.startswith("## "):
             skipping = stripped in GENERATED_SECTIONS

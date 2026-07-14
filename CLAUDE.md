@@ -218,6 +218,20 @@ The rule: **a non-Apple-signed helper invoked under a launch agent must never op
 
 This is not enforced by a linter; it is a design rule to apply whenever a new pipeline reads from or writes to Downloads/Desktop/Documents under launchd.
 
+### AppleScript: `do shell script` returns CR, not LF
+
+AppleScript coerces a shell helper's LF output to CR (classic Mac line endings). Several smart rules pipe a record's body through a Python helper and write the result back — `set newText to do shell script "…helper < tmp"` then `set plain text of theRecord to newText` — and without a modifier that round-trip silently rewrites the **entire body** as one CR-delimited line.
+
+Nothing looks wrong in DEVONthink (it renders CR fine), but every downstream consumer that splits on `\n` then sees a note with **no lines and no headers**. That is how a duplicated daily note happens: `entity-dt-bridge.js`'s `upsert_section` fails to find `## Briefing`, takes its append path, and adds a second copy of every generated section instead of replacing the first. The same input wipes a body in `sync-markdown-h1.py`, which then emits only its H1.
+
+Three rules:
+
+1. **Every `do shell script` whose output is written back into a record must end with `without altering line endings`.** This applies to `set plain text of`, `set comment of`, and `set rich text of` sinks alike. The modifier also repairs the usual `if newText is not originalText` idempotency guard, which is otherwise always true (CR vs LF) and rewrites the record on every pass.
+2. **Build note bodies with `linefeed`, never `return`.** AppleScript's `return` constant *is* CR, so a skeleton like `"# " & headingDate & return & return & "- "` births a CR-delimited note before any helper touches it. The daily-note skeleton is duplicated in four places (`create-daily-note.sh`, two smart rules, and the AppleScript embedded in `ingest-singlefile-html.py`) — change them together.
+3. **Consumers must be tolerant, not trusting.** `splitlines()` splits on CR; `split("\n")` does not, and this pipeline's Python uses both. Anything reading a record body — or an AppleScript-built `--content` argument — must use `splitlines()` or normalize CRs first, and JXA must split on `/\r\n|\r|\n/` (`bodyLines()` in `entity-dt-bridge.js`). Every writer emits `\n`, so a body that picks up CRs some other way self-heals on its next edit.
+
+`devonthink/tests/test_applescript_line_endings.py` enforces rules 1 and 2 across every AppleScript in the repo, including the ones embedded in Python and shell scripts, and asserts the underlying coercion still happens so the guard can't rot into a no-op.
+
 ### Python script shebangs
 
 Python interpreter management is split between mise and uv on purpose. mise (`stow/mise/.config/mise/config.toml`) provides the day-to-day `python3` on `$PATH`. uv (Brewfile) is reserved for scripts that declare third-party deps via PEP 723. There is no repo-wide `pyproject.toml` / `uv.lock` — each script stands alone.

@@ -104,7 +104,7 @@ on performSmartRule(theRecords)
                                 "t = re.sub(r'^(\\s*)[·•‣⁃◦▪▸](\\s*)', r'\\1-\\2', t, flags=re.MULTILINE)" & linefeed & ¬
                                 "open(f, 'w').write(t)"
                             do shell script "/usr/bin/python3 -c " & quoted form of pyFixBullets & " " & quoted form of tmpFile
-                            set formatted to do shell script "cat " & quoted form of tmpFile
+                            set formatted to do shell script "cat " & quoted form of tmpFile without altering line endings
                             do shell script "rm -f " & quoted form of tmpFile
                         on error lintErr
                             log message "Format Boox Comments: markdownlint failed, using unlinted output: " & lintErr info recName

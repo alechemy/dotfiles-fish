@@ -98,7 +98,7 @@ on run argv
     set noteFilename to item 4 of argv
     set headingDate to item 5 of argv
 
-    set noteContent to "# " & headingDate & return & return & "- " & return
+    set noteContent to "# " & headingDate & linefeed & linefeed & "- " & linefeed
 
     tell application id "DNtp"
         try

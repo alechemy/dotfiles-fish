@@ -23,7 +23,10 @@ def main():
         sys.exit(1)
 
     title = sys.argv[1]
-    text = sys.stdin.read()
+    # A body written back by AppleScript is CR-delimited; splitting a CR body
+    # on \n would yield one line and emit an H1 with the document appended to
+    # it — a silent body wipe. Normalizing also heals the record on write-back.
+    text = sys.stdin.read().replace("\r\n", "\n").replace("\r", "\n")
 
     # Refuse to synthesize content from nothing. If the caller hands us
     # empty or whitespace-only input, return it unchanged — never inject

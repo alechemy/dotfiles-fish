@@ -102,11 +102,15 @@ on performSmartRule(theRecords)
 							write noteBody to fileRef as «class utf8»
 							close access fileRef
 
+							-- `without altering line endings`: otherwise the helper's
+							-- LFs come back as CRs and the note is stored as one
+							-- CR-delimited line, which every \n-splitting consumer
+							-- (entity-dt-bridge's upsert_section) reads as headerless.
 							set newBody to do shell script ¬
 								"export JOT_LINE=" & quoted form of jotLine & ¬
 								" && export SECTION_HEADER=" & quoted form of sectionHeader & ¬
 								" && /usr/bin/python3 " & quoted form of pyHelper & ¬
-								" < " & quoted form of tmpPath
+								" < " & quoted form of tmpPath without altering line endings
 						on error errMsg number errNum
 							try
 								close access (POSIX file tmpPath)

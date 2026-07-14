@@ -60,7 +60,10 @@ def main():
 
     note = sys.stdin.read()
     lines = note.splitlines()
-    block_lines = args.content.rstrip("\n").split("\n")
+    # --content is built in AppleScript, where `return` is a CR: split it the
+    # same way the body is split, or the whole block lands as one line.
+    block_lines = args.content.replace("\r\n", "\n").replace(
+        "\r", "\n").rstrip("\n").split("\n")
 
     header_idx = None
     for i, line in enumerate(lines):

@@ -429,6 +429,14 @@ class StripGeneratedSections(unittest.TestCase):
         self.assertNotIn("stuff", out)
         self.assertIn("- real note", out)
 
+    def test_cr_delimited_body_still_strips(self):
+        """A note written back by AppleScript is CR-delimited; splitting it on
+        \\n would see one headerless line and feed the briefing to the LLM."""
+        text = "## Briefing\r\rstuff\r\r## Today's Notes\r\r- real note"
+        out = ef.strip_generated_sections(text)
+        self.assertNotIn("stuff", out)
+        self.assertIn("- real note", out)
+
     def test_subheaders_do_not_end_the_skip(self):
         text = "## On This Day\n\n### 2025\n\n- old entry\n\n## Today's Notes\n\n- now"
         out = ef.strip_generated_sections(text)

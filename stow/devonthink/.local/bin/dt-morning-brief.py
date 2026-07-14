@@ -408,7 +408,7 @@ def redact_person(p, ex_re, keys=()):
                for k, v in (p.get("md") or {}).items()}
     body = p.get("body")
     if body:
-        p["body"] = "\n".join(ln for ln in body.split("\n")
+        p["body"] = "\n".join(ln for ln in body.splitlines()
                               if not text_excluded(ln, ex_re, keys))
     return p
 
@@ -498,7 +498,7 @@ def person_summary_line(p):
 def recent_log_bullets(p, limit=3):
     """Newest bullets by fact date, not append order — a backlog drain can
     append years-old facts after current ones. Renders in document order."""
-    lines = (p.get("body") or "").split("\n")
+    lines = (p.get("body") or "").splitlines()
     bullets = [
         ln for ln in lines
         if LOG_BULLET_RE.match(ln) and not ln.rstrip().endswith("— Created.")

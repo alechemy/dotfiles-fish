@@ -68,7 +68,7 @@ on performSmartRule(theRecords)
 
 			if not isWebClip then
 				-- Shared values for daily notes processing
-				set docBaseName to do shell script "echo " & quoted form of recName & " | sed 's/\\.[^.]*$//'"
+				set docBaseName to do shell script "echo " & quoted form of recName & " | sed 's/\\.[^.]*$//'" without altering line endings
 
 				set eventDate to ""
 				try
@@ -217,9 +217,9 @@ on performSmartRule(theRecords)
 
 								if extractTargetNote is not missing value then
 									set docUUID to uuid of theRecord
-									set contentBlock to "### From [✏️ " & docBaseName & "](x-devonthink-item://" & docUUID & "):" & return & return
+									set contentBlock to "### From [✏️ " & docBaseName & "](x-devonthink-item://" & docUUID & "):" & linefeed & linefeed
 									repeat with aLine in newLinesToAppend
-										set contentBlock to contentBlock & aLine & return
+										set contentBlock to contentBlock & aLine & linefeed
 									end repeat
 
 									my appendToSection(extractTargetNote, sectionHeader, contentBlock)
@@ -299,7 +299,7 @@ on performSmartRule(theRecords)
 
 								-- Only append if this document isn't already linked (by UUID)
 								if (plain text of targetNote) does not contain docUUID then
-									my appendToSection(targetNote, sectionHeader, linkText & return)
+									my appendToSection(targetNote, sectionHeader, linkText & linefeed)
 								end if
 
 								add custom meta data 1 for "DailyNoteLinked" to theRecord
@@ -325,7 +325,7 @@ on performSmartRule(theRecords)
 						set fileRef to open for access (POSIX file tmpPath) with write permission
 						write mdText to fileRef as «class utf8»
 						close access fileRef
-						set newText to do shell script "/usr/bin/python3 ~/.local/bin/sync-markdown-h1.py " & quoted form of titleForH1 & " < " & quoted form of tmpPath
+						set newText to do shell script "/usr/bin/python3 ~/.local/bin/sync-markdown-h1.py " & quoted form of titleForH1 & " < " & quoted form of tmpPath without altering line endings
 						do shell script "rm -f " & quoted form of tmpPath
 						if newText is not mdText then
 							set plain text of theRecord to newText
@@ -416,7 +416,7 @@ on performSmartRule(theRecords)
 									set linkText to "- " & timeStr & ": [🔗 " & bmName & "](x-devonthink-item://" & bmUUID & ")"
 
 									if (plain text of targetNote) does not contain bmUUID then
-										my appendToSection(targetNote, sectionHeader, linkText & return)
+										my appendToSection(targetNote, sectionHeader, linkText & linefeed)
 									end if
 									add custom meta data 1 for "DailyNoteLinked" to bmRecord
 								else
@@ -514,11 +514,15 @@ on appendToSection(theNote, sectionHeader, contentBlock)
 		set fileRef to open for access (POSIX file tmpPath) with write permission
 		write noteText to fileRef as «class utf8»
 		close access fileRef
+		-- `without altering line endings`: otherwise the helper's LFs come back
+		-- as CRs and the whole note is stored as one CR-delimited line, which
+		-- every \n-splitting consumer (entity-dt-bridge's upsert_section) then
+		-- reads as a note with no headers.
 		set newText to do shell script ¬
 			"/usr/bin/python3 ~/.local/bin/insert-daily-note-section.py" & ¬
 			" --header " & quoted form of sectionHeader & ¬
 			" --content " & quoted form of contentBlock & ¬
-			" < " & quoted form of tmpPath
+			" < " & quoted form of tmpPath without altering line endings
 		do shell script "rm -f " & quoted form of tmpPath
 
 		set plain text of theNote to newText
@@ -538,7 +542,7 @@ on getOrCreateDailyNote(targetDB, destGroup, groupPath, dateStr)
 		if existingNote is not missing value then return existingNote
 
 		set headingDate to do shell script "date -j -f '%Y-%m-%d' " & quoted form of dateStr & " '+%A, %B %-d, %Y'"
-		set noteContent to "# " & headingDate & return & return & "- " & return
+		set noteContent to "# " & headingDate & linefeed & linefeed & "- " & linefeed
 
 		set newNote to create record with {name:dateStr, type:markdown} in destGroup
 		set plain text of newNote to noteContent

@@ -50,5 +50,17 @@ class TimeKey(unittest.TestCase):
         self.assertIsNone(sect.time_key("not a bullet at all"))
 
 
+class CarriageReturnContent(unittest.TestCase):
+    """--content is built in AppleScript, where `return` is a CR."""
+
+    def test_cr_content_becomes_separate_lines(self):
+        note = "# Day\n\n## Today's Notes\n\n- old\n"
+        out = run(note, "## Today's Notes", "### From doc:\r\r- one\r- two\r")
+        self.assertEqual(
+            out,
+            "# Day\n\n## Today's Notes\n\n- old\n\n### From doc:\n\n- one\n- two",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

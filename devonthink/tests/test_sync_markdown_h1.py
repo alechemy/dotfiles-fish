@@ -41,5 +41,21 @@ class EmptyInput(unittest.TestCase):
         self.assertEqual(run("   \n\n", "X"), "   \n\n")
 
 
+class CarriageReturnInput(unittest.TestCase):
+    """A body written back by AppleScript is CR-delimited. Splitting it on \\n
+    would collapse it to one line, and rewriting lines[0] would emit the H1
+    alone — the document body silently destroyed."""
+
+    def test_cr_body_keeps_its_content_and_is_normalized(self):
+        self.assertEqual(
+            run("# Old\r\rbody text\r\r- a bullet\r", "New"),
+            "# New\n\nbody text\n\n- a bullet\n",
+        )
+
+    def test_crlf_body_keeps_its_content(self):
+        self.assertEqual(
+            run("# Old\r\n\r\nbody text\r\n", "New"), "# New\n\nbody text\n")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -370,7 +370,7 @@ on getOrCreateDailyNote(targetDB, destGroup, groupPath, dateStr)
         if existingNote is not missing value then return existingNote
 
         set headingDate to do shell script "date -j -f '%Y-%m-%d' " & quoted form of dateStr & " '+%A, %B %-d, %Y'"
-        set noteContent to "# " & headingDate & return & return & "- " & return
+        set noteContent to "# " & headingDate & linefeed & linefeed & "- " & linefeed
 
         set newNote to create record with {name:dateStr, type:markdown} in destGroup
         set plain text of newNote to noteContent

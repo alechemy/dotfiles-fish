@@ -51,9 +51,12 @@ tell application id "DNtp"
             set fileRef to open for access (POSIX file tmpPath) with write permission
             write originalText to fileRef as «class utf8»
             close access fileRef
+            -- `without altering line endings`: otherwise the lint output comes
+            -- back CR-delimited, which stores the body as one line and makes
+            -- the changed-check below true on every save.
             set newText to do shell script ¬
                 "/usr/bin/sed 's/\\t/  /g' " & quoted form of tmpPath & ¬
-                " | " & quoted form of lintHelper
+                " | " & quoted form of lintHelper without altering line endings
         on error errMsg number errNum
             try
                 close access (POSIX file tmpPath)
