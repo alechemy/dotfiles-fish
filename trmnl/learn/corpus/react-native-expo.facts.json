@@ -3,8 +3,8 @@
   "project": "",
   "rotationMinutes": 15,
   "generated": "2026-07-13",
-  "activeStartHour": 8,
-  "activeEndHour": 20,
+  "activeStartHour": 5.5,
+  "activeEndHour": 14,
   "utcOffsetMinutes": -420
  },
  "facts": [

@@ -200,7 +200,8 @@ function main() {
   const activeHours = endH - startH > 0 && endH - startH < 24 ? endH - startH : 24;
   const perDay = Math.floor((activeHours * 60) / meta.rotationMinutes);
   const deckDays = ordered.length / perDay;
-  const window = activeHours === 24 ? '24/7' : `${String(startH).padStart(2, '0')}:00–${String(endH).padStart(2, '0')}:00 local`;
+  const hhmm = (h) => `${String(Math.floor(h)).padStart(2, '0')}:${String(Math.round((h % 1) * 60)).padStart(2, '0')}`;
+  const window = activeHours === 24 ? '24/7' : `${hhmm(startH)}–${hhmm(endH)} local`;
 
   console.log(`rotation           ${meta.rotationMinutes} min · active ${window} · ${perDay} facts/day · full deck in ${deckDays.toFixed(1)} days`);
   console.log(`interleave         ${repeats} back-to-back same-topic`);

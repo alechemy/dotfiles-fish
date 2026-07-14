@@ -101,8 +101,8 @@ To actually see facts quickly, shorten the *display* interval, not just the
 rotation: drop the device refresh rate (15 min is the free-account floor, 5 min on
 TRMNL+) and give the other playlist items custom schedules that hide them during
 your desk hours — a plugin that is the only visible item shows on every refresh.
-Current setup: 15 min refresh, solo during the day → 48 facts/day, full deck in
-7.6 days.
+Current setup: 15 min refresh, solo across a 05:30–14:00 window → 34 facts/day,
+full deck in 10.7 days. Hours may be fractional (`5.5` = 05:30).
 
 ## Code snippets
 
