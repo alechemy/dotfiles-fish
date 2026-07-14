@@ -61,6 +61,9 @@
   "markdown.preview.fontSize": 16,
   "markdown.preview.fontFamily": "IBM Plex Sans",
   "markdown.preview.typographer": true,
+  "markdown-preview-enhanced.automaticallyShowPreviewOfMarkdownBeingEdited": true,
+  "markdown-preview-enhanced.previewMode": "Single Preview",
+  "markdown-preview-enhanced.scrollSync": true,
 
   // FILES
   // ----------------------------------------
@@ -125,10 +128,38 @@
   // WORKBENCH
   // ----------------------------------------
   "workbench.colorTheme": "Night Owl",
+  // Terminal colors are theme-independent on purpose: the ANSI palette mirrors
+  // Ghostty's Catppuccin Macchiato, but the background is Mocha's crust:
+  // Macchiato's own #24273a is lighter than Night Owl's editor background and
+  // leaves the panel with no contrast against it.
   "workbench.colorCustomizations": {
     "[Night Owl]": {
       "editor.wordHighlightBackground": "#FFFFFF08"
-    }
+    },
+    "terminal.background": "#11111b",
+    "terminal.foreground": "#cad3f5",
+    "terminal.border": "#1e2030",
+    "terminal.selectionBackground": "#5b6078",
+    "terminal.selectionForeground": "#cad3f5",
+    "terminal.inactiveSelectionBackground": "#5b607880",
+    "terminalCursor.foreground": "#f4dbd6",
+    "terminalCursor.background": "#11111b",
+    "terminal.ansiBlack": "#494d64",
+    "terminal.ansiRed": "#ed8796",
+    "terminal.ansiGreen": "#a6da95",
+    "terminal.ansiYellow": "#eed49f",
+    "terminal.ansiBlue": "#8aadf4",
+    "terminal.ansiMagenta": "#f5bde6",
+    "terminal.ansiCyan": "#8bd5ca",
+    "terminal.ansiWhite": "#a5adcb",
+    "terminal.ansiBrightBlack": "#5b6078",
+    "terminal.ansiBrightRed": "#ec7486",
+    "terminal.ansiBrightGreen": "#8ccf7f",
+    "terminal.ansiBrightYellow": "#e1c682",
+    "terminal.ansiBrightBlue": "#78a1f6",
+    "terminal.ansiBrightMagenta": "#f2a9dd",
+    "terminal.ansiBrightCyan": "#63cbc0",
+    "terminal.ansiBrightWhite": "#b8c0e0"
   },
   "workbench.editor.closeOnFileDelete": true,
   "workbench.editor.alwaysShowEditorActions": true,
@@ -222,7 +253,13 @@
   // TERMINAL
   // ----------------------------------------
   "terminal.integrated.fontFamily": "Operator Mono SSm Lig",
+  "terminal.integrated.fontLigatures.enabled": true,
   "terminal.integrated.cursorStyle": "line",
+  "terminal.integrated.cursorStyleInactive": "none",
+  "terminal.integrated.cursorBlinking": false,
+  "terminal.integrated.cursorWidth": 2,
+  // Any value above 1 lets VS Code shift the Catppuccin palette for contrast.
+  "terminal.integrated.minimumContrastRatio": 1,
   "terminal.integrated.profiles.osx": {
     "fish (homebrew)": {
       "path": "/opt/homebrew/bin/fish"
