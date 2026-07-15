@@ -346,6 +346,14 @@ else
 fi
 chmod +x "$DOTFILES/scripts/build-vscode-config.sh"
 "$DOTFILES/scripts/build-vscode-config.sh"
+
+# Merge tracked MCP-server fragments into ~/.claude.json (personal always, the
+# work fragment only if the gitignored stow-work/work carries one). No op needed;
+# ~/.claude.json is app-owned runtime state, so this merges rather than stows.
+chmod +x "$DOTFILES/scripts/merge-claude-mcp.sh"
+"$DOTFILES/scripts/merge-claude-mcp.sh" \
+    || info "WARNING: Claude Code MCP-server merge failed; check jq and ~/.claude.json."
+
 chmod +x "$DOTFILES/scripts/build-launchd-plists.sh"
 CHANGED_PLISTS_FILE=$(mktemp)
 "$DOTFILES/scripts/build-launchd-plists.sh" --changed-file "$CHANGED_PLISTS_FILE"
@@ -435,8 +443,10 @@ if command -v stow &> /dev/null; then
             info "Seeding stow-work/work/.stow-local-ignore..."
             cat >"$WORK_IGNORE" <<'EOF'
 .*\.md$
+^docs$
 ^scripts$
 ^sudoers\.d$
+^mcp-servers\.json$
 EOF
         fi
         info "Stowing stow-work/work..."

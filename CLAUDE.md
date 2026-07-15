@@ -144,6 +144,19 @@ Current consumers:
 - `stow/devonthink/_seed/` — DEVONthink smart rules, smart groups, custom metadata, and batch-processing presets (`scripts/seed-devonthink-config.sh`). DEVONthink AI keys live in the macOS Keychain, not these plists, so they are never captured here.
 - `stow/linearmouse/_seed/` — LinearMouse scroll config (`~/.config/linearmouse/linearmouse.json`), scoped to the Ploopy Knob (VID `0x5043` / PID `0x63C3`) (`scripts/seed-linearmouse-config.sh`).
 
+### Merged config (fragment → merge into app-owned JSON, not stowed)
+
+`~/.claude.json` is Claude Code's state file: ~68 KB of runtime data the app rewrites via atomic rename on every launch (`projects`, `cachedGrowthBookFeatures`, `numStartups`, per-machine identity `machineID`/`userID`/`oauthAccount`). Stowing it whole is wrong on every axis — the atomic-rename save de-stows the symlink (as with a seeded plist), the churn produces constant cross-machine diffs, and committing machine identity leaks it and clobbers each machine's own. The only portable, user-authored slice is `.mcpServers`. So instead of stow-or-seed, a tracked **fragment** is merged into just that key, leaving everything else the app owns untouched.
+
+The pattern:
+
+1. A tracked `mcp-servers.json` fragment holds only the `mcpServers` object. It lives inside a stow package but is excluded from stowing (the package's `.stow-local-ignore` lists `mcp-servers\.json`), because nothing reads it from `$HOME` — the merge script reads it straight from the repo.
+2. `scripts/merge-claude-mcp.sh` (jq) sets `~/.claude.json`'s `.mcpServers` to `(live ∪ personal ∪ work)`, writes atomically, and preserves every other key. It is **additive, fragment-wins**: a fragment entry overwrites a stale live copy of the same server and adds new ones, but a server added ad-hoc on a machine survives. Removing a server is therefore manual. Missing `~/.claude.json` (Claude Code never launched yet) starts from `{}`; missing `jq` skips with a warning.
+3. `setup.sh` runs the merge in the generated-configs step (no `op` needed).
+4. **Work/personal split.** MCP `env` values are `${VAR}` placeholders (Claude Code expands them at launch), so no fragment carries a literal secret — but a server URL can still be work-identifying (`<company>.atlassian.net`), and the repo is public. The personal fragment (`stow/claude/mcp-servers.json`: `devonthink`, `ankimcp`) is tracked publicly; the work fragment (`stow-work/work/mcp-servers.json`: `atlassian`) lives in the gitignored work package, and the merge folds it in only when present. See `stow-work/work/ATLASSIAN-MCP-SETUP.md`.
+
+Current consumer: `~/.claude.json` `.mcpServers` (`scripts/merge-claude-mcp.sh`).
+
 ### Local Homebrew tap (apps with no upstream cask)
 
 When an app has no Homebrew cask (or only a third-party one we don't want to depend on), the repo carries its own cask under `homebrew/Casks/<token>.rb` and exposes it through a **local-only tap** named `alec/local`, so it installs through the normal `brew bundle` path like any other app.
