@@ -160,6 +160,119 @@ class BuildPersonPlans(unittest.TestCase):
         self.assertFalse(got[0]["interacted"])
 
 
+class FilingSuppressed(unittest.TestCase):
+    def test_reads_a_flag_set_either_way(self):
+        """Set by the bridge it reads back '1'; ticked in DEVONthink's Info
+        panel it reads back 'true'. Checking one form ignores the other."""
+        for raw in ("1", "true", "True", " TRUE "):
+            self.assertTrue(ef.filing_suppressed(person("W", filingsuppressed=raw)), raw)
+        for raw in ("0", "false", "", None):
+            self.assertFalse(ef.filing_suppressed(person("W", filingsuppressed=raw)), raw)
+
+    def test_absent_flag_is_not_suppressed(self):
+        self.assertFalse(ef.filing_suppressed(person("Wren Talbot")))
+
+    def test_briefingsuppressed_does_not_suppress_filing(self):
+        """The two flags are independent. Reading either for the other's job is
+        the bug this pair of flags exists to prevent."""
+        self.assertFalse(
+            ef.filing_suppressed(person("Wren Talbot", briefingsuppressed="1")))
+
+
+class SuppressedPersonPlans(unittest.TestCase):
+    def plans(self, extracted, people=(), selves=frozenset()):
+        people = list(people)
+        return ef.build_person_plans(extracted, ef.roster_index(people), selves,
+                                     people, "2026-03-16")
+
+    def test_facts_updates_and_interaction_are_all_dropped(self):
+        got = self.plans(
+            [{"name": "Wren Talbot", "interacted": True,
+              "facts": [{"fact": "moved to Leeds"}],
+              "updates": {"location": "Leeds"}}],
+            [person("Wren Talbot", filingsuppressed="1")])
+        self.assertEqual(got, [])
+
+    def test_an_alias_hit_is_suppressed_too(self):
+        got = self.plans([{"name": "Wren", "facts": [{"fact": "x"}]}],
+                         [person("Wren Talbot", aliases="Wren",
+                                 filingsuppressed="1")])
+        self.assertEqual(got, [])
+
+    def test_the_llm_claiming_a_match_does_not_defeat_it(self):
+        got = self.plans(
+            [{"name": "she", "match": "Wren Talbot", "facts": [{"fact": "x"}]}],
+            [person("Wren Talbot", filingsuppressed="1")])
+        self.assertEqual(got, [])
+
+    def test_others_in_the_same_source_still_file(self):
+        got = self.plans([{"name": "Wren Talbot", "facts": [{"fact": "x"}]},
+                          {"name": "Maya Chen", "facts": [{"fact": "y"}]}],
+                         [person("Wren Talbot", filingsuppressed="1"),
+                          person("Maya Chen")])
+        self.assertEqual([p["name"] for p in got], ["Maya Chen"])
+
+    def test_an_ambiguous_name_is_still_proposed(self):
+        """Two people share the alias and only one is suppressed, so the mention
+        is not known to be hers. Dropping it would silently discard a fact about
+        the other — the ambiguity is exactly what review is for."""
+        got = self.plans([{"name": "Wren", "facts": [{"fact": "x"}]}],
+                         [person("Wren Talbot", aliases="Wren",
+                                 filingsuppressed="1"),
+                          person("Wren Vega", aliases="Wren")])
+        self.assertEqual(got[0]["kind"], "ambiguous")
+
+    def test_she_stays_in_the_roster_the_llm_is_shown(self):
+        """The load-bearing half. Suppression must not remove her from the
+        prompt: an unresolvable mention comes back as a `new` plan proposing a
+        second record for someone who already has one — louder than the noise
+        the flag was set to silence."""
+        people = [person("Wren Talbot", aliases="Wren", filingsuppressed="1")]
+        self.assertIn("Wren Talbot", ef.roster_text(people))
+        self.assertIn("wren", ef.roster_index(people))
+
+
+class BuildEventPlans(unittest.TestCase):
+    def plans(self, events, people=(), selves=frozenset()):
+        return ef.build_event_plans(events, ef.roster_index(list(people)), selves,
+                                    "2026-03-16")
+
+    def test_a_suppressed_attendee_is_dropped_from_who(self):
+        got = self.plans([{"name": "Housewarming",
+                           "attendees": ["Wren Talbot", "Maya Chen"]}],
+                         [person("Wren Talbot", filingsuppressed="1"),
+                          person("Maya Chen")])
+        self.assertEqual(got[0]["attendees"], ["Maya Chen"])
+
+    def test_free_text_is_not_scrubbed(self):
+        """Documents the flag's honest limit: it is a noise control, not a
+        privacy one. BriefingSuppressed is what redacts a name from free text."""
+        got = self.plans([{"name": "Wren's birthday", "attendees": [],
+                           "summary": "Wren turned 30"}],
+                         [person("Wren Talbot", aliases="Wren",
+                                 filingsuppressed="1")])
+        self.assertEqual(got[0]["name"], "Wren's birthday")
+        self.assertEqual(got[0]["summary"], "Wren turned 30")
+
+    def test_an_unsuppressed_roster_hit_survives(self):
+        got = self.plans([{"name": "Standup", "attendees": ["Maya Chen"]}],
+                         [person("Maya Chen")])
+        self.assertEqual(got[0]["attendees"], ["Maya Chen"])
+
+    def test_an_ambiguous_attendee_survives(self):
+        got = self.plans([{"name": "Standup", "attendees": ["Wren"]}],
+                         [person("Wren Talbot", aliases="Wren",
+                                 filingsuppressed="1"),
+                          person("Wren Vega", aliases="Wren")])
+        self.assertEqual(got[0]["attendees"], ["Wren"])
+
+    def test_self_and_duplicates_are_still_dropped(self):
+        got = self.plans([{"name": "Standup",
+                           "attendees": ["Alec", "Maya Chen", "Maya Chen"]}],
+                         [person("Maya Chen")], selves={"alec"})
+        self.assertEqual(got[0]["attendees"], ["Maya Chen"])
+
+
 class FactLine(unittest.TestCase):
     def test_carries_a_deterministic_provenance_marker(self):
         a = ef.fact_line("2026-03-16", "moved to Denver", "SRC-1")

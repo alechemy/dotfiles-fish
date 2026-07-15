@@ -351,6 +351,31 @@ definitions into an existing `CustomMetaData.plist` rather than copy-if-absent
 (which would strand every machine that already owns the file on an old schema).
 DEVONthink needs a restart to pick up a newly added field.
 
+#### Muting fact-filing (FilingSuppressed)
+
+`BriefingSuppressed` governs the *brief*; `FilingSuppressed` governs
+*fact-filing* (`entity-filing.py`), and they are independent flags on the same
+Person record. Neither reads the other. The distinction is privacy vs. noise: a
+briefing-suppressed person is redacted from rendered output because their
+presence is sensitive; a filing-suppressed person is muted because they
+*saturate the sources* — a partner or housemate whom every journal entry
+mentions, where the proposals are all things already known.
+
+A flagged person is dropped from `build_person_plans` (no fact, field update,
+or `LastContact` bump is ever proposed) and from an Event's `**Who:**` line. The
+drop happens only once the roster **positively identifies one person**: an
+ambiguous alias two people share is still proposed, because the mention is not
+known to be theirs and dropping it would silently discard a fact about the
+other. Crucially they **stay in the roster the LLM is prompted with** —
+removing them there would make every mention fail to resolve and rebound as a
+`new` proposal to create a second record for someone who already has one, which
+is louder than the noise the flag silences.
+
+The mute is a noise control, not a privacy one: it filters structured plans, not
+free text, so an Event *summary* that names them is not scrubbed. To keep a name
+out of rendered output, that is `BriefingSuppressed`'s job. Set both if a person
+needs both.
+
 Sections are appended *after* `## Today's Notes` (created if missing) because
 `insert-jot-into-daily-note.py` targets the last bullet *before* that header —
 a briefing above it would swallow incoming jots. Each section carries an

@@ -101,7 +101,10 @@ machine-local, mode 600, and never tracked. Tracked defaults stay generic.
 **Suppressing a person is not config.** It is `BriefingSuppressed`, a boolean
 custom-metadata flag on their Person record, keyed by a stable UUID so it cannot
 be defeated by a stale config line or lost with a deleted file. See
-`docs/entities.md`.
+`docs/entities.md`. A second, independent flag `FilingSuppressed` mutes
+*fact-filing* (`entity-filing.py`) for someone who saturates the sources — a
+noise control, not a privacy one. The two never read each other; set both if a
+person needs both.
 
 ## Manual runs must not page the user
 

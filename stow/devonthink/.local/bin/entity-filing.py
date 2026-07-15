@@ -34,6 +34,13 @@ Safety model:
   - An approved proposal is re-verified against the *live* roster before
     its ops run: a frozen `ensure_person "Alison"` written before
     "Alison Vance" was seeded would otherwise create a duplicate record.
+  - The boolean custom-metadata flag FilingSuppressed, on the Person record
+    itself, mutes a person entirely: nothing is proposed or written about
+    them. It is a noise control for someone who saturates the sources, not a
+    privacy control — see filing_suppressed(). The privacy control is a
+    different flag on the same record, BriefingSuppressed, which redacts
+    rendered output and is read only by dt-morning-brief.py. Neither flag
+    reads the other; setting one does nothing for the other.
 
 Lifecycle: a source is only discovered once its upstream pipeline is
 complete (NeedsProcessing cleared — a Boox record mid-OCR has no text
@@ -631,6 +638,34 @@ def self_names(config):
     return names
 
 
+def md_flag(value):
+    """A flag set by script reads back as '1'; the same flag ticked in
+    DEVONthink's Info panel reads back as 'true'. Comparing against either
+    alone silently ignores flags set the other way."""
+    return str(value or "").strip().lower() in {"1", "true"}
+
+
+def filing_suppressed(p):
+    """FilingSuppressed is a *noise* control, not a privacy one.
+
+    Nothing is ever proposed or written about this person: no fact bullets,
+    no field updates, no LastContact bump. It is for someone who saturates
+    the sources — a partner, a housemate — where every journal entry mentions
+    them and the proposals are all things you already know.
+
+    They stay in the roster the LLM is prompted with, deliberately. Dropping
+    them there would not silence them, it would make them *worse*: every
+    mention would fail to resolve and come back as a `new` plan proposing to
+    create a second record for a person who already has one.
+
+    Their name can still reach a record this flag does not own — an Event's
+    `**Who:**` line resolves through the same roster and is filtered here too,
+    but an Event's free-text summary is never scrubbed. To keep a name out of
+    rendered output, use BriefingSuppressed (dt-morning-brief.py), which is
+    the privacy control and redacts free text."""
+    return md_flag(p.get("md", {}).get("mdfilingsuppressed", ""))
+
+
 def roster_index(people):
     index = {}
     for p in people:
@@ -639,6 +674,11 @@ def roster_index(people):
             if k:
                 index.setdefault(k, []).append(p)
     return index
+
+
+def resolves_suppressed(name, index):
+    hits = index.get(norm(name)) or []
+    return len(hits) == 1 and filing_suppressed(hits[0])
 
 
 def roster_text(people):
@@ -706,6 +746,7 @@ def near_matches(name, people, limit=3):
 def build_person_plans(extracted, index, selves, people, source_date):
     """Deterministic resolution: LLM output in, per-person op plans out."""
     plans = []
+    suppressed = 0
     for person in extracted:
         name = str(person.get("name", "")).strip()
         if not name or norm(name) in selves:
@@ -733,6 +774,9 @@ def build_person_plans(extracted, index, selves, people, source_date):
                 matched_key, hits = k, index[k]
                 break
         if len(hits) == 1:
+            if filing_suppressed(hits[0]):
+                suppressed += 1
+                continue
             plans.append({
                 "kind": "existing",
                 "name": hits[0]["name"],
@@ -766,10 +810,12 @@ def build_person_plans(extracted, index, selves, people, source_date):
                 "facts": facts,
                 "updates": updates,
             })
+    if suppressed:
+        log.info("dropped %d extracted person(s) (FilingSuppressed)", suppressed)
     return plans
 
 
-def build_event_plans(events_raw, selves, source_date):
+def build_event_plans(events_raw, index, selves, source_date):
     plans = []
     for ev in events_raw[:4]:
         name = str(ev.get("name", "")).strip()
@@ -778,8 +824,11 @@ def build_event_plans(events_raw, selves, source_date):
         attendees = []
         for a in (ev.get("attendees") or [])[:20]:
             a = str(a).strip()
-            if a and norm(a) not in selves and a not in attendees:
-                attendees.append(a)
+            if not a or norm(a) in selves or a in attendees:
+                continue
+            if resolves_suppressed(a, index):
+                continue
+            attendees.append(a)
         summary = str(ev.get("summary") or "").strip()[:300]
         plans.append({
             "kind": "event",
@@ -1550,7 +1599,7 @@ def _approve_completed(config, m, puuid, entry, row, token, dry_run):
     index = roster_index(people)
     selves = self_names(config)
     plans = build_person_plans(people_ext, index, selves, people, source_date)
-    plans += build_event_plans(events_ext, selves, source_date)
+    plans += build_event_plans(events_ext, index, selves, source_date)
     if not plans:
         _bounce(m, puuid, entry, row, token, dry_run,
                 "nothing left to file after edits; cancel the task to reject "
@@ -1954,7 +2003,8 @@ def scan(config, state, dry_run, force_uuid, user_invoked):
         try:
             plans = build_person_plans(extracted_people, index, selves, people,
                                        source_date)
-            plans += build_event_plans(extracted_events, selves, source_date)
+            plans += build_event_plans(extracted_events, index, selves,
+                                       source_date)
             file_source(config, state, source, source_date, plans, filing_mode,
                         dry_run, text)
         except BridgeUnavailable:
