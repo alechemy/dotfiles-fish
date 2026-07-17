@@ -253,7 +253,7 @@ fi
 # surface_line's dedup caps repeats at daily.
 if [[ "$IS_DRIVER" == 1 ]]; then
     NOW_EPOCH=$(date +%s)
-    while IFS=: read -r AGENT_LABEL AGENT_JOB AGENT_MAX_AGE; do
+    while IFS=: read -r AGENT_LABEL AGENT_JOB AGENT_MAX_AGE AGENT_SUCCESS_MAX_AGE; do
         [[ -n "$AGENT_LABEL" ]] || continue
         AGENT_STATE="$HOME/.local/state/devonthink/${AGENT_JOB}.last-run"
         [[ -f "$AGENT_STATE" ]] || continue
@@ -270,21 +270,26 @@ if [[ "$IS_DRIVER" == 1 ]]; then
         fi
         # A fresh tick proves the process ran, not that it did anything — a
         # gate-skipped run still touches .last-run. Only components that write
-        # a .last-success stamp (epoch seconds) get this check.
+        # a .last-success stamp (epoch seconds) get this check. The success
+        # threshold is the job's WORK cadence (4th field), not its tick
+        # cadence: dt-database-archive ticks daily but archives weekly by
+        # design, and battery days legitimately gate the 30-min jobs for
+        # hours.
         AGENT_SUCCESS_STATE="$HOME/.local/state/devonthink/${AGENT_JOB}.last-success"
         [[ -f "$AGENT_SUCCESS_STATE" ]] || continue
+        [[ "$AGENT_SUCCESS_MAX_AGE" =~ ^[0-9]+$ ]] || AGENT_SUCCESS_MAX_AGE="$AGENT_MAX_AGE"
         AGENT_SUCCESS_LAST=$(cat "$AGENT_SUCCESS_STATE" 2>/dev/null || echo 0)
         [[ "$AGENT_SUCCESS_LAST" =~ ^[0-9]+$ ]] || AGENT_SUCCESS_LAST=0
         SUCCESS_GAP=$((AGENT_LAST - AGENT_SUCCESS_LAST))
-        if [[ "$SUCCESS_GAP" -gt "$AGENT_MAX_AGE" ]]; then
+        if [[ "$SUCCESS_GAP" -gt "$AGENT_SUCCESS_MAX_AGE" ]]; then
             surface_line "$AGENT_JOB has ticked recently but last reached real work $((SUCCESS_GAP / 3600))h ago (label $AGENT_LABEL — work may be silently gated)"
         fi
     done <<'AGENTS'
 com.user.dt-daily-note:dt-daily-note:180000
 com.user.dt-morning-brief:dt-morning-brief:180000
-com.user.dt-database-archive:dt-database-archive:180000
-com.user.entity-filing:entity-filing:21600
-com.user.boox-process:boox-process:21600
+com.user.dt-database-archive:dt-database-archive:180000:691200
+com.user.entity-filing:entity-filing:21600:86400
+com.user.boox-process:boox-process:21600:86400
 com.user.github-stars-import:github-stars-import:21600
 AGENTS
 fi
