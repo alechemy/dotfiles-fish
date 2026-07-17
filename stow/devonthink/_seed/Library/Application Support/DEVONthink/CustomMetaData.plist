@@ -822,16 +822,6 @@
 	</dict>
 	<dict>
 		<key>date</key>
-		<real>804923472.791047</real>
-		<key>identifier</key>
-		<string>mditemlink</string>
-		<key>index</key>
-		<integer>71</integer>
-		<key>type</key>
-		<string>crosslink</string>
-	</dict>
-	<dict>
-		<key>date</key>
 		<real>805515040.173057</real>
 		<key>identifier</key>
 		<string>mdjournalentry</string>
@@ -882,7 +872,9 @@
 	</dict>
 	<dict>
 		<key>date</key>
-		<real>805957117.525695</real>
+		<real>805987296.038814</real>
+		<key>disabled</key>
+		<false/>
 		<key>identifier</key>
 		<string>mdfieldasof</string>
 		<key>index</key>
