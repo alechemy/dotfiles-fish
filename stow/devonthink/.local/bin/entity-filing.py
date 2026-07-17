@@ -143,6 +143,7 @@ LLM_LOCK_FILE = os.path.join(STATE_DIR, "local-llm.lock")
 STATE_SCHEMA_VERSION = 2
 REVIEW_PATH = "/20_ENTITIES/_Review"
 APPROVED_PATH = "/20_ENTITIES/_Review/Approved"
+FACTS_FILED_PATH = "/20_ENTITIES/_Facts/Filed"
 MAX_ATTEMPTS = 5
 UPDATE_FIELDS = ("employer", "role", "city", "email")
 BUMP_WINDOW_DAYS = 60
@@ -1600,8 +1601,8 @@ def _things_decisions(config, dry_run):
         things_bridge.prewarm()
     token = things_bridge.auth_token()
 
-    review = run_bridge([{"op": "list_group", "path": REVIEW_PATH}])[0]
-    approved = run_bridge([{"op": "list_group", "path": APPROVED_PATH}])[0]
+    review, approved = run_bridge([{"op": "list_group", "path": REVIEW_PATH},
+                                   {"op": "list_group", "path": APPROVED_PATH}])
     approved_uuids = {r["uuid"] for r in approved}
     # Rebuild only markers whose proposal still exists: every processed
     # decision leaves its task in the Logbook with the marker intact, and
@@ -1934,10 +1935,11 @@ def _things_reconcile(config, dry_run):
     tasks = m["tasks"]
     token = things_bridge.auth_token()
 
-    children = run_bridge([{"op": "list_group", "path": REVIEW_PATH}])[0]
+    children, approved_children = run_bridge(
+        [{"op": "list_group", "path": REVIEW_PATH},
+         {"op": "list_group", "path": APPROVED_PATH}])
     pending = {r["uuid"]: r for r in children if r["name"] != "Approved"}
-    approved = {r["uuid"] for r in
-                run_bridge([{"op": "list_group", "path": APPROVED_PATH}])[0]}
+    approved = {r["uuid"] for r in approved_children}
 
     people = None
     for puuid, rec in pending.items():
@@ -2344,6 +2346,14 @@ def review_group_has_name(name):
 def file_source(config, state, source, source_date, plans, filing_mode,
                 dry_run, text):
     is_fact = source.get("kind") == "fact"
+    filed_ops = [{"op": "mark_filed", "uuid": source["uuid"]}]
+    if is_fact:
+        # Retiring a fact out of _Facts keeps discovery's wholesale
+        # enumeration from growing forever; the review-stub path below skips
+        # this, since that source is still pending human review.
+        filed_ops += [{"op": "ensure_group", "path": FACTS_FILED_PATH},
+                      {"op": "move_to", "uuid": source["uuid"],
+                       "group": FACTS_FILED_PATH}]
     direct_ops = []
     proposal_plans = []
     for plan in plans:
@@ -2397,7 +2407,7 @@ def file_source(config, state, source, source_date, plans, filing_mode,
                         "duplicating it", proposal_name,
                         extra={"record_name": source["name"],
                                "record_uuid": source["uuid"]})
-            run_bridge([{"op": "mark_filed", "uuid": source["uuid"]}])
+            run_bridge(filed_ops)
         else:
             body = proposal_body(source, source_date, proposal_plans, proposal_ops)
             run_bridge([{
@@ -2406,7 +2416,7 @@ def file_source(config, state, source, source_date, plans, filing_mode,
                 "path": REVIEW_PATH,
                 "text": body,
                 "fields": {"documenttype": "Entity Filing Proposal"},
-            }, {"op": "mark_filed", "uuid": source["uuid"]}])
+            }] + filed_ops)
             log.info("proposal created (%d people)", len(proposal_plans),
                      extra={"record_name": source["name"],
                             "record_uuid": source["uuid"]})
@@ -2430,7 +2440,7 @@ def file_source(config, state, source, source_date, plans, filing_mode,
                      extra={"record_name": source["name"],
                             "record_uuid": source["uuid"]})
     else:
-        run_bridge([{"op": "mark_filed", "uuid": source["uuid"]}])
+        run_bridge(filed_ops)
 
     # mark_filed just bumped the record's modification date; re-read it so
     # the stored stamp doesn't immediately re-candidate the source. Only

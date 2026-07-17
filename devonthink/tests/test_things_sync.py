@@ -343,8 +343,10 @@ class FakeBridge:
     def __init__(self, **results):
         self.results = results
         self.calls = []
+        self.batches = []
 
     def __call__(self, ops, timeout=300):
+        self.batches.append(ops)
         out = []
         for op in ops:
             self.calls.append(op)
@@ -613,6 +615,33 @@ class Decisions(PhaseHarness):
 def settled(entry, row):
     entry["settle"] = ef.settle_snapshot(row)
     return entry
+
+
+class BatchedListGroupCalls(PhaseHarness):
+    """C24: _Review and _Review/Approved are each listed once per phase, not
+    once per path — two ops in one bridge call, not two osascript spawns."""
+
+    def test_decisions_lists_review_and_approved_in_one_bridge_call(self):
+        m = self.fresh_map()
+        self.use_map(m)
+        bridge = self.bridge(list_group=[])
+        ef.things_decisions(self.config, dry_run=False)
+        self.assertEqual(len(bridge.batches), 1)
+        self.assertEqual([o["op"] for o in bridge.batches[0]],
+                         ["list_group", "list_group"])
+        self.assertEqual({o["path"] for o in bridge.batches[0]},
+                         {ef.REVIEW_PATH, ef.APPROVED_PATH})
+
+    def test_reconcile_lists_review_and_approved_in_one_bridge_call(self):
+        m = self.fresh_map()
+        self.use_map(m)
+        bridge = self.bridge(list_group=[])
+        ef.things_reconcile(self.config, dry_run=False)
+        self.assertEqual(len(bridge.batches), 1)
+        self.assertEqual([o["op"] for o in bridge.batches[0]],
+                         ["list_group", "list_group"])
+        self.assertEqual({o["path"] for o in bridge.batches[0]},
+                         {ef.REVIEW_PATH, ef.APPROVED_PATH})
 
 
 class ApproveCompleted(PhaseHarness):

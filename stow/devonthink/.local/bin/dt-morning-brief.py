@@ -343,6 +343,7 @@ def empty_identity_provenance():
         "version": IDENTITY_PROVENANCE_VERSION,
         "people": {},
         "candidates": {},
+        "series_lookback": None,
     }
 
 
@@ -357,6 +358,7 @@ def load_identity_provenance():
     state.setdefault("candidates", {})
     if not isinstance(state["candidates"], dict):
         raise ValueError("malformed calendar candidate state")
+    state.setdefault("series_lookback", None)
     return state
 
 
@@ -443,6 +445,27 @@ def context_conflicts(state, person_uuid, context):
         return False
     other = "work" if context == "personal" else "personal"
     return counts.get(other, 0) >= CONTEXT_CONFLICT_MIN_OBSERVATIONS
+
+
+def stamp_series_lookback(state, today, repeats):
+    """Record today's series-lookback result in `state` so a same-day retry
+    tick can reuse it via cached_repeats instead of re-running the 180-day
+    calendar fetch. series_key tuples aren't JSON keys, so they're stored as
+    sorted [calendar, title] pairs."""
+    state["series_lookback"] = {
+        "date": today,
+        "repeats": sorted(list(key) for key in repeats),
+    }
+
+
+def cached_repeats(state, today):
+    """The repeats set stamped by an earlier tick today, or None when the
+    stamp is absent or dated for a different day — the caller then re-runs
+    the lookback."""
+    stamp = state.get("series_lookback")
+    if not stamp or stamp.get("date") != today:
+        return None
+    return {tuple(key) for key in stamp["repeats"]}
 
 
 def load_skip_attendee_re(conf=None):
@@ -2234,26 +2257,33 @@ def main():
              len(contacts))
 
     yesterday = (date.fromisoformat(today) - timedelta(days=1)).isoformat()
-    repeats = ()
     since = (date.fromisoformat(today)
              - timedelta(days=SERIES_LOOKBACK_DAYS)).isoformat()
-    try:
-        hist = run_osascript(CALENDAR, [since, yesterday], timeout=180)
-        if hist.get("ok"):
-            repeats = repeat_series(hist["events"], today)
-            observations = calendar_observations(
-                hist["events"], people, skip_re, contexts, excluded, skip_cals)
-            if record_calendar_observations(provenance, observations) and not dry_run:
-                save_identity_provenance(provenance, today)
-            log.info(
-                "series lookback %s..%s: %d meetings already seen, %d strong "
-                "identity observations", since, yesterday, len(repeats),
-                len(observations))
-        else:
-            log.warning("series lookback unavailable, briefing every attendee: "
-                        "%s", hist.get("error"))
-    except Exception as exc:
-        log.warning("series lookback failed, briefing every attendee: %s", exc)
+    repeats = cached_repeats(provenance, today)
+    if repeats is not None:
+        log.info("series lookback %s..%s: reusing %d meetings already seen "
+                 "from an earlier run today", since, yesterday, len(repeats))
+    else:
+        repeats = ()
+        try:
+            hist = run_osascript(CALENDAR, [since, yesterday], timeout=180)
+            if hist.get("ok"):
+                repeats = repeat_series(hist["events"], today)
+                observations = calendar_observations(
+                    hist["events"], people, skip_re, contexts, excluded, skip_cals)
+                record_calendar_observations(provenance, observations)
+                stamp_series_lookback(provenance, today, repeats)
+                if not dry_run:
+                    save_identity_provenance(provenance, today)
+                log.info(
+                    "series lookback %s..%s: %d meetings already seen, %d strong "
+                    "identity observations", since, yesterday, len(repeats),
+                    len(observations))
+            else:
+                log.warning("series lookback unavailable, briefing every attendee: "
+                            "%s", hist.get("error"))
+        except Exception as exc:
+            log.warning("series lookback failed, briefing every attendee: %s", exc)
 
     try:
         ycal = run_osascript(CALENDAR, [yesterday], timeout=60)

@@ -81,10 +81,16 @@ function readFile(path) {
   return s.isNil() ? null : s.js
 }
 
-function mdValue(rec, key) {
-  const md = rec.customMetaData() || {}
-  const v = md['md' + key]
+// Pure over an already-fetched customMetaData dict, so a bulk-fetched array
+// of them (one AppleEvent for a whole group) can be read the same way a
+// single record's live dict is.
+function mdField(md, key) {
+  const v = (md || {})['md' + key]
   return v === undefined || v === null ? '' : String(v)
+}
+
+function mdValue(rec, key) {
+  return mdField(rec.customMetaData(), key)
 }
 
 // A flag set by script reads back as '1'; the same flag ticked in the GUI
@@ -148,14 +154,14 @@ function bodyLines(rec) {
   return rec.plainText().split(/\r\n|\r|\n/)
 }
 
-function personBrief(rec, includeBody) {
+function personBriefFrom(uuid, name, aliases, md, body) {
   const out = {
-    uuid: rec.uuid(),
-    name: rec.name(),
-    aliases: String(rec.aliases() || ''),
-    md: rec.customMetaData() || {},
+    uuid: uuid,
+    name: name,
+    aliases: String(aliases || ''),
+    md: md || {},
   }
-  if (includeBody) out.body = rec.plainText()
+  if (body !== undefined) out.body = body
   return out
 }
 
@@ -337,9 +343,21 @@ function eventMatchGap(opDate, mdEventDate, bodyDate, matchDays) {
 // Set by run(); lets module-level helpers reach the DT session.
 let bridgeCtx = null
 let entityIndex = null
+let peopleIndex = null
 
 function escapeRe(s) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+// One group's markdown children as {uuid,name,aliases} arrays fetched in a
+// handful of AppleEvents total (one per property, on the unresolved
+// `children` element specifier) instead of two AppleEvents per record.
+function groupChildFields(group) {
+  const c = group.children
+  return {
+    uuid: c.uuid(), name: c.name(), aliases: c.aliases(),
+    recordType: c.recordType(),
+  }
 }
 
 // Names/aliases of every existing entity record, longest first so
@@ -349,10 +367,11 @@ function buildEntityIndex() {
   for (const path of [PEOPLE_PATH, PLACES_PATH, EVENTS_PATH]) {
     let group
     try { group = bridgeCtx.groupAt(path) } catch (e) { continue }
-    for (const rec of group.children()) {
-      if (String(rec.type()) !== 'markdown') continue
-      const uuid = rec.uuid()
-      const names = [rec.name()].concat(String(rec.aliases() || '').split(','))
+    const f = groupChildFields(group)
+    for (let i = 0; i < f.uuid.length; i++) {
+      if (f.recordType[i] !== 'markdown') continue
+      const uuid = f.uuid[i]
+      const names = [f.name[i]].concat(String(f.aliases[i] || '').split(','))
       for (const n of names) {
         const t = n.trim()
         if (t.length >= 3 && t.indexOf('[') === -1 && t.indexOf(']') === -1) {
@@ -511,9 +530,34 @@ function run(argv) {
 
   bridgeCtx = { groupAt: groupAt }
 
+  // People lookups (findByNameOrAlias/personLink/ensure_person) are the
+  // hottest path — every attendee of every meeting resolves through here —
+  // so the group's children are read once per bridge invocation and reused,
+  // instead of a fresh full-group enumeration per name. Invalidated (not
+  // incrementally updated) wherever a Person is created, so a later lookup
+  // in the same batch reloads and sees it.
+  function loadPeopleIndex() {
+    const group = groupAt(PEOPLE_PATH)
+    const recs = group.children()
+    const names = group.children.name()
+    const aliases = group.children.aliases()
+    peopleIndex = recs.map((rec, i) => ({
+      rec: rec,
+      keys: [normName(names[i])].concat(
+        String(aliases[i] || '').split(',').map(normName).filter(Boolean)),
+    }))
+  }
+
   function findByNameOrAlias(path, name) {
     const want = normName(name)
     const hits = []
+    if (path === PEOPLE_PATH) {
+      if (peopleIndex === null) loadPeopleIndex()
+      for (const entry of peopleIndex) {
+        if (entry.keys.indexOf(want) !== -1) hits.push(entry.rec)
+      }
+      return hits
+    }
     for (const rec of groupAt(path).children()) {
       if (personKeys(rec).indexOf(want) !== -1) hits.push(rec)
     }
@@ -548,56 +592,89 @@ function run(argv) {
   const handlers = {
     dump_people(op) {
       const includeBodies = op.include_bodies !== false
-      return groupAt(PEOPLE_PATH).children()
-        .filter(r => String(r.type()) === 'markdown')
-        .map(r => personBrief(r, includeBodies))
+      const c = groupAt(PEOPLE_PATH).children
+      const types = c.recordType()
+      const uuids = c.uuid()
+      const names = c.name()
+      const aliases = c.aliases()
+      const mds = c.customMetaData()
+      const bodies = includeBodies ? c.plainText() : null
+      const out = []
+      for (let i = 0; i < uuids.length; i++) {
+        if (types[i] !== 'markdown') continue
+        out.push(personBriefFrom(
+          uuids[i], names[i], aliases[i], mds[i],
+          includeBodies ? bodies[i] : undefined))
+      }
+      return out
     },
 
     list_sources() {
       const out = []
       const seen = {}
-      const add = (rec) => {
-        const uuid = rec.uuid()
+      const addResolved = (uuid, name, location, md, added, modified) => {
         if (seen[uuid]) return
         seen[uuid] = true
-        const added = rec.additionDate()
         const kind = classify({
-          location: String(rec.location() || ''),
-          handwritten: flagSet(mdValue(rec, 'handwritten')),
-          documenttype: mdValue(rec, 'documenttype'),
+          location: String(location || ''),
+          handwritten: flagSet(mdField(md, 'handwritten')),
+          documenttype: mdField(md, 'documenttype'),
         })
         out.push({
           uuid: uuid,
-          name: rec.name(),
+          name: name,
           kind: kind,
-          eventdate: mdValue(rec, 'eventdate'),
-          participants: mdValue(rec, 'granolaparticipants'),
+          eventdate: mdField(md, 'eventdate'),
+          participants: mdField(md, 'granolaparticipants'),
           added: added ? isoStamp(added).slice(0, 10) : '',
-          modified: isoStamp(rec.modificationDate()),
-          entityfiled: flagSet(mdValue(rec, 'entityfiled')),
+          modified: isoStamp(modified),
+          entityfiled: flagSet(mdField(md, 'entityfiled')),
           // NeedsProcessing=1 means the smart-rule pipeline (OCR, comment
           // formatting, enrichment) hasn't finished — the record's text may
           // not exist yet. Daily notes never carry the flag.
           ready: kind === 'daily'
             ? true
-            : !flagSet(mdValue(rec, 'needsprocessing')),
+            : !flagSet(mdField(md, 'needsprocessing')),
         })
+      }
+      // A dt.search() result is a resolved list of records, not a lazy
+      // element specifier, so it has no bulk per-property fetch — but one
+      // properties() call per record still collapses what add() used to
+      // read as ~5 property AppleEvents plus a customMetaData() per field
+      // into a single AppleEvent.
+      const addFromRecord = (r) => {
+        const p = r.properties()
+        addResolved(p.uuid, p.name, p.location, p.customMetaData,
+          p.additionDate, p.modificationDate)
+      }
+      // A group's `children` element specifier (unparenthesized) fetches one
+      // property for every child in a single AppleEvent — ~140x faster than
+      // reading it off each child record in turn — so every field add()
+      // needs is pulled as its own array and joined by index.
+      const addFromGroup = (group, filter) => {
+        const c = group.children
+        const uuids = c.uuid()
+        const names = c.name()
+        const locations = c.location()
+        const mds = c.customMetaData()
+        const addeds = c.additionDate()
+        const modifieds = c.modificationDate()
+        for (let i = 0; i < uuids.length; i++) {
+          if (filter && !filter(names[i])) continue
+          addResolved(uuids[i], names[i], locations[i], mds[i], addeds[i], modifieds[i])
+        }
       }
       // Quoted-phrase equality (mddocumenttype=="Meeting Notes") matches
       // nothing in DT's query parser; substring match is the reliable form.
       dt.search('mddocumenttype:~Meeting', { in: db.root() })
-        .forEach(r => add(r))
+        .forEach(addFromRecord)
       dt.search('mdhandwritten==1', { in: db.root() })
-        .forEach(r => add(r))
+        .forEach(addFromRecord)
       const today = new Date()
       const localToday = new Date(today.getTime() - today.getTimezoneOffset() * 60000)
         .toISOString().slice(0, 10)
-      for (const rec of groupAt(DAILY_PATH).children()) {
-        const name = rec.name()
-        if (/^\d{4}-\d{2}-\d{2}$/.test(name) && name < localToday) {
-          add(rec)
-        }
-      }
+      addFromGroup(groupAt(DAILY_PATH),
+        name => /^\d{4}-\d{2}-\d{2}$/.test(name) && name < localToday)
       // Journal entries live under year subgroups; today's entry is
       // skipped like today's daily note — it may still gain content.
       let journalGroup = null
@@ -605,13 +682,9 @@ function run(argv) {
       if (journalGroup) {
         for (const yearGroup of journalGroup.children()) {
           if (String(yearGroup.type()) !== 'group') continue
-          for (const rec of yearGroup.children()) {
-            const name = rec.name()
-            if (/^\d{4}-\d{2}-\d{2} Journal$/.test(name) &&
-                name.slice(0, 10) < localToday) {
-              add(rec)
-            }
-          }
+          addFromGroup(yearGroup,
+            name => /^\d{4}-\d{2}-\d{2} Journal$/.test(name) &&
+              name.slice(0, 10) < localToday)
         }
       }
       // Person-fact captures from the Drafts action. Not date-gated: a fact
@@ -619,9 +692,17 @@ function run(argv) {
       let factsGroup = null
       try { factsGroup = groupAt(FACTS_PATH) } catch (e) {}
       if (factsGroup) {
-        for (const rec of factsGroup.children()) {
-          if (String(rec.type()) === 'group') continue
-          add(rec)
+        const c = factsGroup.children
+        const types = c.recordType()
+        const uuids = c.uuid()
+        const names = c.name()
+        const locations = c.location()
+        const mds = c.customMetaData()
+        const addeds = c.additionDate()
+        const modifieds = c.modificationDate()
+        for (let i = 0; i < uuids.length; i++) {
+          if (types[i] === 'group') continue
+          addResolved(uuids[i], names[i], locations[i], mds[i], addeds[i], modifieds[i])
         }
       }
       return out
@@ -821,6 +902,7 @@ function run(argv) {
         rec.plainText = personSkeleton(op.name)
         created = true
         entityIndex = null
+        peopleIndex = null
         dt.addCustomMetaData('Person', { for: 'entitytype', to: rec })
         dt.addCustomMetaData('active', { for: 'entitystatus', to: rec })
       }
@@ -1028,6 +1110,13 @@ function run(argv) {
 
     get_or_create_daily(op) {
       const group = groupAt(DAILY_PATH)
+      // getRecordAt is O(1) but resolves by path, not by the scan's identity
+      // rule (record name === op.date); a name mismatch (or no record at
+      // that path) falls through to the linear scan unchanged.
+      const fast = dt.getRecordAt(DAILY_PATH + '/' + op.date, { in: db })
+      if (fast && fast.name() === op.date) {
+        return { uuid: fast.uuid(), text: fast.plainText(), created: false }
+      }
       for (const rec of group.children()) {
         if (rec.name() === op.date) {
           return { uuid: rec.uuid(), text: rec.plainText(), created: false }

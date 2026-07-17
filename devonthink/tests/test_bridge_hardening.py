@@ -1,7 +1,8 @@
 """Hardening fixes in entity-dt-bridge.js: linkEntities URL/bracket safety,
 the ensure_event undated-match gap/backfill core, the shared LastContact
 guard, alias union, source-kind classify() precedence, email normalization,
-and the NFKD/casefold rewrite of normName.
+the NFKD/casefold rewrite of normName, and mdField (the enumeration-path
+split of mdValue that reads a bulk-fetched customMetaData dict).
 
 All of these are pure functions in the bridge, so this drives them through
 the real JXA via the same osascript eval harness as test_section_span.py and
@@ -43,6 +44,7 @@ HARNESS = textwrap.dedent("""
       const cases = JSON.parse(readText(argv[1]))
       eval(bridgeSrc)
       const pure = {
+        mdField: function (a) { return mdField(a[0], a[1]) },
         normName: function (a) { return normName(a[0]) },
         unionAliases: function (a) { return unionAliases(a[0], a[1]) },
         normalizeEmail: function (a) { return normalizeEmail(a[0]) },
@@ -65,14 +67,12 @@ HARNESS = textwrap.dedent("""
         }
         if (c.fn === 'buildEntityIndexNames') {
           const src = bridgeSrc + '\\n;(function(){\\n' +
-            'bridgeCtx = { groupAt: function () { return { children: ' +
-            'function () {\\n' +
-            '  return ' + JSON.stringify(c.records) + '.map(function (r) {\\n' +
-            '    return { type: function(){return "markdown"},\\n' +
-            '             uuid: function(){return r.uuid},\\n' +
-            '             name: function(){return r.name},\\n' +
-            '             aliases: function(){return r.aliases||""} }\\n' +
-            '  })\\n' +
+            'const records = ' + JSON.stringify(c.records) + '\\n' +
+            'bridgeCtx = { groupAt: function () { return { children: {\\n' +
+            '  uuid: function(){return records.map(function(r){return r.uuid})},\\n' +
+            '  name: function(){return records.map(function(r){return r.name})},\\n' +
+            '  aliases: function(){return records.map(function(r){return r.aliases||""})},\\n' +
+            '  recordType: function(){return records.map(function(){return "markdown"})},\\n' +
             '} } } }\\n' +
             'return buildEntityIndex().map(function(e){return e.name})\\n' +
             '})()'
@@ -299,6 +299,33 @@ class ClassifyPrecedence(unittest.TestCase):
 
     def test_no_markers_is_other(self):
         self.assertEqual(self.classify("/00_INBOX", False, ""), "other")
+
+
+class MdFieldOverBulkFetchedDict(unittest.TestCase):
+    """mdField(md, key) is the enumeration-path split of mdValue(rec, key):
+    the same lookup, but over a customMetaData dict already pulled out of a
+    bulk children.customMetaData() array instead of a live record."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = make_tmp("dt-mdfield-test")
+
+    def field(self, md, key):
+        return call("mdField", [md, key], self.tmp)
+
+    def test_reads_prefixed_key(self):
+        self.assertEqual(self.field({"mdeventdate": "2026-07-16"}, "eventdate"),
+                          "2026-07-16")
+
+    def test_missing_key_is_empty_string(self):
+        self.assertEqual(self.field({"mdeventdate": "2026-07-16"}, "handwritten"),
+                          "")
+
+    def test_null_dict_is_empty_string(self):
+        self.assertEqual(self.field(None, "eventdate"), "")
+
+    def test_null_value_is_empty_string(self):
+        self.assertEqual(self.field({"mdeventdate": None}, "eventdate"), "")
 
 
 class EmailNormalize(unittest.TestCase):

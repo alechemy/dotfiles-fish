@@ -1024,12 +1024,19 @@ class FileSourceProposalCreationMarksFiled(unittest.TestCase):
 class FileSourceFact(unittest.TestCase):
     """file_source touches the bridge, so stub it and capture the op batches.
     Locks the three fact outcomes: named clearly -> apply, bare name ->
-    proposal, nothing extracted -> review stub (never a silent mark-filed)."""
+    proposal, nothing extracted -> review stub (never a silent mark-filed).
+
+    C71: a fact source that reaches a fully-filed terminal state (direct
+    apply, or a proposal/dup-guard batch that marks it filed) is also moved
+    into _Facts/Filed in that same batch, by UUID, so discovery's wholesale
+    enumeration of _Facts stops seeing it. A review stub leaves the source in
+    place — it is still pending human review."""
 
     def setUp(self):
         self.calls = []
         self.saved = (ef.run_bridge, ef.save_state)
         ef.save_state = lambda s: None
+        self.list_group_result = []
 
         def fake_bridge(ops):
             self.calls.append(ops)
@@ -1039,6 +1046,8 @@ class FileSourceFact(unittest.TestCase):
                     out.append(dict(FACT_SOURCE))
                 elif op["op"] == "create_record":
                     out.append({"uuid": "NEW"})
+                elif op["op"] == "list_group":
+                    out.append(list(self.list_group_result))
                 else:
                     out.append({})
             return out
@@ -1058,6 +1067,9 @@ class FileSourceFact(unittest.TestCase):
     def applied(self):
         return [op["op"] for batch in self.calls for op in batch]
 
+    def batch_with(self, op_name):
+        return next(b for b in self.calls if any(o["op"] == op_name for o in b))
+
     def test_named_clearly_auto_applies_without_a_proposal(self):
         plan = {"kind": "existing", "name": "Dana Parker", "uuid": "U1",
                 "md": {}, "aliases": "Dana", "weak_match": False,
@@ -1067,6 +1079,11 @@ class FileSourceFact(unittest.TestCase):
                        False, "Dana Parker's kid started at Reed")
         self.assertIn("append_log", self.applied())
         self.assertEqual(self.created(), [])
+        batch = self.batch_with("mark_filed")
+        self.assertEqual([o["op"] for o in batch],
+                         ["mark_filed", "ensure_group", "move_to"])
+        self.assertEqual(batch[2]["uuid"], FACT_SOURCE["uuid"])
+        self.assertEqual(batch[2]["group"], ef.FACTS_FILED_PATH)
 
     def test_bare_first_name_becomes_a_proposal(self):
         plan = {"kind": "existing", "name": "Dana Parker", "uuid": "U1",
@@ -1078,12 +1095,40 @@ class FileSourceFact(unittest.TestCase):
         names = [op["name"] for op in self.created()]
         self.assertTrue(any(n.startswith("File:") for n in names), names)
         self.assertNotIn("append_log", self.applied())
+        batch = self.batch_with("create_record")
+        self.assertEqual([o["op"] for o in batch],
+                         ["create_record", "mark_filed", "ensure_group", "move_to"])
+
+    def test_proposal_duplicate_guard_still_files_and_moves(self):
+        self.list_group_result = [{"uuid": "EXISTING",
+                                   "name": f"File: {FACT_SOURCE['name']}"}]
+        plan = {"kind": "existing", "name": "Dana Parker", "uuid": "U1",
+                "md": {}, "aliases": "Dana", "weak_match": False,
+                "interacted": False, "facts": [("2026-03-16", "moved")],
+                "updates": {}}
+        ef.file_source({}, self.state(), FACT_SOURCE, "2026-03-16", [plan], "auto",
+                       False, "Dana moved to Denver")
+        self.assertEqual(self.created(), [])
+        batch = self.batch_with("mark_filed")
+        self.assertEqual([o["op"] for o in batch],
+                         ["mark_filed", "ensure_group", "move_to"])
 
     def test_empty_extraction_surfaces_a_review_stub(self):
         ef.file_source({}, self.state(), FACT_SOURCE, "2026-03-16", [], "auto",
                        False, "not a fact")
         names = [op["name"] for op in self.created()]
         self.assertTrue(any(n.startswith("Review capture:") for n in names), names)
+        batch = self.batch_with("create_record")
+        self.assertEqual([o["op"] for o in batch], ["create_record", "mark_filed"])
+
+    def test_review_stub_duplicate_guard_leaves_the_source_in_place(self):
+        self.list_group_result = [{"uuid": "EXISTING",
+                                   "name": f"Review capture: {FACT_SOURCE['name']}"}]
+        ef.file_source({}, self.state(), FACT_SOURCE, "2026-03-16", [], "auto",
+                       False, "not a fact")
+        self.assertEqual(self.created(), [])
+        batch = self.batch_with("mark_filed")
+        self.assertEqual([o["op"] for o in batch], ["mark_filed"])
 
 
 class RosterIndexEmailKey(unittest.TestCase):

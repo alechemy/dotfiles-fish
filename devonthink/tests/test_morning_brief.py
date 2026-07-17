@@ -1577,6 +1577,37 @@ class SeriesDetection(unittest.TestCase):
         self.assertEqual(mb.repeat_series(hist, self.TODAY), set())
 
 
+class SeriesLookbackStamp(unittest.TestCase):
+    """C21: the 180-day lookback is expensive, so a same-day retry tick
+    reuses the prior tick's repeats instead of re-fetching."""
+
+    TODAY = "2026-07-14"
+
+    def test_no_stamp_yields_no_cached_repeats(self):
+        state = mb.empty_identity_provenance()
+        self.assertIsNone(mb.cached_repeats(state, self.TODAY))
+
+    def test_a_same_day_stamp_is_reused(self):
+        state = mb.empty_identity_provenance()
+        repeats = {mb.series_key(event("Platform Sync"))}
+        mb.stamp_series_lookback(state, self.TODAY, repeats)
+        self.assertEqual(mb.cached_repeats(state, self.TODAY), repeats)
+
+    def test_a_stale_day_stamp_is_not_reused(self):
+        state = mb.empty_identity_provenance()
+        mb.stamp_series_lookback(
+            state, "2026-07-13", {mb.series_key(event("Platform Sync"))})
+        self.assertIsNone(mb.cached_repeats(state, self.TODAY))
+
+    def test_repeats_round_trip_through_json(self):
+        state = mb.empty_identity_provenance()
+        repeats = {mb.series_key(event("Platform Sync", calendar="Work")),
+                   mb.series_key(event("Board Game Night", calendar="Home"))}
+        mb.stamp_series_lookback(state, self.TODAY, repeats)
+        reloaded = json.loads(json.dumps(state))
+        self.assertEqual(mb.cached_repeats(reloaded, self.TODAY), repeats)
+
+
 class BriefNews(unittest.TestCase):
     """The roster ages, the news does not: a standing meeting drops who is in
     the room but keeps what has been filed about them since you last met."""
