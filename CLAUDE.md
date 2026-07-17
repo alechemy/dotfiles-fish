@@ -200,6 +200,19 @@ Load-bearing design rules:
 - **Idempotent + non-destructive.** Managed-folder UUIDs derive deterministically (`uuid5`) from each Chromium node's `guid`, and idempotency is judged on a projection of only the keys the script owns (type/title/URL/UUID): Safari annotates managed nodes with its own bookkeeping keys (`Sync`, `ReadingListNonSync`) once it runs, so an unchanged Chromium tree no-ops even on an annotated file, and a real rewrite merges Safari's extra keys back in by `WebBookmarkUUID` instead of stripping them. It matches its own folder by a fixed `WebBookmarkUUID` (or `Title == "Chromium"`) and rebuilds only that. A one-time pre-write backup lands at `~/.local/state/chromium-bookmarks-sync/Safari-Bookmarks.firstrun-backup.plist`.
 - Modes for manual use/testing: `--once` (single sync), `--dry-run` (report, no write), `--force` (sync even while Safari is running). The default (no args) is the watch loop the agent uses.
 
+### Screen-lock → Keyboard Maestro bridge
+
+Keyboard Maestro (11.0.4) has a native `Unlock` system trigger but no *lock* counterpart. `stow/lock-watcher/` fills exactly that gap: `com.user.lock-watcher` (KeepAlive) runs `lock-watcher.applescript` — AppleScriptObjC under `/usr/bin/osascript` — which observes the `com.apple.screenIsLocked` distributed notification and fires the KM macro named `Screen Locked` via `do script`. Fully event-driven: the process blocks in its run loop between locks (no polling, battery-clean). The macro's contents live in KM's own library, not this repo — KM's macro plist is app-owned runtime state, the same reason `~/.claude.json` isn't stowed.
+
+Load-bearing details:
+
+- **Lock only.** Anything unlock-side belongs on KM's native `Unlock` trigger (as "Restart Feishin on Wake" already does), not on a `screenIsUnlocked` observer here — don't re-add one.
+- The `tell application "Keyboard Maestro Engine"` is wrapped in `run script` so the file compiles on machines where KM was never launched (no scripting dictionary registered); at runtime the script stays dormant when KM is absent (exit 0 + `KeepAlive.SuccessfulExit=false`, same pattern as the bookmark sync). setup.sh additionally gates the bootstrap on the app's presence.
+- At load it sends a harmless `getvariable` ping to KM Engine so the one-time osascript → KM Engine Automation prompt fires while the user is present, not behind a locked screen at the first real lock event. osascript is Apple-signed, so the grant never rotates.
+- ASObjC under osascript: `run`, `name`, and `center` collide with AppleScript terminology — write `|run|()`, `|name|:`, and pick another variable name for the notification center.
+- Scripting the KM **editor**: `make new action with properties {xml:…}` is reliable, but `make new trigger with properties {xml:…}` crashes KM 11.0.4 outright — set the whole macro's `xml` instead if a trigger must ever be scripted.
+- On lid-close the handler races system sleep, so the macro may finish on the next wake; its actions (proxy off, quit apps) are idempotent, and the `Sleep`-triggered macro covers that path anyway. Expect both macros to fire on a lock-then-sleep.
+
 ### Adding a New Package
 
 1. Create `stow/<toolname>/` mirroring the `$HOME` path (e.g. `stow/lazygit/.config/lazygit/`)

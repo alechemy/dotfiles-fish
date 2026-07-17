@@ -504,6 +504,15 @@ EOF
         info "  Grant Full Disk Access to /usr/bin/python3 so the bookmark sync can write Safari's bookmarks"
     fi
 
+    # Screen-lock -> Keyboard Maestro bridge. The watcher exits 0 when Keyboard
+    # Maestro isn't installed, so the agent stays dormant on machines without it
+    # (same KeepAlive.SuccessfulExit=false pattern as the bookmark sync). Its
+    # startup ping fires the one-time osascript -> KM Engine Automation prompt.
+    if [ -d "/Applications/Keyboard Maestro.app" ]; then
+        load_launch_agent "$HOME/Library/LaunchAgents/com.user.lock-watcher.plist" "lock-watcher"
+        info "  Approve the 'osascript wants to control Keyboard Maestro Engine' prompt if it appears"
+    fi
+
     # Git SSH commit-signing key. The tracked gitconfig sets commit.gpgsign=true
     # with gpg.format=ssh, so a signing key must exist or every `git commit`
     # fails. Per-machine ed25519 key, no passphrase so signing stays headless.
