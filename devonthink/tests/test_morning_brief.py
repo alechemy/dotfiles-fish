@@ -1,9 +1,11 @@
 import json
+import logging
 import os
 import re
 import shutil
 import tempfile
 import unittest
+from unittest import mock
 
 from helpers import attendee, capture_logs, contact, event, load, person
 
@@ -46,6 +48,53 @@ class SkipAttendeePattern(unittest.TestCase):
 
     def test_default_constant_matches_the_documented_pattern(self):
         self.assertEqual(mb.DEFAULT_SKIP_ATTENDEE, ROOM_RE.pattern)
+
+
+class CalendarContexts(unittest.TestCase):
+    def test_matches_calendar_title_or_stable_identifier(self):
+        contexts = mb.load_calendar_contexts({
+            "PERSONAL_CALENDARS": "Home",
+            "WORK_CALENDARS": "cal-work,source-corp",
+        })
+        self.assertEqual(
+            mb.event_context(event("x", calendar="Home"), contexts), "personal")
+        self.assertEqual(
+            mb.event_context(event("x", calendar_id="cal-work"), contexts), "work")
+        self.assertEqual(
+            mb.event_context(event("x", source_id="source-corp"), contexts), "work")
+
+    def test_unclassified_calendar_is_neutral(self):
+        self.assertEqual(
+            mb.event_context(event("x"), mb.load_calendar_contexts({})), "neutral")
+
+    def test_overlapping_selectors_are_rejected(self):
+        with self.assertRaisesRegex(ValueError, "both personal and work"):
+            mb.load_calendar_contexts({
+                "PERSONAL_CALENDARS": "shared",
+                "WORK_CALENDARS": "shared",
+            })
+
+
+class PersonResolutionEvidence(unittest.TestCase):
+    def setUp(self):
+        self.person = person("Jordan Vale", aliases="Jordan", email="jv@x.com")
+        self.index = mb.person_index([self.person])
+
+    def test_email_is_strongest(self):
+        got = mb.resolve_person(self.index, "Someone Else", "jv@x.com")
+        self.assertIs(got["person"], self.person)
+        self.assertEqual(got["evidence"], "email")
+        self.assertTrue(got["strong"])
+
+    def test_structured_full_name_is_strong(self):
+        got = mb.resolve_person(self.index, "Jordan Vale", "")
+        self.assertEqual(got["evidence"], "full-name")
+        self.assertTrue(got["strong"])
+
+    def test_bare_alias_is_weak(self):
+        got = mb.resolve_person(self.index, "Jordan", "")
+        self.assertEqual(got["evidence"], "bare-name")
+        self.assertFalse(got["strong"])
 
 
 class RealAttendees(unittest.TestCase):
@@ -135,6 +184,282 @@ class ContactBumps(unittest.TestCase):
                   person("Jonathan Vega", aliases="Jonathan")]
         ev = event("a", [attendee("Jonathan")])
         self.assertEqual(mb.contact_bumps([ev], people, "x", ROOM_RE), [])
+
+
+class IdentityProvenance(unittest.TestCase):
+    def setUp(self):
+        self.person = person("Jordan Vale", aliases="Jordan", email="jv@x.com")
+        self.people = [self.person]
+        self.contexts = mb.load_calendar_contexts({
+            "PERSONAL_CALENDARS": "Home",
+            "WORK_CALENDARS": "Work",
+        })
+
+    def observations(self, events):
+        return mb.calendar_observations(
+            events, self.people, ROOM_RE, self.contexts, set())
+
+    def test_only_strong_identity_evidence_teaches_context(self):
+        strong = event("Review", [attendee("Someone Else", "jv@x.com")],
+                       calendar="Work", event_id="event-1")
+        weak = event("Call with Jordan", calendar="Work", event_id="event-2")
+        got = self.observations([strong, weak])
+        self.assertEqual(len(got), 1)
+        self.assertEqual(got[0]["person_uuid"], self.person["uuid"])
+        self.assertEqual(got[0]["context"], "work")
+        self.assertEqual(got[0]["evidence"], "email")
+
+    def test_recording_is_idempotent_and_context_conflict_needs_history(self):
+        state = mb.empty_identity_provenance()
+        events = [
+            event("Review", [attendee("Jordan Vale")], calendar="Work",
+                  event_id="event-1"),
+            event("Planning", [attendee("Someone Else", "jv@x.com")],
+                  calendar="Work", event_id="event-2"),
+        ]
+        observations = self.observations(events)
+        self.assertTrue(mb.record_calendar_observations(state, observations))
+        self.assertFalse(mb.record_calendar_observations(state, observations))
+        self.assertEqual(
+            mb.context_counts(state, self.person["uuid"]), {"work": 2})
+        self.assertTrue(
+            mb.context_conflicts(state, self.person["uuid"], "personal"))
+        self.assertFalse(
+            mb.context_conflicts(state, self.person["uuid"], "work"))
+        self.assertFalse(
+            mb.context_conflicts(state, self.person["uuid"], "neutral"))
+
+    def test_recurring_occurrences_count_separately(self):
+        state = mb.empty_identity_provenance()
+        observations = self.observations([
+            event("Review", [attendee("Jordan Vale")], calendar="Work",
+                  date="2026-07-06", event_id="series-1"),
+            event("Review", [attendee("Jordan Vale")], calendar="Work",
+                  date="2026-07-13", event_id="series-1"),
+        ])
+        mb.record_calendar_observations(state, observations)
+        self.assertEqual(
+            mb.context_counts(state, self.person["uuid"]), {"work": 2})
+
+    def test_one_observation_does_not_create_a_hard_context_boundary(self):
+        state = mb.empty_identity_provenance()
+        observations = self.observations([
+            event("Review", [attendee("Jordan Vale")], calendar="Work",
+                  event_id="event-1")
+        ])
+        mb.record_calendar_observations(state, observations)
+        self.assertFalse(
+            mb.context_conflicts(state, self.person["uuid"], "personal"))
+
+    def test_context_conflict_blocks_only_weak_title_evidence(self):
+        state = mb.empty_identity_provenance()
+        mb.record_calendar_observations(state, self.observations([
+            event("Review", [attendee("Jordan Vale")], calendar="Work",
+                  event_id="event-1"),
+            event("Planning", [attendee("Jordan Vale")], calendar="Work",
+                  event_id="event-2"),
+        ]))
+        self.assertEqual(
+            mb.title_matches(self.people, "Call with Jordan", "personal", state), [])
+        self.assertEqual(
+            [p["name"] for p in mb.title_matches(
+                self.people, "Call with Jordan", "work", state)],
+            ["Jordan Vale"])
+        self.assertEqual(
+            [p["name"] for p in mb.title_matches(
+                self.people, "Call with Jordan Vale", "personal", state)],
+            ["Jordan Vale"])
+
+    def test_context_conflict_is_visible_and_cannot_bump_lastcontact(self):
+        state = mb.empty_identity_provenance()
+        mb.record_calendar_observations(state, self.observations([
+            event("Review", [attendee("Jordan Vale")], calendar="Work",
+                  event_id="event-1"),
+            event("Planning", [attendee("Jordan Vale")], calendar="Work",
+                  event_id="event-2"),
+        ]))
+        personal = event("Call with Jordan", calendar="Home", event_id="event-3")
+        blocks = mb.brief_blocks(
+            [personal], self.people, ROOM_RE, set(), set(), (), self.contexts,
+            state)
+        self.assertEqual(blocks[0]["people"], [])
+        self.assertIn("identity unresolved", blocks[0]["warnings"][0])
+        self.assertEqual(
+            mb.contact_bumps(
+                [personal], self.people, "2026-07-13", ROOM_RE, set(), set(),
+                self.contexts, state),
+            [])
+
+    def test_exact_email_overrides_a_context_mismatch(self):
+        state = mb.empty_identity_provenance()
+        mb.record_calendar_observations(state, self.observations([
+            event("Review", [attendee("Jordan Vale")], calendar="Work",
+                  event_id="event-1"),
+            event("Planning", [attendee("Jordan Vale")], calendar="Work",
+                  event_id="event-2"),
+        ]))
+        personal = event(
+            "Dinner", [attendee("Someone Else", "jv@x.com")],
+            calendar="Home", event_id="event-3")
+        got = mb.contact_bumps(
+            [personal], self.people, "2026-07-13", ROOM_RE, set(), set(),
+            self.contexts, state)
+        self.assertEqual(got[0]["uuid"], self.person["uuid"])
+
+
+class CalendarPersonCandidates(unittest.TestCase):
+    def setUp(self):
+        self.contexts = mb.load_calendar_contexts({
+            "PERSONAL_CALENDARS": "Home",
+            "WORK_CALENDARS": "Work",
+        })
+
+    def candidates(self, events, people=(), contacts=(), provenance=None):
+        return mb.calendar_person_candidates(
+            events, list(people), list(contacts), ROOM_RE, self.contexts, set(),
+            mb.SKIP_CALENDARS, provenance)
+
+    def test_unmatched_structured_attendee_is_a_candidate(self):
+        got = self.candidates([
+            event("Lease review",
+                  [attendee("Jordan Pike", "jp@x.com")],
+                  calendar="Home", event_id="event-1")
+        ])
+        self.assertEqual(len(got), 1)
+        self.assertEqual(got[0]["name"], "Jordan Pike")
+        self.assertEqual(got[0]["email"], "jp@x.com")
+        self.assertEqual(got[0]["evidence"], "calendar attendee")
+        self.assertEqual(got[0]["context"], "personal")
+
+    def test_existing_person_is_not_a_candidate(self):
+        people = [person("Jordan Pike", email="jp@x.com")]
+        got = self.candidates([
+            event("Lease review",
+                  [attendee("Jordan Pike", "jp@x.com")],
+                  calendar="Home", event_id="event-1")
+        ], people)
+        self.assertEqual(got, [])
+
+    def test_ambiguous_attendee_key_is_not_a_candidate(self):
+        """resolve_person returns None for both a plain miss and an ambiguous
+        multi-hit key; a candidate must not be manufactured for the latter."""
+        people = [person("Casey Doyle", uuid="P1"), person("Casey Doyle", uuid="P2")]
+        got = self.candidates([
+            event("Lease review", [attendee("Casey Doyle")],
+                  calendar="Home", event_id="event-1")
+        ], people)
+        self.assertEqual(got, [])
+
+    def test_title_full_name_requires_contacts_corroboration(self):
+        ev = event("Meeting with Jordan Pike", calendar="Home",
+                   event_id="event-1")
+        self.assertEqual(self.candidates([ev]), [])
+        got = self.candidates([ev], contacts=[contact("Jordan Pike")])
+        self.assertEqual(len(got), 1)
+        self.assertEqual(got[0]["evidence"], "calendar title + Contacts")
+
+    def test_title_parser_does_not_propose_uncorroborated_nouns(self):
+        ev = event("Meeting with Project Hail Mary", calendar="Home",
+                   event_id="event-1")
+        self.assertEqual(self.candidates([ev]), [])
+
+    def test_unique_contact_can_resolve_a_bare_personal_title(self):
+        people = [
+            person("Jordan Vale", aliases="Jordan"),
+            person("Jordan Reyes", aliases="Jordan"),
+        ]
+        provenance = mb.empty_identity_provenance()
+        for p in people:
+            mb.record_calendar_observations(provenance, [
+                {"id": f"{p['uuid']}-1", "person_uuid": p["uuid"],
+                 "context": "work", "date": "2026-07-01",
+                 "evidence": "full-name"},
+                {"id": f"{p['uuid']}-2", "person_uuid": p["uuid"],
+                 "context": "work", "date": "2026-07-08",
+                 "evidence": "full-name"},
+            ])
+        ev = event("Meet with Jordan", calendar="Home", event_id="event-1")
+        got = self.candidates(
+            [ev], people, [contact("Jordan Pike")], provenance)
+        self.assertEqual([candidate["name"] for candidate in got], ["Jordan Pike"])
+        self.assertEqual(
+            got[0]["evidence"], "calendar title + unique Contacts name")
+
+    def test_bare_title_does_not_create_a_candidate_without_context_conflict(self):
+        people = [person("Jordan Vale", aliases="Jordan")]
+        ev = event("Meet with Jordan", calendar="Home", event_id="event-1")
+        self.assertEqual(
+            self.candidates([ev], people, [contact("Jordan Pike")]), [])
+
+    def test_same_identity_is_deduplicated_across_events(self):
+        events = [
+            event("Lease review", [attendee("Jordan Pike", "jp@x.com")],
+                  calendar="Home", event_id="event-1"),
+            event("Inspection", [attendee("Jordan Pike", "jp@x.com")],
+                  calendar="Home", event_id="event-2"),
+        ]
+        self.assertEqual(len(self.candidates(events)), 1)
+
+    def test_title_and_attendee_evidence_share_one_candidate_identity(self):
+        events = [
+            event("Meeting with Jordan Pike", calendar="Home",
+                  event_id="event-1"),
+            event("Inspection", [attendee("Jordan Pike", "jp@x.com")],
+                  calendar="Home", event_id="event-2"),
+        ]
+        got = self.candidates(events, contacts=[contact("Jordan Pike")])
+        self.assertEqual(len(got), 1)
+        self.assertEqual(got[0]["evidence"], "calendar attendee")
+        self.assertEqual(got[0]["email"], "jp@x.com")
+
+    def test_proposal_creates_no_facts_or_lastcontact(self):
+        candidate = self.candidates([
+            event("Lease review",
+                  [attendee("Jordan Pike", "jp@x.com")],
+                  calendar="Home", event_id="event-1")
+        ])[0]
+        body = mb.calendar_candidate_body(candidate)
+        ops = json.loads(re.findall(
+            r"```json\n(.*?)\n```", body, re.DOTALL)[-1])
+        self.assertEqual(ops, [{
+            "op": "ensure_person",
+            "name": "Jordan Pike",
+            "fields": {"email": "jp@x.com"},
+        }])
+
+    def test_near_name_candidate_confirms_distinct_identity(self):
+        candidate = self.candidates([
+            event("Lease review",
+                  [attendee("Jordan Pike", "jp@x.com")],
+                  calendar="Home", event_id="event-1")
+        ], people=[person("Jordan Vale")])[0]
+        body = mb.calendar_candidate_body(candidate)
+        ops = json.loads(re.findall(
+            r"```json\n(.*?)\n```", body, re.DOTALL)[-1])
+        self.assertTrue(ops[0]["confirm_new"])
+        self.assertNotIn("add `\"confirm_new\": true`", body)
+
+    def test_existing_review_proposal_repairs_missing_local_state(self):
+        candidate = self.candidates([
+            event("Lease review",
+                  [attendee("Jordan Pike", "jp@x.com")],
+                  calendar="Home", event_id="event-1")
+        ])[0]
+        state = mb.empty_identity_provenance()
+        with mock.patch.object(
+                mb, "run_bridge", return_value=[[{
+                    "uuid": "PROPOSAL-1",
+                    "name": "Calendar person: Jordan Pike",
+                }]]) as bridge:
+            changed = mb.propose_calendar_candidates([candidate], state, False)
+        self.assertTrue(changed)
+        ledger_key = mb.calendar_candidate_ledger_key(
+            candidate["name"], candidate["email"])
+        self.assertEqual(
+            state["candidates"][ledger_key]["proposal_uuid"], "PROPOSAL-1")
+        self.assertEqual(bridge.call_count, 1)
+        self.assertEqual(
+            bridge.call_args.args[0][0]["op"], "list_group")
 
 
 class BuildReconnect(unittest.TestCase):
@@ -420,6 +745,38 @@ class MessageBumps(unittest.TestCase):
         self.assertEqual(ops, [])
 
 
+class DurableBumps(unittest.TestCase):
+    def test_drops_ops_dated_today_or_later(self):
+        ops = [{"op": "bump_lastcontact", "uuid": "u1", "date": "2026-07-14"},
+               {"op": "bump_lastcontact", "uuid": "u2", "date": "2026-07-15"}]
+        self.assertEqual(mb.durable_bumps(ops, "2026-07-15"), [ops[0]])
+
+    def test_keeps_everything_strictly_before_today(self):
+        ops = [{"op": "bump_lastcontact", "uuid": "u1", "date": "2026-07-01"}]
+        self.assertEqual(mb.durable_bumps(ops, "2026-07-15"), ops)
+
+
+class NovelBumps(unittest.TestCase):
+    def test_drops_ops_that_would_not_raise_the_stored_value(self):
+        p = person("Jake Pendry", lastcontact="2026-07-14")
+        ops = [{"op": "bump_lastcontact", "uuid": p["uuid"], "date": "2026-07-14"}]
+        self.assertEqual(mb.novel_bumps(ops, [p]), [])
+
+    def test_keeps_ops_that_would_raise_it(self):
+        p = person("Jake Pendry", lastcontact="2026-07-10")
+        ops = [{"op": "bump_lastcontact", "uuid": p["uuid"], "date": "2026-07-14"}]
+        self.assertEqual(mb.novel_bumps(ops, [p]), ops)
+
+    def test_no_stored_lastcontact_always_raises(self):
+        p = person("Jake Pendry")
+        ops = [{"op": "bump_lastcontact", "uuid": p["uuid"], "date": "2026-07-14"}]
+        self.assertEqual(mb.novel_bumps(ops, [p]), ops)
+
+    def test_op_for_a_person_not_in_the_roster_is_kept(self):
+        ops = [{"op": "bump_lastcontact", "uuid": "ghost", "date": "2026-07-14"}]
+        self.assertEqual(mb.novel_bumps(ops, []), ops)
+
+
 class PersonSummaryLine(unittest.TestCase):
     def test_role_and_employer_combine(self):
         line = mb.person_summary_line(
@@ -540,6 +897,45 @@ class NewsBullets(unittest.TestCase):
                              lastcontact="2026-07-10")
         self.assertEqual(len(self.news(a, told)), 1)
         self.assertEqual(self.news(b, told), [])
+
+
+class MessageBumpRetryComposition(unittest.TestCase):
+    """C01: a same-day text falls inside "since yesterday"'s query window,
+    so it must not durably promote LastContact past yesterday — that would
+    outrun apply_bumps' in-memory cutoff and hide the fact on the next
+    launchd retry, which rebuilds the Briefing section from a fresh DT read."""
+
+    def test_yesterdays_fact_survives_a_same_day_text_across_runs(self):
+        run_n_today = "2026-07-15"
+        yesterday = "2026-07-14"
+        fact = f"- {yesterday} — closed the Meridian deal."
+
+        def roster(lastcontact):
+            p = person("Priya Raman", lastcontact=lastcontact)
+            p["body"] = "# Priya Raman\n\n## Biographical Log\n\n" + fact
+            return p
+
+        contacts = [contact("Priya Raman", emails=["priya@x.com"])]
+        index = mb.handle_index(contacts, [roster("2026-07-01")])
+        raw_mops = mb.message_bumps(
+            [("priya@x.com", mb.apple_ns(run_n_today))], index)
+        self.assertEqual(raw_mops[0]["date"], run_n_today)
+
+        p_n = roster("2026-07-01")
+        mb.apply_bumps([p_n], raw_mops, run_n_today)
+        self.assertEqual(mb.news_bullets(p_n, set()), ["  " + fact])
+
+        durable = mb.durable_bumps(raw_mops, run_n_today)
+        dt_lastcontact = "2026-07-01"
+        for op in durable:
+            if op["date"] > dt_lastcontact:
+                dt_lastcontact = op["date"]
+
+        p_n1 = roster(dt_lastcontact)
+        self.assertEqual(
+            mb.news_bullets(p_n1, set()), ["  " + fact],
+            "a same-day text must not durably promote LastContact past "
+            "yesterday, or the next retry loses a fact this run already showed")
 
 
 class RenderReview(unittest.TestCase):
@@ -1229,18 +1625,32 @@ class BriefNews(unittest.TestCase):
         got = self.rendered(evs)
         self.assertEqual(got.count("moved to Denver"), 1)
 
-    def test_a_repeat_with_no_news_is_a_bare_heading(self):
+    def test_a_repeat_with_no_news_is_a_bare_slot(self):
         self.priya["md"]["mdlastcontact"] = "2026-07-14"
         ev = event("Weekly Sync", [attendee("Priya Raman", "p@x.com")])
         got = self.rendered([ev], repeats={mb.series_key(ev)})
         self.assertEqual(got.strip().splitlines()[-1],
-                         "### 9:00am — Weekly Sync")
+                         "- 9:00am — Weekly Sync")
 
     def test_a_redacted_event_never_carries_news(self):
         ev = event("Lunch with Priya Raman", [attendee("Priya Raman", "p@x.com")])
         got = mb.brief_blocks([ev], self.people, ROOM_RE, {"priya raman"})
         self.assertEqual(got[0]["title"], mb.REDACTED_TITLE)
         self.assertEqual(got[0]["news"], [])
+
+    def test_the_day_is_one_tight_list_nested_under_each_slot(self):
+        """The slot is a bullet, not a heading, so everything it carries has to
+        hang off it — a blank line or a lost indent would end the list and
+        promote the roster to the day's top level."""
+        got = self.rendered([event("Kickoff",
+                                   [attendee("Priya Raman", "p@x.com")])])
+        body = got.split("-->\n\n", 1)[1]
+        self.assertEqual(body.splitlines(), [
+            "- 9:00am — Kickoff",
+            "  - [Priya Raman](x-devonthink-item://uuid-priya-raman)"
+            " — last contact 2026-07-10",
+            "    - 2026-07-13 — moved to Denver.",
+        ])
 
 
 class BriefBlocksTimeline(unittest.TestCase):
@@ -1337,7 +1747,363 @@ class BriefBlocksTimeline(unittest.TestCase):
 
     def test_person_less_event_renders_without_a_trailing_blank(self):
         got = mb.render_brief(self.blocks([event("Perio cleaning")]), "2026-07-13")
-        self.assertTrue(got.endswith("### 9:00am — Perio cleaning"), repr(got))
+        self.assertTrue(got.endswith("- 9:00am — Perio cleaning"), repr(got))
+
+
+class SectionsForUpsert(unittest.TestCase):
+    """C42: a calendar or contacts fetch failure must not upsert its
+    dependent section as empty — that would erase whatever an earlier run
+    wrote correctly. The failed section is dropped from the batch entirely."""
+
+    def test_calendar_failure_excludes_only_the_briefing(self):
+        sections = [(mb.BRIEF_HEADER, "brief content"),
+                    (mb.BIRTHDAYS_HEADER, "bday content"),
+                    (mb.REVIEW_HEADER, "review content")]
+        got = mb.sections_for_upsert(sections, {"calendar"})
+        self.assertEqual([h for h, _ in got],
+                         [mb.BIRTHDAYS_HEADER, mb.REVIEW_HEADER])
+
+    def test_contacts_failure_excludes_only_birthdays(self):
+        sections = [(mb.BRIEF_HEADER, "brief content"),
+                    (mb.BIRTHDAYS_HEADER, "bday content")]
+        got = mb.sections_for_upsert(sections, {"contacts"})
+        self.assertEqual([h for h, _ in got], [mb.BRIEF_HEADER])
+
+    def test_no_failure_keeps_every_section_including_empty_ones(self):
+        sections = [(mb.BRIEF_HEADER, None), (mb.REVIEW_HEADER, "x")]
+        self.assertEqual(mb.sections_for_upsert(sections, set()), sections)
+
+    def test_unaffected_sections_survive_either_failure(self):
+        sections = [(mb.REVIEW_HEADER, "x"), (mb.JOURNAL_HEADER, "y"),
+                    (mb.ON_THIS_DAY_HEADER, "z"), (mb.RECONNECT_HEADER, "w")]
+        got = mb.sections_for_upsert(sections, {"calendar", "contacts"})
+        self.assertEqual(got, sections)
+
+    def test_both_failures_exclude_both_dependent_sections(self):
+        sections = [(mb.BRIEF_HEADER, "a"), (mb.BIRTHDAYS_HEADER, "b"),
+                    (mb.REVIEW_HEADER, "c")]
+        got = mb.sections_for_upsert(sections, {"calendar", "contacts"})
+        self.assertEqual([h for h, _ in got], [mb.REVIEW_HEADER])
+
+
+class RequestedDateValidation(unittest.TestCase):
+    """C02: a --date in the future would write LastContact into the future,
+    which the raise-only bridge guard then defends against every correction
+    until the real date catches up."""
+
+    def test_a_future_date_is_rejected(self):
+        self.assertIsNotNone(
+            mb.validate_requested_date("2026-07-17", "2026-07-16"))
+
+    def test_a_past_date_is_fine(self):
+        self.assertIsNone(
+            mb.validate_requested_date("2026-07-01", "2026-07-16"))
+
+    def test_todays_date_is_fine(self):
+        self.assertIsNone(
+            mb.validate_requested_date("2026-07-16", "2026-07-16"))
+
+
+class EffectiveDryRun(unittest.TestCase):
+    """C02: a --date replay of a past day must run read-only, same as an
+    explicit --dry-run, so it never durably bumps LastContact or writes the
+    daily note."""
+
+    def test_explicit_dry_run_is_preserved(self):
+        self.assertTrue(mb.effective_dry_run(True, "2026-07-16", "2026-07-16"))
+
+    def test_a_past_date_forces_read_only(self):
+        self.assertTrue(mb.effective_dry_run(False, "2026-07-01", "2026-07-16"))
+
+    def test_todays_date_stays_live(self):
+        self.assertFalse(mb.effective_dry_run(False, "2026-07-16", "2026-07-16"))
+
+
+class LoadIdentityProvenanceQuarantine(unittest.TestCase):
+    """C03: a corrupt or unsupported state file must not take the whole
+    brief down — it is quarantined aside and the run continues with empty
+    state."""
+
+    def setUp(self):
+        self.original = mb.IDENTITY_PROVENANCE_FILE
+        self.dir = tempfile.mkdtemp()
+        mb.IDENTITY_PROVENANCE_FILE = os.path.join(
+            self.dir, "identity-provenance.json")
+
+    def tearDown(self):
+        shutil.rmtree(self.dir, ignore_errors=True)
+        mb.IDENTITY_PROVENANCE_FILE = self.original
+
+    def test_missing_file_is_not_quarantined(self):
+        with capture_logs(mb) as cap:
+            state = mb.load_identity_provenance_or_quarantine("20260716T051500")
+        self.assertEqual(state, mb.empty_identity_provenance())
+        self.assertEqual(cap.messages(), [])
+
+    def test_malformed_json_is_quarantined_and_state_is_empty(self):
+        with open(mb.IDENTITY_PROVENANCE_FILE, "w") as f:
+            f.write("{not json")
+        with capture_logs(mb) as cap:
+            state = mb.load_identity_provenance_or_quarantine("20260716T051500")
+        self.assertEqual(state, mb.empty_identity_provenance())
+        self.assertFalse(os.path.exists(mb.IDENTITY_PROVENANCE_FILE))
+        self.assertTrue(os.path.exists(
+            mb.IDENTITY_PROVENANCE_FILE + ".corrupt-20260716T051500"))
+        messages = cap.messages()
+        self.assertEqual(len(messages), 1)
+        self.assertIn("candidate", messages[0])
+
+    def test_unsupported_version_is_quarantined(self):
+        with open(mb.IDENTITY_PROVENANCE_FILE, "w") as f:
+            json.dump({"version": 99, "people": {}}, f)
+        state = mb.load_identity_provenance_or_quarantine("20260716T051500")
+        self.assertEqual(state, mb.empty_identity_provenance())
+        self.assertTrue(os.path.exists(
+            mb.IDENTITY_PROVENANCE_FILE + ".corrupt-20260716T051500"))
+
+    def test_a_readable_valid_file_is_never_quarantined(self):
+        state = mb.empty_identity_provenance()
+        state["people"]["U"] = {"contexts": {}}
+        with open(mb.IDENTITY_PROVENANCE_FILE, "w") as f:
+            json.dump(state, f)
+        with capture_logs(mb) as cap:
+            got = mb.load_identity_provenance_or_quarantine("20260716T051500")
+        self.assertEqual(got, state)
+        self.assertTrue(os.path.exists(mb.IDENTITY_PROVENANCE_FILE))
+        self.assertEqual(cap.messages(), [])
+
+
+class PruneContextObservations(unittest.TestCase):
+    """C03: context observations exist only to recognize a series inside
+    SERIES_LOOKBACK_DAYS, so anything older is unbounded growth with no
+    future read. The candidate ledger is exempt."""
+
+    def test_drops_observations_older_than_the_lookback_window(self):
+        state = mb.empty_identity_provenance()
+        mb.record_calendar_observations(state, [
+            {"id": "old", "person_uuid": "U", "context": "work",
+             "date": "2025-01-01", "evidence": "email"},
+            {"id": "new", "person_uuid": "U", "context": "work",
+             "date": "2026-07-01", "evidence": "email"},
+        ])
+        changed = mb.prune_context_observations(state, "2026-07-16")
+        self.assertTrue(changed)
+        self.assertEqual(
+            list(state["people"]["U"]["contexts"]["work"]), ["new"])
+
+    def test_the_lookback_boundary_is_kept(self):
+        state = mb.empty_identity_provenance()
+        cutoff = (mb.date.fromisoformat("2026-07-16")
+                 - mb.timedelta(days=mb.SERIES_LOOKBACK_DAYS)).isoformat()
+        mb.record_calendar_observations(state, [
+            {"id": "edge", "person_uuid": "U", "context": "work",
+             "date": cutoff, "evidence": "email"},
+        ])
+        self.assertFalse(mb.prune_context_observations(state, "2026-07-16"))
+        self.assertIn("edge", state["people"]["U"]["contexts"]["work"])
+
+    def test_reports_no_change_when_nothing_is_stale(self):
+        state = mb.empty_identity_provenance()
+        mb.record_calendar_observations(state, [
+            {"id": "new", "person_uuid": "U", "context": "work",
+             "date": "2026-07-01", "evidence": "email"},
+        ])
+        self.assertFalse(mb.prune_context_observations(state, "2026-07-16"))
+
+    def test_the_candidate_ledger_is_never_touched(self):
+        state = mb.empty_identity_provenance()
+        state["candidates"]["k1"] = {
+            "proposal_uuid": "U", "created": "2020-01-01T00:00:00",
+            "event_date": "2020-01-01"}
+        mb.prune_context_observations(state, "2026-07-16")
+        self.assertIn("k1", state["candidates"])
+
+
+class AcquireLock(unittest.TestCase):
+    """C41: a non-blocking exclusive lock, mirroring entity-filing.py's own,
+    so an overlapping launchd retry never last-writer-wins the identity
+    provenance state file."""
+
+    def setUp(self):
+        self.original = mb.LOCK_FILE
+        self.dir = tempfile.mkdtemp()
+        mb.LOCK_FILE = os.path.join(self.dir, "dt-morning-brief.lock")
+
+    def tearDown(self):
+        shutil.rmtree(self.dir, ignore_errors=True)
+        mb.LOCK_FILE = self.original
+
+    def test_acquires_when_free(self):
+        fd = mb.acquire_lock()
+        self.assertIsNotNone(fd)
+        fd.close()
+
+    def test_returns_none_when_already_held(self):
+        import fcntl
+        holder = open(mb.LOCK_FILE, "w")
+        fcntl.flock(holder, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        try:
+            self.assertIsNone(mb.acquire_lock())
+        finally:
+            holder.close()
+
+    def test_creates_the_state_dir_if_missing(self):
+        mb.LOCK_FILE = os.path.join(self.dir, "nested", "dt-morning-brief.lock")
+        fd = mb.acquire_lock()
+        self.assertIsNotNone(fd)
+        fd.close()
+
+
+class CalendarPersonCandidateCap(unittest.TestCase):
+    """C04: one large meeting must not flood _Review and the Things mirror
+    with a proposal per unmatched attendee."""
+
+    def setUp(self):
+        self.contexts = mb.load_calendar_contexts({})
+
+    def candidates(self, events):
+        return mb.calendar_person_candidates(
+            events, [], [], ROOM_RE, self.contexts, set(), mb.SKIP_CALENDARS,
+            None)
+
+    def test_a_large_meeting_is_capped_per_event(self):
+        attendees = [attendee(f"Guest Number{i}", f"g{i}@x.com")
+                    for i in range(40)]
+        ev = event("All Hands", attendees, calendar="Work", event_id="event-1")
+        got = self.candidates([ev])
+        self.assertEqual(len(got), mb.CANDIDATE_CAP_PER_EVENT)
+
+    def test_the_drop_is_logged_with_a_count_and_the_event_not_every_name(self):
+        attendees = [attendee(f"Guest Number{i}", f"g{i}@x.com")
+                    for i in range(40)]
+        ev = event("All Hands", attendees, calendar="Work", event_id="event-1")
+        with capture_logs(mb) as cap:
+            self.candidates([ev])
+        messages = cap.messages(level=logging.INFO)
+        self.assertEqual(len(messages), 1)
+        self.assertIn("35", messages[0])
+        self.assertIn("All Hands", messages[0])
+        for i in range(40):
+            self.assertNotIn(f"Guest Number{i}", messages[0])
+
+    def test_two_small_meetings_are_not_capped_against_each_other(self):
+        ev1 = event("Sync A", [attendee("Aaron Brooks", "ab@x.com")],
+                   calendar="Work", event_id="event-1")
+        ev2 = event("Sync B", [attendee("Casey Doyle", "cd@x.com")],
+                   calendar="Work", event_id="event-2")
+        got = self.candidates([ev1, ev2])
+        self.assertEqual(len(got), 2)
+
+    def test_an_evidence_upgrade_does_not_count_against_the_cap(self):
+        """A candidate already known from an earlier event's title mention is
+        upgraded to attendee evidence here, not counted as a new proposal."""
+        events = [
+            event("Meeting with Jordan Pike", calendar="Work",
+                 event_id="event-1"),
+            event("Inspection", [attendee("Jordan Pike", "jp@x.com")],
+                 calendar="Work", event_id="event-2"),
+        ]
+        got = mb.calendar_person_candidates(
+            events, [], [contact("Jordan Pike")], ROOM_RE, self.contexts,
+            set(), mb.SKIP_CALENDARS, None)
+        self.assertEqual(len(got), 1)
+        self.assertEqual(got[0]["evidence"], "calendar attendee")
+
+
+class CalendarCandidateLedgerKeying(unittest.TestCase):
+    """C78: the ledger must not let a rejected "John Smith" burn every
+    future John Smith — a second, differently-emailed person who shares the
+    name gets their own memory."""
+
+    def make_candidate(self, name="Jordan Pike", email="jp@x.com"):
+        return {"key": mb.calendar_candidate_key(name), "name": name,
+                "email": email, "evidence": "calendar attendee",
+                "context": "neutral", "event_title": "Lease review",
+                "event_date": "2026-07-13", "near": []}
+
+    def propose(self, candidate, state, proposal_uuid):
+        with mock.patch.object(
+                mb, "run_bridge",
+                side_effect=[
+                    [[]],
+                    [{"uuid": proposal_uuid,
+                      "name": f"Calendar person: {candidate['name']}"}],
+                ]):
+            return mb.propose_calendar_candidates([candidate], state, False)
+
+    def test_no_email_key_matches_the_legacy_name_key(self):
+        self.assertEqual(
+            mb.calendar_candidate_ledger_key("Jordan Pike", ""),
+            mb.calendar_candidate_key("Jordan Pike"))
+
+    def test_an_email_produces_a_different_key_than_name_alone(self):
+        self.assertNotEqual(
+            mb.calendar_candidate_ledger_key("Jordan Pike", "jp@x.com"),
+            mb.calendar_candidate_key("Jordan Pike"))
+
+    def test_two_different_emails_get_different_keys(self):
+        self.assertNotEqual(
+            mb.calendar_candidate_ledger_key("Jordan Pike", "jp1@x.com"),
+            mb.calendar_candidate_ledger_key("Jordan Pike", "jp2@x.com"))
+
+    def test_candidate_ledger_keys_checks_new_style_then_legacy(self):
+        candidate = self.make_candidate(email="jp@x.com")
+        self.assertEqual(mb.candidate_ledger_keys(candidate), [
+            mb.calendar_candidate_ledger_key("Jordan Pike", "jp@x.com"),
+            mb.calendar_candidate_key("Jordan Pike"),
+        ])
+
+    def test_candidate_ledger_keys_without_email_has_one_key(self):
+        candidate = self.make_candidate(email="")
+        self.assertEqual(mb.candidate_ledger_keys(candidate),
+                         [mb.calendar_candidate_key("Jordan Pike")])
+
+    def test_a_second_differently_emailed_same_named_person_is_not_blocked(self):
+        state = mb.empty_identity_provenance()
+        first = self.make_candidate(email="jp1@x.com")
+        self.assertTrue(self.propose(first, state, "PROPOSAL-1"))
+
+        second = self.make_candidate(email="jp2@x.com")
+        self.assertTrue(self.propose(second, state, "PROPOSAL-2"))
+
+        self.assertEqual(len(state["candidates"]), 2)
+
+    def test_two_same_named_candidates_without_email_still_collide(self):
+        """With nothing sharper to key on, this is the pre-fix behavior and
+        stays that way — the fix only helps once an email is known."""
+        state = mb.empty_identity_provenance()
+        first = self.make_candidate(email="")
+        self.assertTrue(self.propose(first, state, "PROPOSAL-1"))
+
+        second = self.make_candidate(email="")
+        with mock.patch.object(mb, "run_bridge") as bridge:
+            changed = mb.propose_calendar_candidates([second], state, False)
+        self.assertFalse(changed)
+        bridge.assert_not_called()
+
+    def test_a_legacy_name_only_ledger_entry_still_suppresses(self):
+        """An entry written before the ledger began distinguishing by email
+        must still stop a reproposal — no migration of the live file."""
+        state = mb.empty_identity_provenance()
+        legacy_key = mb.calendar_candidate_key("Jordan Pike")
+        state["candidates"][legacy_key] = {
+            "proposal_uuid": "OLD", "created": "2020-01-01T00:00:00",
+            "event_date": "2020-01-01"}
+        candidate = self.make_candidate(email="jp@x.com")
+        with mock.patch.object(mb, "run_bridge") as bridge:
+            changed = mb.propose_calendar_candidates([candidate], state, False)
+        self.assertFalse(changed)
+        bridge.assert_not_called()
+
+    def test_a_new_entry_is_keyed_on_name_and_email_not_legacy(self):
+        state = mb.empty_identity_provenance()
+        candidate = self.make_candidate(email="jp@x.com")
+        self.propose(candidate, state, "PROPOSAL-1")
+        expected_key = mb.calendar_candidate_ledger_key(
+            "Jordan Pike", "jp@x.com")
+        self.assertIn(expected_key, state["candidates"])
+        self.assertNotIn(
+            mb.calendar_candidate_key("Jordan Pike"), state["candidates"])
 
 
 if __name__ == "__main__":

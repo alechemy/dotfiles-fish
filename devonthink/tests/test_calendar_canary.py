@@ -65,6 +65,12 @@ class CalendarCanary(unittest.TestCase):
             self.assertRegex(e["date"], r"^\d{4}-\d{2}-\d{2}$")
             self.assertEqual(e["date"], e["start"][:10])
 
+    def test_every_event_carries_stable_provenance_identifiers(self):
+        for e in self.events:
+            self.assertTrue(e["calendar_id"])
+            self.assertTrue(e["source_id"])
+            self.assertTrue(e["event_id"])
+
     def test_rsvp_is_a_known_state(self):
         for e in self.events:
             self.assertIn(e["rsvp"], RSVP_STATES)

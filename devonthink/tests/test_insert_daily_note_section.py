@@ -32,6 +32,18 @@ class HeaderMissing(unittest.TestCase):
         self.assertEqual(out, "# Day\n\n- x\n\n## Notes\n\n- new")
 
 
+class SpanRule(unittest.TestCase):
+    def test_span_stops_at_an_indented_h1_heading(self):
+        note = ("# Day\n\n## Today's Notes\n\n- old\n\n"
+                "  # Indented Heading\n\n- other")
+        out = run(note, "## Today's Notes", "- new")
+        self.assertEqual(
+            out,
+            "# Day\n\n## Today's Notes\n\n- old\n- new\n\n"
+            "  # Indented Heading\n\n- other",
+        )
+
+
 class ChronologicalOrdering(unittest.TestCase):
     def test_timed_bullet_slots_into_time_order(self):
         note = "## T\n\n- 9:00am: a\n- 7:00am: b\n"

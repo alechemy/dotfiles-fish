@@ -58,17 +58,12 @@ If `setup.sh` halts early, fix the reported issue and re-run — it's idempotent
 
 These live outside the dotfiles repo. Copy via Time Machine, AirDrop, or `scp`.
 
-- [ ] **Granola pipeline files** — gitignored on purpose (the importers reverse-engineer Granola's local SQLCipher store, and we'd rather not advertise that publicly). Copy from the old machine:
-  - `~/.dotfiles/stow/devonthink/.local/bin/import-granola.py` (the AppleEvents sender; stays under `/usr/bin/python3` for TCC stability)
-  - `~/.dotfiles/stow/devonthink/.local/bin/import-granola-parse.py` (the `uv run --script` parser subprocess)
-  - `~/.dotfiles/stow/devonthink/Library/LaunchAgents/com.user.granola-import.plist.template` (re-stow `devonthink` and re-run `scripts/build-launchd-plists.sh` after copying)
-  - `~/.local/share/granola-import/` — design notes (`NOTES.md`) + any cached state.
-- [ ] **Importer idempotency state.** Copy the whole `~/.local/state/devonthink/` directory. It holds two kinds of files: the JSON idempotency state that prevents importers from re-importing everything on first run (`github-stars-imported.json`, `granola-imported.json`, `granola-version.json`, optional `granola-failure.json`, plus any `.bak` siblings), and the `*.last-run` heartbeat files for every launchd-driven pipeline (`dt-daily-note`, `dt-watchdog`, `github-stars-import`, `granola-import`, `singlefile-watcher`, `boox-import-watcher`). Without the JSONs, the next launchd fire re-imports your full GitHub star history and every Granola meeting and spams duplicate failure records into DT. Without the heartbeats, the watchdog flags pipelines as stale.
+- [ ] **Importer idempotency state.** Copy the whole `~/.local/state/devonthink/` directory, with one exception: `entity-seed.yaml` was a one-time input to the 2026-07-09 entity seed, nothing reads it afterward, and DEVONthink's People roster is authoritative — safe to leave behind (or delete) rather than carry forward. The rest holds two kinds of files: the JSON idempotency state that prevents importers from re-importing everything on first run (`github-stars-imported.json`, plus any `.bak` siblings), and the `*.last-run` heartbeat files for every launchd-driven pipeline (`dt-daily-note`, `dt-watchdog`, `github-stars-import`, `singlefile-watcher`, `boox-import-watcher`). Without the JSON, the next launchd fire re-imports your full GitHub star history. Without the heartbeats, the watchdog flags pipelines as stale.
 - [ ] **Dropzone grid layout (`Actions5.dzdb`).** Dropzone 5 itself is a manual install (the Homebrew cask still ships v4 — it's commented out in the Brewfile). The action bundles (`Send to DEVONthink.dzbundle`, `Send to DEVONthink Inbox.dzbundle`) come along automatically via `stow/dropzone/` — they land at `~/Library/Application Support/Dropzone/Actions/`. What does *not* come along is the grid layout itself, which Dropzone 5 stores in `~/Library/Application Support/Dropzone/Actions5.dzdb` (a SQLite DB that mutates at runtime, so it's not stowed). To restore the grid (custom display names like "Send to 99_ARCHIVE", positions, "Automatically Add to Music" → Move Files target path, etc.), quit Dropzone 5, then `cp` the `Actions5.dzdb` from the old Mac's `~/Library/Application Support/Dropzone/` into the same path on the new Mac, then relaunch. Without this swap, Dropzone 5 will discover the bundles but show them as default-named entries you have to drag into the grid yourself. Note: on Dropzone 4 the path was `~/Library/Application Support/Dropzone 4/Actions/`; Dropzone 5 uses the unversioned `Dropzone/` dir.
 - [ ] `~/.gnupg/` — only if you sign commits with GPG. You don't: commit signing here is SSH-based via the local `~/.ssh/id_signing` key (`gpg.format=ssh`), so skip this.
 - [ ] `~/.config/op/` — 1Password CLI local state. Optional; 1Password rebuilds on first auth.
 - [ ] **Keyboard Maestro macros**, **Alfred workflows** — neither stores state in `~/.config`. Export from the old machine and import on the new one; KM macros reference `~/.dotfiles/keyboard-maestro/` scripts by path, so the repo clone must exist before the macros run.
-- [ ] **Drafts actions** — import from Drafts sync/backup, then re-paste the three scripts from `~/.dotfiles/drafts/` over the imported action bodies (the repo files are canonical; imported bodies may be stale). See `drafts/README.md`. (Espanso is *not* in this list: its config and matches live in `stow/espanso/.config/espanso/`, and `setup.sh` registers + starts the service at step 9.)
+- [ ] **Drafts actions** — import from Drafts sync/backup, then re-paste the four scripts from `~/.dotfiles/drafts/` over the imported action bodies (the repo files are canonical; imported bodies may be stale). See `drafts/README.md`. (Espanso is *not* in this list: its config and matches live in `stow/espanso/.config/espanso/`, and `setup.sh` registers + starts the service at step 9.)
 - [ ] **Karabiner-Elements** — `~/.config/karabiner/` *is* in the dotfiles (`stow/karabiner/`), so it comes along automatically. Just open the app once on the new machine and grant Input Monitoring.
 
 ## 6. Post-install authentication
@@ -111,13 +106,7 @@ macOS will prompt the first time each app tries to do something privileged. Pre-
 - [ ] `/bin/bash` → DEVONthink 4
 - [ ] `/usr/bin/osascript` → DEVONthink 4
 
-Easiest way to surface the prompts: open DEVONthink, then manually run each script once from Terminal (`/usr/bin/python3 ~/.local/bin/import-granola.py`, etc.) so the system prompts while you're at the keyboard.
-
-The Granola importer is **not** an Automation sender into Granola — it reads Granola's local files directly via the parser subprocess. No Granola → DEVONthink Automation grant is needed.
-
-**Files and Folders** / **Full Disk Access** — needed because the importer reads protected locations under `~/Library/Application Support/`:
-
-- [ ] `/usr/bin/python3` (or the parser subprocess) — Full Disk Access, so `import-granola-parse.py` can read `~/Library/Application Support/Granola/`.
+Easiest way to surface the prompts: open DEVONthink, then manually run each script once from Terminal (`/usr/bin/python3 ~/.local/bin/import-github-stars.py`, etc.) so the system prompts while you're at the keyboard.
 
 ## 8. macOS system settings
 
@@ -146,5 +135,4 @@ The Granola importer is **not** an Automation sender into Granola — it reads G
 - `~/.aerospace.toml` will be a regular file (not a symlink), regenerated from `stow/aerospace/.aerospace.toml` by the gap scripts. Don't edit it directly — edit the source in the dotfiles. See `stow/aerospace/.stow-local-ignore`.
 - DT launch agents run as **your user**, not root. If you change your username (you're not, but for the record), every `.plist` regenerates fine from its `.plist.template` via `scripts/build-launchd-plists.sh`.
 - VSCodium's `vscode-custom-css` inlines `custom.{css,js}` into `workbench.html` on enable. Every edit to those files — and **every VSCodium update**, which replaces `workbench.html` — needs re-**Enable Custom CSS and JS** + full quit, or the machine silently runs unpatched. Check: `rg -c VSCODE-CUSTOM-CSS "/Applications/VSCodium.app/Contents/Resources/app/out/vs/code/electron-browser/workbench/workbench.html"` (any match means patched).
-- The Granola pipeline decrypts a local SQLCipher store. If you upgrade Granola and the schema changes, the pipeline will break — see `~/.local/share/granola-import/NOTES.md`.
 - The NAS auto-mount agent (`com.user.mount-nas`, package `stow/nas-mount/`) mounts the `Media` and `Archive` shares from `192.168.50.54` via macOS NetFS, which reads the SMB password from the **login Keychain**. A fresh machine has no such entry — connect to the NAS once in Finder and tick *Remember this password in my keychain*, or the first mount pops a GUI auth dialog instead of mounting silently. The agent exits 0 when the NAS is unreachable, so it's harmless off the home network.

@@ -2,16 +2,18 @@
 # dt-entity-bootstrap
 # Idempotently prepares the entity layer's group scaffold in DEVONthink.
 # The JXA bridge assumes /20_ENTITIES/{People,Places,Events,_Review,_Review/
-# Approved} already exist, but nothing creates them; hand-created Person/Place/
-# Event markdown records also lack the EntityType metadata that scripted
+# Approved,_Facts} already exist, but nothing creates them; hand-created Person/
+# Place/Event markdown records also lack the EntityType metadata that scripted
 # creation stamps. This command closes both gaps.
 #
 # What it does (each step is safe to repeat):
 #   - Creates any missing entity group, reporting created vs already present.
-#   - Excludes /20_ENTITIES/People, /20_ENTITIES/_Review, and _Review/Approved
-#     from AI/chat access (DEVONthink's "exclude from chat"), by design.
+#   - Excludes /20_ENTITIES/People, /20_ENTITIES/_Review, _Review/Approved, and
+#     _Facts from AI/chat access (DEVONthink's "exclude from chat"), by design.
 #   - Stamps EntityType on markdown records directly inside People (Person),
 #     Places (Place), and Events (Event) only where the field is empty.
+#   - Prints the _Facts group UUID, to paste into the Capture Person Fact
+#     Drafts action (drafts/drafts-capture-fact.js).
 #
 # Usage:
 #   dt-entity-bootstrap        # create/exclude/stamp as needed; logs to
@@ -35,8 +37,8 @@ cat > "$BOOTSTRAP_SCRIPT" <<'BOOTSTRAP_APPLESCRIPT'
 on run argv
     set dbName to item 1 of argv
 
-    set groupPaths to {"/20_ENTITIES/People", "/20_ENTITIES/Places", "/20_ENTITIES/Events", "/20_ENTITIES/_Review", "/20_ENTITIES/_Review/Approved"}
-    set excludePaths to {"/20_ENTITIES/People", "/20_ENTITIES/_Review", "/20_ENTITIES/_Review/Approved"}
+    set groupPaths to {"/20_ENTITIES/People", "/20_ENTITIES/Places", "/20_ENTITIES/Events", "/20_ENTITIES/_Review", "/20_ENTITIES/_Review/Approved", "/20_ENTITIES/_Facts"}
+    set excludePaths to {"/20_ENTITIES/People", "/20_ENTITIES/_Review", "/20_ENTITIES/_Review/Approved", "/20_ENTITIES/_Facts"}
     set stampSpecs to {{"/20_ENTITIES/People", "Person"}, {"/20_ENTITIES/Places", "Place"}, {"/20_ENTITIES/Events", "Event"}}
 
     set report to ""
@@ -101,6 +103,11 @@ on run argv
                 set report to report & "stamp " & pStr & ": " & stampedCount & " set, " & alreadyCount & " already" & linefeed
             end if
         end repeat
+
+        set factGroup to get record at "/20_ENTITIES/_Facts" in targetDB
+        if factGroup is not missing value then
+            set report to report & "_Facts group UUID (paste into drafts-capture-fact.js): " & (uuid of factGroup) & linefeed
+        end if
 
         return report
     end tell

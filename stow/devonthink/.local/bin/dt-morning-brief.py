@@ -24,9 +24,9 @@ all-of-Contacts Birthdays calendar stays in SKIP_CALENDARS. Whenever
 filing proposals sit unreviewed in `/20_ENTITIES/_Review`, an
 `## Entity Review` line reports the backlog count.
 
-The brief reads live from the records, so it is never stale. Mutations are
-limited to the daily-note section insert (idempotent via an HTML comment
-marker per section per day) and LastContact bumps from two sources: every
+The brief reads live from the records, so it is never stale. Mutations are the
+daily-note section insert (idempotent via an HTML comment marker per section per
+day), review-only Person candidates, and LastContact bumps from two sources: every
 person matched in YESTERDAY's calendar — yesterday because the day is
 complete, so a meeting that was cancelled after the morning run never
 counts as contact — and everyone texted with since yesterday, read from
@@ -67,6 +67,8 @@ Usage:
     dt-morning-brief.py --force      # bypass battery/role gates
     dt-morning-brief.py --weekly     # include the Reconnect section today
     dt-morning-brief.py --date YYYY-MM-DD
+                                     # read-only replay of a past day, no
+                                     # durable writes; a future date refuses
     dt-morning-brief.py --backfill-contacts [--days N]
                                      # replay past calendar days into
                                      # LastContact (default 365); run once
@@ -86,6 +88,10 @@ calendar names and real people's names belong here and nowhere in the repo.
                                      human, so the name is the only signal.
     SKIP_CALENDARS=<a,b,c>           calendar names never briefed on, added to
                                      the built-in SKIP_CALENDARS defaults.
+    PERSONAL_CALENDARS=<a,b,c>       calendar titles, calendar identifiers, or
+                                     source identifiers treated as personal.
+    WORK_CALENDARS=<a,b,c>           selectors treated as work. A selector
+                                     cannot appear in both lists.
 A config that exists but cannot be read is fatal rather than ignored, since
 SKIP_CALENDARS is a privacy control and degrading to an empty dict would
 silently brief a calendar the user asked never to see.
@@ -98,6 +104,8 @@ config line or lost with a deleted file. See suppression_keys().
 
 import calendar as calmod
 import collections
+import fcntl
+import hashlib
 import json
 import os
 import re
@@ -187,6 +195,11 @@ SKIP_CALENDARS = {"Birthdays", "Siri Suggestions", "US Holidays", "Holidays"}
 # must not dump 38 noise lines into the daily note.
 UNMATCHED_LIST_MAX = 8
 
+# New Person candidates proposed from any one event, however many unmatched
+# attendees it has — an all-hands with 40 strangers must not flood _Review
+# and the Things mirror with 40 proposals at once.
+CANDIDATE_CAP_PER_EVENT = 5
+
 # A suppressed event keeps its place on the timeline under this title.
 REDACTED_TITLE = "Private event"
 
@@ -210,10 +223,15 @@ ENTITY_STATE_FILE = os.path.expanduser(
     "~/.local/state/devonthink/entity-filing-state.json")
 SNAPSHOT_FILE = os.path.expanduser(
     "~/.local/state/devonthink/morning-brief.json")
+IDENTITY_PROVENANCE_FILE = os.path.expanduser(
+    "~/.local/state/devonthink/identity-provenance.json")
+LOCK_FILE = os.path.expanduser("~/.local/state/devonthink/dt-morning-brief.lock")
 TRMNL_PUSH = os.path.expanduser("~/.local/bin/trmnl-push-brief.py")
 DEFAULT_SKIP_ATTENDEE = r"\bVC\b|\bConference\b|\bRoom\b|\d+\s?ppl"
 BACKFILL_DAYS = 365
 PARKED_LIST_MAX = 5
+IDENTITY_PROVENANCE_VERSION = 1
+CONTEXT_CONFLICT_MIN_OBSERVATIONS = 2
 
 
 def run_osascript(script, args, timeout=120):
@@ -253,6 +271,23 @@ def run_bridge(ops):
     return out["results"]
 
 
+def acquire_lock():
+    """Hold a non-blocking exclusive lock for the run's lifetime, mirroring
+    entity-filing.py's own lock — a launchd retry overlapping a hand-run brief
+    would otherwise last-writer-win identity-provenance.json, silently
+    dropping a candidate-ledger entry or a whole --backfill-contacts harvest.
+    Returns the open fd (kept referenced to hold the lock) or None if another
+    run holds it."""
+    os.makedirs(os.path.dirname(LOCK_FILE), exist_ok=True)
+    fd = open(LOCK_FILE, "w")
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        fd.close()
+        return None
+    return fd
+
+
 def load_config():
     """entities.conf as a dict. Shared with entity-filing.py, which reads its
     own keys and ignores the rest, so adding a key here is safe.
@@ -277,6 +312,137 @@ def load_config():
 def conf_list(conf, key):
     """A comma-separated config value as a list of non-empty items."""
     return [s.strip() for s in conf.get(key, "").split(",") if s.strip()]
+
+
+def load_calendar_contexts(conf):
+    personal = {norm(v) for v in conf_list(conf, "PERSONAL_CALENDARS")}
+    work = {norm(v) for v in conf_list(conf, "WORK_CALENDARS")}
+    overlap = personal & work
+    if overlap:
+        raise ValueError(
+            "calendar selectors configured as both personal and work: "
+            + ", ".join(sorted(overlap)))
+    return {"personal": personal, "work": work}
+
+
+def event_context(ev, contexts):
+    keys = {
+        norm(ev.get("calendar", "")),
+        norm(ev.get("calendar_id", "")),
+        norm(ev.get("source_id", "")),
+    }
+    keys.discard("")
+    for context in ("personal", "work"):
+        if keys & contexts.get(context, set()):
+            return context
+    return "neutral"
+
+
+def empty_identity_provenance():
+    return {
+        "version": IDENTITY_PROVENANCE_VERSION,
+        "people": {},
+        "candidates": {},
+    }
+
+
+def load_identity_provenance():
+    if not os.path.exists(IDENTITY_PROVENANCE_FILE):
+        return empty_identity_provenance()
+    with open(IDENTITY_PROVENANCE_FILE) as f:
+        state = json.load(f)
+    if state.get("version") != IDENTITY_PROVENANCE_VERSION \
+            or not isinstance(state.get("people"), dict):
+        raise ValueError("unsupported or malformed identity provenance state")
+    state.setdefault("candidates", {})
+    if not isinstance(state["candidates"], dict):
+        raise ValueError("malformed calendar candidate state")
+    return state
+
+
+def load_identity_provenance_or_quarantine(when):
+    """load_identity_provenance(), quarantining a corrupt or unsupported
+    state file instead of raising, so one bad write never takes the whole
+    brief down. Context observations self-rebuild from the next
+    SERIES_LOOKBACK_DAYS-wide series lookback; the candidate never-repropose
+    ledger does not, so a candidate rejected before the quarantine may be
+    proposed again once."""
+    try:
+        return load_identity_provenance()
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        if os.path.exists(IDENTITY_PROVENANCE_FILE):
+            dest = f"{IDENTITY_PROVENANCE_FILE}.corrupt-{when}"
+            os.replace(IDENTITY_PROVENANCE_FILE, dest)
+            log.warning(
+                "identity provenance state unreadable (%s) — quarantined to "
+                "%s; calendar-context observations self-rebuild via the "
+                "%d-day series lookback, but the candidate never-repropose "
+                "ledger is lost — a previously rejected calendar candidate "
+                "may be proposed again once", exc, dest, SERIES_LOOKBACK_DAYS)
+        return empty_identity_provenance()
+
+
+def prune_context_observations(state, today):
+    """Drop context observations older than SERIES_LOOKBACK_DAYS. They exist
+    only so repeat_series can recognize a meeting within that window;
+    anything older is unbounded growth with no future read. The candidate
+    ledger is never pruned by age — see propose_calendar_candidates."""
+    cutoff = (date.fromisoformat(today)
+              - timedelta(days=SERIES_LOOKBACK_DAYS)).isoformat()
+    changed = False
+    for person in state.get("people", {}).values():
+        for observations in person.get("contexts", {}).values():
+            for oid in [o for o, obs in observations.items()
+                       if obs.get("date", "") < cutoff]:
+                del observations[oid]
+                changed = True
+    return changed
+
+
+def save_identity_provenance(state, today):
+    prune_context_observations(state, today)
+    state_dir = os.path.dirname(IDENTITY_PROVENANCE_FILE)
+    os.makedirs(state_dir, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=state_dir, suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump(state, f, ensure_ascii=False, indent=1, sort_keys=True)
+        os.replace(tmp, IDENTITY_PROVENANCE_FILE)
+    finally:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+
+
+def record_calendar_observations(state, observations):
+    changed = False
+    for observation in observations:
+        person = state["people"].setdefault(
+            observation["person_uuid"], {"contexts": {}})
+        context = person["contexts"].setdefault(observation["context"], {})
+        if observation["id"] in context:
+            continue
+        context[observation["id"]] = {
+            "date": observation["date"],
+            "evidence": observation["evidence"],
+        }
+        changed = True
+    return changed
+
+
+def context_counts(state, person_uuid):
+    contexts = state.get("people", {}).get(person_uuid, {}).get("contexts", {})
+    return {context: len(observations)
+            for context, observations in contexts.items() if observations}
+
+
+def context_conflicts(state, person_uuid, context):
+    if context not in {"personal", "work"}:
+        return False
+    counts = context_counts(state, person_uuid)
+    if counts.get(context, 0):
+        return False
+    other = "work" if context == "personal" else "personal"
+    return counts.get(other, 0) >= CONTEXT_CONFLICT_MIN_OBSERVATIONS
 
 
 def load_skip_attendee_re(conf=None):
@@ -500,6 +666,22 @@ def apply_bumps(people, ops, before):
             md["mdlastcontact"] = when
 
 
+def novel_bumps(ops, people):
+    """bump_lastcontact ops that would actually raise the roster's stored
+    LastContact.
+
+    A retry recomputes the same historical window (yesterday's calendar,
+    Messages since yesterday) every run, so most of an op list is a bump an
+    earlier retry this morning already wrote durably. The bridge guard is
+    monotonic raise-only, so resending one is harmless — but it is still a
+    round trip for nothing, and counting it makes stale contact read as
+    fresh.
+    """
+    current = {p["uuid"]: (p.get("md") or {}).get("mdlastcontact") or ""
+               for p in people}
+    return [op for op in ops if op["date"] > current.get(op["uuid"], "")]
+
+
 def repeat_series(history, today):
     """Meetings that have run at least once before `today`.
 
@@ -561,14 +743,31 @@ def person_index(people):
     return index
 
 
-def match_person(index, name, email):
-    for key in (norm(email), norm(name)):
+def resolve_person(index, name, email):
+    for evidence, key in (("email", norm(email)), ("name", norm(name))):
         hits = index.get(key)
         if key and hits:
             if len(hits) != 1 or is_suppressed(hits[0]):
                 return None
-            return hits[0]
+            strong = evidence == "email" or len(key.split()) > 1
+            return {
+                "person": hits[0],
+                "evidence": evidence if evidence == "email"
+                else "full-name" if strong else "bare-name",
+                "strong": strong,
+            }
     return None
+
+
+def match_person(index, name, email, context="neutral", provenance=None):
+    resolution = resolve_person(index, name, email)
+    if resolution is None:
+        return None
+    person = resolution["person"]
+    if not resolution["strong"] and provenance is not None \
+            and context_conflicts(provenance, person["uuid"], context):
+        return None
+    return person
 
 
 def fmt_time(iso):
@@ -640,7 +839,7 @@ def news_bullets(p, told, limit=RECENT_FACTS):
     return [f[2] for _, f in newest]
 
 
-def title_matches(people, title):
+def title_resolutions(people, title, context="neutral", provenance=None):
     """People whose name or alias appears in the event title. Personal
     calendars rarely carry structured attendees ("Call with Jake"), so the
     title is a first-class matching surface, not a fallback.
@@ -681,19 +880,360 @@ def title_matches(people, title):
                 if (j < len(tokens) and tokens[j][:1].isupper()
                         and f"{k} {words[j]}" not in index):
                     continue
-                spans.append((i, j, p))
+                spans.append((i, j, p, k))
     # "Call with Avery North" contains "Avery": one person is named, not two, so
     # a span swallowed by a longer one loses. Every occurrence is judged on its
     # own, because a name can appear both inside a longer one and standing alone
     # ("Avery North and Avery" names two people, in either order).
     hits = []
     for p in people:
-        mine = [(s, e) for s, e, q in spans if q is p]
-        if any(not any(s2 <= s and e <= e2 and e2 - s2 > e - s
-                       for s2, e2, q in spans if q is not p)
-               for s, e in mine):
-            hits.append(p)
+        mine = [(s, e, k) for s, e, q, k in spans if q is p]
+        surviving = [
+            (s, e, k) for s, e, k in mine
+            if not any(s2 <= s and e <= e2 and e2 - s2 > e - s
+                       for s2, e2, q, _ in spans if q is not p)
+        ]
+        if not surviving:
+            continue
+        strong = any(len(k.split()) > 1 for _, _, k in surviving)
+        conflict = not strong and provenance is not None \
+            and context_conflicts(provenance, p["uuid"], context)
+        hits.append({
+            "person": p,
+            "evidence": "title-full-name" if strong else "title-bare-name",
+            "strong": strong,
+            "context_conflict": conflict,
+        })
     return hits
+
+
+def title_matches(people, title, context="neutral", provenance=None):
+    return [resolution["person"] for resolution in
+            title_resolutions(people, title, context, provenance)
+            if not resolution["context_conflict"]]
+
+
+def calendar_observation_id(ev, person_uuid):
+    event_key = "|".join([
+        ev.get("event_id", ""),
+        ev.get("calendar_id", ""),
+        ev.get("source_id", ""),
+        ev.get("start", ""),
+        ev.get("end", ""),
+        ev.get("title", ""),
+    ])
+    return hashlib.sha256(
+        f"{event_key}|{person_uuid}".encode()).hexdigest()[:24]
+
+
+def calendar_observations(events, people, skip_re, contexts, excluded=(),
+                          skip_cals=SKIP_CALENDARS):
+    index = person_index(people)
+    ex_re = excluded_re(excluded)
+    observations = []
+    for ev in events:
+        context = event_context(ev, contexts)
+        if context == "neutral" or ev["all_day"] or not attending(ev) \
+                or ev["calendar"] in skip_cals:
+            continue
+        seen = set()
+        for attendee in real_attendees(ev, skip_re):
+            if attendee_excluded(attendee, ex_re, excluded):
+                continue
+            resolution = resolve_person(
+                index, attendee["name"], attendee["email"])
+            if resolution is None or not resolution["strong"]:
+                continue
+            person = resolution["person"]
+            seen.add(person["uuid"])
+            observations.append({
+                "id": calendar_observation_id(ev, person["uuid"]),
+                "person_uuid": person["uuid"],
+                "context": context,
+                "date": ev.get("date") or ev["start"][:10],
+                "evidence": resolution["evidence"],
+            })
+        if text_excluded(ev["title"], ex_re, excluded):
+            continue
+        for resolution in title_resolutions(people, ev["title"]):
+            person = resolution["person"]
+            if not resolution["strong"] or person["uuid"] in seen:
+                continue
+            observations.append({
+                "id": calendar_observation_id(ev, person["uuid"]),
+                "person_uuid": person["uuid"],
+                "context": context,
+                "date": ev.get("date") or ev["start"][:10],
+                "evidence": resolution["evidence"],
+            })
+    return observations
+
+
+def title_person_phrases(title):
+    tokens = list(NAME_TOKEN_RE.finditer(title or ""))
+    phrases = []
+    for i, token in enumerate(tokens):
+        if norm(token.group()) != "with":
+            continue
+        parts = []
+        for candidate in tokens[i + 1:i + 4]:
+            text = candidate.group()
+            if not text[:1].isupper():
+                break
+            parts.append(text)
+        for size in range(len(parts), 0, -1):
+            phrases.append(" ".join(parts[:size]))
+    return list(dict.fromkeys(phrases))
+
+
+def matching_contact(contacts, name="", email=""):
+    for key, getter in (
+            (norm(email), lambda c: [norm(e) for e in c.get("emails") or []]),
+            (norm(name), lambda c: [norm(c.get("name", ""))])):
+        if not key:
+            continue
+        hits = [contact for contact in contacts if key in getter(contact)]
+        if len(hits) == 1:
+            return hits[0]
+        if hits:
+            return None
+    return None
+
+
+def matching_contact_name_hint(contacts, name):
+    key = norm(name)
+    if not key:
+        return None
+    hits = [
+        contact for contact in contacts
+        if norm(contact.get("nickname", "")) == key
+        or (norm(contact.get("name", "")).split() or [""])[0] == key
+    ]
+    return hits[0] if len(hits) == 1 else None
+
+
+def calendar_candidate_key(name):
+    return hashlib.sha256(norm(name).encode()).hexdigest()[:24]
+
+
+def calendar_candidate_ledger_key(name, email):
+    """The candidate never-repropose ledger's storage key. An email
+    distinguishes two different people who happen to share a name, so
+    rejecting one no longer burns every future same-named candidate; with no
+    email there is nothing sharper to key on, so the key stays the legacy
+    name-only one."""
+    if not email:
+        return calendar_candidate_key(name)
+    return hashlib.sha256(f"{norm(name)}|{norm(email)}".encode()).hexdigest()[:24]
+
+
+def candidate_ledger_keys(candidate):
+    """Ledger keys to check for `candidate`, new-style first. An entry
+    written before the ledger began distinguishing by email is still found
+    through the legacy name-only fallback, so the live file needs no
+    migration."""
+    new = calendar_candidate_ledger_key(candidate["name"], candidate["email"])
+    if not candidate["email"]:
+        return [new]
+    return [new, calendar_candidate_key(candidate["name"])]
+
+
+def possible_existing_people(name, people):
+    tokens = {token for token in norm(name).split() if len(token) >= 3}
+    return [
+        person["name"] for person in people
+        if tokens & {
+            token
+            for value in [person["name"]] + person.get("aliases", "").split(",")
+            for token in norm(value).split()
+            if len(token) >= 3
+        }
+    ][:3]
+
+
+def ambiguous_person_key(index, name, email):
+    """True when the same email-then-name lookup resolve_person uses lands
+    on more than one roster record. resolve_person collapses that case to
+    the same None it returns for a plain miss, which a caller that reads
+    None as "unknown person" would otherwise read as license to propose a
+    duplicate for someone who already has two matching records."""
+    for key in (norm(email), norm(name)):
+        hits = index.get(key)
+        if key and hits:
+            return len(hits) > 1
+    return False
+
+
+def calendar_person_candidates(events, people, contacts, skip_re, contexts,
+                               excluded=(), skip_cals=SKIP_CALENDARS,
+                               provenance=None):
+    index = person_index(people)
+    ex_re = excluded_re(excluded)
+    candidates = {}
+    for ev in events:
+        if ev["all_day"] or not attending(ev) or ev["calendar"] in skip_cals \
+                or text_excluded(ev["title"], ex_re, excluded):
+            continue
+        context = event_context(ev, contexts)
+        event_date = ev.get("date") or ev["start"][:10]
+        added = 0
+        dropped = 0
+        for attendee in real_attendees(ev, skip_re):
+            if attendee_excluded(attendee, ex_re, excluded):
+                continue
+            if resolve_person(index, attendee["name"], attendee["email"]):
+                continue
+            if ambiguous_person_key(index, attendee["name"], attendee["email"]):
+                continue
+            card = matching_contact(
+                contacts, attendee["name"], attendee["email"])
+            name = (card or {}).get("name") or attendee["name"]
+            if len(norm(name).split()) < 2:
+                continue
+            email = attendee["email"] or next(
+                iter((card or {}).get("emails") or []), "")
+            key = calendar_candidate_key(name)
+            is_new = key not in candidates
+            if is_new and added >= CANDIDATE_CAP_PER_EVENT:
+                dropped += 1
+                continue
+            if is_new or candidates[key]["evidence"] != "calendar attendee":
+                if is_new:
+                    added += 1
+                candidates[key] = {
+                    "key": key,
+                    "name": name,
+                    "email": email,
+                    "evidence": "calendar attendee",
+                    "context": context,
+                    "event_title": ev["title"],
+                    "event_date": event_date,
+                    "near": possible_existing_people(name, people),
+                }
+        for phrase in title_person_phrases(ev["title"]):
+            phrase_key = norm(phrase)
+            hits = index.get(phrase_key) or []
+            if hits and (
+                    len(phrase_key.split()) > 1
+                    or provenance is None
+                    or not all(context_conflicts(
+                        provenance, person["uuid"], context) for person in hits)):
+                continue
+            card = matching_contact(contacts, phrase)
+            if card is None and len(phrase_key.split()) == 1:
+                card = matching_contact_name_hint(contacts, phrase)
+            if card is None or len(norm(card.get("name", "")).split()) < 2:
+                continue
+            name = card["name"]
+            email = next(iter(card.get("emails") or []), "")
+            key = calendar_candidate_key(name)
+            if key in candidates:
+                continue
+            if added >= CANDIDATE_CAP_PER_EVENT:
+                dropped += 1
+                continue
+            added += 1
+            candidates[key] = {
+                "key": key,
+                "name": name,
+                "email": email,
+                "evidence": (
+                    "calendar title + unique Contacts name"
+                    if len(phrase_key.split()) == 1
+                    else "calendar title + Contacts"),
+                "context": context,
+                "event_title": ev["title"],
+                "event_date": event_date,
+                "near": possible_existing_people(name, people),
+            }
+        if dropped:
+            log.info(
+                "capped calendar person candidates at %d for %r on %s — "
+                "%d more dropped", CANDIDATE_CAP_PER_EVENT, ev["title"],
+                event_date, dropped)
+    return list(candidates.values())
+
+
+def calendar_candidate_body(candidate):
+    fields = {"email": candidate["email"]} if candidate["email"] else {}
+    op = {
+        "op": "ensure_person",
+        "name": candidate["name"],
+        "fields": fields,
+    }
+    if candidate.get("near"):
+        op["confirm_new"] = True
+    ops = [op]
+    lines = [
+        f"# Calendar person candidate: {candidate['name']}",
+        "",
+        f"Evidence: {candidate['evidence']}",
+        f"Calendar context: {candidate['context']}",
+        f"Event: {candidate['event_date']} — {candidate['event_title']}",
+        "",
+        "This proposal creates only a Person record. It does not infer facts or "
+        "mark the meeting as completed contact.",
+        "",
+        "Move this record into `20_ENTITIES/_Review/Approved` to create the "
+        "person, or delete it to reject this identity.",
+    ]
+    if candidate.get("near"):
+        lines += [
+            "",
+            "Possible existing records: " + ", ".join(candidate["near"]),
+            "",
+            "This candidate is marked as a separate identity. If it is actually "
+            "one of these people, add the candidate name as an alias to that "
+            "record and delete this proposal.",
+        ]
+    lines += [
+        "",
+        "## Ops",
+        "",
+        "```json",
+        json.dumps(ops, indent=2),
+        "```",
+        "",
+    ]
+    return "\n".join(lines)
+
+
+def propose_calendar_candidates(candidates, state, dry_run):
+    known = state.setdefault("candidates", {})
+    unseen = [candidate for candidate in candidates
+              if not any(k in known for k in candidate_ledger_keys(candidate))]
+    pending = {}
+    if unseen and not dry_run:
+        pending = {
+            record["name"]: record for record in
+            run_bridge([{"op": "list_group", "path": REVIEW_PATH}])[0]
+        }
+    changed = False
+    for candidate in unseen:
+        if dry_run:
+            print(f"[dry-run] would propose new Person {candidate['name']} "
+                  f"from {candidate['evidence']}")
+            continue
+        proposal_name = f"Calendar person: {candidate['name']}"
+        result = pending.get(proposal_name)
+        if result is None:
+            result = run_bridge([{
+                "op": "create_record",
+                "name": proposal_name,
+                "path": REVIEW_PATH,
+                "text": calendar_candidate_body(candidate),
+            }])[0]
+            pending[proposal_name] = result
+        known[candidate_ledger_keys(candidate)[0]] = {
+            "proposal_uuid": result["uuid"],
+            "created": datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
+            "event_date": candidate["event_date"],
+        }
+        changed = True
+        log.info("created calendar Person candidate",
+                 extra={"record_name": candidate["name"],
+                        "record_uuid": result["uuid"]})
+    return changed
 
 
 def strip_symbols(s):
@@ -704,7 +1244,8 @@ def strip_symbols(s):
 
 
 def brief_blocks(events, people, skip_re, excluded=(),
-                 skip_cals=SKIP_CALENDARS, repeats=()):
+                 skip_cals=SKIP_CALENDARS, repeats=(), contexts=None,
+                 provenance=None):
     """One block per event on the day's timeline, in start order.
 
     Every event is briefed, not only the ones with people: a day reads as a
@@ -728,6 +1269,7 @@ def brief_blocks(events, people, skip_re, excluded=(),
     told = set()
     blocks = []
     for ev in events:
+        context = event_context(ev, contexts) if contexts else "neutral"
         if ev["all_day"] or not attending(ev):
             continue
         if ev["calendar"] in skip_cals:
@@ -738,7 +1280,7 @@ def brief_blocks(events, people, skip_re, excluded=(),
             # and a redacted event must not leak its title, people or location.
             blocks.append({"time": fmt_time(ev["start"]),
                            "title": REDACTED_TITLE, "people": [],
-                           "unmatched": [], "news": []})
+                           "unmatched": [], "news": [], "warnings": []})
             continue
         others = [a for a in real_attendees(ev, skip_re)
                   if not attendee_excluded(a, ex_re, excluded)]
@@ -750,7 +1292,8 @@ def brief_blocks(events, people, skip_re, excluded=(),
             if ident in seen:
                 continue
             seen.add(ident)
-            p = match_person(index, a["name"], a["email"])
+            p = match_person(
+                index, a["name"], a["email"], context, provenance)
             if p:
                 if p["uuid"] in seen:
                     continue
@@ -761,7 +1304,16 @@ def brief_blocks(events, people, skip_re, excluded=(),
                 detail = f" ({a['email']})" if a["name"] and a["email"] else ""
                 seen.add(norm(who))
                 unmatched.append(f"{who}{detail}")
-        for p in title_matches(people, ev["title"]):
+        warnings = []
+        for resolution in title_resolutions(
+                people, ev["title"], context, provenance):
+            p = resolution["person"]
+            if resolution["context_conflict"]:
+                warnings.append(
+                    f"{p['name']} matches only by a bare name and has only "
+                    f"{'work' if context == 'personal' else 'personal'}-calendar "
+                    "history — identity unresolved")
+                continue
             if p["uuid"] in seen:
                 continue
             seen.add(p["uuid"])
@@ -773,7 +1325,7 @@ def brief_blocks(events, people, skip_re, excluded=(),
         blocks.append({"time": fmt_time(ev["start"]), "title": event_title(ev),
                        "people": [] if repeat else matched,
                        "unmatched": [] if repeat else unmatched,
-                       "news": news})
+                       "news": news, "warnings": warnings})
     return blocks
 
 
@@ -797,12 +1349,11 @@ def render_brief(blocks, today):
             body.extend(f"- {u} — no entity record yet" for u in b["unmatched"])
         else:
             body.append(f"- {len(b['unmatched'])} people without entity records")
-        lines = [f"### {b['time']} — {b['title']}"]
-        if body:
-            lines.append("")
-            lines.extend(body)
+        body.extend(f"- {warning}" for warning in b.get("warnings", []))
+        lines = [f"- {b['time']} — {b['title']}"]
+        lines.extend("  " + ln for ln in body)
         out.append("\n".join(lines))
-    return f"<!-- brief:{today} -->\n\n" + "\n\n".join(out)
+    return f"<!-- brief:{today} -->\n\n" + "\n".join(out)
 
 
 def load_people(include_bodies=True, contacts=()):
@@ -827,7 +1378,7 @@ def load_people(include_bodies=True, contacts=()):
 
 
 def contact_bumps(events, people, day, skip_re, skip_cals=SKIP_CALENDARS,
-                  excluded=()):
+                  excluded=(), contexts=None, provenance=None):
     """One bump op per person per day. `day` is the fallback for a single-day
     dump; a range dump tags each event with its own date."""
     index = person_index(people)
@@ -835,11 +1386,13 @@ def contact_bumps(events, people, day, skip_re, skip_cals=SKIP_CALENDARS,
     ops = []
     seen = set()
     for ev in events:
+        context = event_context(ev, contexts) if contexts else "neutral"
         if ev["all_day"] or not attending(ev) or ev["calendar"] in skip_cals:
             continue
         when = ev.get("date") or day
         matched = [
-            p for p in (match_person(index, a["name"], a["email"])
+            p for p in (match_person(index, a["name"], a["email"],
+                                     context, provenance)
                         for a in real_attendees(ev, skip_re)
                         if not attendee_excluded(a, ex_re, excluded))
             if p
@@ -847,7 +1400,8 @@ def contact_bumps(events, people, day, skip_re, skip_cals=SKIP_CALENDARS,
         # A redacted title is not evidence: it is never read, so nobody is
         # credited with contact from it. A structured attendee still is.
         if not text_excluded(ev["title"], ex_re, excluded):
-            matched.extend(title_matches(people, ev["title"]))
+            matched.extend(
+                title_matches(people, ev["title"], context, provenance))
         for p in matched:
             key = (p["uuid"], when)
             if key in seen:
@@ -1078,6 +1632,21 @@ def message_bumps(handle_dates, index):
             for u, d in latest.items()]
 
 
+def durable_bumps(ops, today):
+    """bump_lastcontact ops safe to write to DT right now: those dated
+    strictly before today.
+
+    "Since yesterday" is a message window with no upper bound, so it also
+    catches today's texts. Writing one of those durably would raise DT's
+    LastContact to today mid-morning, and the next retry reads that back as
+    the news cutoff — hiding a fact from yesterday this run hasn't shown
+    yet, even though apply_bumps kept today's date out of its own in-memory
+    cutoff. Tomorrow's own "since yesterday" window re-derives the same op,
+    so dropping it here loses nothing.
+    """
+    return [op for op in ops if op["date"] < today]
+
+
 def query_messages(since_day):
     """Latest message date per handle since local midnight of since_day.
     Read-only; any failure (no Full Disk Access, schema drift, database
@@ -1234,11 +1803,11 @@ def render_journal(info, today):
         if parked:
             detail += f", {parked} parked"
         lines.append(f"- Yesterday's journal entry hasn't been processed "
-                     f"yet ({detail}) — journal-process catches up on "
+                     f"yet ({detail}) — boox-process catches up on "
                      f"AC/idle")
     elif parked:
         lines.append(f"- {parked} journal page(s) are parked — "
-                     f"`journal-process.py --status` has the reasons")
+                     f"`boox-process.py --status` has the reasons")
     else:
         lines.append("- No journal entry arrived for yesterday — if you "
                      "wrote one, check the Boox's Dropbox sync")
@@ -1351,7 +1920,8 @@ def build_snapshot(today, blocks, overdue, bdays, backlog, journal_info, otd):
         "meetings": [
             {"time": b["time"], "title": b["title"],
              "people": [person_snapshot(p) for p in b["people"]],
-             "unmatched": b["unmatched"]}
+             "unmatched": b["unmatched"],
+             "warnings": b.get("warnings", [])}
             for b in blocks
         ],
         "reconnect": [
@@ -1416,7 +1986,7 @@ def push_snapshot():
         log.info("TRMNL push failed to launch: %s", exc)
 
 
-def backfill_contacts(today, days, skip_re, dry_run, conf):
+def backfill_contacts(today, days, skip_re, dry_run, conf, contexts, provenance):
     """Replay past calendar days into LastContact. Meeting attendance is the
     only historical source of contact dates — Granola's copy of the calendar
     carries no attendees — and the daily run only ever looks at yesterday, so
@@ -1438,9 +2008,13 @@ def backfill_contacts(today, days, skip_re, dry_run, conf):
         log.info("no Person records yet, nothing to backfill")
         return
 
+    skip_cals = load_skip_calendars(conf)
+    observations = calendar_observations(
+        cal["events"], people, skip_re, contexts, keys, skip_cals)
+    provenance_changed = record_calendar_observations(provenance, observations)
     latest = {}
     for op in contact_bumps(cal["events"], people, end, skip_re,
-                            load_skip_calendars(conf), keys):
+                            skip_cals, keys, contexts, provenance):
         if op["date"] > latest.get(op["uuid"], ""):
             latest[op["uuid"]] = op["date"]
     ops = [{"op": "bump_lastcontact", "uuid": u, "date": d}
@@ -1449,10 +2023,13 @@ def backfill_contacts(today, days, skip_re, dry_run, conf):
     if dry_run:
         by_uuid = {p["uuid"]: p["name"] for p in people}
         print(f"[dry-run] {start}..{end}: {len(cal['events'])} events, "
-              f"{len(ops)} people would be bumped")
+              f"{len(ops)} people would be bumped, "
+              f"{len(observations)} strong identity observations")
         for op in sorted(ops, key=lambda o: o["date"], reverse=True):
             print(f"  {op['date']}  {by_uuid.get(op['uuid'], op['uuid'])}")
         return
+    if provenance_changed:
+        save_identity_provenance(provenance, today)
     if not ops:
         log.info("backfill: no roster matches in %s..%s", start, end)
         return
@@ -1479,7 +2056,8 @@ def backfill_messages(today, days, dry_run, conf):
     if not people:
         log.info("no Person records yet, nothing to backfill")
         return
-    ops = message_bumps(rows, handle_index(cj["contacts"], people))
+    ops = durable_bumps(
+        message_bumps(rows, handle_index(cj["contacts"], people)), today)
     if dry_run:
         by_uuid = {p["uuid"]: p["name"] for p in people}
         print(f"[dry-run] {start}..: {len(rows)} texted handles, "
@@ -1495,6 +2073,46 @@ def backfill_messages(today, days, dry_run, conf):
              "Messages (since %s)", changed, len(ops), start)
 
 
+def validate_requested_date(requested, real_today):
+    """None when a --date argument is usable; otherwise the message main()
+    should exit on. A date after today would write LastContact into the
+    future, which the raise-only bridge guard then defends against every
+    correction until the real date catches up."""
+    if requested > real_today:
+        return (f"--date {requested} is after today ({real_today}) — "
+                f"refusing, this would write LastContact into the future")
+    return None
+
+
+def effective_dry_run(dry_run, requested, real_today):
+    """Whether this run must behave as dry: the explicit flag, or a --date
+    naming any day other than today. A replayed day must render and log like
+    a normal run but never durably write — the same posture the snapshot/TRMNL
+    gate already held alone."""
+    return dry_run or requested != real_today
+
+
+SECTION_SOURCES = {
+    BRIEF_HEADER: "calendar",
+    BIRTHDAYS_HEADER: "contacts",
+}
+
+
+def sections_for_upsert(sections, failed_sources):
+    """Sections safe to hand to upsert_section this run.
+
+    upsert_section treats empty content as a removal, and a failed calendar
+    or contacts fetch makes render_brief / render_birthdays return None the
+    same way a verified-empty day does — so a transient fetch failure is
+    indistinguishable from an honestly empty day by the time it reaches here.
+    A section fed by a fetch that failed is dropped from the batch entirely
+    rather than upserted empty, leaving it exactly as the last successful run
+    wrote it.
+    """
+    return [(header, content) for header, content in sections
+            if SECTION_SOURCES.get(header) not in failed_sources]
+
+
 def main():
     args = sys.argv[1:]
     dry_run = "--dry-run" in args
@@ -1505,11 +2123,19 @@ def main():
     days = BACKFILL_DAYS
     if "--days" in args:
         days = int(args[args.index("--days") + 1])
-    today = date.today().isoformat()
+    real_today = date.today().isoformat()
+    today = real_today
     if "--date" in args:
         today = args[args.index("--date") + 1]
     user_invoked = (dry_run or force or "--date" in args or weekly
                     or backfill or backfill_msgs)
+
+    if not backfill and not backfill_msgs:
+        error = validate_requested_date(today, real_today)
+        if error:
+            log.error(error)
+            sys.exit(1)
+        dry_run = effective_dry_run(dry_run, today, real_today)
 
     subprocess.run(
         [os.path.expanduser("~/.local/bin/pipeline-record-run"),
@@ -1536,6 +2162,13 @@ def main():
             log.info("skipping: follower machine")
             return
 
+    lock_fd = None
+    if not dry_run:
+        lock_fd = acquire_lock()
+        if lock_fd is None:
+            log.info("another morning-brief run holds the lock, exiting")
+            return
+
     try:
         conf = load_config()
     except OSError as exc:
@@ -1544,23 +2177,34 @@ def main():
         sys.exit(1)
     skip_re = load_skip_attendee_re(conf)
     skip_cals = load_skip_calendars(conf)
+    try:
+        contexts = load_calendar_contexts(conf)
+    except ValueError as exc:
+        log.error("cannot load calendar contexts: %s", exc)
+        sys.exit(1)
+    provenance = load_identity_provenance_or_quarantine(
+        datetime.now().strftime("%Y%m%dT%H%M%S"))
 
     if backfill:
-        backfill_contacts(today, days, skip_re, dry_run, conf)
+        backfill_contacts(
+            today, days, skip_re, dry_run, conf, contexts, provenance)
         return
     if backfill_msgs:
         backfill_messages(today, days, dry_run, conf)
         return
 
     events = []
+    calendar_failed = False
     try:
         cal = run_osascript(CALENDAR, [today], timeout=60)
         if cal.get("ok"):
             events = cal["events"]
         else:
             log.warning("calendar unavailable: %s", cal.get("error"))
+            calendar_failed = True
     except Exception as exc:
         log.warning("calendar query failed: %s", exc)
+        calendar_failed = True
 
     contacts = []
     contacts_ok = False
@@ -1590,24 +2234,53 @@ def main():
              len(contacts))
 
     yesterday = (date.fromisoformat(today) - timedelta(days=1)).isoformat()
+    repeats = ()
+    since = (date.fromisoformat(today)
+             - timedelta(days=SERIES_LOOKBACK_DAYS)).isoformat()
+    try:
+        hist = run_osascript(CALENDAR, [since, yesterday], timeout=180)
+        if hist.get("ok"):
+            repeats = repeat_series(hist["events"], today)
+            observations = calendar_observations(
+                hist["events"], people, skip_re, contexts, excluded, skip_cals)
+            if record_calendar_observations(provenance, observations) and not dry_run:
+                save_identity_provenance(provenance, today)
+            log.info(
+                "series lookback %s..%s: %d meetings already seen, %d strong "
+                "identity observations", since, yesterday, len(repeats),
+                len(observations))
+        else:
+            log.warning("series lookback unavailable, briefing every attendee: "
+                        "%s", hist.get("error"))
+    except Exception as exc:
+        log.warning("series lookback failed, briefing every attendee: %s", exc)
+
     try:
         ycal = run_osascript(CALENDAR, [yesterday], timeout=60)
-        bumps = contact_bumps(ycal["events"], people, yesterday, skip_re,
-                              skip_cals, excluded) if ycal.get("ok") else []
+        if ycal.get("ok"):
+            bumps = contact_bumps(ycal["events"], people, yesterday, skip_re,
+                                  skip_cals, excluded, contexts,
+                                  provenance)
+        else:
+            log.warning("yesterday's calendar unavailable: %s",
+                        ycal.get("error"))
+            bumps = []
     except Exception as exc:
         log.warning("yesterday's calendar query failed: %s", exc)
         bumps = []
+    bumps = novel_bumps(bumps, people)
     if bumps:
         if dry_run:
             print(f"[dry-run] would bump LastContact to {yesterday} for "
                   f"{len(bumps)} people")
         else:
-            run_bridge(bumps)
+            changed = sum(1 for r in run_bridge(bumps) if r.get("changed"))
             log.info("bumped LastContact for %d people from %s calendar",
-                     len(bumps), yesterday)
+                     changed, yesterday)
 
-    mops = message_bumps(query_messages(yesterday),
-                         handle_index(contacts, people))
+    mops = novel_bumps(durable_bumps(message_bumps(
+        query_messages(yesterday), handle_index(contacts, people)), today),
+        people)
     if mops:
         if dry_run:
             print(f"[dry-run] would bump LastContact from Messages for "
@@ -1619,27 +2292,17 @@ def main():
 
     apply_bumps(people, bumps + mops, today)
 
-    # A failed lookback shows every attendee rather than none: a noisy brief is
-    # recoverable, a brief that silently drops the people is not.
-    repeats = ()
-    since = (date.fromisoformat(today)
-             - timedelta(days=SERIES_LOOKBACK_DAYS)).isoformat()
-    try:
-        hist = run_osascript(CALENDAR, [since, yesterday], timeout=180)
-        if hist.get("ok"):
-            repeats = repeat_series(hist["events"], today)
-            log.info("series lookback %s..%s: %d meetings already seen",
-                     since, yesterday, len(repeats))
-        else:
-            log.warning("series lookback unavailable, briefing every attendee: "
-                        "%s", hist.get("error"))
-    except Exception as exc:
-        log.warning("series lookback failed, briefing every attendee: %s", exc)
-
     # Every section is upserted (not append-once): the 05:45/06:30/08:00
     # retries refresh a 05:15 brief built from incomplete calendar sync, and
     # a cleared review backlog removes its stale nudge (empty content).
-    blocks = brief_blocks(events, people, skip_re, excluded, skip_cals, repeats)
+    blocks = brief_blocks(
+        events, people, skip_re, excluded, skip_cals, repeats, contexts,
+        provenance)
+    candidates = calendar_person_candidates(
+        events, people, contacts, skip_re, contexts, excluded, skip_cals,
+        provenance)
+    if propose_calendar_candidates(candidates, provenance, dry_run):
+        save_identity_provenance(provenance, today)
     overdue = reconnect_overdue(people, today)
     bdays = birthday_rows(contacts, people, today)
     backlog = review_backlog(today, excluded)
@@ -1656,20 +2319,33 @@ def main():
     sections.append((JOURNAL_HEADER, render_journal(journal_info, today)))
     sections.append((ON_THIS_DAY_HEADER, render_on_this_day(otd, today)))
 
+    failed_sources = set()
+    if calendar_failed:
+        failed_sources.add("calendar")
+    if not contacts_ok:
+        failed_sources.add("contacts")
+    upsert_sections = sections_for_upsert(sections, failed_sources)
+    if len(upsert_sections) != len(sections):
+        kept = {header for header, _ in upsert_sections}
+        log.warning(
+            "leaving %s untouched (their fetch failed this run) instead of "
+            "upserting empty content over an earlier run's section",
+            ", ".join(h for h, _ in sections if h not in kept))
+
     # The TRMNL screen updates even on an empty day — "no meetings" is a
-    # displayable state — and never for a --date replay, which would clobber
-    # the device with a stale day.
-    if not dry_run and today == date.today().isoformat():
+    # displayable state — but never for a --date replay or a failed fetch,
+    # either of which would push wrong or stale data to the device.
+    if not dry_run and today == real_today and not failed_sources:
         write_snapshot(build_snapshot(today, blocks, overdue, bdays,
                                       backlog, journal_info, otd))
         push_snapshot()
 
-    if not any(content for _, content in sections):
+    if not any(content for _, content in upsert_sections):
         log.info("nothing to write (no briefable meetings, no reconnects)")
         return
 
     if dry_run:
-        for header, content in sections:
+        for header, content in upsert_sections:
             if content:
                 print(f"\n{header}\n\n{content}")
         return
@@ -1681,9 +2357,9 @@ def main():
     results = run_bridge([
         {"op": "upsert_section", "uuid": daily["uuid"], "header": header,
          "content": content or ""}
-        for header, content in sections
+        for header, content in upsert_sections
     ])
-    wrote = [header for (header, _), res in zip(sections, results)
+    wrote = [header for (header, _), res in zip(upsert_sections, results)
              if res.get("changed")]
     if not wrote:
         log.info("sections already current, nothing to do")

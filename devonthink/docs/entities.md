@@ -20,12 +20,13 @@ Groups (all in Lorebook):
 | `/20_ENTITIES/Events` | Event records for trips, gatherings, milestones — proposed automatically by filing when a note documents a distinct occasion, or hand-authored; recurring meetings stay ordinary meeting notes |
 | `/20_ENTITIES/_Review` | Filing proposals awaiting review |
 | `/20_ENTITIES/_Review/Approved` | Drop zone: move a proposal here and the next filing run applies it |
+| `/20_ENTITIES/_Facts` | Person-fact captures from the "Capture Person Fact" Drafts action, awaiting extraction (source kind `fact`) |
 
 **Bootstrap the groups first.** The bridge assumes all of the above already
 exist; nothing in `setup.sh` creates them. Run `~/.local/bin/dt-entity-bootstrap`
 once on the driver before seeding People — it is idempotent and does three
 things: creates any missing entity group, applies the `exclude from chat`
-flag to `People`, `_Review`, and `_Review/Approved`, and stamps `EntityType`
+flag to `People`, `_Review`, `_Review/Approved`, and `_Facts`, and stamps `EntityType`
 (`Person`/`Place`/`Event`) on any hand-authored markdown record inside the
 matching group that lacks it (scripted creation already stamps it; this covers
 records made from templates by hand). Re-run it any time you hand-author a
@@ -61,8 +62,8 @@ README's table without adding it here silences or resurfaces people.
 
 ## Biographical Log
 
-- 2026-03-02 — Alice got a promotion. ([source](x-devonthink-item://…))
 - 2026-06-20 — Moved from Acme to Globex. ([source](x-devonthink-item://…))
+- 2026-03-02 — Alice got a promotion. ([source](x-devonthink-item://…))
 ```
 
 Rules the automation enforces:
@@ -71,6 +72,17 @@ Rules the automation enforces:
   with the fact's date and an `x-devonthink-item://` link to the source
   document. When a queryable field changes (new employer), the field is
   updated *and* a `Employer: old → new` line is logged, so history survives.
+- **Newest first.** The section is re-sorted by fact date, descending, on
+  every write. Facts arrive in *filing* order, which is not fact order — a
+  backlog drain, a `--force` re-extraction, or a note about something that
+  happened months ago all file below entries dated after them — so a log that
+  is only appended to ends up in no order at all. Same-date facts keep the
+  order they were filed in, so the sort is stable and idempotent; blank lines,
+  prose, and undated bullets hold their positions, and an indented line under
+  a fact travels with it. The brief renders a person's news in document order,
+  so it inherits newest-first too. `## Log` on Place and Event records sorts
+  the same way. Records the filer never touches are repaired on demand with
+  the bridge's `sort_logs` op (see [Operations](#operations)).
 - **Idempotent by fact.** A log line already in the body — same source, date,
   and text, ignoring auto-link decoration — is skipped, so re-running filing
   never duplicates facts, while re-extracting a corrected note (`--force`)
@@ -213,23 +225,39 @@ capitalized non-surname follows a bare alias and the match is lost — a missed
 enrichment, which is the failure worth having when the alternative is a false
 write.
 
-There is deliberately **no heuristic name extraction** for people the roster has
-never heard of. An earlier version parsed unknown names out of titles, anchored
-on `X <> Y` / `with X` / `Call X`, and flagged them "no entity record yet". Once
-every event lists, that earns almost nothing: the heading already reads *"Lunch
-with Delphine Marsh"*, so repeating the name below it adds a line, a curated
-stopword list that rots, and a false-positive surface where a band, a film, or a
-clinic ("Hollow Coves presale", "Project Hail Mary", "Fernbrook Clinic") reads as
-a person. **Showing the whole timeline is what solved the problem; the parser was
-solving it twice.** If unknown-person discovery is wanted later, do it
-asynchronously and proposal-only, and start from structured attendees — which
-carry an email and are therefore evidence — not from a guess at a title.
+Identity evidence is ranked. Exact attendee email wins, followed by structured
+full name, exact multi-word title name or alias, calendar-context affinity, and
+finally a bare title alias. Calendar context is configured privately with
+`PERSONAL_CALENDARS` and `WORK_CALENDARS` in `entities.conf`. Values can be
+calendar titles, stable EventKit calendar identifiers, or source identifiers.
 
-Matched people get their header facts plus the three most recent Biographical
-Log entries. Unrecognised **attendees** are listed as "no entity record yet"
-(collapsed to a count past `UNMATCHED_LIST_MAX`, so a 200-person CAB invite costs
-one line); this is render-only and never creates a record or a proposal. The
-brief reads live from records, so it can never go stale.
+Strong matches from the 180-day lookback accumulate in
+`~/.local/state/devonthink/identity-provenance.json`, keyed by Person UUID and a
+hashed event identity. Two observations in one context, with none in the other,
+make a bare-name match from the other context unresolved. Context is a prior,
+not an identity key: exact email or full name always overrides it, and one
+observation never establishes a hard boundary. Bare-name matches never teach
+provenance, which prevents an initial mistake from reinforcing itself.
+
+Unknown-person discovery is asynchronous and proposal-only. An unmatched
+structured attendee can create a Person proposal directly. A full name parsed
+from a narrow `with X` title pattern must also match a macOS Contacts card. This
+keeps the old broad parser's false positives such as bands, films, clinics, and
+project titles out of `_Review`. The proposal contains only `ensure_person`,
+optionally with the attendee email. It invents no facts and does not set
+`LastContact` before the meeting occurs. Candidate identities are remembered by
+hash so rejecting one does not recreate it on every morning retry. A bare title
+such as "Meet with Jordan" can also propose the unique full-name Contacts card,
+but only when every roster record aliased `Jordan` has established history in
+the opposite calendar context. When a candidate shares a name token with an
+existing record, its op carries `confirm_new` because the candidate resolver has
+already classified it as a distinct identity. Approval is the human confirmation;
+no second JSON edit is required to bypass the generic near-name guard.
+
+Matched people get their header facts plus newly filed Biographical Log entries.
+Unrecognised **attendees** are still listed as "no entity record yet" (collapsed
+to a count past `UNMATCHED_LIST_MAX`, so a 200-person CAB invite costs one line).
+The brief reads live from records, so it can never go stale.
 
 Exchange reports **conference rooms with `participantType` Person** — identical
 to a human on every EventKit field — so rooms are excluded by name via
@@ -331,8 +359,8 @@ smallest thing that carries the name:
 
 A redacted title is never mined for `LastContact`, so nobody is credited with
 contact from it; a structured attendee still is. If Contacts is unavailable while
-anyone is flagged, the run warns — a card-only nickname cannot be redacted that
-run.
+anyone is flagged, the run exits non-zero rather than briefing with a
+card-only nickname it cannot redact.
 
 Suppressing a *calendar* is the one privacy control that does live in config:
 `SKIP_CALENDARS` excludes whole calendars by name, added to the built-in
@@ -457,8 +485,9 @@ unaffected either way.
 ### Filing (extract → resolve → file)
 
 Sources: records with `DocumentType` containing "Meeting", records with
-`Handwritten=1`, and past daily notes in `/10_DAILY` (never today's — it's
-still being written), each gated on its upstream pipeline being finished
+`Handwritten=1`, past daily notes in `/10_DAILY` (never today's — it's
+still being written), and Person-fact captures in `/20_ENTITIES/_Facts` (kind
+`fact`, see below), each gated on its upstream pipeline being finished
 (`NeedsProcessing` clear — a Boox record mid-OCR has no text yet).
 Daily-note text is stripped of the brief's machine-generated sections
 (`## Briefing`, `## Reconnect`, `## Birthdays`, `## Entity Review`,
@@ -560,6 +589,54 @@ two really are different people. This is the same near-match check that
 writes the "possible existing match" hints into a proposal, applied a second
 time at the moment the ops actually run.
 
+#### Fact capture (Drafts → `_Facts`, kind `fact`)
+
+The **Capture Person Fact** Drafts action (`drafts/drafts-capture-fact.js`)
+drops a one-line fact — *"Dana Parker's daughter started at Reed College"* —
+straight into `/20_ENTITIES/_Facts` as a Markdown record, on Mac and iOS alike
+(`createMarkdown` with `destination = <group UUID>`; the UUID is stable across
+DEVONthink sync). It is a dedicated, prompt path for a fact you learned just
+now — distinct from a daily-note jot, which is only extracted a day later,
+bundled with everything else you wrote, and never same-day. Filing treats the
+`fact` kind specially:
+
+- **Not date-gated.** Unlike today's daily note, a capture is a complete
+  thought at write time, so `list_sources` surfaces it immediately and the
+  fact-first sort tie-breaker lets it lead same-day meetings for a
+  `MAX_PER_RUN` slot.
+- **Terse by design.** The 20-word scaffolding gate (which drops a short daily
+  note as noise) is lowered to 1 word for `fact`, and a one-line preface tells
+  the model this is a deliberate fact to extract even when brief. The capture's
+  leading `# <title>` H1 — present so the global "Sync H1 and Filename" rule
+  no-ops — is stripped before the prompt.
+- **Local-only**, like daily/journal/handwritten: a hand-typed fact never
+  reaches DT chat regardless of `TRANSPORT`.
+- **Auto-files when the person is named clearly.** The `fact` kind forces
+  `auto` mode, but only applies directly when the resolved person's full name
+  or a multi-word alias appears *verbatim* in the capture. A bare first name
+  still resolves but lands as a proposal — the model can expand "Dana" to a
+  full name in `match` and slip past `weak_match`, and single first names
+  collide silently as the roster grows, so "name them clearly for zero-touch"
+  is the contract. Ambiguous / new-person / event cases are proposals as
+  always.
+- **Never bumps `LastContact`.** A typed fact is knowledge, not contact
+  evidence — the calendar and Messages passes own that clock. Field updates
+  (employer/role/city/email) still auto-apply, logged with a transition line
+  and stale-guarded.
+- **Never silently lost.** If extraction yields nothing to apply or propose,
+  filing writes a *"Review capture: …"* stub to `_Review` (empty `[]` ops
+  fence, so approving it is a harmless clear) rather than marking the source
+  filed with no trace — surfaced in the brief's `## Entity Review` count.
+- The capture record persists in `_Facts` (`EntityFiled=1`) as the clickable
+  `([source](…))` provenance anchor. **Don't label a `_Facts` record** — the
+  global "After Labelling, Move to 99_ARCHIVE" rule would archive it out of
+  reach of filing.
+
+Latency: filing runs on the ≤30-min tick under the usual AC + idle gates, so a
+capture files on the next idle/AC tick, not instantly. `entity-filing.py
+--scan-only` drains it now. Setup (bootstrap creates `_Facts` and prints its
+UUID; paste into the action) is in `entities-howto.md` and `drafts/README.md`.
+
 ### Things review loop (optional, `THINGS_SYNC=on`)
 
 The review loop above requires being at the Mac inside DEVONthink. With
@@ -639,6 +716,8 @@ SKIP_ATTENDEE_PATTERN=\bVC\b|\bConference\b|\bRoom\b|\d+\s?ppl
                       # calendar attendees that are rooms, not people
 SKIP_CALENDARS=       # calendar names never briefed on (comma-separated),
                       # added to the built-in defaults
+PERSONAL_CALENDARS=   # personal calendar titles, calendar IDs, or source IDs
+WORK_CALENDARS=       # work calendar titles, calendar IDs, or source IDs
 SKIP_SOURCE_TITLES=Round ?Table|Standup|…   # sources never extracted
 IDLE_MINUTES=10       # local extraction waits for user inactivity; 0 = off
 THINGS_SYNC=off       # on = mirror proposals to Things 3 (see review loop)
@@ -647,10 +726,12 @@ THINGS_PROJECT=Entity Filing   # Things project holding the proposal to-dos
 
 Resource behavior: a run with nothing to extract never loads the model (the
 availability check is a tags ping), local extraction runs only after
-`IDLE_MINUTES` of user inactivity (HIDIdleTime; `--dry-run`/`--force` bypass)
-so it can't spin fans or take memory mid-work, and `keep_alive: 1m` returns
-the model's ~22 GB right after each batch instead of Ollama's 5-minute
-default. Once the backlog drains, inference happens only when a new
+`IDLE_MINUTES` of user inactivity (HIDIdleTime) and only on AC power — any
+manual flag (`--dry-run`, `--force`, `--apply-only`, `--scan-only`,
+`--rebuild-state`) bypasses both gates — so it can't spin fans or take memory
+mid-work, and oMLX's per-model idle TTL
+(admin panel, seconds) unloads the ~18 GB of weights shortly after each
+batch. Once the backlog drains, inference happens only when a new
 meeting/handwritten/daily note appears — a few short runs a day.
 
 The deployed posture is **local-only** (`TRANSPORT=local`), and `local` is
@@ -704,15 +785,15 @@ temperature 0, ≥16k usable context, ≤~25 GB quantized.
 
 Boundaries hard-coded regardless of config:
 
-- **Daily notes, journal entries, and handwritten notes are local-only.**
-  `/10_DAILY` and `/15_JOURNAL` are excluded from DT's AI chat by design,
-  and handwritten notebooks are transcribed on-device (see
-  `boox-local.md`); the filing step honors all three: the `daily`,
-  `journal`, and `handwritten` kinds are only ever extracted through a
-  local transport, never DT chat. Handwritten sources read from the
-  Finder comment (the transcription), not the image's OCR text layer.
-- **`/20_ENTITIES/People` and `_Review` are excluded from DT's AI chat**
-  (`excludeFromChat`), because Person records are distilled dossiers — more
+- **Daily notes, journal entries, handwritten notes, and fact captures are
+  local-only.** `/10_DAILY`, `/15_JOURNAL`, and `/20_ENTITIES/_Facts` are
+  excluded from DT's AI chat by design, and handwritten notebooks are
+  transcribed on-device (see `boox-local.md`); the filing step honors all
+  four: the `daily`, `journal`, `handwritten`, and `fact` kinds are only ever
+  extracted through a local transport, never DT chat. Handwritten sources read
+  from the Finder comment (the transcription), not the image's OCR text layer.
+- **`/20_ENTITIES/People`, `_Review`, and `_Review/Approved` are excluded from
+  DT's AI chat** (`excludeFromChat`), because Person records are distilled dossiers — more
   sensitive than any single source note. The automation is unaffected
   (AppleScript/JXA reads aren't gated), but DT chat and the DT MCP server
   cannot read them. Revert deliberately if conversational retrieval over the
@@ -818,6 +899,12 @@ review-gated proposal, never an auto-apply.
 # loop) until the log stops saying "extracting"
 ~/.local/bin/entity-filing.py --scan-only
 
+# re-sort every entity log newest-first (`dry_run: true` to preview). The
+# filer sorts what it writes; this is for records it has no reason to touch,
+# and for logs hand-edited out of order
+echo '{"ops":[{"op":"sort_logs"}]}' > /tmp/ops.json
+osascript -l JavaScript ~/.local/bin/entity-dt-bridge.js /tmp/ops.json | jq .
+
 # logs
 rg 'entity-filing|morning-brief' ~/Library/Logs/devonthink-pipeline.log
 ```
@@ -836,8 +923,8 @@ brief passes `--urgent` to the battery gate because it is deadline-bound.
 - **Mesh/CRM enrichment feeds** — rejected as a second source of truth.
 - **Multi-hop queries** ("friends of my Chicago friends") — known weak spot of
   the DT-native approach; no query infrastructure is built for these. Note the
-  DEVONthink MCP server **cannot** answer them: `/20_ENTITIES/People` and
-  `_Review` are excluded from AI chat, so MCP refuses those records by design
+  DEVONthink MCP server **cannot** answer them: `/20_ENTITIES/People`,
+  `_Review`, and `_Review/Approved` are excluded from AI chat, so MCP refuses those records by design
   (do not lift the exclusion for this — the records are distilled dossiers).
   The retrieval path over People is the bridge or plain osascript, which read
   entity records directly. To pull the whole roster with bodies, run the

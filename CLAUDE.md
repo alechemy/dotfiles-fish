@@ -219,7 +219,7 @@ Two rules keep this stable:
 1. The plist's `ProgramArguments[0]` must be an Apple-signed binary at a path that never rotates: `/usr/bin/python3`, `/bin/bash`, `/bin/sh`, or `/usr/bin/osascript`. `/usr/bin/env` is also Apple-signed but is excluded because it resolves through launchd's PATH and would let mise's shimmed Python win.
 2. Sub-scripts that the entry script invokes via shebang resolution (e.g. `"$VAR" arg` in a bash script, where `$VAR` holds a script path) must themselves use an explicit interpreter shebang from the same allowlist. Avoid `#!/usr/bin/env python3` for these, since `env` resolves through PATH again and reintroduces the same failure mode.
 
-When the work needs Python ≥ 3.10 or third-party packages, use the split-architecture pattern. The entry script runs under `/usr/bin/python3` (stdlib only) and owns every `osascript` invocation; a separate parser script with `#!/usr/bin/env -S uv run --script` is invoked via `subprocess.run([parser_path], ...)` and exchanges JSON over stdin/stdout for the heavy work. The parser never sends AppleEvents. Reference: `stow/devonthink/.local/bin/import-granola.py` (sender) plus `import-granola-parse.py` (parser).
+When the work needs Python ≥ 3.10 or third-party packages, use the split-architecture pattern. The entry script runs under `/usr/bin/python3` (stdlib only) and owns every `osascript` invocation; a separate parser script with `#!/usr/bin/env -S uv run --script` is invoked via `subprocess.run([parser_path], ...)` and exchanges JSON over stdin/stdout for the heavy work. The parser never sends AppleEvents.
 
 `scripts/lint-launchd-plists.sh` enforces both rules across every plist template in the repo and runs as part of `setup.sh`. It will halt the bootstrap on any violation.
 
@@ -252,7 +252,7 @@ Python interpreter management is split between mise and uv on purpose. mise (`st
 Pick a script's shebang from this three-tier rule:
 
 1. **TCC-sensitive** (script sends AppleEvents AND is invoked by a launch agent, either directly via the plist or transitively through a launchd-driven shell script that calls `"$SCRIPT" args`) → `#!/usr/bin/python3`. Apple-signed, stable TCC identity, stdlib only. If the work needs third-party deps, use the split-architecture pattern from the section above (sender stays `/usr/bin/python3`, parser is a `uv run --script` subprocess).
-2. **Has third-party deps, not TCC-sensitive** → `#!/usr/bin/env -S uv run --script` with a PEP 723 inline `# /// script` block declaring `requires-python` and `dependencies`. Reference: `stow/devonthink/.local/bin/import-granola-parse.py`, `stow/bin/.local/bin/tagger.py`.
+2. **Has third-party deps, not TCC-sensitive** → `#!/usr/bin/env -S uv run --script` with a PEP 723 inline `# /// script` block declaring `requires-python` and `dependencies`. Reference: `stow/bin/.local/bin/tagger.py`.
 3. **Pure stdlib, not TCC-sensitive** → `#!/usr/bin/env python3`. Resolves through PATH to mise's Python.
 
 For tier 1 scripts, even when the launchd plist provides the interpreter explicitly (`/usr/bin/python3 /path/to/script.py`), still write the shebang as `#!/usr/bin/python3` so direct invocation during testing uses the same interpreter as production rather than mise's.
@@ -304,11 +304,3 @@ The Response-style bullet pair in `CLAUDE.md` is the canonical prose; Copilot re
 `stow/bin/.local/bin/agent-stub-scan` runs from the Claude Code `Stop` hook (every repo, no opt-in marker) and refuses to let a turn end while stub markers — `TODO`/`FIXME`/`HACK`/`XXX`, `not implemented`, `NotImplementedError`, `unimplemented!` — remain on lines the agent added this session: it exits 2 with the `file:line` list on stderr, which Claude Code feeds back to the model so it finishes the work or explicitly justifies the marker to the user. It is the complement of `agent-strip-comments`, not part of it: the stripper deliberately *preserves* TODO/FIXME and never blocks, and half the stub patterns are code, not comments.
 
 Because this hook can block, its scoping is stricter than the stripper's: only exact edit targets parsed from the transcript count (no referenced-path or all-changed fallback — no transcript means no scan), and only their git-added lines vs `HEAD` (whole file when untracked), so pre-existing markers never trigger. `stop_hook_active` short-circuits to exit 0, capping enforcement at one round per stop chain — an intentional marker costs at most one extra round-trip. All infrastructure failures exit 0. Known gap: subagent edits live in separate transcripts, so stubs left by a `Task` agent aren't caught. Copilot CLI is not wired up — its `agentStop` hook has no blocking semantics.
-
-## External design notes (gitignored, outside the repo)
-
-Some pipelines have design docs kept outside the public repo because they document sensitive recipes (e.g. local-store decryption). **Read the relevant file before modifying its pipeline** — the docs cover schema, breakage modes, and debug recipes that aren't reconstructable from the code alone.
-
-- `~/.local/share/granola-import/NOTES.md` — Granola → DEVONthink import: encryption key chain, SQLCipher schema, ProseMirror conversion, debug recipes, brittle points. Read before touching `stow/devonthink/.local/bin/import-granola*.py` or `stow/devonthink/Library/LaunchAgents/com.user.granola-import.plist*`.
-
-When adding a new pipeline that needs gitignored design notes, append an entry here so future sessions discover it without having to be pointed.

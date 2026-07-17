@@ -1,3 +1,4 @@
+import hashlib
 import json
 import os
 import re
@@ -15,12 +16,63 @@ def roster(*people):
     return list(people), ef.roster_index(list(people))
 
 
+class ParseExtraction(unittest.TestCase):
+    def test_plain_object(self):
+        people, events = ef.parse_extraction(
+            '{"people": [{"name": "Alison"}], "events": []}')
+        self.assertEqual(people, [{"name": "Alison"}])
+        self.assertEqual(events, [])
+
+    def test_fenced_object(self):
+        people, _ = ef.parse_extraction(
+            '```json\n{"people": [{"name": "Alison"}]}\n```')
+        self.assertEqual(people, [{"name": "Alison"}])
+
+    def test_unclosed_people_array(self):
+        # Qwen3-VL-32B-4bit closes the last person but not the array, leaving
+        # "events" as a bare string inside it. Deterministic at temperature 0,
+        # so the source burns all its attempts and parks.
+        people, events = ef.parse_extraction(
+            '{"people": [{"name": "Alison", "facts": []}, "events": []}')
+        self.assertEqual(people, [{"name": "Alison", "facts": []}])
+        self.assertEqual(events, [])
+
+    def test_unclosed_empty_people_array(self):
+        people, events = ef.parse_extraction(
+            '{"people": ["events": [{"name": "Trip"}]}')
+        self.assertEqual(people, [])
+        self.assertEqual(events, [{"name": "Trip"}])
+
+    def test_colon_inside_a_string_is_not_a_defect(self):
+        people, _ = ef.parse_extraction(
+            '{"people": [{"fact": "said: [see \\"x\\"]"}], "events": []}')
+        self.assertEqual(people, [{"fact": 'said: [see "x"]'}])
+
+    def test_unrepairable_output_raises_the_original_error(self):
+        with self.assertRaises(json.JSONDecodeError) as caught:
+            ef.parse_extraction('{"people": [{"name": ')
+        self.assertIn("column 21", str(caught.exception))
+
+    def test_non_object_raises(self):
+        with self.assertRaises(ValueError):
+            ef.parse_extraction('{"events": []}')
+
+
 class Norm(unittest.TestCase):
     def test_strips_accents_case_and_runs_of_space(self):
         self.assertEqual(ef.norm("  Renée   VAN Dam "), "renee van dam")
 
     def test_none(self):
         self.assertEqual(ef.norm(None), "")
+
+
+class CollapseWs(unittest.TestCase):
+    def test_collapses_interior_newlines_tabs_and_runs_of_space(self):
+        self.assertEqual(ef.collapse_ws("moved to\nDenver  in\tMarch"),
+                         "moved to Denver in March")
+
+    def test_strips_leading_and_trailing_whitespace(self):
+        self.assertEqual(ef.collapse_ws("  hello  "), "hello")
 
 
 class ValidDate(unittest.TestCase):
@@ -93,6 +145,14 @@ class StalePersonOps(unittest.TestCase):
         people, index = roster()
         self.assertEqual(ef.stale_person_ops([self.op("Alison")], index, people), [])
 
+    def test_two_hit_key_is_stale_even_with_confirm_new(self):
+        people, index = roster(person("Jonathan Marsh", aliases="Jonathan"),
+                               person("Jonathan Vega", aliases="Jonathan"))
+        for extra in ({}, {"confirm_new": True}):
+            stale = ef.stale_person_ops([self.op("Jonathan", **extra)], index, people)
+            self.assertEqual(
+                stale, [("Jonathan", ["Jonathan Marsh", "Jonathan Vega"])], extra)
+
     def test_ignores_other_ops(self):
         people, index = roster(person("Alison Vance"))
         ops = [{"op": "bump_lastcontact", "uuid": "x", "date": "2026-01-01"},
@@ -150,6 +210,16 @@ class BuildPersonPlans(unittest.TestCase):
         got = self.plans([{"name": "Alison", "facts": [{"fact": "x"}]}],
                          [person("Alison")])
         self.assertFalse(got[0]["weak_match"])
+
+    def test_interior_newlines_in_a_fact_are_collapsed(self):
+        got = self.plans([{"name": "Wren",
+                           "facts": [{"fact": "moved to\nDenver in March"}]}])
+        self.assertEqual(got[0]["facts"][0][1], "moved to Denver in March")
+
+    def test_interior_newlines_in_an_update_are_collapsed(self):
+        got = self.plans([{"name": "Wren", "facts": [{"fact": "x"}],
+                           "updates": {"city": "Denver\nColorado"}}])
+        self.assertEqual(got[0]["updates"]["city"], "Denver Colorado")
 
     def test_interacted_flag_carries_through(self):
         got = self.plans([{"name": "Maya Chen", "interacted": True,
@@ -272,6 +342,27 @@ class BuildEventPlans(unittest.TestCase):
                          [person("Maya Chen")], selves={"alec"})
         self.assertEqual(got[0]["attendees"], ["Maya Chen"])
 
+    def test_interior_newlines_in_a_summary_are_collapsed(self):
+        got = self.plans([{"name": "Trip", "attendees": [],
+                           "summary": "great\ntrip this\r\nyear"}])
+        self.assertEqual(got[0]["summary"], "great trip this year")
+
+
+class ThingsNoteStub(unittest.TestCase):
+    def test_source_less_proposal_does_not_render_a_broken_link(self):
+        got = ef.things_note_stub(None, "PROPOSAL-1")
+        self.assertNotIn("None", got)
+        self.assertIn("x-devonthink-item://PROPOSAL-1", got)
+
+    def test_rebuilt_mapping_recognizes_stub_as_edit_disabled(self):
+        got = ef.things_note_stub(None, "PROPOSAL-1")
+        self.assertFalse(ef.things_note_is_editable(got))
+
+    def test_rebuilt_mapping_recognizes_editable_note(self):
+        plans = [{"kind": "new", "name": "Wren", "updates": {}, "facts": []}]
+        got = ef.things_note_body("SOURCE-1", "PROPOSAL-1", plans)
+        self.assertTrue(ef.things_note_is_editable(got))
+
 
 class FactLine(unittest.TestCase):
     def test_carries_a_deterministic_provenance_marker(self):
@@ -390,7 +481,7 @@ class PickTransport(unittest.TestCase):
         ef.omlx_available, ef.ollama_available = self.saved
 
     def test_off_disables_every_kind(self):
-        for kind in ("meeting", "handwritten", "daily", "journal"):
+        for kind in ("meeting", "handwritten", "daily", "journal", "fact"):
             self.assertIsNone(ef.pick_transport({"TRANSPORT": "off"}, kind), kind)
 
     def test_local_never_returns_dtchat(self):
@@ -407,12 +498,12 @@ class PickTransport(unittest.TestCase):
         self.assertIsNone(ef.pick_transport({"TRANSPORT": "auto"}, "daily"))
 
     def test_personal_kinds_never_reach_dtchat(self):
-        for kind in ("journal", "handwritten"):
+        for kind in ("journal", "handwritten", "fact"):
             self.assertIsNone(
                 ef.pick_transport({"TRANSPORT": "dtchat"}, kind), kind)
         ef.omlx_available = lambda c: False
         ef.ollama_available = lambda c: False
-        for kind in ("journal", "handwritten"):
+        for kind in ("journal", "handwritten", "fact"):
             self.assertIsNone(
                 ef.pick_transport({"TRANSPORT": "auto"}, kind), kind)
 
@@ -565,6 +656,452 @@ class StripGeneratedSections(unittest.TestCase):
     def test_text_without_generated_sections_is_unchanged(self):
         text = "# Note\n\n## Today's Notes\n\n- a\n- b"
         self.assertEqual(ef.strip_generated_sections(text), text)
+
+    def test_user_h1_block_after_generated_section_is_kept(self):
+        text = "\n".join([
+            "## Briefing",
+            "",
+            "9:00 AM Planning Roundtable",
+            "",
+            "# Alison Vance",
+            "",
+            "Ran into her at the coffee shop.",
+            "",
+            "## Today's Notes",
+            "",
+            "- real note",
+        ])
+        out = ef.strip_generated_sections(text)
+        self.assertNotIn("Planning Roundtable", out)
+        self.assertIn("# Alison Vance", out)
+        self.assertIn("Ran into her at the coffee shop.", out)
+        self.assertIn("- real note", out)
+
+    def test_pure_journal_link_bullet_is_stripped(self):
+        text = ("## Today's Notes\n\n"
+                "- [\U0001F4D4 Journal](x-devonthink-item://ABC123)\n"
+                "- real note")
+        out = ef.strip_generated_sections(text)
+        self.assertNotIn("Journal](x-devonthink-item", out)
+        self.assertIn("- real note", out)
+
+    def test_pure_timed_link_bullet_is_stripped(self):
+        text = ("## Today's Notes\n\n"
+                "- 6:10am: [\U0001F517 Some Bookmark]"
+                "(x-devonthink-item://ABC123)\n"
+                "- real note")
+        out = ef.strip_generated_sections(text)
+        self.assertNotIn("Some Bookmark", out)
+        self.assertIn("- real note", out)
+
+    def test_bullet_with_free_prose_beyond_a_link_survives(self):
+        text = ("## Today's Notes\n\n"
+                "- Talked to Alison Vance about the trip "
+                "([source](x-devonthink-item://ABC123))\n")
+        out = ef.strip_generated_sections(text)
+        self.assertIn("Talked to Alison Vance about the trip", out)
+
+    def test_jot_bullet_with_trailing_marker_survives(self):
+        text = ("## Today's Notes\n\n"
+                "- Had a good idea about the launch <!-- jot:ABC123 -->\n")
+        out = ef.strip_generated_sections(text)
+        self.assertIn("Had a good idea about the launch", out)
+
+
+FACT_SOURCE = {"uuid": "FACT-1", "name": "Fact 2026-03-16 at 3.00.00PM",
+               "kind": "fact", "modified": "2026-03-16T15:00:00"}
+
+
+class MinWordsFor(unittest.TestCase):
+    def test_fact_bypasses_the_scaffolding_gate(self):
+        self.assertEqual(ef.min_words_for("fact"), 1)
+
+    def test_other_kinds_keep_the_twenty_word_gate(self):
+        for kind in ("daily", "journal", "handwritten", "meeting"):
+            self.assertEqual(ef.min_words_for(kind), 20, kind)
+
+
+class EffectiveFilingMode(unittest.TestCase):
+    def test_fact_forces_auto_regardless_of_config(self):
+        self.assertEqual(ef.effective_filing_mode("fact", "suggest"), "auto")
+        self.assertEqual(ef.effective_filing_mode("fact", "auto"), "auto")
+
+    def test_other_kinds_honor_the_configured_mode(self):
+        self.assertEqual(ef.effective_filing_mode("daily", "suggest"), "suggest")
+        self.assertEqual(ef.effective_filing_mode("meeting", "auto"), "auto")
+
+
+class NameInText(unittest.TestCase):
+    def test_whole_token_run_matches_case_and_accent_insensitively(self):
+        self.assertTrue(ef.name_in_text("Renée Vann", "spoke with renee vann today"))
+
+    def test_partial_token_does_not_match(self):
+        self.assertFalse(ef.name_in_text("Dana Parker", "met Dana Parkerson"))
+        self.assertFalse(ef.name_in_text("Dana Parker", "Dana moved to Denver"))
+
+    def test_empty_name_never_matches(self):
+        self.assertFalse(ef.name_in_text("", "anything"))
+
+
+class FactMatchIsStrong(unittest.TestCase):
+    def plan(self, name, aliases="", weak=False):
+        return {"kind": "existing", "name": name, "aliases": aliases,
+                "weak_match": weak}
+
+    def test_full_name_in_capture_is_strong(self):
+        self.assertTrue(ef.fact_match_is_strong(
+            self.plan("Dana Parker"), "Dana Parker's kid started at Reed"))
+
+    def test_bare_first_name_only_is_not_strong(self):
+        self.assertFalse(ef.fact_match_is_strong(
+            self.plan("Dana Parker", aliases="Dana"), "Dana moved to Denver"))
+
+    def test_multi_word_alias_in_capture_is_strong(self):
+        self.assertTrue(ef.fact_match_is_strong(
+            self.plan("Robert Vega", aliases="Bobby Vega, Bob"),
+            "ran into Bobby Vega at the market"))
+
+    def test_weak_match_is_never_strong(self):
+        self.assertFalse(ef.fact_match_is_strong(
+            self.plan("Dana Parker", weak=True), "Dana Parker got promoted"))
+
+    def test_mononym_record_without_alias_is_not_strong(self):
+        self.assertFalse(ef.fact_match_is_strong(
+            self.plan("Cher"), "Cher released an album"))
+
+
+class StripLeadingH1(unittest.TestCase):
+    def test_drops_leading_h1_and_following_blanks(self):
+        self.assertEqual(
+            ef.strip_leading_h1("# Fact 2026-03-16\n\nDana Parker moved."),
+            "Dana Parker moved.")
+
+    def test_leading_blank_lines_before_h1(self):
+        self.assertEqual(
+            ef.strip_leading_h1("\n\n# T\n\nbody"), "body")
+
+    def test_no_h1_is_unchanged(self):
+        self.assertEqual(ef.strip_leading_h1("Dana Parker moved."),
+                         "Dana Parker moved.")
+
+    def test_cr_delimited_capture_is_not_collapsed_to_empty(self):
+        """DEVONthink can store the capture with classic-Mac CR endings; a
+        split("\\n") would return one line and drop the whole fact."""
+        self.assertEqual(ef.strip_leading_h1("# T\r\rDana Parker moved."),
+                         "Dana Parker moved.")
+        self.assertEqual(ef.strip_leading_h1("# T\r\nbody"), "body")
+
+
+class OpsForFactPlan(unittest.TestCase):
+    def test_interaction_does_not_bump_lastcontact_for_a_fact(self):
+        plan = {"kind": "existing", "name": "Bob Vega", "uuid": "U1", "md": {},
+                "aliases": "", "facts": [("2026-03-16", "x")], "updates": {},
+                "interacted": True}
+        ops = ef.ops_for_plan(plan, FACT_SOURCE, "2026-03-16")
+        self.assertEqual([o["op"] for o in ops], ["append_log"])
+
+    def test_new_person_from_a_fact_gets_no_lastcontact(self):
+        plan = {"kind": "new", "name": "Wren Talbot",
+                "facts": [("2026-03-16", "x")], "updates": {}, "interacted": True}
+        ops = ef.ops_for_plan(plan, FACT_SOURCE, "2026-03-16")
+        self.assertEqual(ops[0]["fields"], {})
+
+
+class FallbackReviewBody(unittest.TestCase):
+    def test_carries_the_raw_text_and_an_empty_ops_fence(self):
+        body = ef.fallback_review_body(FACT_SOURCE, "2026-03-16",
+                                       "  gibberish capture  ")
+        self.assertIn("gibberish capture", body)
+        self.assertEqual(ef.proposal_ops(body), [])
+
+
+class ScanForceBypassesHashShortCircuit(unittest.TestCase):
+    SOURCE = {"uuid": "SRC-1", "name": "Standup", "kind": "meeting",
+              "modified": "2026-03-16T10:00:00", "ready": True}
+    TEXT = ("Dana Parker mentioned during today's call that her son started "
+            "at Reed College this fall and things are going well so far "
+            "according to her update just now.")
+
+    def setUp(self):
+        self.saved = (ef.run_bridge, ef.save_state)
+        ef.save_state = lambda s: None
+        self.calls = []
+
+        def fake_bridge(ops, timeout=300):
+            self.calls.append(ops)
+            out = []
+            for op in ops:
+                if op["op"] == "dump_people":
+                    out.append([])
+                elif op["op"] == "list_sources":
+                    out.append([self.SOURCE])
+                elif op["op"] == "get_text":
+                    out.append({"text": self.TEXT})
+                elif op["op"] == "chat":
+                    out.append({"text": '{"people": [], "events": []}'})
+                elif op["op"] == "get_source":
+                    out.append(dict(self.SOURCE))
+                else:
+                    out.append({})
+            return out
+
+        ef.run_bridge = fake_bridge
+
+    def tearDown(self):
+        ef.run_bridge, ef.save_state = self.saved
+
+    def config(self):
+        return {"TRANSPORT": "dtchat", "MIN_ROSTER": "0",
+                "SKIP_SOURCE_TITLES": "", "MAX_PER_RUN": "3",
+                "FILING_MODE": "suggest", "IDLE_MINUTES": "10",
+                "SELF_NAME": ""}
+
+    def matching_hash_state(self):
+        h = hashlib.sha256(self.TEXT.encode()).hexdigest()
+        return {"processed": {"SRC-1": {"modified": "2026-03-15T00:00:00",
+                                        "hash": h}},
+                "attempts": {}, "parked": {}}
+
+    def chat_call_count(self):
+        return sum(1 for batch in self.calls for op in batch
+                   if op["op"] == "chat")
+
+    def test_force_target_extracts_despite_a_matching_hash(self):
+        ef.scan(self.config(), self.matching_hash_state(), False, "SRC-1", True)
+        self.assertEqual(self.chat_call_count(), 1)
+
+    def test_unforced_source_with_a_matching_hash_still_short_circuits(self):
+        ef.scan(self.config(), self.matching_hash_state(), False, None, True)
+        self.assertEqual(self.chat_call_count(), 0)
+
+
+class ScanPreservesParkedDiagnosisOnDeferral(unittest.TestCase):
+    SOURCE = {"uuid": "SRC-1", "name": "Standup", "kind": "meeting",
+              "modified": "2026-03-17T00:00:00", "ready": True}
+
+    def setUp(self):
+        self.saved = (ef.run_bridge, ef.save_state)
+        ef.save_state = lambda s: None
+
+        def fake_bridge(ops):
+            out = []
+            for op in ops:
+                if op["op"] == "dump_people":
+                    out.append([])
+                elif op["op"] == "list_sources":
+                    out.append([self.SOURCE])
+                else:
+                    out.append({})
+            return out
+
+        ef.run_bridge = fake_bridge
+
+    def tearDown(self):
+        ef.run_bridge, ef.save_state = self.saved
+
+    def config(self):
+        return {"TRANSPORT": "off", "MIN_ROSTER": "0",
+                "SKIP_SOURCE_TITLES": "", "MAX_PER_RUN": "3",
+                "FILING_MODE": "suggest", "IDLE_MINUTES": "10",
+                "SELF_NAME": ""}
+
+    def test_a_run_that_defers_leaves_the_parked_entry_intact(self):
+        state = {"processed": {}, "attempts": {},
+                 "parked": {"SRC-1": {"name": "Standup", "attempts": 5,
+                                      "last_error": "boom",
+                                      "modified": "2026-03-16T00:00:00",
+                                      "parked_at": "2026-03-16"}}}
+        ef.scan(self.config(), state, False, None, True)
+        self.assertIn("SRC-1", state["parked"])
+        self.assertEqual(state["parked"]["SRC-1"]["last_error"], "boom")
+
+
+class FileSourceReReadsBeforeAdoptingTheFreshStamp(unittest.TestCase):
+    ORIGINAL_TEXT = ("Dana Parker mentioned during today's call that her son "
+                     "started at Reed College this fall and is doing well.")
+
+    def setUp(self):
+        self.saved = (ef.run_bridge, ef.save_state)
+        ef.save_state = lambda s: None
+
+    def tearDown(self):
+        ef.run_bridge, ef.save_state = self.saved
+
+    def source(self):
+        return {"uuid": "SRC-1", "name": "Standup", "kind": "meeting",
+                "modified": "2026-03-16T10:00:00"}
+
+    def run_file_source(self, fresh_modified, fresh_text):
+        def fake_bridge(ops):
+            out = []
+            for op in ops:
+                if op["op"] == "get_source":
+                    out.append({"uuid": "SRC-1", "name": "Standup",
+                               "kind": "meeting", "modified": fresh_modified})
+                elif op["op"] == "get_text":
+                    out.append({"text": fresh_text})
+                else:
+                    out.append({})
+            return out
+
+        ef.run_bridge = fake_bridge
+        state = {"processed": {}, "attempts": {}, "parked": {}}
+        ef.file_source({}, state, self.source(), "2026-03-16", [], "auto",
+                       False, self.ORIGINAL_TEXT)
+        return state
+
+    def test_an_edit_landing_mid_extraction_is_not_swallowed(self):
+        state = self.run_file_source(
+            "2026-03-16T10:05:00",
+            self.ORIGINAL_TEXT + " Extra sentence added after extraction started.")
+        self.assertEqual(state["processed"]["SRC-1"]["modified"],
+                         "2026-03-16T10:00:00")
+
+    def test_an_unedited_source_adopts_the_fresh_stamp(self):
+        state = self.run_file_source("2026-03-16T10:05:00", self.ORIGINAL_TEXT)
+        self.assertEqual(state["processed"]["SRC-1"]["modified"],
+                         "2026-03-16T10:05:00")
+
+
+class FileSourceProposalCreationMarksFiled(unittest.TestCase):
+    """C08: EntityFiled must be set the moment a proposal or review stub is
+    created, not only when it is later approved — otherwise --rebuild-state
+    can never learn a pending or rejected source was already seen."""
+
+    def setUp(self):
+        self.calls = []
+        self.saved = (ef.run_bridge, ef.save_state)
+        ef.save_state = lambda s: None
+        self.list_group_result = []
+
+        def fake_bridge(ops):
+            self.calls.append(ops)
+            out = []
+            for op in ops:
+                if op["op"] == "get_source":
+                    out.append(dict(SOURCE))
+                elif op["op"] == "get_text":
+                    out.append({"text": "unchanged"})
+                elif op["op"] == "create_record":
+                    out.append({"uuid": "NEW"})
+                elif op["op"] == "list_group":
+                    out.append(list(self.list_group_result))
+                else:
+                    out.append({})
+            return out
+
+        ef.run_bridge = fake_bridge
+
+    def tearDown(self):
+        ef.run_bridge, ef.save_state = self.saved
+
+    def state(self):
+        return {"processed": {}, "attempts": {}, "parked": {}}
+
+    def batches_with(self, op_name):
+        return [b for b in self.calls if any(o["op"] == op_name for o in b)]
+
+    def test_a_new_proposal_batch_marks_the_source_filed(self):
+        plan = {"kind": "new", "name": "Wren", "single_token": True, "near": [],
+                "facts": [("2026-03-16", "attends Cedar Ridge")], "updates": {}}
+        ef.file_source({}, self.state(), SOURCE, "2026-03-16", [plan], "suggest",
+                       False, "some source text")
+        batch = self.batches_with("create_record")[0]
+        self.assertEqual([o["op"] for o in batch], ["create_record", "mark_filed"])
+        self.assertEqual(batch[1]["uuid"], SOURCE["uuid"])
+
+    def test_a_proposal_matching_an_existing_review_name_is_not_duplicated(self):
+        self.list_group_result = [{"uuid": "EXISTING",
+                                   "name": f"File: {SOURCE['name']}"}]
+        plan = {"kind": "new", "name": "Wren", "single_token": True, "near": [],
+                "facts": [("2026-03-16", "attends Cedar Ridge")], "updates": {}}
+        ef.file_source({}, self.state(), SOURCE, "2026-03-16", [plan], "suggest",
+                       False, "some source text")
+        self.assertEqual(self.batches_with("create_record"), [])
+        self.assertTrue(self.batches_with("mark_filed"))
+
+
+class FileSourceFact(unittest.TestCase):
+    """file_source touches the bridge, so stub it and capture the op batches.
+    Locks the three fact outcomes: named clearly -> apply, bare name ->
+    proposal, nothing extracted -> review stub (never a silent mark-filed)."""
+
+    def setUp(self):
+        self.calls = []
+        self.saved = (ef.run_bridge, ef.save_state)
+        ef.save_state = lambda s: None
+
+        def fake_bridge(ops):
+            self.calls.append(ops)
+            out = []
+            for op in ops:
+                if op["op"] == "get_source":
+                    out.append(dict(FACT_SOURCE))
+                elif op["op"] == "create_record":
+                    out.append({"uuid": "NEW"})
+                else:
+                    out.append({})
+            return out
+
+        ef.run_bridge = fake_bridge
+
+    def tearDown(self):
+        ef.run_bridge, ef.save_state = self.saved
+
+    def state(self):
+        return {"processed": {}, "attempts": {}, "parked": {}}
+
+    def created(self):
+        return [op for batch in self.calls for op in batch
+                if op["op"] == "create_record"]
+
+    def applied(self):
+        return [op["op"] for batch in self.calls for op in batch]
+
+    def test_named_clearly_auto_applies_without_a_proposal(self):
+        plan = {"kind": "existing", "name": "Dana Parker", "uuid": "U1",
+                "md": {}, "aliases": "Dana", "weak_match": False,
+                "interacted": False, "facts": [("2026-03-16", "kid at Reed")],
+                "updates": {}}
+        ef.file_source({}, self.state(), FACT_SOURCE, "2026-03-16", [plan], "auto",
+                       False, "Dana Parker's kid started at Reed")
+        self.assertIn("append_log", self.applied())
+        self.assertEqual(self.created(), [])
+
+    def test_bare_first_name_becomes_a_proposal(self):
+        plan = {"kind": "existing", "name": "Dana Parker", "uuid": "U1",
+                "md": {}, "aliases": "Dana", "weak_match": False,
+                "interacted": False, "facts": [("2026-03-16", "moved")],
+                "updates": {}}
+        ef.file_source({}, self.state(), FACT_SOURCE, "2026-03-16", [plan], "auto",
+                       False, "Dana moved to Denver")
+        names = [op["name"] for op in self.created()]
+        self.assertTrue(any(n.startswith("File:") for n in names), names)
+        self.assertNotIn("append_log", self.applied())
+
+    def test_empty_extraction_surfaces_a_review_stub(self):
+        ef.file_source({}, self.state(), FACT_SOURCE, "2026-03-16", [], "auto",
+                       False, "not a fact")
+        names = [op["name"] for op in self.created()]
+        self.assertTrue(any(n.startswith("Review capture:") for n in names), names)
+
+
+class RosterIndexEmailKey(unittest.TestCase):
+    def test_exact_email_resolves_the_person(self):
+        p = person("Cara Quill", email="cara@x.com")
+        index = ef.roster_index([p])
+        self.assertEqual(index.get("cara@x.com"), [p])
+
+    def test_mailto_prefix_and_case_fold_onto_the_bare_address(self):
+        p = person("Cara Quill", email="mailto:Cara@X.com")
+        index = ef.roster_index([p])
+        self.assertEqual(index.get("cara@x.com"), [p])
+        self.assertNotIn("mailto:cara@x.com", index)
+
+    def test_no_email_adds_no_email_key(self):
+        p = person("Cara Quill")
+        index = ef.roster_index([p])
+        self.assertEqual(set(index), {"cara quill"})
 
 
 if __name__ == "__main__":

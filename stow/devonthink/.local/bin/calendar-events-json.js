@@ -12,8 +12,9 @@
 // Usage: calendar-events-json.js [YYYY-MM-DD [YYYY-MM-DD]]
 //        one day (default: today, local time), or an inclusive day range.
 //
-// stdout: {"ok": true, "date": "...", "events": [{title, calendar, date,
-//          start, end, all_day, location, rsvp, organizer_is_self,
+// stdout: {"ok": true, "date": "...", "events": [{title, calendar,
+//          calendar_id, source_id, event_id, date, start, end, all_day,
+//          location, rsvp, organizer_is_self,
 //          attendees: [{name, email, is_self, is_person}]}]}
 //         {"ok": false, "error": "..."} on denied/undetermined access.
 //
@@ -144,9 +145,14 @@ function run(argv) {
       }
     }
     const org = ev.organizer
+    const calendar = ev.calendar
+    const source = calendar.source
     out.push({
       title: str(ev.title),
-      calendar: str(ev.calendar.title),
+      calendar: str(calendar.title),
+      calendar_id: str(calendar.calendarIdentifier),
+      source_id: str(source.sourceIdentifier),
+      event_id: str(ev.eventIdentifier),
       date: isoLocal(ev.startDate).slice(0, 10),
       start: isoLocal(ev.startDate),
       end: isoLocal(ev.endDate),

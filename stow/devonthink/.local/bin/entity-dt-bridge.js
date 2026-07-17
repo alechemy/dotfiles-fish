@@ -37,19 +37,23 @@
 //   move_to            {uuid,group}                     -> {uuid}
 //   list_tags          {}                               -> [name,...]
 //   chat               {prompt,role}                    -> {text}
-//   ensure_person      {name,aliases?,fields?,log_lines?} -> {uuid,created}
+//   ensure_person      {name,aliases?,fields?,log_lines?} -> {uuid,created,
+//                       lastcontact_changed?,lastcontact_invalid?}
 //   ensure_event       {name,date,location?,attendees?,summary?,source_uuid,
 //                       log_line?}                      -> {uuid,created,merged?}
 //   append_log         {uuid,lines}                     -> {uuid,appended,skipped}
 //   set_field          {uuid,field,value,effective_date?,
 //                       expected_previous?,transition_line?}
 //                                                       -> {uuid,changed,previous,stale?}
-//   bump_lastcontact   {uuid,date}                      -> {uuid,changed}
+//   bump_lastcontact   {uuid,date}                      -> {uuid,changed,invalid?}
 //   mark_filed         {uuid}                           -> {uuid}
 //   create_record      {name,path,text,fields?,tags?}   -> {uuid}
 //   get_or_create_daily {date,heading}                  -> {uuid,text,created}
 //   upsert_section     {uuid,header,content}            -> {uuid,changed,replaced}
+//   insert_under_section {uuid,header,line}             -> {uuid,changed}
 //   relink_entities    {}                               -> {records,changed}
+//   sort_logs          {dry_run?}                       -> {records,changed,
+//                                                           records_changed}
 //   trash              {uuid}                           -> {uuid}
 
 ObjC.import('Foundation')
@@ -61,6 +65,7 @@ const PLACES_PATH = ENTITIES_PATH + '/Places'
 const EVENTS_PATH = ENTITIES_PATH + '/Events'
 const DAILY_PATH = '/10_DAILY'
 const JOURNAL_PATH = '/15_JOURNAL'
+const FACTS_PATH = ENTITIES_PATH + '/_Facts'
 const NOTES_SECTION = "## Today's Notes"
 const LOG_SECTION = '## Biographical Log'
 const EVENT_LOG_SECTION = '## Log'
@@ -96,8 +101,41 @@ function isoStamp(d) {
 }
 
 function normName(s) {
-  return String(s || '').toLowerCase().normalize('NFKD')
-    .replace(/[̀-ͯ]/g, '').replace(/\s+/g, ' ').trim()
+  return String(s || '').normalize('NFKD').replace(/\p{M}/gu, '')
+    .replace(/ß/g, 'ss').toLowerCase().replace(/\s+/g, ' ').trim()
+}
+
+// Raise-only guard for LastContact, shared by bump_lastcontact and
+// ensure_person: a hand-typed non-ISO current value sorts above every ISO
+// date and would freeze the field, so it is treated as absent; an incoming
+// value that isn't a bare YYYY-MM-DD is rejected outright rather than
+// written, so a malformed hand-edited proposal can't smudge the field.
+function lastContactGuard(current, incoming) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(incoming || ''))) {
+    return { changed: false, invalid: true }
+  }
+  const comparable = /^\d{4}-\d{2}-\d{2}$/.test(current) ? current : ''
+  return { changed: !comparable || incoming > comparable, invalid: false }
+}
+
+// Comparison/storage normalization for the Email field: trims, lowercases,
+// and strips a leading mailto: so that variant never reads as a change.
+function normalizeEmail(v) {
+  return String(v || '').trim().replace(/^mailto:/i, '').toLowerCase()
+}
+
+// Classifies one source record's kind for transport/privacy policy, checked
+// in order of privacy restriction — every local-only kind (daily, journal,
+// fact, handwritten) before the cloud-eligible meeting kind — so a record
+// carrying more than one marker lands on the more restrictive kind. Pure
+// over already-extracted values so list_sources and get_source agree.
+function classify(v) {
+  if (v.location.indexOf(DAILY_PATH) === 0) return 'daily'
+  if (v.location.indexOf(JOURNAL_PATH) === 0) return 'journal'
+  if (v.location.indexOf(FACTS_PATH) === 0) return 'fact'
+  if (v.handwritten) return 'handwritten'
+  if (v.documenttype.indexOf('Meeting') !== -1) return 'meeting'
+  return 'other'
 }
 
 // A body can come back CR-delimited: AppleScript's `do shell script` coerces
@@ -131,25 +169,169 @@ function personKeys(rec) {
   return keys
 }
 
+// Union two alias lists (comma-separated string or array), preserving the
+// existing order and appending new entries deduped case-insensitively.
+function unionAliases(existing, incoming) {
+  const split = v => (Array.isArray(v) ? v : String(v || '').split(','))
+    .map(s => String(s).trim()).filter(Boolean)
+  const current = split(existing)
+  const seen = Object.create(null)
+  for (const a of current) seen[normName(a)] = true
+  const out = current.slice()
+  for (const a of split(incoming)) {
+    const k = normName(a)
+    if (!seen[k]) { seen[k] = true; out.push(a) }
+  }
+  return out.join(', ')
+}
+
+// The line index a section's span ends at: the next heading of level 1 or 2
+// (trimmed), or the body's length. Shared by every scanner that owns a `##`
+// section's span, so a user-authored `# H1` block never lands inside one.
+function sectionSpan(body, headerIdx) {
+  let end = body.length
+  for (let i = headerIdx + 1; i < body.length; i++) {
+    if (/^#{1,2}\s/.test(body[i].trim())) { end = i; break }
+  }
+  return end
+}
+
+// The body span a `##` section owns: the lines after its header, up to the
+// next heading. Null when the record has no such header.
+function sectionBounds(body, header) {
+  let headerIdx = -1
+  for (let i = 0; i < body.length; i++) {
+    if (body[i].trim() === header) { headerIdx = i; break }
+  }
+  if (headerIdx === -1) return null
+  return { header: headerIdx, start: headerIdx + 1, end: sectionSpan(body, headerIdx) }
+}
+
 function insertUnderSection(body, header, lines) {
   const out = body.slice()
-  let headerIdx = -1
-  for (let i = 0; i < out.length; i++) {
-    if (out[i].trim() === header) { headerIdx = i; break }
-  }
-  if (headerIdx === -1) {
+  const b = sectionBounds(out, header)
+  if (b === null) {
     while (out.length && out[out.length - 1].trim() === '') out.pop()
-    return out.concat(['', header, ''], lines).join('\n') + '\n'
+    return out.concat(['', header, ''], lines, [''])
   }
-  let end = out.length
-  for (let i = headerIdx + 1; i < out.length; i++) {
-    if (/^#{1,2}\s/.test(out[i])) { end = i; break }
-  }
-  let insertAt = end
-  while (insertAt > headerIdx + 1 && out[insertAt - 1].trim() === '') insertAt--
-  const block = insertAt === headerIdx + 1 ? [''].concat(lines) : lines
+  let insertAt = b.end
+  while (insertAt > b.start && out[insertAt - 1].trim() === '') insertAt--
+  const block = insertAt === b.start ? [''].concat(lines) : lines
   out.splice(insertAt, 0, ...block)
-  return out.join('\n')
+  return out
+}
+
+// Idempotent single-line form: a retry of the record's latest body must not
+// duplicate the line, the same guarantee upsert_section gives a full section.
+function insertUnderSectionOnce(body, header, line) {
+  const b = sectionBounds(body, header)
+  if (b !== null) {
+    const want = String(line).trim()
+    if (body.slice(b.start, b.end).some(l => l.trim() === want)) return body
+  }
+  return insertUnderSection(body, header, [line])
+}
+
+// Pure core of the upsert_section op: the new full body text to write (or
+// null when nothing changed) for replacing/creating/removing one section.
+function sectionUpsert(lines, header, content) {
+  let start = -1
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].trim() === header) { start = i; break }
+  }
+  if (start === -1) {
+    if (!content.trim()) return { text: null, changed: false, replaced: false }
+    let out = lines.slice()
+    // Jots are inserted relative to the last bullet BEFORE this header
+    // (see insert-jot-into-daily-note.py); generated sections must sit
+    // after it, so guarantee it exists.
+    if (out.map(l => l.trim()).indexOf(NOTES_SECTION) === -1) {
+      while (out.length && out[out.length - 1].trim() === '') out.pop()
+      out = out.concat(['', NOTES_SECTION])
+    }
+    while (out.length && out[out.length - 1].trim() === '') out.pop()
+    const text =
+      out.concat(['', header, ''], content.split('\n')).join('\n') + '\n'
+    return { text: text, changed: true, replaced: false }
+  }
+  const end = sectionSpan(lines, start)
+  if (!content.trim()) {
+    const out = lines.slice(0, start).concat(lines.slice(end))
+    while (out.length && out[out.length - 1].trim() === '') out.pop()
+    return { text: out.join('\n') + '\n', changed: true, replaced: true, removed: true }
+  }
+  let spanEnd = end
+  while (spanEnd > start && lines[spanEnd - 1].trim() === '') spanEnd--
+  const section = [header, ''].concat(content.split('\n'))
+  if (lines.slice(start, spanEnd).join('\n') === section.join('\n')) {
+    return { text: null, changed: false, replaced: true }
+  }
+  const out = lines.slice(0, start).concat(section, [''], lines.slice(end))
+  return { text: out.join('\n'), changed: true, replaced: true }
+}
+
+const LOG_ENTRY_RE = /^-\s+(\d{4}-\d{2}-\d{2})(?![\d-])/
+
+// Order a dated log section newest-first. Facts arrive in filing order, not
+// fact order — a backlog drain, a corrected re-extraction, or a note about
+// something that happened last year all append below entries dated after
+// them — so without this the log reads in no order at all.
+//
+// An entry is a column-zero `- YYYY-MM-DD` bullet plus any non-blank lines
+// under it, and only entries move: blank lines and prose keep the positions
+// they hold in the section, each entry slot refilled from the sorted run.
+// Undated bullets are prose by that rule, and an *indented* dated bullet is a
+// continuation of the entry above it — both travel with their parent rather
+// than sorting on their own date, so nested details never detach.
+// Same-date entries keep their existing order, which leaves an append after
+// its same-day neighbours and makes the sort idempotent.
+function sortLogSection(body, header) {
+  const b = sectionBounds(body, header)
+  if (b === null) return body
+  const slots = []
+  const entries = []
+  for (let i = b.start; i < b.end; i++) {
+    const m = body[i].match(LOG_ENTRY_RE)
+    if (!m) { slots.push(body[i]); continue }
+    const block = [body[i]]
+    while (i + 1 < b.end && body[i + 1].trim() !== '' &&
+           !LOG_ENTRY_RE.test(body[i + 1])) {
+      block.push(body[++i])
+    }
+    entries.push({ date: m[1], order: entries.length, block: block })
+    slots.push(null)
+  }
+  const sorted = entries.slice().sort((x, y) =>
+    x.date === y.date ? x.order - y.order : (x.date < y.date ? 1 : -1))
+  const out = body.slice(0, b.start)
+  let next = 0
+  for (const slot of slots) {
+    if (slot === null) out.push(...sorted[next++].block)
+    else out.push(slot)
+  }
+  return out.concat(body.slice(b.end))
+}
+
+// A candidate event record's body Date value, or '' when missing/bare — the
+// fallback ensure_event scores against when mdeventdate is unset.
+function bodyDateValue(lines) {
+  for (const line of lines) {
+    if (/^\*\*Date:\*\*/.test(line)) {
+      const v = line.replace(/^\*\*Date:\*\*\s*/, '').trim()
+      return v === '' || v === '—' ? '' : v
+    }
+  }
+  return ''
+}
+
+// ensure_event's match-window gap in days for one candidate: falls back to
+// the body Date when eventdate metadata is blank, so an undated record is
+// only ever the weakest (date-agnostic) match once — a real date on either
+// side wins it a real gap instead of matching forever.
+function eventMatchGap(opDate, mdEventDate, bodyDate, matchDays) {
+  const d = mdEventDate || bodyDate
+  if (!opDate || !d) return matchDays
+  return Math.abs(new Date(opDate) - new Date(d)) / 86400000
 }
 
 // Set by run(); lets module-level helpers reach the DT session.
@@ -173,7 +355,9 @@ function buildEntityIndex() {
       const names = [rec.name()].concat(String(rec.aliases() || '').split(','))
       for (const n of names) {
         const t = n.trim()
-        if (t.length >= 3) entries.push({ name: t, uuid: uuid })
+        if (t.length >= 3 && t.indexOf('[') === -1 && t.indexOf(']') === -1) {
+          entries.push({ name: t, uuid: uuid })
+        }
       }
     }
   }
@@ -184,23 +368,50 @@ function buildEntityIndex() {
 // Markdown-link spans land at odd indices after a capture-group split.
 const LINK_SPLIT_RE = /(\[[^\]]*\]\([^)]*\))/
 
+// Whitespace-delimited token ranges that look like a URL (a `://` scheme or
+// a bare `www.` host), so linkEntities never wraps a substring inside one —
+// an entity name inside a bare URL would break the link, not annotate it.
+function urlSpans(text) {
+  const spans = []
+  const re = /\S+/g
+  let m
+  while ((m = re.exec(text))) {
+    if (m[0].indexOf('://') !== -1 || /^www\./i.test(m[0])) {
+      spans.push([m.index, m.index + m[0].length])
+    }
+  }
+  return spans
+}
+
+function withinSpan(start, end, spans) {
+  return spans.some(s => start >= s[0] && end <= s[1])
+}
+
 // Wrap the first mention of each known entity in an item link so hand-
 // authored Places/Events (and other People) accrue backlinks from every
-// filed fact. Never links inside an existing link, never links the target
-// record to itself, skips entities the line already links to.
+// filed fact. Never links inside an existing link or a bare URL, never
+// links the target record to itself, skips entities the line already
+// links to.
 function linkEntities(line, excludeUuid) {
   if (entityIndex === null) entityIndex = buildEntityIndex()
   let out = line
   for (const e of entityIndex) {
     if (e.uuid === excludeUuid || out.indexOf(e.uuid) !== -1) continue
     const re = new RegExp(
-      '(^|[^\\w\\[])(' + escapeRe(e.name) + ')(?![\\w\\]])', 'i')
+      '(^|[^\\w\\[])(' + escapeRe(e.name) + ')(?![\\w\\]])', 'ig')
     const parts = out.split(LINK_SPLIT_RE)
     for (let i = 0; i < parts.length; i += 2) {
-      const m = parts[i].match(re)
-      if (m) {
-        parts[i] = parts[i].replace(
-          re, m[1] + '[' + m[2] + '](x-devonthink-item://' + e.uuid + ')')
+      const spans = urlSpans(parts[i])
+      re.lastIndex = 0
+      let m, hit = null
+      while ((m = re.exec(parts[i]))) {
+        const start = m.index + m[1].length
+        if (!withinSpan(start, start + m[2].length, spans)) { hit = m; break }
+      }
+      if (hit) {
+        parts[i] = parts[i].slice(0, hit.index) + hit[1] +
+          '[' + hit[2] + '](x-devonthink-item://' + e.uuid + ')' +
+          parts[i].slice(hit.index + hit[0].length)
         out = parts.join('')
         break
       }
@@ -227,8 +438,11 @@ function factSignature(line) {
 }
 
 // Skip lines already filed (by fact signature), link known entities in the
-// remainder, then insert under the given section header.
+// remainder, insert under the given section header, and re-sort the section
+// newest-first. The sort runs even when nothing was appended, so a record the
+// filer touches at all leaves in order.
 function appendLogLines(rec, lines, section) {
+  const header = section || LOG_SECTION
   const body = bodyLines(rec)
   const uuid = rec.uuid()
   const seen = Object.create(null)
@@ -241,9 +455,10 @@ function appendLogLines(rec, lines, section) {
     seen[sig] = true
     fresh.push(linkEntities(line, uuid))
   }
-  if (fresh.length) {
-    rec.plainText = insertUnderSection(body, section || LOG_SECTION, fresh)
-  }
+  const next = sortLogSection(
+    fresh.length ? insertUnderSection(body, header, fresh) : body, header)
+  const text = next.join('\n')
+  if (text !== body.join('\n')) rec.plainText = text
   return { appended: fresh.length, skipped: skipped }
 }
 
@@ -341,11 +556,16 @@ function run(argv) {
     list_sources() {
       const out = []
       const seen = {}
-      const add = (rec, kind) => {
+      const add = (rec) => {
         const uuid = rec.uuid()
         if (seen[uuid]) return
         seen[uuid] = true
         const added = rec.additionDate()
+        const kind = classify({
+          location: String(rec.location() || ''),
+          handwritten: flagSet(mdValue(rec, 'handwritten')),
+          documenttype: mdValue(rec, 'documenttype'),
+        })
         out.push({
           uuid: uuid,
           name: rec.name(),
@@ -366,16 +586,16 @@ function run(argv) {
       // Quoted-phrase equality (mddocumenttype=="Meeting Notes") matches
       // nothing in DT's query parser; substring match is the reliable form.
       dt.search('mddocumenttype:~Meeting', { in: db.root() })
-        .forEach(r => add(r, 'meeting'))
+        .forEach(r => add(r))
       dt.search('mdhandwritten==1', { in: db.root() })
-        .forEach(r => add(r, 'handwritten'))
+        .forEach(r => add(r))
       const today = new Date()
       const localToday = new Date(today.getTime() - today.getTimezoneOffset() * 60000)
         .toISOString().slice(0, 10)
       for (const rec of groupAt(DAILY_PATH).children()) {
         const name = rec.name()
         if (/^\d{4}-\d{2}-\d{2}$/.test(name) && name < localToday) {
-          add(rec, 'daily')
+          add(rec)
         }
       }
       // Journal entries live under year subgroups; today's entry is
@@ -389,24 +609,33 @@ function run(argv) {
             const name = rec.name()
             if (/^\d{4}-\d{2}-\d{2} Journal$/.test(name) &&
                 name.slice(0, 10) < localToday) {
-              add(rec, 'journal')
+              add(rec)
             }
           }
+        }
+      }
+      // Person-fact captures from the Drafts action. Not date-gated: a fact
+      // capture is a complete thought at write time, unlike a daily note.
+      let factsGroup = null
+      try { factsGroup = groupAt(FACTS_PATH) } catch (e) {}
+      if (factsGroup) {
+        for (const rec of factsGroup.children()) {
+          if (String(rec.type()) === 'group') continue
+          add(rec)
         }
       }
       return out
     },
 
-    // Classify one record the same way list_sources buckets its hits, so
-    // --force can target a record the database sweep never surfaces.
+    // classify() with the same precedence list_sources uses, so --force
+    // can target a record the database sweep never surfaces.
     get_source(op) {
       const r = byUuid(op.uuid)
-      const hw = mdValue(r, 'handwritten')
-      let kind = 'other'
-      if (String(r.location() || '').indexOf(DAILY_PATH) === 0) kind = 'daily'
-      else if (String(r.location() || '').indexOf(JOURNAL_PATH) === 0) kind = 'journal'
-      else if (flagSet(hw)) kind = 'handwritten'
-      else if (mdValue(r, 'documenttype').indexOf('Meeting') !== -1) kind = 'meeting'
+      const kind = classify({
+        location: String(r.location() || ''),
+        handwritten: flagSet(mdValue(r, 'handwritten')),
+        documenttype: mdValue(r, 'documenttype'),
+      })
       const added = r.additionDate()
       return {
         uuid: r.uuid(),
@@ -595,18 +824,17 @@ function run(argv) {
         dt.addCustomMetaData('Person', { for: 'entitytype', to: rec })
         dt.addCustomMetaData('active', { for: 'entitystatus', to: rec })
       }
-      if (op.aliases) rec.aliases = op.aliases
+      if (op.aliases) rec.aliases = unionAliases(rec.aliases(), op.aliases)
+      let lastcontact
       for (const [field, value] of Object.entries(op.fields || {})) {
         if (!value) continue
         // ensure_person can resolve to an existing record (a re-run proposal),
         // so LastContact keeps the bump op's monotonicity instead of being
         // overwritten backwards.
         if (field === 'lastcontact') {
-          const current = mdValue(rec, 'lastcontact')
-          const comparable = /^\d{4}-\d{2}-\d{2}$/.test(current) ? current : ''
-          if (!comparable || String(value) > comparable) {
-            dt.addCustomMetaData(value, { for: field, to: rec })
-          }
+          const g = lastContactGuard(mdValue(rec, 'lastcontact'), value)
+          if (g.changed) dt.addCustomMetaData(value, { for: field, to: rec })
+          lastcontact = g
           continue
         }
         dt.addCustomMetaData(value, { for: field, to: rec })
@@ -614,7 +842,12 @@ function run(argv) {
       if ((op.log_lines || []).length) {
         appendLogLines(rec, op.log_lines)
       }
-      return { uuid: rec.uuid(), created: created }
+      const result = { uuid: rec.uuid(), created: created }
+      if (lastcontact) {
+        result.lastcontact_changed = lastcontact.changed
+        if (lastcontact.invalid) result.lastcontact_invalid = true
+      }
+      return result
     },
 
     // Event identity is normalized name PLUS date proximity: same-name
@@ -638,13 +871,8 @@ function run(argv) {
       let bestGap = Infinity
       for (const h of hits) {
         const d = mdValue(h, 'eventdate').slice(0, 10)
-        let gap
-        if (!opDate || !d) {
-          // Undated on either side: date-agnostic legacy match, weakest.
-          gap = EVENT_MATCH_DAYS
-        } else {
-          gap = Math.abs(new Date(opDate) - new Date(d)) / 86400000
-        }
+        const bd = d ? '' : bodyDateValue(bodyLines(h))
+        const gap = eventMatchGap(opDate, d, bd, EVENT_MATCH_DAYS)
         if (gap <= EVENT_MATCH_DAYS && gap < bestGap) {
           rec = h
           bestGap = gap
@@ -661,9 +889,6 @@ function run(argv) {
             if (bare(v) && opDate) {
               lines[i] = '**Date:** ' + opDate
               changed = true
-              if (!mdValue(rec, 'eventdate')) {
-                dt.addCustomMetaData(opDate, { for: 'eventdate', to: rec })
-              }
             }
           } else if (/^\*\*Where:\*\*/.test(lines[i])) {
             const v = lines[i].replace(/^\*\*Where:\*\*\s*/, '').trim()
@@ -692,6 +917,10 @@ function run(argv) {
               changed = true
             }
           }
+        }
+        if (!mdValue(rec, 'eventdate')) {
+          const backfill = bodyDateValue(lines) || opDate
+          if (backfill) dt.addCustomMetaData(backfill, { for: 'eventdate', to: rec })
         }
         if (changed) rec.plainText = lines.join('\n')
         if (logLine) appendLogLines(rec, [logLine], EVENT_LOG_SECTION)
@@ -738,6 +967,11 @@ function run(argv) {
     set_field(op) {
       const rec = byUuid(op.uuid)
       const previous = mdValue(rec, op.field)
+      const isEmail = op.field === 'email'
+      const incomingValue = isEmail ? normalizeEmail(op.value) : op.value
+      const sameValue = isEmail
+        ? normalizeEmail(previous) === incomingValue
+        : previous === String(op.value)
       let dates = {}
       try { dates = JSON.parse(mdValue(rec, 'fieldasof') || '{}') || {} }
       catch (e) { dates = {} }
@@ -748,7 +982,7 @@ function run(argv) {
           dt.addCustomMetaData(JSON.stringify(dates), { for: 'fieldasof', to: rec })
         }
       }
-      if (previous === String(op.value)) {
+      if (sameValue) {
         stampAsOf()
         return { uuid: op.uuid, changed: false, previous: previous }
       }
@@ -762,7 +996,7 @@ function run(argv) {
                  String(op.expected_previous) !== previous) {
         return { uuid: op.uuid, changed: false, stale: true, previous: previous }
       }
-      dt.addCustomMetaData(op.value, { for: op.field, to: rec })
+      dt.addCustomMetaData(incomingValue, { for: op.field, to: rec })
       stampAsOf()
       if (op.transition_line) appendLogLines(rec, [op.transition_line])
       return { uuid: op.uuid, changed: true, previous: previous }
@@ -770,15 +1004,10 @@ function run(argv) {
 
     bump_lastcontact(op) {
       const rec = byUuid(op.uuid)
-      const current = mdValue(rec, 'lastcontact')
-      // A hand-typed non-ISO value sorts above every ISO date and would
-      // freeze the field; treat it as absent so a real date can repair it.
-      const comparable = /^\d{4}-\d{2}-\d{2}$/.test(current) ? current : ''
-      if (comparable && comparable >= op.date) {
-        return { uuid: op.uuid, changed: false }
-      }
-      dt.addCustomMetaData(op.date, { for: 'lastcontact', to: rec })
-      return { uuid: op.uuid, changed: true }
+      const g = lastContactGuard(mdValue(rec, 'lastcontact'), op.date)
+      if (g.invalid) return { uuid: op.uuid, changed: false, invalid: true }
+      if (g.changed) dt.addCustomMetaData(op.date, { for: 'lastcontact', to: rec })
+      return { uuid: op.uuid, changed: g.changed }
     },
 
     mark_filed(op) {
@@ -811,6 +1040,37 @@ function run(argv) {
       rec.plainText = text
       rec.tags = ['Daily Note']
       return { uuid: rec.uuid(), text: text, created: true }
+    },
+
+    // Repair pass for logs that predate the sort (or were hand-edited out of
+    // order): re-sorts every entity record's log section newest-first. The
+    // filer keeps records it touches in order on its own, so this is only for
+    // the ones it has no reason to touch. Invoke manually:
+    //   echo '{"ops":[{"op":"sort_logs"}]}' > /tmp/ops.json &&
+    //   osascript -l JavaScript entity-dt-bridge.js /tmp/ops.json
+    sort_logs(op) {
+      let records = 0
+      let changedRecords = 0
+      const changed = []
+      for (const path of [PEOPLE_PATH, PLACES_PATH, EVENTS_PATH]) {
+        let group
+        try { group = groupAt(path) } catch (e) { continue }
+        for (const rec of group.children()) {
+          if (String(rec.type()) !== 'markdown') continue
+          records++
+          const body = bodyLines(rec)
+          let next = body
+          for (const header of [LOG_SECTION, EVENT_LOG_SECTION]) {
+            next = sortLogSection(next, header)
+          }
+          const text = next.join('\n')
+          if (text === body.join('\n')) continue
+          if (!op.dry_run) rec.plainText = text
+          changedRecords++
+          changed.push({ uuid: rec.uuid(), name: rec.name() })
+        }
+      }
+      return { records: records, changed: changedRecords, records_changed: changed }
     },
 
     // On-demand backfill: creating a Place or Event only affects facts
@@ -858,48 +1118,25 @@ function run(argv) {
     upsert_section(op) {
       const rec = byUuid(op.uuid)
       const lines = bodyLines(rec)
-      const content = String(op.content || '')
-      let start = -1
-      for (let i = 0; i < lines.length; i++) {
-        if (lines[i].trim() === op.header) { start = i; break }
-      }
-      if (start === -1) {
-        if (!content.trim()) {
-          return { uuid: op.uuid, changed: false, replaced: false }
-        }
-        let out = lines.slice()
-        // Jots are inserted relative to the last bullet BEFORE this header
-        // (see insert-jot-into-daily-note.py); generated sections must sit
-        // after it, so guarantee it exists.
-        if (out.map(l => l.trim()).indexOf(NOTES_SECTION) === -1) {
-          while (out.length && out[out.length - 1].trim() === '') out.pop()
-          out = out.concat(['', NOTES_SECTION])
-        }
-        while (out.length && out[out.length - 1].trim() === '') out.pop()
-        rec.plainText =
-          out.concat(['', op.header, ''], content.split('\n')).join('\n') + '\n'
-        return { uuid: op.uuid, changed: true, replaced: false }
-      }
-      let end = lines.length
-      for (let i = start + 1; i < lines.length; i++) {
-        if (/^##\s/.test(lines[i].trim())) { end = i; break }
-      }
-      if (!content.trim()) {
-        const out = lines.slice(0, start).concat(lines.slice(end))
-        while (out.length && out[out.length - 1].trim() === '') out.pop()
-        rec.plainText = out.join('\n') + '\n'
-        return { uuid: op.uuid, changed: true, replaced: true, removed: true }
-      }
-      let spanEnd = end
-      while (spanEnd > start && lines[spanEnd - 1].trim() === '') spanEnd--
-      const section = [op.header, ''].concat(content.split('\n'))
-      if (lines.slice(start, spanEnd).join('\n') === section.join('\n')) {
-        return { uuid: op.uuid, changed: false, replaced: true }
-      }
-      const out = lines.slice(0, start)
-        .concat(section, [''], lines.slice(end))
-      rec.plainText = out.join('\n')
-      return { uuid: op.uuid, changed: true, replaced: true }
+      const r = sectionUpsert(lines, op.header, String(op.content || ''))
+      if (r.text !== null) rec.plainText = r.text
+      const out = { uuid: op.uuid, changed: r.changed, replaced: r.replaced }
+      if (r.removed) out.removed = true
+      return out
+    },
+
+    // Insert one line under a `##` section header against the record's
+    // LATEST body, read and written inside this single bridge invocation —
+    // the read-modify-write upsert_section closes for a full section,
+    // scoped to a single line. A line already present under the section is
+    // a no-op.
+    insert_under_section(op) {
+      const rec = byUuid(op.uuid)
+      const body = bodyLines(rec)
+      const next = insertUnderSectionOnce(body, op.header, op.line)
+      if (next === body) return { uuid: op.uuid, changed: false }
+      rec.plainText = next.join('\n')
+      return { uuid: op.uuid, changed: true }
     },
 
     trash(op) {

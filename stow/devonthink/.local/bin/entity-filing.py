@@ -150,6 +150,7 @@ THINGS_MAP_FILE = os.path.join(STATE_DIR, "things-filing-map.json")
 THINGS_MAP_VERSION = 1
 THINGS_URL_LIMIT = 3500
 THINGS_WHEN = "today"
+BOUNCE_LIMIT = 3
 SPEC_SENTINEL = "=== proposed v1 ==="
 BANNER_PREFIX = "⚠ entity-filing:"
 PROPOSAL_MARKER = "Proposal: x-devonthink-item://"
@@ -207,6 +208,12 @@ KNOWN PEOPLE (use these exact names in "match"; aliases in parentheses):
 NOTE ({source_name}):
 {content}
 """
+
+FACT_PREFACE = (
+    "This note is a single fact the author deliberately recorded about a "
+    "person. Extract it even if it is brief; do not discard it as too short "
+    "or too minor.\n\n"
+)
 
 EXTRACTION_SCHEMA = {
     "type": "object",
@@ -428,7 +435,7 @@ def acquire_lock():
 
 def acquire_llm_lock():
     """Cross-pipeline lock serializing local inference with journal OCR
-    (journal-process.py holds it for its OCR phase), so two ~18 GB models
+    (boox-process.py holds it for its OCR phase), so two ~18 GB models
     are never resident in unified memory at once — the sequential holders
     let oMLX's LRU eviction swap cleanly. Non-blocking: a busy lock defers
     this run's local extraction to the next tick."""
@@ -601,12 +608,61 @@ def extract_dtchat(prompt):
     )[0]["text"]
 
 
+def close_orphaned_arrays(text):
+    """Insert the `]` a model dropped after an array's last element.
+
+    A colon is only legal after a key in an object, so a colon reached while
+    the innermost open container is an array proves that array should have
+    closed before the preceding string — `{"people": [{...}, "events": []}`
+    is the whole defect. Purely syntactic: it moves a bracket and changes no
+    value, and an output it cannot balance still fails to parse.
+    """
+    inserts = []
+    stack = []
+    key_start = None
+    i = 0
+    while i < len(text):
+        c = text[i]
+        if c == '"':
+            key_start = i
+            i += 1
+            while i < len(text) and text[i] != '"':
+                i += 2 if text[i] == "\\" else 1
+        elif c in "[{":
+            stack.append(c)
+        elif c in "]}":
+            if stack:
+                stack.pop()
+        elif c == ":" and stack and stack[-1] == "[" and key_start is not None:
+            j = key_start - 1
+            while j >= 0 and text[j].isspace():
+                j -= 1
+            # Reuse the comma that separated the array's last element from the
+            # orphaned key; an array the model never put an element in has none.
+            inserts.append((j, "]") if j >= 0 and text[j] == ","
+                           else (key_start, "],"))
+            stack.pop()
+        i += 1
+    for pos, patch in reversed(inserts):
+        text = text[:pos] + patch + text[pos:]
+    return text
+
+
 def parse_extraction(raw):
     text = raw.strip()
     fence = re.search(r"```(?:json)?\s*\n(.*?)\n```", text, re.DOTALL)
     if fence:
         text = fence.group(1)
-    data = json.loads(text)
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError as exc:
+        repaired = close_orphaned_arrays(text)
+        try:
+            data = json.loads(repaired)
+        except json.JSONDecodeError:
+            raise exc from None
+        log.info("repaired %d unclosed array(s) in the model's JSON",
+                 repaired.count("]") - text.count("]"))
     if not isinstance(data, dict) or not isinstance(data.get("people"), list):
         raise ValueError("extraction JSON missing 'people' array")
     events = data.get("events")
@@ -619,10 +675,27 @@ def parse_extraction(raw):
 
 
 def norm(s):
+    """casefold, not lower: only casefold folds the case *pairs* that are not
+    one-to-one, so "STRASSE" and "Straße" reach the same key here, in the
+    brief's norm, and in the bridge's normName alike."""
     import unicodedata
     s = unicodedata.normalize("NFKD", s or "")
     s = "".join(c for c in s if not unicodedata.combining(c))
-    return re.sub(r"\s+", " ", s).strip().lower()
+    return re.sub(r"\s+", " ", s).strip().casefold()
+
+
+def norm_email(v):
+    """The Email field is url-typed in DT, so a GUI-entered value can carry
+    a mailto: prefix even though scripts store bare addresses."""
+    return norm(v).removeprefix("mailto:")
+
+
+def collapse_ws(s):
+    """Flattens an embedded newline the LLM sometimes emits mid-sentence,
+    which would otherwise split one filed line into two once appended to a
+    record body — breaking factSignature dedup, the Things note grammar,
+    and the brief's fact-marker identity alike."""
+    return re.sub(r"\s+", " ", s).strip()
 
 
 def self_names(config):
@@ -670,6 +743,9 @@ def roster_index(people):
     index = {}
     for p in people:
         keys = [norm(p["name"])] + [norm(a) for a in p.get("aliases", "").split(",")]
+        email = norm_email(p.get("md", {}).get("mdemail", ""))
+        if email:
+            keys.append(email)
         for k in keys:
             if k:
                 index.setdefault(k, []).append(p)
@@ -743,6 +819,57 @@ def near_matches(name, people, limit=3):
     return out[:limit]
 
 
+def min_words_for(kind):
+    """Fact captures are terse and deliberate; the 20-word scaffolding gate
+    that protects meeting/daily extraction would silently drop a one-line
+    fact ("Dana Parker moved to Denver")."""
+    return 1 if kind == "fact" else 20
+
+
+def effective_filing_mode(kind, configured):
+    """Hand-authored fact captures auto-file (subject to the verbatim-name
+    guard in file_source); every other kind honors the configured mode."""
+    return "auto" if kind == "fact" else configured
+
+
+def name_in_text(name, text):
+    """True when `name` appears in `text` as a whole-token run, case- and
+    diacritic-insensitively (both sides folded through norm)."""
+    n = norm(name)
+    if not n:
+        return False
+    return re.search(r"(?<!\w)" + re.escape(n) + r"(?!\w)", norm(text)) is not None
+
+
+def strip_leading_h1(text):
+    """Drop a fact capture's leading `# <title>` line (present so the global
+    H1-sync smart rule no-ops) before extraction, so the model sees only the
+    fact text."""
+    lines = text.splitlines()
+    i = 0
+    while i < len(lines) and not lines[i].strip():
+        i += 1
+    if i < len(lines) and lines[i].lstrip().startswith("# "):
+        i += 1
+        while i < len(lines) and not lines[i].strip():
+            i += 1
+        return "\n".join(lines[i:])
+    return text
+
+
+def fact_match_is_strong(plan, text):
+    """A fact plan may auto-apply only when the resolved person is named
+    unambiguously in the capture: their full name or a multi-word alias
+    appears verbatim. A bare first name — even one the model expanded to a
+    full name in `match` — stays a proposal, since single first names
+    collide silently as the roster grows."""
+    if plan.get("weak_match"):
+        return False
+    candidates = [plan.get("name", "")]
+    candidates += (plan.get("aliases") or "").split(",")
+    return any(len(c.split()) >= 2 and name_in_text(c, text) for c in candidates)
+
+
 def build_person_plans(extracted, index, selves, people, source_date):
     """Deterministic resolution: LLM output in, per-person op plans out."""
     plans = []
@@ -753,14 +880,14 @@ def build_person_plans(extracted, index, selves, people, source_date):
             continue
         facts = []
         for f in (person.get("facts") or [])[:12]:
-            text = str(f.get("fact", "")).strip()
+            text = collapse_ws(str(f.get("fact", "")))
             if text and len(text) <= 400:
                 facts.append((valid_date(f.get("date")) or source_date, text))
         updates = {}
         for field in UPDATE_FIELDS:
             v = (person.get("updates") or {}).get(field)
             if isinstance(v, str) and v.strip():
-                updates[field] = v.strip()
+                updates[field] = collapse_ws(v)
         if not facts and not updates:
             continue
 
@@ -787,6 +914,7 @@ def build_person_plans(extracted, index, selves, people, source_date):
                 # collide silently as the roster grows.
                 "weak_match": len(matched_key.split()) < 2
                 and matched_key != norm(hits[0]["name"]),
+                "aliases": hits[0].get("aliases", ""),
                 "interacted": interacted,
                 "facts": facts,
                 "updates": updates,
@@ -829,7 +957,7 @@ def build_event_plans(events_raw, index, selves, source_date):
             if resolves_suppressed(a, index):
                 continue
             attendees.append(a)
-        summary = str(ev.get("summary") or "").strip()[:300]
+        summary = collapse_ws(str(ev.get("summary") or ""))[:300]
         plans.append({
             "kind": "event",
             "name": name,
@@ -871,12 +999,14 @@ def ops_for_plan(plan, source, source_date):
             ops.append(op)
         if lines:
             ops.append({"op": "append_log", "uuid": plan["uuid"], "lines": lines})
-        if plan.get("interacted"):
+        # A typed fact is knowledge, not contact evidence — the calendar and
+        # Messages passes own LastContact; a fact must not move that clock.
+        if plan.get("interacted") and source.get("kind") != "fact":
             ops.append({"op": "bump_lastcontact", "uuid": plan["uuid"],
                         "date": source_date})
     else:
         fields = dict(plan["updates"])
-        if plan.get("interacted"):
+        if plan.get("interacted") and source.get("kind") != "fact":
             fields["lastcontact"] = source_date
         ops.append({"op": "ensure_person", "name": plan["name"],
                     "fields": fields, "log_lines": lines})
@@ -936,20 +1066,56 @@ def proposal_body(source, source_date, plans, ops):
     return "\n".join(lines)
 
 
+def fallback_review_body(source, source_date, text):
+    """Review stub for a fact capture the model extracted nothing from. The
+    empty ops fence makes approving it a harmless no-op that just clears it;
+    the intended moves are to file the fact by hand or delete the stub."""
+    return "\n".join([
+        f"# Review capture: {source['name']}",
+        "",
+        f"Source: [{source['name']}](x-devonthink-item://{source['uuid']})"
+        f" ({source_date})",
+        "",
+        "The local model found no filable fact in this capture. File it by "
+        "hand (add a bullet to the right Person's `## Biographical Log`), or "
+        "delete this to discard. Approving as-is applies nothing and clears it.",
+        "",
+        "## Captured text",
+        "",
+        text.strip(),
+        "",
+        "## Ops",
+        "",
+        "```json",
+        "[]",
+        "```",
+        "",
+    ])
+
+
 def stale_person_ops(ops, index, people):
     """`ensure_person` ops whose name no longer resolves the way the proposal
     assumed. The ops are frozen when the proposal is written, but the roster
     keeps growing: a proposal that says `ensure_person "Alison"` because People
     was empty at extraction time would, once "Alison Vance" is seeded, match
     nothing and quietly create a second record. `ensure_person` resolves on
-    exact name/alias only, so a shared name token is the signal. Returns
-    [(name, [near matches])]; `"confirm_new": true` in an op opts out."""
+    exact name/alias only, so a shared name token is the signal. A name
+    matching two or more roster records is stale too, regardless of
+    `confirm_new`: the bridge's ensure_person throws on multiple hits and
+    never reads that flag. Returns [(name, [near matches])]; `"confirm_new":
+    true` in an op opts out of the single near-match case only."""
     stale = []
     for op in ops:
-        if op.get("op") != "ensure_person" or op.get("confirm_new"):
+        if op.get("op") != "ensure_person":
             continue
         name = str(op.get("name", "")).strip()
-        if not name or index.get(norm(name)):
+        if not name:
+            continue
+        hits = index.get(norm(name)) or []
+        if len(hits) > 1:
+            stale.append((name, [h["name"] for h in hits]))
+            continue
+        if op.get("confirm_new") or hits:
             continue
         near = near_matches(name, people)
         if near:
@@ -1081,12 +1247,14 @@ def things_note_body(source_uuid, proposal_uuid, plans):
 
 
 def things_note_stub(source_uuid, proposal_uuid):
-    return "\n".join([
+    lines = [
         "This proposal can't be edited here — review it in DEVONthink, then",
         "complete this to-do to apply it as written, or cancel to reject.",
-        f"Source: x-devonthink-item://{source_uuid}",
-        f"{PROPOSAL_MARKER}{proposal_uuid}",
-    ])
+    ]
+    if source_uuid:
+        lines.append(f"Source: x-devonthink-item://{source_uuid}")
+    lines.append(f"{PROPOSAL_MARKER}{proposal_uuid}")
+    return "\n".join(lines)
 
 
 def _spec_fact(body, facts):
@@ -1316,6 +1484,10 @@ def proposal_uuid_from_notes(notes):
     return m.group(1) if m else None
 
 
+def things_note_is_editable(notes):
+    return SPEC_SENTINEL in (notes or "")
+
+
 def strip_banner(notes):
     lines = notes.split("\n")
     while lines and lines[0].startswith(BANNER_PREFIX):
@@ -1367,6 +1539,28 @@ def save_things_map(m):
 # ---------------------------------------------------------------------------
 
 
+def _mirror_lost(config, m, dry_run):
+    """True when the mirror project itself was deleted or completed out from
+    under mapped tasks — a project-level event, not N individual decisions.
+    Callers must not act on any mapped task this tick when this fires; the
+    caller that should recover (things_reconcile) resolves a fresh project
+    on its next _things_project call once the stale mapping is cleared."""
+    puuid = m.get("project_uuid")
+    if not puuid or things_bridge.project_alive(puuid) or not m["tasks"]:
+        return False
+    log.warning("Things project %r is gone or completed while %d mirrored "
+                "proposal(s) still existed; treating this as a lost mirror "
+                "rather than acting on each task — dropping the stale "
+                "mapping so it re-mirrors into a fresh project",
+                config["THINGS_PROJECT"], len(m["tasks"]))
+    if dry_run:
+        return True
+    m["tasks"] = {}
+    m["project_uuid"] = None
+    save_things_map(m)
+    return True
+
+
 def _things_project(config, m, dry_run):
     if m.get("project_uuid") and things_bridge.project_alive(m["project_uuid"]):
         return m["project_uuid"]
@@ -1396,24 +1590,34 @@ def _things_decisions(config, dry_run):
     m = load_things_map()
     if m is None:
         return
+    if _mirror_lost(config, m, dry_run):
+        return
     project = _things_project(config, m, dry_run)
     if project is None:
         return
     tasks = m["tasks"]
+    if tasks:
+        things_bridge.prewarm()
     token = things_bridge.auth_token()
 
     review = run_bridge([{"op": "list_group", "path": REVIEW_PATH}])[0]
     approved = run_bridge([{"op": "list_group", "path": APPROVED_PATH}])[0]
+    approved_uuids = {r["uuid"] for r in approved}
     # Rebuild only markers whose proposal still exists: every processed
     # decision leaves its task in the Logbook with the marker intact, and
     # resurrecting those would churn rebuild -> settle -> drop every run.
     live_proposals = ({r["uuid"] for r in review if r["name"] != "Approved"}
-                      | {r["uuid"] for r in approved})
+                      | approved_uuids)
     rows_by_proposal = {}
+    orphans = []
     for row in things_bridge.read_project_tasks(project):
         puuid = proposal_uuid_from_notes(row["notes"])
-        if puuid and puuid in live_proposals:
+        if not puuid:
+            continue
+        if puuid in live_proposals:
             rows_by_proposal.setdefault(puuid, []).append(row)
+        elif puuid not in tasks and row["status"] == 0 and not row["trashed"]:
+            orphans.append(row)
     rebuilt = 0
     for puuid, rows in rows_by_proposal.items():
         if puuid in tasks:
@@ -1424,6 +1628,11 @@ def _things_decisions(config, dry_run):
                         "of them to proceed", puuid)
             continue
         row = live[0] if live else rows[0]
+        # A rebuilt task without the editable sentinel might be a frozen
+        # stub, or an editable note whose sentinel line got stripped by
+        # hand — the two look identical from here. edit_disabled=False
+        # makes the ambiguous case bounce with a parse error on completion
+        # instead of silently applying frozen ops over real user edits.
         tasks[puuid] = {"task_uuid": row["uuid"], "source_uuid": None,
                         "fence_hash": None, "prepared_hash": None,
                         "warned": {}, "edit_disabled": False,
@@ -1433,6 +1642,22 @@ def _things_decisions(config, dry_run):
         log.info("rebuilt %d Things map entries from task notes", rebuilt)
         if not dry_run:
             save_things_map(m)
+    if orphans:
+        if dry_run:
+            log.info("[dry-run] would cancel %d orphaned Things task(s) for "
+                     "proposals that no longer exist in DEVONthink",
+                     len(orphans))
+        else:
+            for row in orphans:
+                if things_bridge.update_todo(row["uuid"], token,
+                                             {"canceled": "true"},
+                                             {"status": 2}):
+                    log.info("canceled an orphaned Things task for a "
+                             "proposal that no longer exists in "
+                             "DEVONthink", extra={"record_uuid": row["uuid"]})
+                else:
+                    log.info("could not cancel orphaned Things task %s "
+                             "(missing auth token?); will retry", row["uuid"])
 
     for rec in approved:
         entry = tasks.get(rec["uuid"])
@@ -1457,7 +1682,8 @@ def _things_decisions(config, dry_run):
         entry = tasks[puuid]
         try:
             _decide_task(config, m, puuid, entry,
-                         rows.get(entry["task_uuid"]), token, dry_run)
+                         rows.get(entry["task_uuid"]), token, dry_run,
+                         approved_uuids)
         except BridgeUnavailable:
             raise
         except Exception as exc:
@@ -1465,7 +1691,7 @@ def _things_decisions(config, dry_run):
                         puuid, type(exc).__name__, exc)
 
 
-def _decide_task(config, m, puuid, entry, row, token, dry_run):
+def _decide_task(config, m, puuid, entry, row, token, dry_run, approved_uuids):
     tasks = m["tasks"]
     if row is None:
         log.info("Things task for proposal %s is gone (emptied trash?); "
@@ -1476,7 +1702,10 @@ def _decide_task(config, m, puuid, entry, row, token, dry_run):
             save_things_map(m)
         return
     if row["status"] == 0 and not row["trashed"]:
-        if entry.pop("settle", None) is not None and not dry_run:
+        cleared = entry.pop("settle", None) is not None
+        cleared = entry.pop("prepared_hash", None) is not None or cleared
+        cleared = entry.pop("bounce_count", None) is not None or cleared
+        if cleared and not dry_run:
             save_things_map(m)
         return
     snap = settle_snapshot(row)
@@ -1489,6 +1718,18 @@ def _decide_task(config, m, puuid, entry, row, token, dry_run):
         return
     if row["status"] == 3 and not row["trashed"]:
         _approve_completed(config, m, puuid, entry, row, token, dry_run)
+        return
+    if puuid in approved_uuids:
+        # A failed completion write (e.g. no auth token) can leave a task
+        # mapped after DT already approved it; without this, canceling that
+        # stale task here would trash the user's explicit DT approval.
+        log.warning("Things task for proposal %s was canceled or deleted, "
+                    "but the proposal is already approved in DEVONthink; "
+                    "keeping the approval and dropping the stale Things "
+                    "mapping", puuid)
+        if not dry_run:
+            tasks.pop(puuid)
+            save_things_map(m)
         return
     if dry_run:
         log.info("[dry-run] would trash proposal %s (task canceled/deleted "
@@ -1507,11 +1748,21 @@ def _decide_task(config, m, puuid, entry, row, token, dry_run):
 
 
 def _bounce(m, puuid, entry, row, token, dry_run, message):
+    if entry.get("bounce_count", 0) >= BOUNCE_LIMIT:
+        log.error("Things task for proposal %s has bounced %d times without "
+                  "a successful re-open; leaving it for manual review",
+                  puuid, BOUNCE_LIMIT)
+        return
     log.warning("Things approval for proposal %s bounced: %s", puuid, message)
     entry.pop("settle", None)
     if dry_run:
         return
+    entry["bounce_count"] = entry.get("bounce_count", 0) + 1
     notes = f"{BANNER_PREFIX} {message}\n\n{strip_banner(row['notes'] or '')}"
+    params = {"auth-token": token or "", "id": entry["task_uuid"],
+              "completed": "false", "notes": notes}
+    if len(things_bridge.build_url("update", params)) > THINGS_URL_LIMIT:
+        notes = f"{BANNER_PREFIX} {message}"
     if not things_bridge.update_todo(
             entry["task_uuid"], token,
             {"completed": "false", "notes": notes},
@@ -1621,9 +1872,13 @@ def _approve_completed(config, m, puuid, entry, row, token, dry_run):
     stale = stale_person_ops(new_ops, index, people)
     if stale:
         warned = entry.setdefault("warned", {})
-        to_warn = [(n, near) for n, near in stale if norm(n) not in warned]
+        notes_sha = hashlib.sha256((row["notes"] or "").encode()).hexdigest()
+        # "Complete again unchanged to confirm" only holds if the notes are
+        # byte-identical to the warning; any other edit re-enters the normal
+        # bounce path instead of blindly trusting a stale confirmation.
+        to_warn = [(n, near) for n, near in stale
+                  if warned.get(norm(n)) != notes_sha]
         if to_warn:
-            notes_sha = hashlib.sha256((row["notes"] or "").encode()).hexdigest()
             for n, _ in to_warn:
                 warned[norm(n)] = notes_sha
             detail = "; ".join(f'"{n}" resembles {", ".join(near)}'
@@ -1670,6 +1925,9 @@ def _things_reconcile(config, dry_run):
     m = load_things_map()
     if m is None:
         return
+    # A lost mirror clears the stale mapping; _things_project then resolves
+    # a fresh one below in the same tick, so pending proposals re-mirror now.
+    _mirror_lost(config, m, dry_run)
     project = _things_project(config, m, dry_run)
     if project is None and not dry_run:
         return
@@ -1685,43 +1943,65 @@ def _things_reconcile(config, dry_run):
     for puuid, rec in pending.items():
         if puuid in tasks:
             continue
-        text = run_bridge([{"op": "get_text", "uuid": puuid}])[0]["text"]
         try:
-            ops = proposal_ops(text)
-        except ValueError:
-            ops = None
-        if not ops:
-            log.warning("proposal has no usable ops block; not mirroring it "
-                        "to Things",
-                        extra={"record_name": rec["name"], "record_uuid": puuid})
-            continue
-        if people is None:
-            people = run_bridge([{"op": "dump_people",
-                                  "include_bodies": False}])[0]
-        plans, editable, source_uuid = plans_from_ops(ops, people)
-        if not source_uuid:
-            editable = False
-        note = things_note_body(source_uuid, puuid, plans) if editable \
-            else things_note_stub(source_uuid, puuid)
-        if editable and len(things_bridge.build_url(
-                "add", things_bridge.add_todo_params(
-                    project, rec["name"], note, THINGS_WHEN))) > THINGS_URL_LIMIT:
-            note = things_note_stub(source_uuid, puuid)
-            editable = False
-        if dry_run:
-            log.info("[dry-run] would mirror proposal %s to Things%s",
-                     rec["name"], "" if editable else " (edit-disabled)")
-            continue
-        task_uuid = things_bridge.add_todo(project, rec["name"], note, puuid,
-                                           when=THINGS_WHEN)
-        tasks[puuid] = {"task_uuid": task_uuid, "source_uuid": source_uuid,
-                        "fence_hash": ops_hash(ops), "prepared_hash": None,
-                        "warned": {}, "edit_disabled": not editable,
-                        "created": datetime.now().strftime("%Y-%m-%dT%H:%M:%S")}
-        save_things_map(m)
-        log.info("mirrored proposal to Things%s",
-                 "" if editable else " (edit-disabled)",
-                 extra={"record_name": rec["name"], "record_uuid": puuid})
+            text = run_bridge([{"op": "get_text", "uuid": puuid}])[0]["text"]
+            try:
+                ops = proposal_ops(text)
+            except ValueError:
+                ops = None
+            if ops is not None and not ops:
+                # Intentional review-only stub (an empty fact capture): nothing
+                # to approve from Things, so it stays DEVONthink-side quietly.
+                continue
+            if not ops:
+                log.warning("proposal has no usable ops block; not mirroring "
+                            "it to Things",
+                            extra={"record_name": rec["name"],
+                                   "record_uuid": puuid})
+                continue
+            if people is None:
+                people = run_bridge([{"op": "dump_people",
+                                      "include_bodies": False}])[0]
+            plans, editable, source_uuid = plans_from_ops(ops, people)
+            if not source_uuid:
+                editable = False
+            note = things_note_body(source_uuid, puuid, plans) if editable \
+                else things_note_stub(source_uuid, puuid)
+            add_url = things_bridge.build_url("add", things_bridge.add_todo_params(
+                project, rec["name"], note, THINGS_WHEN))
+            if len(add_url) > THINGS_URL_LIMIT:
+                if editable:
+                    note = things_note_stub(source_uuid, puuid)
+                    editable = False
+                    add_url = things_bridge.build_url(
+                        "add", things_bridge.add_todo_params(
+                            project, rec["name"], note, THINGS_WHEN))
+                if len(add_url) > THINGS_URL_LIMIT:
+                    log.warning("proposal %s's Things note exceeds the URL "
+                                "size limit even as a stub (title too "
+                                "long?); not mirroring it", puuid,
+                                extra={"record_name": rec["name"],
+                                       "record_uuid": puuid})
+                    continue
+            if dry_run:
+                log.info("[dry-run] would mirror proposal %s to Things%s",
+                         rec["name"], "" if editable else " (edit-disabled)")
+                continue
+            task_uuid = things_bridge.add_todo(project, rec["name"], note,
+                                               puuid, when=THINGS_WHEN)
+            tasks[puuid] = {"task_uuid": task_uuid, "source_uuid": source_uuid,
+                            "fence_hash": ops_hash(ops), "prepared_hash": None,
+                            "warned": {}, "edit_disabled": not editable,
+                            "created": datetime.now().strftime("%Y-%m-%dT%H:%M:%S")}
+            save_things_map(m)
+            log.info("mirrored proposal to Things%s",
+                     "" if editable else " (edit-disabled)",
+                     extra={"record_name": rec["name"], "record_uuid": puuid})
+        except BridgeUnavailable:
+            raise
+        except Exception as exc:
+            log.warning("Things mirror for proposal %s failed: %s: %s",
+                        puuid, type(exc).__name__, exc)
 
     resolved = [p for p in list(tasks) if p not in pending and p not in approved]
     rows = things_bridge.read_tasks(
@@ -1765,24 +2045,49 @@ GENERATED_SECTIONS = frozenset({
     "## Journal", "## On This Day",
 })
 
+HEADING_RE = re.compile(r"^#{1,2}\s")
+
+# A bullet whose entire content is a machine-written cross-link or marker —
+# the journal/wikilink lines boox-process.py and the post-enrich smart rules
+# append to a daily note, or a bare provenance comment — with no free prose
+# of its own.
+MACHINE_LINK_BULLET_RE = re.compile(
+    r"^-\s+(?:\d{1,2}:\d{2}(?:am|pm):\s+)?"
+    r"(?:\[[^\]]*\]\(x-devonthink-item://[0-9A-Za-z-]+\)"
+    r"|x-devonthink-item://[0-9A-Za-z-]+"
+    r"|<!--[^>]*-->)\s*$",
+    re.IGNORECASE,
+)
+
 
 def strip_generated_sections(text):
     """Daily-note text minus the brief's machine-written sections (each
-    spans its header through the next `##` header, matching the bridge's
-    upsert_section). Extraction must only see human-authored content:
-    the briefing's attendee scaffolding otherwise round-trips into
-    attendance pseudo-facts, and On This Day re-surfaces old entries as
-    if they were dated today."""
+    spans its header through the next heading of level 1 or 2, matching the
+    bridge's section-span rule) and any bullet that is nothing but a
+    machine-written link or marker. Extraction must only see human-authored
+    content: the briefing's attendee scaffolding otherwise round-trips into
+    attendance pseudo-facts, On This Day re-surfaces old entries as if they
+    were dated today, and a late journal/post-enrich link line would
+    otherwise re-trigger extraction on a note nothing new was written into."""
     out, skipping = [], False
     for line in text.splitlines():
         stripped = line.strip()
-        if stripped.startswith("## "):
+        if HEADING_RE.match(stripped):
             skipping = stripped in GENERATED_SECTIONS
             if skipping:
                 continue
-        if not skipping:
-            out.append(line)
+        if skipping or MACHINE_LINK_BULLET_RE.match(stripped):
+            continue
+        out.append(line)
     return "\n".join(out)
+
+
+def normalize_source_text(kind, text):
+    if kind == "daily":
+        return strip_generated_sections(text)
+    if kind == "fact":
+        return strip_leading_h1(text)
+    return text
 
 
 LOCAL_TRANSPORTS = ("omlx", "ollama")
@@ -1804,9 +2109,9 @@ def pick_transport(config, kind):
         return local_pick((transport,))
     if transport == "local":
         return local_pick(LOCAL_TRANSPORTS)
-    if kind in ("daily", "journal", "handwritten"):
-        # Daily notes, journal entries, and handwritten notes are
-        # local-only by policy: personal content never reaches DT chat,
+    if kind in ("daily", "journal", "handwritten", "fact"):
+        # Daily notes, journal entries, handwritten notes, and fact captures
+        # are local-only by policy: personal content never reaches DT chat,
         # which may be a cloud provider.
         return local_pick(LOCAL_TRANSPORTS) if transport == "auto" else None
     if transport == "dtchat":
@@ -1881,7 +2186,10 @@ def scan(config, state, dry_run, force_uuid, user_invoked):
             if source_needs_filing(s, state)
             and not (skip_re and skip_re.search(s["name"]))
         ]
-        candidates.sort(key=source_date_of, reverse=True)
+        # Newest first, but a fact capture leads its day: a deliberate
+        # capture shouldn't wait behind same-day meetings for a MAX_PER_RUN slot.
+        candidates.sort(key=lambda s: (source_date_of(s), s["kind"] == "fact"),
+                        reverse=True)
 
     limit = int(config["MAX_PER_RUN"])
     filing_mode = config["FILING_MODE"]
@@ -1899,16 +2207,11 @@ def scan(config, state, dry_run, force_uuid, user_invoked):
         if extracted_count >= limit:
             break
         uuid = source["uuid"]
-        if uuid in state["parked"]:
-            # Discovery only surfaces a parked source when its content
-            # changed since parking; give it a fresh set of attempts.
-            attempts = 0
-            if not dry_run:
-                state["parked"].pop(uuid, None)
-                state["attempts"].pop(uuid, None)
-                save_state(state)
-        else:
-            attempts = (state["attempts"].get(uuid) or {}).get("count", 0)
+        parked = state["parked"].get(uuid)
+        # Discovery only surfaces a parked source when its content changed
+        # since parking; give it a fresh set of attempts.
+        attempts = 0 if parked is not None \
+            else (state["attempts"].get(uuid) or {}).get("count", 0)
         if attempts >= MAX_ATTEMPTS and not force_uuid:
             last_error = (state["attempts"].get(uuid) or {}).get(
                 "last_error", "")
@@ -1954,10 +2257,9 @@ def scan(config, state, dry_run, force_uuid, user_invoked):
 
         source_date = source_date_of(source)
         text = run_bridge([{"op": "get_text", "uuid": uuid}])[0]["text"]
-        if source["kind"] == "daily":
-            text = strip_generated_sections(text)
+        text = normalize_source_text(source["kind"], text)
         entry = state["processed"].get(uuid)
-        if entry is not None and entry.get("hash") == \
+        if uuid != force_uuid and entry is not None and entry.get("hash") == \
                 hashlib.sha256(text.encode()).hexdigest():
             # Metadata-only touch (tags, EntityFiled, sync churn): the text
             # already filed is unchanged, so just re-baseline the mod stamp.
@@ -1965,11 +2267,16 @@ def scan(config, state, dry_run, force_uuid, user_invoked):
                 entry["modified"] = source.get("modified", "")
                 save_state(state)
             continue
-        if len(text.split()) < 20:
+        if len(text.split()) < min_words_for(source["kind"]):
             if not dry_run:
                 remember_processed(state, source, text)
                 save_state(state)
             continue
+
+        if parked is not None and not dry_run:
+            state["parked"].pop(uuid, None)
+            state["attempts"].pop(uuid, None)
+            save_state(state)
 
         prompt = PROMPT_TEMPLATE.format(
             source_date=source_date,
@@ -1977,6 +2284,8 @@ def scan(config, state, dry_run, force_uuid, user_invoked):
             source_name=source["name"],
             content=cap_words(text),
         )
+        if source["kind"] == "fact":
+            prompt = FACT_PREFACE + prompt
         extracted_count += 1
         log.info("extracting via %s", transport,
                  extra={"record_name": source["name"],
@@ -2005,7 +2314,8 @@ def scan(config, state, dry_run, force_uuid, user_invoked):
                                        source_date)
             plans += build_event_plans(extracted_events, index, selves,
                                        source_date)
-            file_source(config, state, source, source_date, plans, filing_mode,
+            mode = effective_filing_mode(source["kind"], filing_mode)
+            file_source(config, state, source, source_date, plans, mode,
                         dry_run, text)
         except BridgeUnavailable:
             raise
@@ -2023,13 +2333,27 @@ def scan(config, state, dry_run, force_uuid, user_invoked):
                  "(TRANSPORT=%s)", no_transport, config["TRANSPORT"])
 
 
+def review_group_has_name(name):
+    """True when a record named `name` already sits in `_Review` — the guard
+    against a crash between create_record and save_state re-creating the
+    same proposal or stub on the next tick's retry."""
+    return any(r["name"] == name for r in
+               run_bridge([{"op": "list_group", "path": REVIEW_PATH}])[0])
+
+
 def file_source(config, state, source, source_date, plans, filing_mode,
                 dry_run, text):
+    is_fact = source.get("kind") == "fact"
     direct_ops = []
     proposal_plans = []
     for plan in plans:
-        if filing_mode == "auto" and plan["kind"] == "existing" \
-                and not plan.get("weak_match"):
+        strong = filing_mode == "auto" and plan["kind"] == "existing" \
+            and not plan.get("weak_match")
+        # A fact auto-applies only when its person is named unambiguously in
+        # the capture text; a bare first name the model expanded stays a proposal.
+        if strong and is_fact and not fact_match_is_strong(plan, text):
+            strong = False
+        if strong:
             direct_ops.extend(ops_for_plan(plan, source, source_date))
         else:
             proposal_plans.append(plan)
@@ -2039,9 +2363,15 @@ def file_source(config, state, source, source_date, plans, filing_mode,
         proposal_ops.extend(ops_for_plan(plan, source, source_date))
     proposal_ops.append({"op": "mark_filed", "uuid": source["uuid"]})
 
+    # A deliberately-authored fact must never vanish: when extraction yields
+    # nothing to apply or propose, surface the raw capture for manual review
+    # instead of silently marking it filed.
+    empty_fact = is_fact and not direct_ops and not proposal_plans
+
     if dry_run:
-        log.info("[dry-run] %s: %d direct ops, %d proposal plans",
-                 source["name"], len(direct_ops), len(proposal_plans))
+        log.info("[dry-run] %s: %d direct ops, %d proposal plans%s",
+                 source["name"], len(direct_ops), len(proposal_plans),
+                 " (empty fact → review stub)" if empty_fact else "")
         print(json.dumps({"source": source["name"], "direct": direct_ops,
                           "proposal": proposal_ops}, indent=2))
         return
@@ -2061,26 +2391,60 @@ def file_source(config, state, source, source_date, plans, filing_mode,
                         "record_uuid": source["uuid"]})
 
     if proposal_plans:
-        body = proposal_body(source, source_date, proposal_plans, proposal_ops)
-        run_bridge([{
-            "op": "create_record",
-            "name": f"File: {source['name']}",
-            "path": REVIEW_PATH,
-            "text": body,
-            "fields": {"documenttype": "Entity Filing Proposal"},
-        }])
-        log.info("proposal created (%d people)", len(proposal_plans),
-                 extra={"record_name": source["name"],
-                        "record_uuid": source["uuid"]})
+        proposal_name = f"File: {source['name']}"
+        if review_group_has_name(proposal_name):
+            log.warning("a proposal named %r already exists in _Review; not "
+                        "duplicating it", proposal_name,
+                        extra={"record_name": source["name"],
+                               "record_uuid": source["uuid"]})
+            run_bridge([{"op": "mark_filed", "uuid": source["uuid"]}])
+        else:
+            body = proposal_body(source, source_date, proposal_plans, proposal_ops)
+            run_bridge([{
+                "op": "create_record",
+                "name": proposal_name,
+                "path": REVIEW_PATH,
+                "text": body,
+                "fields": {"documenttype": "Entity Filing Proposal"},
+            }, {"op": "mark_filed", "uuid": source["uuid"]}])
+            log.info("proposal created (%d people)", len(proposal_plans),
+                     extra={"record_name": source["name"],
+                            "record_uuid": source["uuid"]})
+    elif empty_fact:
+        stub_name = f"Review capture: {source['name']}"
+        if review_group_has_name(stub_name):
+            log.warning("a review stub named %r already exists in _Review; "
+                        "not duplicating it", stub_name,
+                        extra={"record_name": source["name"],
+                               "record_uuid": source["uuid"]})
+            run_bridge([{"op": "mark_filed", "uuid": source["uuid"]}])
+        else:
+            run_bridge([{
+                "op": "create_record",
+                "name": stub_name,
+                "path": REVIEW_PATH,
+                "text": fallback_review_body(source, source_date, text),
+                "fields": {"documenttype": "Entity Filing Proposal"},
+            }, {"op": "mark_filed", "uuid": source["uuid"]}])
+            log.info("no filable fact extracted — capture surfaced for review",
+                     extra={"record_name": source["name"],
+                            "record_uuid": source["uuid"]})
     else:
         run_bridge([{"op": "mark_filed", "uuid": source["uuid"]}])
 
     # mark_filed just bumped the record's modification date; re-read it so
-    # the stored stamp doesn't immediately re-candidate the source.
+    # the stored stamp doesn't immediately re-candidate the source. Only
+    # adopt the fresh stamp when the record's content still matches what was
+    # actually filed — an edit landing during extraction would otherwise be
+    # stamped as already seen and never re-enter filing.
     modified = source.get("modified", "")
     try:
-        fresh = run_bridge([{"op": "get_source", "uuid": source["uuid"]}])[0]
-        modified = fresh.get("modified", "") or modified
+        fresh, fresh_text_res = run_bridge([
+            {"op": "get_source", "uuid": source["uuid"]},
+            {"op": "get_text", "uuid": source["uuid"]},
+        ])
+        if normalize_source_text(source.get("kind"), fresh_text_res["text"]) == text:
+            modified = fresh.get("modified", "") or modified
     except Exception:
         pass
     remember_processed(state, source, text, modified=modified)

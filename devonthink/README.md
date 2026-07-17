@@ -26,7 +26,7 @@ The Lorebook database syncs across every Mac over CloudKit, but exactly **one** 
 | `com.user.dt-daily-note` | ✅ | — |
 | `com.user.singlefile-watcher` | ✅ | — |
 | `com.user.boox-import-watcher` | ✅ | — |
-| `com.user.granola-import` | ✅ | — |
+| `com.user.boox-process` | ✅ | — |
 | `com.user.github-stars-import` | ✅ | — |
 | `com.user.dt-morning-brief` | ✅ | — |
 | `com.user.entity-filing` | ✅ | — |
@@ -51,7 +51,7 @@ echo driver > ~/.config/dt-pipeline/role      # or: echo follower > ~/.config/dt
 To flip roles by hand without a full setup run, boot out the driver-only agents yourself:
 
 ```bash
-for l in dt-daily-note singlefile-watcher boox-import-watcher granola-import \
+for l in dt-daily-note singlefile-watcher boox-import-watcher boox-process \
          github-stars-import dt-morning-brief entity-filing dt-database-archive; do
   launchctl bootout "gui/$(id -u)/com.user.$l" 2>/dev/null
 done
@@ -112,6 +112,7 @@ The pipeline keys on the following custom metadata fields. You do **not** create
 | Relationship        | Text            | `family` / `close-friend` / `friend` / `colleague` / `acquaintance`. Sets the Reconnect digest threshold (30/30/60/90 days; acquaintances never surface)                                                                                                                                     |
 | Email               | Text            | Person's email — the strongest calendar-attendee matching key for the morning brief                                                                                                                                                                                                          |
 | LastContact         | Text            | yyyy-mm-dd of last interaction. Bumped by `entity-filing.py` from meeting attendance and filed facts; only ever raised, never lowered                                                                                                                                                        |
+| FieldAsOf           | Multi-line Text | JSON object mapping a Person field name to the yyyy-mm-dd date of the source that last set it (`{"employer": "2026-05-01"}`). Written by `entity-dt-bridge.js`'s `set_field`, which refuses an update dated before the field's recorded date — an older source processed later can't clobber current state. Never edit by hand; a corrupt blob is treated as empty, degrading the guard to `expected_previous` checks                                                                 |
 | EntityFiled         | Boolean         | Set on source documents (meeting notes, handwritten notes, daily notes) once the entity-filing step has extracted them (or a proposal was applied). Authoritative gate is the state file; this flag is the in-DT audit trail                                                                 |
 
 > **Migration Note — `AI-Renamed` retired.** The earlier `AI-Renamed` boolean flag has been replaced by `NameLocked`. If any existing records still carry `AI-Renamed` metadata, you can safely ignore or batch-clear it; it is no longer referenced by any rule or script.
@@ -429,7 +430,7 @@ Default blocklist is `youtube.com`, `youtu.be`, `spotify.com`. Edit the file to 
 
 ### Logs
 
-Most pipeline components — the ingest smart rules, Python scripts, shell watchers — write to a single central log at `~/Library/Logs/devonthink-pipeline.log`. See the [Pipeline Logging](#pipeline-logging) section for the format and how to grep it. Exceptions: `import-granola.py` and `import-github-stars.py` keep their own log files (see their integration docs), `create-daily-note.sh` writes to `~/Library/Logs/dt-daily-note.log`, and the Util/formatting rules (`Process: Jots`, `Format: Boox Comments`, `Lint Markdown`, H1 sync) log only to DT's Log window. The SingleFile watcher's raw stdout/stderr also lands at `/tmp/singlefile-watcher.log` (launchd's capture) in case the pipeline log itself fails to write.
+Most pipeline components — the ingest smart rules, Python scripts, shell watchers — write to a single central log at `~/Library/Logs/devonthink-pipeline.log`. See the [Pipeline Logging](#pipeline-logging) section for the format and how to grep it. Exceptions: `import-granola.py` and `import-github-stars.py` keep their own log files, `create-daily-note.sh` writes to `~/Library/Logs/dt-daily-note.log`, and the Util/formatting rules (`Process: Jots`, `Format: Boox Comments`, `Lint Markdown`, H1 sync) log only to DT's Log window. The SingleFile watcher's raw stdout/stderr also lands at `/tmp/singlefile-watcher.log` (launchd's capture) in case the pipeline log itself fails to write.
 
 `dt-watchdog.sh` (every 5 minutes) is the consumer that makes failures visible: it scans the newly-written regions of the central log, `dt-daily-note.log`, and `github-stars-import.log` for `ERROR`/`WARN`/`ALERT` lines and raises a macOS notification per new failure signature (digit-stripped, re-notified at most daily; state in `~/.local/state/devonthink/watchdog-scan/`). It also verifies the two fswatch watcher agents have live processes (kickstarting and alerting when not) and flags `.html` files stuck in `~/Downloads/SingleFile/` for more than 15 minutes.
 
@@ -652,6 +653,8 @@ The remaining seeded rules are small conveniences. Most use embedded scripts or 
 
 DT-stock rules (Reminders, Filter Duplicates, Bates Numbering, chat-suggestion helpers, etc.) are not part of the pipeline and aren't documented here.
 
+> **Entity fact captures and the two global rules.** The "Capture Person Fact" Drafts action drops a Markdown record into `20_ENTITIES/_Facts` (source kind `fact`; see [docs/entities.md](docs/entities.md) → "Fact capture"). Because every enrichment/sweep/archive rule is scoped to `00_INBOX`, a `_Facts` record is never swept or archived — but the two **global** utility rules above still see it: the capture ships a body whose H1 already equals its title so **Sync H1 and Filename** is a no-op, and a `_Facts` record must **never be labelled**, or **After Labelling, Move to 99_ARCHIVE** would pull it out of `_Facts` before filing reads it.
+
 ## Notebook Dedup (at import)
 
 Boox re-exports are deduplicated twice: `boox-stage.sh` byte-hash short-circuits identical re-emissions before any work happens, and `boox-process.py` dedups by the `SourceFile` custom-metadata field (the original Boox filename, minus extension) at filing time. A new notebook imports into `00_INBOX` with its transcription already in the Finder comment and all pipeline flags set. A re-export whose `SourceFile` matches an existing record replaces that record's backing file in place — preserving its UUID, name, tags, and WikiLinks — refreshes the comment and metadata, sets `NeedsProcessing=1`, and moves it back to `00_INBOX`, where Post-Enrich & Archive re-runs its idempotent pass. Only new or edited pages are re-transcribed (per-page pixel signatures).
@@ -771,11 +774,14 @@ accrue backlinks without any extra effort.
 Division of labor: the LLM only converts messy text to structured JSON;
 deterministic scripts do all matching and writing through a single JXA
 gateway (`entity-dt-bridge.js`). Extraction is local-only (`TRANSPORT=local`:
-Qwen3.5-35B-A3B via oMLX/MLX in seconds, never cloud — it waits out server
+Qwen3-VL-32B-Instruct-4bit via oMLX/MLX in seconds, never cloud — it waits out server
 outages instead); recurring standup-class meetings are skipped
 by title regex; the brief also bumps `LastContact` from yesterday's completed
-calendar so the reconnect digest doesn't depend on jot discipline. Person and
-proposal groups are excluded from DT's AI chat. Full design, config
+calendar so the reconnect digest doesn't depend on jot discipline. Its identity
+resolver ranks attendee email, full names, calendar-context history, and bare
+title aliases. Unmatched attendees and Contacts-corroborated calendar-title
+names become review-only Person proposals. Person and proposal groups
+are excluded from DT's AI chat. Full design, config
 (`~/.config/dt-pipeline/entities.conf`), operations, and failure modes:
 [docs/entities.md](docs/entities.md).
 
@@ -798,15 +804,20 @@ State the repo can't stow or seed — reproduce by hand (or with the noted one-l
   osascript -e 'tell application id "DNtp" to set exclude from chat of (get record at "/10_DAILY" in database "Lorebook") to true'
   ```
 
-- **`20_ENTITIES/People` and `20_ENTITIES/_Review` are excluded from AI chat** for the same reason, applied the same way — Person records are distilled dossiers, more sensitive than any single note. Entity-layer automation reads them via AppleScript/JXA and is unaffected; DT chat and the DT MCP server cannot.
+- **`20_ENTITIES/People`, `20_ENTITIES/_Review`, `20_ENTITIES/_Review/Approved`, and `20_ENTITIES/_Facts` are excluded from AI chat** for the same reason, applied the same way — Person records are distilled dossiers and `_Facts` holds raw fact captures, both more sensitive than any single note. Entity-layer automation reads them via AppleScript/JXA and is unaffected; DT chat and the DT MCP server cannot.
 
 - **AI engine configuration** (Settings → AI): provider + model selection; API keys live in the macOS Keychain and are never captured by the repo.
-- **MCP server privacy** (Settings → AI): private-information **redaction is enabled** on the MCP server; re-toggle it on a fresh machine and confirm which databases are exposed before pointing any external AI client at them. Record/group AI exclusions (`/10_DAILY`, `20_ENTITIES/People`, `20_ENTITIES/_Review`) are database-level state and sync on their own.
+- **MCP server privacy** (Settings → AI): private-information **redaction is enabled** on the MCP server; re-toggle it on a fresh machine and confirm which databases are exposed before pointing any external AI client at them. Record/group AI exclusions (`/10_DAILY`, `20_ENTITIES/People`, `20_ENTITIES/_Review`, `20_ENTITIES/_Review/Approved`, `20_ENTITIES/_Facts`) are database-level state and sync on their own.
 - **Keyboard Maestro macros** — the AppleScripts they run are tracked in [`../keyboard-maestro/`](../keyboard-maestro/); the macro wrappers (hotkey triggers → Execute AppleScript) sync via KM's own iCloud syncing (`~/Library/Mobile Documents/com~apple~CloudDocs/Keyboard Maestro/Keyboard Maestro Macros.kmsync`), so a fresh machine gets them by signing into iCloud and enabling KM sync.
 - **Calendars access for osascript** — the morning brief reads EventKit from `/usr/bin/osascript`; the TCC grant can only be created interactively. Run `osascript -l JavaScript ~/.local/bin/calendar-events-json.js` once in a terminal and approve the prompt (or toggle osascript under System Settings → Privacy & Security → Calendars).
-- **oMLX (entity-extraction server)** — install the `.dmg` from the omlx GitHub releases (the Homebrew formula does not build on macOS 27), complete the app's first-run setup so `omlx start` manages the server across reboots, download the MLX model into `~/.omlx/models/` (`uvx --from 'huggingface_hub[cli]' hf download mlx-community/Qwen3.5-35B-A3B-4bit --local-dir ~/.omlx/models/Qwen3.5-35B-A3B-4bit`), copy `auth.api_key` from `~/.omlx/settings.json` into `OMLX_API_KEY` in `~/.config/dt-pipeline/entities.conf` (chmod 600), and set the per-model idle TTL in `http://localhost:8000/admin` — the field is **seconds** (300 ≈ 5 min). An Ollama fallback transport exists in the code but is not installed; extraction simply waits when oMLX is down.
+- **oMLX (entity-extraction server)** — install the `.dmg` from the omlx GitHub releases (the Homebrew formula does not build on macOS 27), complete the app's first-run setup so `omlx start` manages the server across reboots, download the MLX model into `~/.omlx/models/` (`uvx --from 'huggingface_hub[cli]' hf download mlx-community/Qwen3-VL-32B-Instruct-4bit --local-dir ~/.omlx/models/Qwen3-VL-32B-Instruct-4bit`), copy `auth.api_key` from `~/.omlx/settings.json` into `OMLX_API_KEY` in `~/.config/dt-pipeline/entities.conf` (chmod 600), and set the per-model idle TTL in `http://localhost:8000/admin` — the field is **seconds** (300 ≈ 5 min). An Ollama fallback transport exists in the code but is not installed; extraction simply waits when oMLX is down.
 - **Entity metadata display titles** — the entity fields were created by script, so DT shows their identifiers (`entitytype`, `lastcontact`, …) rather than CamelCase titles in the Info inspector. Cosmetic only; add display names in Settings → Data if it grates.
 - **Work calendar in macOS Calendar** — the brief only sees calendars added to macOS Calendar. Add your company email account with Calendars enabled in Settings → Internet Accounts for work-meeting briefs.
+- **Calendar identity contexts** — add `PERSONAL_CALENDARS` and
+  `WORK_CALENDARS` to `~/.config/dt-pipeline/entities.conf`. Each value is a
+  comma-separated list of calendar titles, EventKit calendar identifiers, or
+  source identifiers. Keep the values machine-local because calendar and account
+  names are personal data.
 
 ## Database Backup & Recovery
 
@@ -819,7 +830,6 @@ A *sync-store* loss plus a dead machine is the only scenario with no automated a
 
 ## Integrations
 
-- [Granola Integration](docs/granola.md) — automated meeting notes import from Granola
 - [GitHub Stars Integration](docs/github-stars.md) — automated bookmark import for starred repos
 - [Summarize Skill](docs/summarize.md) — on-demand content summarization via Claude Code
 - [Entity Layer](docs/entities.md) — person/place/event memory: morning briefings, reconnect digests, AI fact filing

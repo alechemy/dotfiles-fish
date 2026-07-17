@@ -880,5 +880,17 @@
 		<key>type</key>
 		<string>bool</string>
 	</dict>
+	<dict>
+		<key>date</key>
+		<real>805957117.525695</real>
+		<key>identifier</key>
+		<string>mdfieldasof</string>
+		<key>index</key>
+		<integer>77</integer>
+		<key>title</key>
+		<string>FieldAsOf</string>
+		<key>type</key>
+		<string>text</string>
+	</dict>
 </array>
 </plist>

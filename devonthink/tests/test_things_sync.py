@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import tempfile
 import unittest
@@ -306,12 +307,16 @@ class FakeThings:
         self.rows = {}
         self.added = []
         self.token = "tok"
+        self.prewarm_calls = 0
         self.build_url = tb.build_url
         self.add_todo_params = tb.add_todo_params
         self.ThingsError = tb.ThingsError
 
     def auth_token(self):
         return self.token
+
+    def prewarm(self):
+        self.prewarm_calls += 1
 
     def project_alive(self, uuid):
         return True
@@ -486,6 +491,124 @@ class Decisions(PhaseHarness):
         ef.things_decisions(self.config, dry_run=False)
         self.assertEqual(m["tasks"], {})
 
+    def test_reopened_task_clears_prepared_hash_and_bounce_count(self):
+        entry = map_entry(prepared_hash="stale-hash", bounce_count=2,
+                          settle={"status": 3, "trashed": 0,
+                                  "notes_sha": "x", "mod": 1.0})
+        m = self.fresh_map(**{"PROP-1": entry})
+        self.use_map(m)
+        self.fake.rows["T-1"] = task_row(status=0)
+        self.bridge(list_group=[])
+        ef.things_decisions(self.config, dry_run=False)
+        self.assertNotIn("settle", entry)
+        self.assertNotIn("prepared_hash", entry)
+        self.assertNotIn("bounce_count", entry)
+
+    def test_approved_in_dt_survives_stale_things_cancel(self):
+        self.fake.update_ok = False
+        m = self.fresh_map(**{"PROP-1": map_entry()})
+        self.use_map(m)
+        self.fake.rows["T-1"] = task_row(status=2, notes="n")
+        bridge = self.bridge(list_group=lambda op: (
+            [{"uuid": "PROP-1", "name": "File: X"}]
+            if op["path"] == ef.APPROVED_PATH else []))
+        ef.things_decisions(self.config, dry_run=False)
+        with capture_logs(ef) as logs:
+            ef.things_decisions(self.config, dry_run=False)
+        self.assertEqual(m["tasks"], {})
+        self.assertNotIn("trash", [c["op"] for c in bridge.calls])
+        self.assertTrue(any("already approved in DEVONthink" in msg
+                            for msg in logs.messages()))
+
+    def test_dead_project_skips_decisions_this_tick(self):
+        m = self.fresh_map(**{"PROP-1": map_entry()})
+        self.use_map(m)
+        self.fake.project_alive = lambda uuid: False
+        bridge = self.bridge(list_group=RuntimeError("must not be called"))
+        with capture_logs(ef) as logs:
+            ef.things_decisions(self.config, dry_run=False)
+        self.assertEqual(m["tasks"], {})
+        self.assertIsNone(m["project_uuid"])
+        self.assertEqual(bridge.calls, [])
+        self.assertTrue(any("lost mirror" in msg for msg in logs.messages()))
+
+    def test_prewarm_called_only_when_mappings_exist(self):
+        m = self.fresh_map()
+        self.use_map(m)
+        self.bridge(list_group=[])
+        ef.things_decisions(self.config, dry_run=False)
+        self.assertEqual(self.fake.prewarm_calls, 0)
+
+        m["tasks"]["PROP-1"] = map_entry()
+        self.fake.rows["T-1"] = task_row(status=0)
+        self.bridge(list_group=[])
+        ef.things_decisions(self.config, dry_run=False)
+        self.assertEqual(self.fake.prewarm_calls, 1)
+
+    def test_rebuild_without_sentinel_bounces_instead_of_freezing(self):
+        m = self.fresh_map()
+        self.use_map(m)
+        row = task_row(uuid="T-1",
+                       notes=f"stray note\n{ef.PROPOSAL_MARKER}PROP-1", status=0)
+        self.fake.project_tasks = [row]
+        self.fake.rows = {"T-1": row}
+        self.bridge(list_group=lambda op: (
+            [{"uuid": "PROP-1", "name": "File: X"}]
+            if op["path"] == ef.REVIEW_PATH else []))
+        ef.things_decisions(self.config, dry_run=False)
+        self.assertFalse(m["tasks"]["PROP-1"]["edit_disabled"])
+
+        ops = ef.ops_for_plan(existing_plan(), SOURCE, DATE)
+        ops.append({"op": "mark_filed", "uuid": "SRC-1"})
+        row["status"] = 3
+        settled(m["tasks"]["PROP-1"], row)
+        bridge = self.bridge(list_group=[],
+                             get_text={"uuid": "PROP-1", "text": fence_body(ops)},
+                             get_source=SOURCE)
+        with capture_logs(ef) as logs:
+            ef.things_decisions(self.config, dry_run=False)
+        self.assertIn("PROP-1", m["tasks"])
+        self.assertNotIn("move_to", [c["op"] for c in bridge.calls])
+        self.assertIn("could not parse the edited note",
+                      self.fake.updates[-1][1]["notes"])
+
+    def test_rebuild_cancels_orphaned_task_for_dead_proposal(self):
+        m = self.fresh_map()
+        self.use_map(m)
+        row = task_row(uuid="T-DEAD",
+                       notes=f"{ef.PROPOSAL_MARKER}PROP-DEAD", status=0)
+        self.fake.project_tasks = [row]
+        self.bridge(list_group=[])
+        ef.things_decisions(self.config, dry_run=False)
+        self.assertEqual(self.fake.updates, [("T-DEAD", {"canceled": "true"})])
+        self.assertEqual(m["tasks"], {})
+
+    def test_rebuild_baselines_fence_hash_on_completion(self):
+        plans = [existing_plan()]
+        ops = ef.ops_for_plan(plans[0], SOURCE, DATE)
+        ops.append({"op": "mark_filed", "uuid": "SRC-1"})
+        m = self.fresh_map()
+        self.use_map(m)
+        row = task_row(uuid="T-1", status=3, notes=note_for(plans))
+        self.fake.project_tasks = [row]
+        self.fake.rows = {"T-1": row}
+        self.bridge(list_group=lambda op: (
+            [{"uuid": "PROP-1", "name": "File: X"}]
+            if op["path"] == ef.REVIEW_PATH else []))
+        ef.things_decisions(self.config, dry_run=False)
+        entry = m["tasks"]["PROP-1"]
+        self.assertIsNone(entry["fence_hash"])
+        settled(entry, row)
+        self.bridge(
+            list_group=[], get_text={"uuid": "PROP-1", "text": fence_body(ops)},
+            get_source=SOURCE, dump_people=[person("Alison Vance", uuid="P-1")],
+            set_text={"uuid": "PROP-1"}, move_to={"uuid": "PROP-1"})
+        with capture_logs(ef) as logs:
+            ef.things_decisions(self.config, dry_run=False)
+        self.assertTrue(any("baselined the ops fence" in msg
+                            for msg in logs.messages(level=logging.INFO)))
+        self.assertEqual(m["tasks"], {})
+
 
 def settled(entry, row):
     entry["settle"] = ef.settle_snapshot(row)
@@ -652,6 +775,78 @@ class ApproveCompleted(PhaseHarness):
         self.assertEqual(self.fake.updates, [])
         self.assertIn("PROP-1", m["tasks"])
 
+    def test_reopen_clears_stale_prepared_hash_before_new_edit_applies(self):
+        plans = [existing_plan()]
+        ops = []
+        for plan in plans:
+            ops.extend(ef.ops_for_plan(plan, SOURCE, DATE))
+        ops.append({"op": "mark_filed", "uuid": "SRC-1"})
+        stale_hash = ef.ops_hash(ops)
+        entry = map_entry(fence_hash=stale_hash, prepared_hash=stale_hash)
+        m = self.fresh_map(**{"PROP-1": entry})
+        self.use_map(m)
+        self.fake.rows["T-1"] = task_row(status=0, notes=note_for(plans))
+        self.bridge(list_group=[], get_text={"uuid": "PROP-1",
+                                             "text": fence_body(ops)})
+        ef.things_decisions(self.config, dry_run=False)
+        self.assertIsNone(entry.get("prepared_hash"))
+
+        edited_notes = note_for(plans).replace("Ran a marathon.", "Ran an ultra.")
+        row = self.fake.rows["T-1"]
+        row["status"], row["notes"] = 3, edited_notes
+        settled(entry, row)
+        bridge = self.bridge(
+            list_group=[], get_text={"uuid": "PROP-1", "text": fence_body(ops)},
+            get_source=SOURCE, dump_people=[person("Alison Vance", uuid="P-1")],
+            set_text={"uuid": "PROP-1"}, move_to={"uuid": "PROP-1"})
+        ef.things_decisions(self.config, dry_run=False)
+        set_text_call = next(c for c in bridge.calls if c["op"] == "set_text")
+        self.assertIn("Ran an ultra.", set_text_call["text"])
+        self.assertNotIn("Ran a marathon.", set_text_call["text"])
+        self.assertEqual(m["tasks"], {})
+
+    def test_near_match_confirm_requires_truly_unchanged_notes(self):
+        roster = [person("Alison Vance", uuid="P-1")]
+        plans = [new_plan(name="Alison")]
+        bridge, m = self.proposal_setup(plans=plans, roster=roster)
+        ef.things_decisions(self.config, dry_run=False)
+        self.assertIn("alison", m["tasks"]["PROP-1"]["warned"])
+
+        row = self.fake.rows["T-1"]
+        row["status"] = 3
+        row["notes"] = row["notes"] + "\n"
+        settled(m["tasks"]["PROP-1"], row)
+        ef.things_decisions(self.config, dry_run=False)
+        self.assertNotIn("set_text", [c["op"] for c in bridge.calls])
+        self.assertIn("PROP-1", m["tasks"])
+        self.assertIn("resembles Alison Vance", self.fake.updates[-1][1]["notes"])
+
+    def test_bounce_increments_count(self):
+        self.proposal_setup(notes="=== proposed v1 ===\ngarbage")
+        ef.things_decisions(self.config, dry_run=False)
+        self.assertEqual(self.m["tasks"]["PROP-1"]["bounce_count"], 1)
+
+    def test_bounce_stops_after_limit(self):
+        self.proposal_setup(notes="=== proposed v1 ===\ngarbage")
+        self.entry["bounce_count"] = ef.BOUNCE_LIMIT
+        with capture_logs(ef) as logs:
+            ef.things_decisions(self.config, dry_run=False)
+        self.assertEqual(self.fake.updates, [])
+        self.assertTrue(any("manual review" in msg for msg in logs.messages()))
+
+    def test_bounce_reopen_note_sized_against_url_limit(self):
+        huge_notes = "x" * (ef.THINGS_URL_LIMIT * 2)
+        self.proposal_setup(notes=huge_notes,
+                            get_text={"uuid": "PROP-1", "text": "no fence here"})
+        ef.things_decisions(self.config, dry_run=False)
+        notes = self.fake.updates[-1][1]["notes"]
+        self.assertTrue(notes.startswith(ef.BANNER_PREFIX))
+        self.assertNotIn("x" * 50, notes)
+        self.assertLessEqual(
+            len(tb.build_url("update", {"auth-token": "tok", "id": "T-1",
+                                        "completed": "false", "notes": notes})),
+            ef.THINGS_URL_LIMIT)
+
 
 class Reconcile(PhaseHarness):
     def pending_proposal(self, plans, roster):
@@ -699,6 +894,73 @@ class Reconcile(PhaseHarness):
         self.pending_proposal(plans, [])
         ef.things_reconcile(self.config, dry_run=False)
         self.assertTrue(m["tasks"]["PROP-1"]["edit_disabled"])
+
+    def test_oversized_stub_title_skips_mirroring(self):
+        m = self.fresh_map()
+        self.use_map(m)
+        huge_name = "File: " + "x" * ef.THINGS_URL_LIMIT
+        ops = ef.ops_for_plan(existing_plan(), SOURCE, DATE)
+        ops.append({"op": "mark_filed", "uuid": "SRC-1"})
+        self.bridge(
+            list_group=lambda op: [] if op["path"] == ef.APPROVED_PATH
+            else [{"uuid": "PROP-1", "name": huge_name}],
+            get_text={"uuid": "PROP-1", "text": fence_body(ops)}, dump_people=[])
+        with capture_logs(ef) as logs:
+            ef.things_reconcile(self.config, dry_run=False)
+        self.assertEqual(self.fake.added, [])
+        self.assertEqual(m["tasks"], {})
+        self.assertTrue(any("exceeds the URL size limit even as a stub" in msg
+                            for msg in logs.messages()))
+
+    def test_empty_ops_stub_skips_silently(self):
+        m = self.fresh_map()
+        self.use_map(m)
+        self.bridge(
+            list_group=lambda op: [] if op["path"] == ef.APPROVED_PATH
+            else [{"uuid": "PROP-1", "name": "File: X"}],
+            get_text={"uuid": "PROP-1", "text": fence_body([])})
+        with capture_logs(ef) as logs:
+            ef.things_reconcile(self.config, dry_run=False)
+        self.assertEqual(self.fake.added, [])
+        self.assertEqual(m["tasks"], {})
+        self.assertFalse(logs.messages())
+
+    def test_poison_proposal_does_not_stall_others_or_cancel_pass(self):
+        m = self.fresh_map(**{"PROP-GONE": map_entry(task_uuid="T-9")})
+        self.use_map(m)
+        self.fake.rows["T-9"] = task_row(uuid="T-9", status=0)
+        ops_good = ef.ops_for_plan(new_plan(), SOURCE, DATE)
+        ops_good.append({"op": "mark_filed", "uuid": "SRC-1"})
+
+        def get_text(op):
+            if op["uuid"] == "PROP-BAD":
+                raise RuntimeError("bridge op get_text failed: boom")
+            return {"uuid": "PROP-GOOD", "text": fence_body(ops_good)}
+
+        self.bridge(
+            list_group=lambda op: [] if op["path"] == ef.APPROVED_PATH
+            else [{"uuid": "PROP-BAD", "name": "File: Bad"},
+                  {"uuid": "PROP-GOOD", "name": "File: Good"}],
+            get_text=get_text, dump_people=[])
+        with capture_logs(ef) as logs:
+            ef.things_reconcile(self.config, dry_run=False)
+        self.assertEqual(len(self.fake.added), 1)
+        self.assertEqual(self.fake.added[0][2], "PROP-GOOD")
+        self.assertEqual(self.fake.updates, [("T-9", {"canceled": "true"})])
+        self.assertTrue(any("Things mirror for proposal PROP-BAD failed" in msg
+                            for msg in logs.messages()))
+
+    def test_dead_project_drops_mappings_and_remirrors(self):
+        m = self.fresh_map(**{"PROP-OLD": map_entry(task_uuid="T-OLD")})
+        self.use_map(m)
+        self.fake.project_alive = lambda uuid: False
+        self.pending_proposal([new_plan()], [])
+        with capture_logs(ef) as logs:
+            ef.things_reconcile(self.config, dry_run=False)
+        self.assertEqual(m["project_uuid"], "PROJ-1")
+        self.assertNotIn("PROP-OLD", m["tasks"])
+        self.assertIn("PROP-1", m["tasks"])
+        self.assertTrue(any("lost mirror" in msg for msg in logs.messages()))
 
     def test_resolved_proposal_cancels_open_task(self):
         m = self.fresh_map(**{"PROP-GONE": map_entry(task_uuid="T-9")})
@@ -758,6 +1020,37 @@ class MapFile(unittest.TestCase):
         finally:
             ef.THINGS_MAP_FILE = orig
         self.assertEqual(m["tasks"], {})
+
+    def test_wrong_schema_version_returns_none(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "map.json")
+            with open(path, "w") as f:
+                json.dump({"version": 999, "project_uuid": None, "tasks": {}}, f)
+            orig = ef.THINGS_MAP_FILE
+            ef.THINGS_MAP_FILE = path
+            try:
+                with capture_logs(ef) as logs:
+                    self.assertIsNone(ef.load_things_map())
+                self.assertTrue(any("unrecognized schema" in msg
+                                    for msg in logs.messages()))
+            finally:
+                ef.THINGS_MAP_FILE = orig
+
+
+class UpdateTodoShortCircuit(unittest.TestCase):
+    def test_already_satisfied_skips_the_fire(self):
+        def boom_fire(url):
+            raise AssertionError("must not fire a URL when already satisfied")
+
+        orig_read, orig_fire = tb.read_tasks, tb._fire
+        tb.read_tasks = lambda uuids: {
+            "T-1": {"uuid": "T-1", "status": 3, "notes": "n"}}
+        tb._fire = boom_fire
+        try:
+            self.assertTrue(tb.update_todo(
+                "T-1", "tok", {"completed": "true"}, {"status": 3}))
+        finally:
+            tb.read_tasks, tb._fire = orig_read, orig_fire
 
 
 class AuthToken(unittest.TestCase):

@@ -1,24 +1,22 @@
 #!/usr/bin/python3
 """
-import-granola.py — Import Granola meeting notes into DEVONthink.
+import-granola.py — retired Granola meeting-notes importer, kept as a skeleton.
 
-Entry point. Spawns import-granola-parse.py as a subprocess to read
-Granola's local SQLCipher store (the parser owns the cryptography /
-sqlcipher3 / ccl-chromium-reader deps via uv's PEP 723 inline
-metadata), then imports each returned meeting into DEVONthink via
-osascript.
+Granola moved the local SQLCipher decryption key to a Team-ID-scoped
+keychain entry this script has no entitlement to read, so the companion
+parser it depends on (import-granola-parse.py) has been deleted and this
+entry point no longer runs end to end. Nothing loads or schedules it.
 
-The split exists for TCC stability: this script runs under the
-Apple-signed /usr/bin/python3 so AppleEvents to DEVONthink come from
-a signed sender whose identity persists across system updates.
-Adhoc-signed binaries (uv, Homebrew/mise Python) rotate paths and
-CDHashes on upgrade and would re-prompt for Automation permission.
+The file is kept because everything past the parser boundary — state
+tracking, idempotent DEVONthink import via osascript, failure reporting,
+--dry-run/--force/--rebuild-state — is reusable if a parser built on
+Granola's public API replaces the deleted local-decryption one. Such a
+parser should keep the same split: this script runs under the
+Apple-signed /usr/bin/python3 so AppleEvents to DEVONthink come from a
+signed sender whose identity persists across system updates, while the
+parser stays adhoc-signed (uv) and out of the AppleEvents path entirely.
 
-See ~/.local/share/granola-import/NOTES.md for the broader
-architecture, schema reference, debug recipes, and likely breakage
-modes.
-
-Usage:
+Usage (once a parser is restored):
     import-granola.py                  # import new meetings
     import-granola.py --dry-run        # preview without importing
     import-granola.py --force ID       # re-import a specific document ID

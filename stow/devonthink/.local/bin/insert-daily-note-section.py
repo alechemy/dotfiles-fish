@@ -80,7 +80,7 @@ def main():
     else:
         section_end = len(lines)
         for i in range(header_idx + 1, len(lines)):
-            if re.match(r"^#{1,2}\s", lines[i]):
+            if re.match(r"^#{1,2}\s", lines[i].strip()):
                 section_end = i
                 break
         # Insert immediately after the last non-blank line within the section,

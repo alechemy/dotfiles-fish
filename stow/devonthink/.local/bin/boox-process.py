@@ -84,7 +84,6 @@ from pipeline_log import setup as setup_log
 log = setup_log("boox-process")
 
 BRIDGE = os.path.expanduser("~/.local/bin/entity-dt-bridge.js")
-INSERT_SECTION = os.path.expanduser("~/.local/bin/insert-daily-note-section.py")
 CONFIG_FILE = os.path.expanduser("~/.config/dt-pipeline/journal.conf")
 ENTITIES_CONFIG = os.path.expanduser("~/.config/dt-pipeline/entities.conf")
 STATE_DIR = os.path.expanduser("~/.local/state/devonthink")
@@ -123,8 +122,6 @@ MD_HEADER_RE = re.compile(r"^\s*#+\s")
 
 OCR_ROLE = "You transcribe handwritten note pages into clean Markdown."
 OCR_RULES = """\
-- Use ## / ### headers for titles and section breaks (replace underlines \
-or horizontal rules).
 - Replace middle dots, bullet characters, and other non-standard list \
 markers with standard Markdown bullets (-), preserving nesting via \
 indentation.
@@ -145,6 +142,8 @@ anything.
 Rules:
 - The page begins with a handwritten date line (e.g. "Fri, Jul 11"). \
 Transcribe it verbatim as a level-1 heading: "# Fri, Jul 11".
+- Use ## / ### headers for section titles and section breaks (replace \
+underlines or horizontal rules). Reserve # for the date line.
 """ + OCR_RULES
 
 NOTE_OCR_PROMPT = """\
@@ -153,6 +152,9 @@ original content exactly — do not add, remove, rephrase, or comment on \
 anything. If a heading ends with "(cont.)", keep it verbatim.
 
 Rules:
+- The page's title is a level-1 heading (e.g. "# Project Kickoff"). Use \
+## / ### headers for section titles and section breaks within the page \
+(replace underlines or horizontal rules).
 """ + OCR_RULES
 
 METADATA_ROLE = ("You are a document cataloguing assistant that responds "
@@ -233,10 +235,19 @@ def load_config():
 
 
 def load_state():
+    """Fail closed on a corrupt state file: entries is the sole date->UUID
+    mapping, and starting from empty state would duplicate every journal
+    record."""
     if not os.path.exists(STATE_FILE):
         return {"schema": STATE_SCHEMA_VERSION, "notebooks": {}}
-    with open(STATE_FILE) as f:
-        state = json.load(f)
+    try:
+        with open(STATE_FILE) as f:
+            state = json.load(f)
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RuntimeError(
+            f"state file {STATE_FILE} is unreadable ({exc}); inspect or "
+            f"remove it, then run boox-process.py --rebuild-state"
+        ) from exc
     if state.get("schema") != STATE_SCHEMA_VERSION:
         log.warning("state schema %s != %s, starting fresh",
                     state.get("schema"), STATE_SCHEMA_VERSION)
@@ -307,25 +318,35 @@ def sha256_file(path):
     return h.hexdigest()
 
 
+def run_magick(args, timeout):
+    env = dict(os.environ)
+    # magick rasterizes PDF by exec'ing `gs` off PATH, which launchd does not populate.
+    env["PATH"] = os.pathsep.join(
+        p for p in (os.path.dirname(MAGICK), env.get("PATH")) if p)
+    proc = subprocess.run([MAGICK] + args, capture_output=True, text=True,
+                          timeout=timeout, env=env)
+    if proc.returncode != 0:
+        detail = " ".join(proc.stderr.split()) or "no stderr"
+        raise RuntimeError(f"magick exited {proc.returncode}: {detail[:500]}")
+    return proc
+
+
 def render_pages(pdf_path, workdir, density):
     if os.path.isdir(workdir):
         shutil.rmtree(workdir)
     os.makedirs(workdir)
-    subprocess.run(
-        [MAGICK, "-density", str(density), pdf_path,
+    run_magick(
+        ["-density", str(density), pdf_path,
          "-colorspace", "gray", "-background", "white",
          "-alpha", "remove", "-alpha", "off",
          os.path.join(workdir, "page-%04d.png")],
-        check=True, capture_output=True, timeout=600,
+        timeout=600,
     )
     return sorted(glob.glob(os.path.join(workdir, "page-*.png")))
 
 
 def page_signatures(pngs):
-    out = subprocess.run(
-        [MAGICK, "identify", "-format", "%#\n"] + pngs,
-        check=True, capture_output=True, text=True, timeout=300,
-    )
+    out = run_magick(["identify", "-format", "%#\n"] + pngs, timeout=300)
     sigs = out.stdout.split()
     if len(sigs) != len(pngs):
         raise RuntimeError(
@@ -435,6 +456,21 @@ def assemble_pages(texts):
     return "\n\n".join(parts)
 
 
+def promote_title(markdown):
+    """A note's opening heading is its title, so it belongs at level 1. The
+    model still demotes it to ## on occasion; promote it only when the
+    document has no level-1 heading, leaving section headings where they
+    were transcribed."""
+    lines = markdown.splitlines()
+    if any(line.startswith("# ") for line in lines):
+        return markdown
+    first = next((k for k, l in enumerate(lines) if l.strip()), None)
+    if first is None or not lines[first].startswith("## "):
+        return markdown
+    lines[first] = lines[first][1:]
+    return "\n".join(lines) + ("\n" if markdown.endswith("\n") else "")
+
+
 def markdownlint_fix(text):
     fd, tmp = tempfile.mkstemp(suffix=".md")
     try:
@@ -454,11 +490,11 @@ def convert_tiff(pdf_path, workdir, stem):
     """Monochrome Group4 TIFF, the stored record artifact — same recipe as
     the retired boox-import.sh (flattening matters for vector PDFs)."""
     out = os.path.join(workdir, f"{stem}.tiff")
-    subprocess.run(
-        [MAGICK, "-density", str(TIFF_DENSITY), pdf_path,
+    run_magick(
+        ["-density", str(TIFF_DENSITY), pdf_path,
          "-background", "white", "-alpha", "remove", "-alpha", "off",
          "-threshold", "50%", "-monochrome", "-compress", "Group4", out],
-        check=True, capture_output=True, timeout=300)
+        timeout=300)
     size = os.path.getsize(out)
     if size > MAX_TIFF_MB * 1024 * 1024:
         raise RuntimeError(f"TIFF too large ({size} bytes)")
@@ -596,6 +632,15 @@ def upsert_entry(notebook_name, entry_date, page_index, sig, text, entries):
         ])
         existing["text_sha"] = text_sha
         return existing["uuid"], True
+    path = f"{JOURNAL_GROUP}/{entry_date.year}/{name}"
+    found = run_bridge([{"op": "get_at_path", "path": path}])[0]
+    if found:
+        run_bridge([
+            {"op": "set_text", "uuid": found["uuid"], "text": text},
+            {"op": "set_fields", "uuid": found["uuid"], "fields": fields},
+        ])
+        entries[iso] = {"uuid": found["uuid"], "text_sha": text_sha}
+        return found["uuid"], True
     uuid = run_bridge([{
         "op": "create_record",
         "name": name,
@@ -656,16 +701,9 @@ def link_daily_note(entry_date, uuid):
     daily = run_bridge([{"op": "get_or_create_daily",
                          "date": entry_date.isoformat(),
                          "heading": heading}])[0]
-    if uuid in daily["text"]:
-        return
     line = f"- [\U0001F4D4 Journal](x-devonthink-item://{uuid})"
-    result = subprocess.run(
-        ["/usr/bin/python3", INSERT_SECTION,
-         "--header", DAILY_SECTION, "--content", line],
-        input=daily["text"], capture_output=True, text=True, check=True,
-    )
-    run_bridge([{"op": "set_text", "uuid": daily["uuid"],
-                 "text": result.stdout}])
+    run_bridge([{"op": "insert_under_section", "uuid": daily["uuid"],
+                 "header": DAILY_SECTION, "line": line}])
 
 
 def file_regular_note(stem, tiff_path, markdown, meta):
@@ -682,8 +720,9 @@ def file_regular_note(stem, tiff_path, markdown, meta):
         "Commented": 1,
         "AIEnriched": 1,
         "DocumentType": "Handwritten Note",
-        "EventDate": meta["eventDate"] if meta else "",
     }
+    if meta is not None:
+        fields["EventDate"] = meta["eventDate"]
     if meta and meta["summary"]:
         fields["summary"] = meta["summary"]
     hits = run_bridge([{"op": "find_by_field", "field": "SourceFile",
@@ -824,7 +863,7 @@ def process_notebook(pdf_path, state, config, dry_run, force, budget,
         return processed
 
     if not is_journal:
-        if not file_note_if_needed(nb, stem, pdf_path, workdir, config):
+        if not file_note_if_needed(nb, stem, pdf_path, workdir, config, state):
             return processed
     finish_notebook(basename, pdf_sha, pdf_path, workdir)
     return processed
@@ -927,12 +966,12 @@ def process_note_pages(nb, basename, workdir, pending, config, budget, state):
     return processed
 
 
-def file_note_if_needed(nb, stem, pdf_path, workdir, config):
+def file_note_if_needed(nb, stem, pdf_path, workdir, config, state):
     """Assemble, enrich, and upsert a completed regular notebook. Returns
     True when the notebook is fully filed (caller may clean up), False
     when filing must be retried next run."""
-    markdown = markdownlint_fix(
-        assemble_pages([p.get("text", "") for p in nb["pages"]]))
+    markdown = markdownlint_fix(promote_title(
+        assemble_pages([p.get("text", "") for p in nb["pages"]])))
     content_sha = hashlib.sha256(markdown.encode()).hexdigest()
     hits = run_bridge([{"op": "find_by_field", "field": "SourceFile",
                         "value": stem}])[0]
@@ -954,6 +993,7 @@ def file_note_if_needed(nb, stem, pdf_path, workdir, config):
     uuid, status = file_regular_note(stem, tiff, markdown, meta)
     nb["filed_sha"] = content_sha
     nb["dirty"] = False
+    save_state(state)
     log.info("%s %s as %s (eventDate=%s)", stem, status, uuid,
              (meta or {}).get("eventDate", "") or "none")
     return True
@@ -970,7 +1010,9 @@ def rebuild_state(state):
     re-derives them, with matching text hashes preventing DT churn."""
     try:
         years = run_bridge([{"op": "list_group", "path": JOURNAL_GROUP}])[0]
-    except (RuntimeError, BridgeUnavailable) as exc:
+    except BridgeUnavailable:
+        raise
+    except RuntimeError as exc:
         log.info("no journal group to rebuild from: %s", exc)
         return
     rebuilt = 0
@@ -999,6 +1041,17 @@ def rebuild_state(state):
             rebuilt += 1
     save_state(state)
     log.info("state rebuild: %d entr(ies) reseeded from DT", rebuilt)
+
+
+def auto_rebuild_if_missing(state, state_file_existed, dry_run):
+    """A first-ever or lost state file reseeds entries from DT instead of
+    starting empty, which would mint a duplicate journal record for every
+    date DT already has filed."""
+    if state_file_existed or dry_run:
+        return
+    log.warning("state file missing, rebuilding entries from DT before "
+                "processing")
+    rebuild_state(state)
 
 
 def print_status(state):
@@ -1066,11 +1119,14 @@ def main():
             return
 
     config = load_config()
+    state_file_existed = os.path.exists(STATE_FILE)
     state = load_state()
 
     if rebuild:
         rebuild_state(state)
         return
+
+    auto_rebuild_if_missing(state, state_file_existed, dry_run)
 
     staged = sorted(glob.glob(os.path.join(STAGING_DIR, "*.pdf")))
     if not staged:
@@ -1113,4 +1169,8 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as exc:
+        log.error("FATAL: %s: %s", type(exc).__name__, exc)
+        sys.exit(1)

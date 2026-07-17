@@ -39,7 +39,7 @@ SingleFile ingestion is OUT of smart rules — it's Python scripts + an fswatch 
   → Post-Enrich & Archive (action items → Things 3, daily notes extraction + wikilinks, archive to 99_ARCHIVE) → move only on success
 ```
 
-Smart rule scripts live in `../stow/devonthink/Library/Application Scripts/com.devon-technologies.think/Smart Rules/`. Standalone Python helpers called by those scripts live in `../stow/devonthink/.local/bin/`. Standalone AppleScript utilities live in `utils/`. Integration docs (Granola, GitHub Stars, Summarize, Boox/Journal) live in `docs/`. The canonical reference for rule criteria, triggers, and actions is `README.md`.
+Smart rule scripts live in `../stow/devonthink/Library/Application Scripts/com.devon-technologies.think/Smart Rules/`. Standalone Python helpers called by those scripts live in `../stow/devonthink/.local/bin/`. Standalone AppleScript utilities live in `utils/`. Integration docs (GitHub Stars, Summarize, Boox/Journal) live in `docs/`. The canonical reference for rule criteria, triggers, and actions is `README.md`.
 
 The **entity layer** (`/20_ENTITIES` — Person/Place/Event records, morning briefing, AI fact filing) sits outside the smart-rule state machine: two launchd-driven tier-1 Python orchestrators (`dt-morning-brief.py`, `entity-filing.py`) do all DEVONthink I/O through a single JXA gateway, `entity-dt-bridge.js`, invoked via `/usr/bin/osascript -l JavaScript` with a JSON ops file. Anything JSON-heavy that talks to DT should go through (or extend) that bridge rather than round-tripping JSON through AppleScript records. Design doc: `docs/entities.md`. JXA gotcha learned there: never probe speculative properties on a DT object specifier (`typeof rec.isNil`) — any property access fires an AppleEvent; commands return `null` for missing records, so null-check instead.
 
@@ -55,11 +55,10 @@ writes to `~/Library/Logs/devonthink-pipeline.log` — a test that exercises a
 warning path would otherwise make `dt-watchdog.sh` raise a desktop
 notification.
 
-The suite covers the pure functions that carry the logic (`md_enum`,
-`real_attendees`, `contact_bumps`, `build_reconnect`, `person_summary_line`,
-`stale_person_ops`, `build_person_plans`, `ops_for_plan`, `pick_transport`,
-`load_state`). Anything needing DEVONthink is out of scope — drive the bridge
-by hand for that, and clean up the records you create.
+The suite covers the pure functions that carry the logic — see
+`devonthink/tests/` for the current coverage. Anything needing DEVONthink is
+out of scope — drive the bridge by hand for that, and clean up the records
+you create.
 
 `test_calendar_canary.py` and `test_contacts_canary.py` are the exception:
 they run the real `calendar-events-json.js` / `contacts-json.js` against the
@@ -124,7 +123,7 @@ their failures still notify.
 
 The DEVONthink MCP server is the **interactive** interface — use it freely from an AI session for searches, reads, and one-off record work. It is never a pipeline transport: launchd automation must not depend on a server process or session being alive, so runtime code talks to DT only via `/usr/bin/osascript` (AppleScript or `entity-dt-bridge.js`). Rules for sessions using the MCP tools:
 
-- `/20_ENTITIES/People` and `/20_ENTITIES/_Review` are excluded from AI access; MCP tools refuse their UUIDs ("Record is excluded from AI access") and omit them from results. This is by design, not breakage — operate on entity records via osascript/the bridge instead. Same applies to `/10_DAILY` and `/15_JOURNAL`.
+- `/20_ENTITIES/People`, `/20_ENTITIES/_Review`, `/20_ENTITIES/_Review/Approved`, and `/20_ENTITIES/_Facts` are excluded from AI access; MCP tools refuse their UUIDs ("Record is excluded from AI access") and omit them from results. This is by design, not breakage — operate on entity records via osascript/the bridge instead. Same applies to `/10_DAILY` and `/15_JOURNAL`.
 - Custom-metadata writes through MCP auto-create fields (typos become new fields) and can flip the flags the smart-rule state machine keys on (`NeedsProcessing`, `Recognized`, `Commented`, `AIEnriched`, …). Before setting any flag from the README's metadata table, understand which rule watches it.
 - The server's privacy posture (exposed databases, private-info redaction — currently enabled) lives in DT's Settings → AI on the machine, not in this repo; see the README fresh-machine checklist.
 
@@ -136,7 +135,7 @@ The DEVONthink MCP server is the **interactive** interface — use it freely fro
   - For markdown records landing in `00_INBOX`, call `~/.local/bin/lint-markdown-file` on the file before import and set `Recognized=1, Commented=1` at creation — this keeps `Extract: Native Text Bypass` from matching.
   - For bookmark records landing in `00_INBOX`, set `Recognized=1, Commented=1, AIEnriched=1` (or own the bookmark's journey entirely, as `Extract: Web Content` now does) to keep `Post-Enrich & Archive` from matching.
   - For records that should skip the pipeline entirely (rewrite/companion records like prose-check output), set `NeedsProcessing=0` explicitly — not empty — to block `mark-inbox-needs-processing` from flipping it back on.
-  - Current pre-flagging callers: `ingest-singlefile-html.py`, `summarize` skill, `import-granola.py`, `import-github-stars.py`, `km-new-inbox-note.applescript`, `prose-check` skill. New record-creators in any part of the pipeline must follow the same pattern.
+  - Current pre-flagging callers: `ingest-singlefile-html.py`, `summarize` skill, `import-github-stars.py`, `km-new-inbox-note.applescript`, `prose-check` skill. New record-creators in any part of the pipeline must follow the same pattern.
 - **Web clip ingestion is Python, not smart rules.** Scenario 1 (desktop SingleFile save) is driven by an fswatch launchd agent on `~/Downloads/SingleFile/`. Scenario 2 (scheduled/manual batch capture of `NeedsSingleFile=1` bookmarks) is `capture-bookmarks-batch.py`. Both funnel through `ingest-singlefile-html.py`, which creates bookmark + HTML snapshot + markdown in a single atomic AppleScript call — DT never sees the staging file, and no Sweep / Every-Minute / `synchronize record` can race the ingestion. Previous smart-rule-based implementation (Capture: SingleFile Batch + Process: SingleFile Import) had three known race classes around URL matching, HTML filename lookups, and DT's buffered disk writes; moving the work out of smart rules eliminated all of them.
 - **All pipeline components log to `~/Library/Logs/devonthink-pipeline.log`** via two helpers:
   - `~/.local/bin/pipeline-log <component> <level> <message> [<record-name> [<record-uuid>]]` — bash, called from AppleScript via `do shell script`. Each smart-rule script includes a short `pipelineLog(component, level, msg, recName, recUUID)` handler that wraps this.
@@ -158,7 +157,7 @@ The DEVONthink MCP server is the **interactive** interface — use it freely fro
 - **defuddle** (`~/.local/share/mise/shims/defuddle`) — extracts readable article content as markdown from local HTML files for `ingest-singlefile-html.py`
 - **fswatch** (`/opt/homebrew/bin/fswatch`) — folder watcher behind two launchd agents: `singlefile-watcher.sh` (`com.user.singlefile-watcher`) watches `~/Downloads/SingleFile/` for new HTML files, and `boox-import-watcher.sh` (`com.user.boox-import-watcher`) watches the Maestral-synced Boox "Notebooks" folder for new PDF exports
 
-- **Granola** — meeting transcription app; `import-granola.py` reads its local cache and imports meeting notes into DT with pre-set metadata (`GranolaID`, `EventDate`, `NameLocked=1`)
+- **Granola** — meeting transcription app; `import-granola.py` is retired (kept as a skeleton, not scheduled by any agent) — see its docstring for status
 
 ## Custom metadata fields
 

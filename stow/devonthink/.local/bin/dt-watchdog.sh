@@ -45,12 +45,12 @@ fi
 "$HOME/.local/bin/pipeline-record-run" dt-watchdog 3600 || true
 
 # ── 1. Surface new failures from the pipeline logs ───────────────────────────
-# Apart from Granola's failure records, every pipeline component logs
-# failures to files only — nothing pushes them to the user, so breakage sits
-# unnoticed until a manual log grep. Scan the log regions written since the
-# previous watchdog run and raise one macOS notification per new failure
-# signature. Signatures are digit-stripped (gap sizes, dates, and byte counts
-# vary between occurrences of the same failure) and re-notify at most daily.
+# Every pipeline component logs failures to files only — nothing pushes them
+# to the user, so breakage sits unnoticed until a manual log grep. Scan the
+# log regions written since the previous watchdog run and raise one macOS
+# notification per new failure signature. Signatures are digit-stripped (gap
+# sizes, dates, and byte counts vary between occurrences of the same failure)
+# and re-notify at most daily.
 SCAN_STATE_DIR="$HOME/.local/state/devonthink/watchdog-scan"
 NOTIFIED_FILE="$SCAN_STATE_DIR/notified.txt"
 FAILURE_PATTERN=' ERROR | WARN(ING)? |WARNING:|ERROR:|ALERT:|FATAL:|FAILED:'
@@ -113,7 +113,6 @@ awk -v cutoff=$((PRUNE_NOW - 604800)) '$2 >= cutoff' "$NOTIFIED_FILE" > "$NOTIFI
 scan_log "$HOME/Library/Logs/devonthink-pipeline.log"
 scan_log "$HOME/Library/Logs/dt-daily-note.log"
 scan_log "$HOME/Library/Logs/github-stars-import.log"
-scan_log "$HOME/Library/Logs/granola-import.log"
 
 # Stuck captures: a .html still in the staging folder after 15 minutes was
 # either missed by the watcher or failed ingest (failures stay in place by
@@ -221,9 +220,9 @@ fi
 # silently — pipeline-record-run only flags a gap when the component runs
 # AGAIN. Check each label is loaded and its recorded last run is fresh.
 # Only components that have run on this machine before (a .last-run file
-# exists) are checked, so a deliberately unprovisioned agent (e.g. Granola
-# without its op-built plist) stays quiet. Thresholds are loose on purpose:
-# sleep gaps are routine, and surface_line's dedup caps repeats at daily.
+# exists) are checked, so a deliberately unprovisioned agent stays quiet.
+# Thresholds are loose on purpose: sleep gaps are routine, and
+# surface_line's dedup caps repeats at daily.
 if [[ "$IS_DRIVER" == 1 ]]; then
     NOW_EPOCH=$(date +%s)
     while IFS=: read -r AGENT_LABEL AGENT_JOB AGENT_MAX_AGE; do
@@ -246,7 +245,6 @@ com.user.dt-morning-brief:dt-morning-brief:180000
 com.user.dt-database-archive:dt-database-archive:180000
 com.user.entity-filing:entity-filing:21600
 com.user.boox-process:boox-process:21600
-com.user.granola-import:granola-import:21600
 com.user.github-stars-import:github-stars-import:21600
 AGENTS
 fi

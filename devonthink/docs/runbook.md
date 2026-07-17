@@ -17,7 +17,6 @@ grep -E ' (WARN|ERROR) ' ~/Library/Logs/devonthink-pipeline.log
 
 # Watchdog + per-importer logs
 tail ~/Library/Logs/dt-watchdog.log
-tail ~/Library/Logs/granola-import.log
 tail ~/Library/Logs/github-stars-import.log
 tail ~/Library/Logs/dt-daily-note.log
 
@@ -59,11 +58,11 @@ Check the flag ladder in DT's Info inspector; the rules advance it in order
 
 The daily note has no `## Briefing` (or a section looks out of date).
 
-The brief writes `## Briefing`, `## Reconnect`, `## Entity Review`, and
-`## On This Day` as **marker-bounded upserts** — each scheduled run replaces
-its own section against the latest note body (jots are never clobbered) and a
-section removes itself when empty. Scheduled at ~05:15 with retries at
-05:45 / 06:30 / 08:00.
+The brief writes `## Briefing`, `## Reconnect`, `## Birthdays`,
+`## Entity Review`, `## Journal`, and `## On This Day` as **marker-bounded
+upserts** — each scheduled run replaces its own section against the latest
+note body (jots are never clobbered) and a section removes itself when
+empty. Scheduled at ~05:15 with retries at 05:45 / 06:30 / 08:00.
 
 ```bash
 # Preview without writing, then run for real.
@@ -74,11 +73,11 @@ section removes itself when empty. Scheduled at ~05:15 with retries at
 ~/.local/bin/dt-morning-brief.py --dry-run --weekly
 ```
 
-If it's still empty: confirm today's daily note exists (a missing note blocks
-the brief — see [daily note](#no-daily-note)); confirm this Mac is the driver;
-confirm the Calendars grant for osascript
-(`osascript -l JavaScript ~/.local/bin/calendar-events-json.js` once
-interactively). Details: [entities.md](entities.md).
+If it's still empty: confirm this Mac is the driver; confirm the Calendars
+grant for osascript (`osascript -l JavaScript ~/.local/bin/calendar-events-json.js`
+once interactively) — the brief creates today's daily note itself
+(`get_or_create_daily`) if one doesn't exist yet, so a missing note isn't the
+blocker. Details: [entities.md](entities.md).
 
 ## No daily note
 
@@ -117,7 +116,7 @@ launchctl bootout "gui/$(id -u)/com.user.entity-filing"
 
 The watchdog kickstarts the two KeepAlive watchers itself; it only *reports*
 interval agents (daily-note, morning-brief, entity-filing, boox-process,
-granola, github-stars, database-archive) that are booted out or stale,
+github-stars, database-archive) that are booted out or stale,
 because those have no resident process to restart. After editing a plist template, re-render
 with `scripts/build-launchd-plists.sh`, then `bootout` + `bootstrap`.
 
@@ -130,7 +129,6 @@ rather than treat a damaged file as empty and re-import/re-propose everything.
 State files (`~/.local/state/devonthink/`):
 
 - `entity-filing-state.json` — entity filing
-- `granola-imported.json` — Granola importer
 - `github-stars-imported.json` — GitHub Stars importer
 
 ```bash
@@ -139,14 +137,12 @@ cat ~/.local/state/devonthink/<file>.json | jq . 2>&1 | head
 
 # If unrepairable, remove it — each component rebuilds from DEVONthink:
 #   entity filing  ← EntityFiled audit flag
-#   Granola        ← GranolaID metadata
 #   GitHub Stars   ← bookmark URLs
 rm ~/.local/state/devonthink/<file>.json
 
 # Rebuild explicitly (also happens automatically on the next run when the
 # file is missing). No import happens — it only re-derives the cache.
 ~/.local/bin/entity-filing.py --rebuild-state
-~/.local/bin/import-granola.py --rebuild-state
 python3 ~/.local/bin/import-github-stars.py --rebuild-state
 ```
 
@@ -155,45 +151,27 @@ python3 ~/.local/bin/import-github-stars.py --rebuild-state
 Two records for the same meeting or repo.
 
 Creation is now idempotent **against the database**, so this is largely
-self-healing: Granola adopts an existing record by `GranolaID` and GitHub Stars
-by canonical URL before creating anything, and both rebuild their local cache
-from the database when it's missing. A lost or restored state file therefore no
-longer floods the inbox.
+self-healing: GitHub Stars adopts an existing record by canonical URL before
+creating anything, and rebuilds its local cache from the database when it's
+missing. A lost or restored state file therefore no longer floods the inbox.
 
 ```bash
-# Re-derive the caches from what the database already holds.
-~/.local/bin/import-granola.py --rebuild-state
+# Re-derive the cache from what the database already holds.
 python3 ~/.local/bin/import-github-stars.py --rebuild-state
 ```
 
 Duplicates created *before* this behavior existed won't disappear on their own —
 merge or trash them by hand (DT's Filter Duplicates / a URL search helps).
 
-## Granola schema drift
+## Granola import (retired)
 
-Granola shipped an update and imports break or go empty.
-
-Signals, in the logs:
-
-- `~/Library/Logs/granola-import.log` — malformed-panel `WARN`s, or a
-  version-transition line emitted when `granola-version.json` changes (useful
-  to pin a regression to a release).
-- A `DocumentType=Pipeline Error` record in `00_INBOX` (one per failure
-  signature) carrying the traceback.
-
-A no-content meeting is retried for a 3-day window before it's marked imported,
-so a late-arriving panel isn't lost. Before touching the parser, read the
-gitignored design notes — schema, key chain, and debug recipes:
-
-```bash
-less ~/.local/share/granola-import/NOTES.md
-
-# Isolate a parse failure from a DEVONthink/AppleScript failure.
-echo '{"imported_ids": [], "force_id": null}' \
-  | ~/.local/bin/import-granola-parse.py | jq '.meetings | length'
-```
-
-Full detail: [granola.md](granola.md).
+The local-store importer is retired, not just disabled. Granola 7.417.0 moved
+the SQLCipher key into the macOS Keychain under the app's Team-ID access
+group, so the local-decryption approach no longer works and can't be
+reproduced outside the signed app. No launchd agent is registered for it and
+no plist template exists; the entry-point script (`import-granola.py`)
+remains as a skeleton for a rewrite against Granola's public API — see its
+docstring.
 
 ## Failed SingleFile capture
 
@@ -310,7 +288,6 @@ duplicate:
 
 ```bash
 ~/.local/bin/entity-filing.py --rebuild-state
-~/.local/bin/import-granola.py --rebuild-state
 python3 ~/.local/bin/import-github-stars.py --rebuild-state
 ```
 

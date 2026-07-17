@@ -664,12 +664,11 @@ EOF
 
             # dt-watchdog runs on every machine (keeps DT + sync alive; mutating
             # rules self-skip on a follower). The ingest + entity agents run only
-            # on the driver. com.user.granola-import needs the gitignored parser
-            # restored from backup; load_plist logs and skips an absent plist.
+            # on the driver.
             dt_driver_agents=(com.user.dt-daily-note \
                               com.user.singlefile-watcher \
                               com.user.boox-import-watcher \
-                              com.user.granola-import \
+                              com.user.boox-process \
                               com.user.github-stars-import \
                               com.user.dt-morning-brief \
                               com.user.entity-filing \
