@@ -86,8 +86,12 @@ calendar names and real people's names belong here and nowhere in the repo.
                                      rooms with participantType Person and
                                      is otherwise indistinguishable from a
                                      human, so the name is the only signal.
-    SKIP_CALENDARS=<a,b,c>           calendar names never briefed on, added to
-                                     the built-in SKIP_CALENDARS defaults.
+    SKIP_CALENDARS=<a,b,c>           calendars never briefed on, added to the
+                                     built-in SKIP_CALENDARS defaults. Entries
+                                     are selectors like the context lists
+                                     below (title, calendar identifier, or
+                                     source identifier), so a skip pinned to
+                                     an identifier survives a rename.
     PERSONAL_CALENDARS=<a,b,c>       calendar titles, calendar identifiers, or
                                      source identifiers treated as personal.
     WORK_CALENDARS=<a,b,c>           selectors treated as work. A selector
@@ -327,17 +331,29 @@ def load_calendar_contexts(conf):
     return {"personal": personal, "work": work}
 
 
-def event_context(ev, contexts):
+def event_keys(ev):
     keys = {
         norm(ev.get("calendar", "")),
         norm(ev.get("calendar_id", "")),
         norm(ev.get("source_id", "")),
     }
     keys.discard("")
+    return keys
+
+
+def event_context(ev, contexts):
+    keys = event_keys(ev)
     for context in ("personal", "work"):
         if keys & contexts.get(context, set()):
             return context
     return "neutral"
+
+
+def skipped(ev, skip_cals):
+    """A skip entry is any selector event_keys() matches — calendar title,
+    calendar identifier, or source identifier — so a skip can be pinned to an
+    identifier and survive the calendar being renamed."""
+    return not event_keys(ev).isdisjoint(norm(c) for c in skip_cals)
 
 
 def empty_identity_provenance():
@@ -959,7 +975,7 @@ def calendar_observations(events, people, skip_re, contexts, excluded=(),
     for ev in events:
         context = event_context(ev, contexts)
         if context == "neutral" or ev["all_day"] or not attending(ev) \
-                or ev["calendar"] in skip_cals:
+                or skipped(ev, skip_cals):
             continue
         seen = set()
         for attendee in real_attendees(ev, skip_re):
@@ -1096,7 +1112,7 @@ def calendar_person_candidates(events, people, contacts, skip_re, contexts,
     ex_re = excluded_re(excluded)
     candidates = {}
     for ev in events:
-        if ev["all_day"] or not attending(ev) or ev["calendar"] in skip_cals \
+        if ev["all_day"] or not attending(ev) or skipped(ev, skip_cals) \
                 or text_excluded(ev["title"], ex_re, excluded):
             continue
         context = event_context(ev, contexts)
@@ -1297,7 +1313,7 @@ def brief_blocks(events, people, skip_re, excluded=(),
         context = event_context(ev, contexts) if contexts else "neutral"
         if ev["all_day"] or not attending(ev):
             continue
-        if ev["calendar"] in skip_cals:
+        if skipped(ev, skip_cals):
             continue
         if text_excluded(ev["title"], ex_re, excluded):
             # The slot survives, the content does not: deleting it outright
@@ -1412,7 +1428,7 @@ def contact_bumps(events, people, day, skip_re, skip_cals=SKIP_CALENDARS,
     seen = set()
     for ev in events:
         context = event_context(ev, contexts) if contexts else "neutral"
-        if ev["all_day"] or not attending(ev) or ev["calendar"] in skip_cals:
+        if ev["all_day"] or not attending(ev) or skipped(ev, skip_cals):
             continue
         when = ev.get("date") or day
         matched = [

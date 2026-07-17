@@ -363,9 +363,14 @@ anyone is flagged, the run exits non-zero rather than briefing with a
 card-only nickname it cannot redact.
 
 Suppressing a *calendar* is the one privacy control that does live in config:
-`SKIP_CALENDARS` excludes whole calendars by name, added to the built-in
-defaults, in `~/.config/dt-pipeline/entities.conf` (machine-local, mode 600,
-never tracked — a real calendar name belongs there and nowhere in this repo).
+`SKIP_CALENDARS` excludes whole calendars, added to the built-in defaults, in
+`~/.config/dt-pipeline/entities.conf` (machine-local, mode 600, never tracked
+— a real calendar name belongs there and nowhere in this repo). Entries are
+selectors like `PERSONAL_CALENDARS`/`WORK_CALENDARS`: a calendar title,
+calendar identifier, or source identifier, matched case-insensitively. Prefer
+the identifier for a shared calendar — a title entry silently stops matching
+if anyone renames the calendar (identifiers are per-machine, so a title entry
+is the portable form; the sets can hold both).
 Because it is a privacy control, a config file that exists but **cannot be read
 is fatal**: degrading to an empty dict would quietly brief a calendar the user
 asked never to see. A file that is simply absent means "never configured", which
@@ -694,8 +699,8 @@ MIN_ROSTER=1          # extract only once People holds this many records
 SELF_NAME=            # extra self-alias to exclude from extraction
 SKIP_ATTENDEE_PATTERN=\bVC\b|\bConference\b|\bRoom\b|\d+\s?ppl
                       # calendar attendees that are rooms, not people
-SKIP_CALENDARS=       # calendar names never briefed on (comma-separated),
-                      # added to the built-in defaults
+SKIP_CALENDARS=       # calendars never briefed on (comma-separated titles,
+                      # calendar IDs, or source IDs), added to the built-ins
 PERSONAL_CALENDARS=   # personal calendar titles, calendar IDs, or source IDs
 WORK_CALENDARS=       # work calendar titles, calendar IDs, or source IDs
 SKIP_SOURCE_TITLES=Round ?Table|Standup|…   # sources never extracted

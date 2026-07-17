@@ -75,6 +75,24 @@ class CalendarContexts(unittest.TestCase):
             })
 
 
+class SkipCalendars(unittest.TestCase):
+    def test_matches_calendar_title_or_stable_identifier(self):
+        cals = {"Shared", "cal-shared", "source-shared"}
+        for ev in (event("x", calendar="Shared"),
+                   event("x", calendar_id="cal-shared"),
+                   event("x", source_id="source-shared")):
+            self.assertTrue(mb.skipped(ev, cals))
+        self.assertFalse(mb.skipped(event("x", calendar="Other"), cals))
+
+    def test_a_renamed_calendar_still_skips_by_identifier(self):
+        ev = event("x", calendar="New Name", calendar_id="cal-shared")
+        self.assertTrue(mb.skipped(ev, {"cal-shared"}))
+
+    def test_matching_is_normalized_both_ways(self):
+        self.assertTrue(mb.skipped(event("x", calendar="SHARED"), {"shared"}))
+        self.assertTrue(mb.skipped(event("x", calendar="shared"), {"SHARED"}))
+
+
 class PersonResolutionEvidence(unittest.TestCase):
     def setUp(self):
         self.person = person("Jordan Vale", aliases="Jordan", email="jv@x.com")
@@ -1711,6 +1729,12 @@ class BriefBlocksTimeline(unittest.TestCase):
     def test_configured_skip_calendar_is_dropped(self):
         got = self.blocks([event("Date night", calendar="Shared")],
                           skip_cals=mb.SKIP_CALENDARS | {"Shared"})
+        self.assertEqual(got, [])
+
+    def test_skip_entry_pinned_to_an_identifier_survives_a_rename(self):
+        got = self.blocks([event("Date night", calendar="New Name",
+                                 calendar_id="cal-shared")],
+                          skip_cals=mb.SKIP_CALENDARS | {"cal-shared"})
         self.assertEqual(got, [])
 
     def test_all_day_and_unaccepted_still_never_brief(self):
