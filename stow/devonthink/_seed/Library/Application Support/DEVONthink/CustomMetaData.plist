@@ -884,5 +884,29 @@
 		<key>type</key>
 		<string>text</string>
 	</dict>
+	<dict>
+		<key>date</key>
+		<real>806002761.120304</real>
+		<key>identifier</key>
+		<string>mdtracktarget</string>
+		<key>index</key>
+		<integer>78</integer>
+		<key>title</key>
+		<string>TrackTarget</string>
+		<key>type</key>
+		<string>string</string>
+	</dict>
+	<dict>
+		<key>date</key>
+		<real>806002767.923777</real>
+		<key>identifier</key>
+		<string>mdcreatedistinct</string>
+		<key>index</key>
+		<integer>79</integer>
+		<key>title</key>
+		<string>CreateDistinct</string>
+		<key>type</key>
+		<string>bool</string>
+	</dict>
 </array>
 </plist>
