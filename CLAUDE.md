@@ -202,7 +202,7 @@ Load-bearing design rules:
 
 ### Screen-lock → Keyboard Maestro bridge
 
-Keyboard Maestro (11.0.4) has a native `Unlock` system trigger but no *lock* counterpart. `stow/lock-watcher/` fills exactly that gap: `com.user.lock-watcher` (KeepAlive) runs `lock-watcher.applescript` — AppleScriptObjC under `/usr/bin/osascript` — which observes the `com.apple.screenIsLocked` distributed notification and fires the KM macro named `Screen Locked` via `do script`. Fully event-driven: the process blocks in its run loop between locks (no polling, battery-clean). The macro's contents live in KM's own library, not this repo — KM's macro plist is app-owned runtime state, the same reason `~/.claude.json` isn't stowed.
+Keyboard Maestro (11.0.4) has a native `Unlock` system trigger but no *lock* counterpart. `stow/lock-watcher/` fills exactly that gap: `com.user.lock-watcher` (KeepAlive) runs `lock-watcher.applescript` — AppleScriptObjC under `/usr/bin/osascript` — which observes the `com.apple.screenIsLocked` distributed notification and fires the KM macro named in its `lockMacroName` property (`On Lock, Disable Proxy + Quit Feishin and Qobuz`) via `do script` — rename the macro and that property together. Fully event-driven: the process blocks in its run loop between locks (no polling, battery-clean). The macro's contents live in KM's own library, not this repo — KM's macro plist is app-owned runtime state, the same reason `~/.claude.json` isn't stowed.
 
 Load-bearing details:
 

@@ -3,7 +3,7 @@
 use framework "Foundation"
 use scripting additions
 
-property lockMacroName : "Screen Locked"
+property lockMacroName : "On Lock, Disable Proxy + Quit Feishin and Qobuz"
 
 on screenLocked:aNotification
     my triggerMacro(lockMacroName)
