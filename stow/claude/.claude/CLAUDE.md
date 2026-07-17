@@ -55,12 +55,6 @@
   - `jscpd` - copy/paste detection for code duplication (`brew install jscpd` or `npx jscpd`)
   - `sg` - ast-grep for structural code search (`brew install ast-grep` or `npm i -g @ast-grep/cli`)
 
-## End of session: unresolved items → Things 3
-
-- When a session is wrapping up (the main task is done, or I've indicated I'm finished) and there are unresolved items that need action from **me** — manual steps you couldn't do (grant a permission, restart an app, test something physical), decisions I deferred, follow-up work I said "later" to, or loose ends you had to leave behind — offer to save them to Things 3 via the things skill. List the items in the offer so I can approve or trim them before anything is created.
-- If there are no such items, say nothing about this rule. No "nothing to save to Things" disclaimers — silence is the correct output.
-- Only offer once per session, and don't count things I already declined or items you fully resolved yourself.
-
 ## When something goes wrong
 
 - If you make a mistake or break something:
