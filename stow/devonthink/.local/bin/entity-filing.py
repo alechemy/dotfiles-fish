@@ -12,14 +12,21 @@ the messy-text -> structured-JSON extraction; everything that writes to
 DEVONthink is deterministic (entity-dt-bridge.js ops built here).
 
 Safety model:
-  - suggest mode (default): every extraction becomes a proposal record in
-    /20_ENTITIES/_Review containing a human summary plus the exact ops as
-    a fenced JSON block. Moving a proposal into _Review/Approved makes the
-    next run apply it; deleting it rejects it. Nothing touches a Person
-    record without review.
+  - suggest mode (default): every extraction about *known* people becomes a
+    proposal record in /20_ENTITIES/_Review containing a human summary plus
+    the exact ops as a fenced JSON block. Moving a proposal into
+    _Review/Approved makes the next run apply it; deleting it rejects it.
+    Nothing touches a Person record without review.
   - auto mode (FILING_MODE=auto): ops for unambiguous existing people
-    apply immediately; new-person creations and ambiguous matches still
-    become proposals. A permanent manual-review path, per the design doc.
+    apply immediately; ambiguous matches still become proposals. A
+    permanent manual-review path, per the design doc.
+  - People absent from the roster never enter proposals at all. Each gets
+    one durable candidate record under /20_ENTITIES/_Candidates (see
+    entity_candidates.py) accumulating per-source sightings; move it to
+    _Candidates/Approved to track them (promotion files the accumulated
+    evidence), to _Candidates/Ignored to never hear about them again, or
+    delete it to forget. The calendar pass in dt-morning-brief.py feeds the
+    same store, so one stranger has one decision, made once.
   - Extraction is gated on a seeded roster (MIN_ROSTER). The prompt's
     whole resolution step is the roster, and a source is only extracted
     again when its content changes, so extracting against an empty People
@@ -95,6 +102,12 @@ Usage:
     entity-filing.py --apply-only    # only process _Review/Approved
     entity-filing.py --scan-only     # skip the apply phase
     entity-filing.py --rebuild-state # seed processed state from EntityFiled
+    entity-filing.py --split-candidate UUID SID...
+                                     # move sightings to a new candidate
+    entity-filing.py --merge-candidates KEEP FOLD
+                                     # fold one candidate into another
+    entity-filing.py --migrate-candidates
+                                     # one-shot calendar-ledger conversion
 """
 
 import fcntl
@@ -114,6 +127,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path.home() / ".local" / "bin"))
 from pipeline_log import setup as setup_log
 
+import entity_candidates as ec
 import things_bridge
 
 log = setup_log("entity-filing")
@@ -902,15 +916,9 @@ def proposal_body(source, source_date, plans, ops):
             lines.append(f"- **{plan['name']}** — AMBIGUOUS: matches {cands};"
                          " edit the ops JSON before approving")
         else:
-            flag = " — single-word name, verify before approving" \
-                if plan.get("single_token") else ""
-            lines.append(f"- **{plan['name']}** (new Person record){flag}")
-            if plan.get("near"):
-                cands = ", ".join(plan["near"])
-                lines.append(
-                    f"  - possible existing match: {cands} — if same person,"
-                    " add this name as an alias there, delete this proposal,"
-                    " and re-run `entity-filing.py --force <source-uuid>`")
+            # Unreachable in normal flow — new people divert to candidates —
+            # but a plan that slips through must render, not vanish.
+            lines.append(f"- **{plan['name']}** (new Person record)")
         for d, fact in plan.get("facts", []):
             lines.append(f"  - {d} — {fact}")
         for field, value in plan.get("updates", {}).items():
@@ -992,12 +1000,35 @@ def proposal_ops(text):
     return ops
 
 
+def ignored_conflicts(ops, index, ignored):
+    """Names an approved proposal's frozen ops would file that the user has
+    since Ignored. Roster-first, exactly as during extraction: a name that
+    now resolves is the roster's to handle (stale_person_ops converts it),
+    whatever the Ignored group says — only zero-hit names are checked."""
+    conflicts = []
+    for op in ops:
+        if op.get("op") == "ensure_person":
+            name = str(op.get("name", "")).strip()
+            if name and not index.get(norm(name)) and norm(name) in ignored:
+                conflicts.append(name)
+        elif op.get("op") == "ensure_event":
+            for a in op.get("attendees") or []:
+                a = str(a).strip()
+                if a and not index.get(norm(a)) and norm(a) in ignored:
+                    conflicts.append(a)
+    return conflicts
+
+
 def apply_approved(dry_run):
     approved = run_bridge([{"op": "list_group", "path": APPROVED_PATH}])[0]
     if not approved:
         return
-    people = run_bridge([{"op": "dump_people", "include_bodies": False}])[0]
+    people, listing = run_bridge([
+        {"op": "dump_people", "include_bodies": False},
+        {"op": "list_candidates"},
+    ])
     index = roster_index(people)
+    ignored = ec.CandidateIndex(listing).ignored_names()
     for rec in approved:
         text = run_bridge([{"op": "get_text", "uuid": rec["uuid"]}])[0]["text"]
         try:
@@ -1011,6 +1042,19 @@ def apply_approved(dry_run):
             log.warning("approved proposal has no ops block, skipping",
                         extra={"record_name": rec["name"],
                                "record_uuid": rec["uuid"]})
+            continue
+        conflicts = ignored_conflicts(ops, index, ignored)
+        if conflicts:
+            log.warning(
+                "approved proposal names Ignored candidate(s) %s; bouncing to "
+                "_Review for re-approval — edit the ops or un-ignore the "
+                "candidate, then re-approve. The approved fence is exactly "
+                "what runs; nothing was filtered silently",
+                ", ".join(repr(c) for c in conflicts),
+                extra={"record_name": rec["name"], "record_uuid": rec["uuid"]})
+            if not dry_run:
+                run_bridge([{"op": "move_to", "uuid": rec["uuid"],
+                             "group": REVIEW_PATH}])
             continue
         stale = stale_person_ops(ops, index, people)
         if stale:
@@ -1051,6 +1095,303 @@ def apply_approved(dry_run):
         if any(op.get("op") == "ensure_person" for op in ops):
             people = run_bridge([{"op": "dump_people", "include_bodies": False}])[0]
             index = roster_index(people)
+
+
+# ---------------------------------------------------------------------------
+# Candidate promotion
+# ---------------------------------------------------------------------------
+
+
+def promotion_target(data, md, people, index):
+    """Identifier-wide preflight: (person_uuid_or_None, bounce_reason,
+    near). No mutation happens here — every collision is caught before
+    ensure_person could create anything. A None uuid with no reason means
+    "create a new Person"."""
+    identifiers = [data["name"]] + list(data["name_variants"])
+    keys = {norm(i) for i in identifiers if norm(i)}
+    keys.update(e for e in data["emails"] if e)
+    hits = {}
+    for key in keys:
+        for p in index.get(key, []):
+            hits[p["uuid"]] = p
+    near = ec.near_matches(data["name"], people)
+    track_target = str(md.get("mdtracktarget", "") or "").strip()
+    create_distinct = md_flag(md.get("mdcreatedistinct", ""))
+    if track_target:
+        if not any(p["uuid"] == track_target for p in people):
+            return None, (f"TrackTarget {track_target!r} is not a Person "
+                          "record UUID"), near
+        others = [p["name"] for u, p in hits.items() if u != track_target]
+        if others:
+            return None, ("alias collision: this candidate's identifiers "
+                          "already resolve to " + ", ".join(others)), near
+        return track_target, None, near
+    if len(hits) > 1:
+        return None, ("identifiers resolve to multiple people ("
+                      + ", ".join(p["name"] for p in hits.values())
+                      + ") — set TrackTarget to choose"), near
+    if len(hits) == 1:
+        return next(iter(hits)), None, near
+    if ec.needs_confirmation(data, near) and not create_distinct:
+        reason = ("possible existing records: " + ", ".join(near)
+                  if near else "single-word name")
+        return None, (f"approval needs confirmation ({reason}) — set "
+                      "TrackTarget to file into an existing person or "
+                      "CreateDistinct to confirm a new one"), near
+    return None, None, near
+
+
+def promotion_evidence_ops(data, target_uuid, current_md):
+    """Evidence ops for an already-resolved Person UUID: chronological
+    set_field through the FieldAsOf guard, one append_log of provenance-
+    carrying fact lines, and a LastContact bump from the latest interacted
+    non-fact sighting."""
+    ops = []
+    sightings = sorted(data["sightings"].items(),
+                       key=lambda kv: (kv[1].get("date", ""), kv[0]))
+    first_write = set()
+    log_lines = []
+    last_contact = ""
+    for sid, s in sightings:
+        d = valid_date(s.get("date", "")) or date.today().isoformat()
+        for field in UPDATE_FIELDS:
+            value = (s.get("updates") or {}).get(field)
+            # A calendar sighting observes the email outside `updates`; it
+            # must still reach the Person, not just the candidate's key set.
+            if field == "email" and not value:
+                value = s.get("email")
+            if not isinstance(value, str) or not value.strip():
+                continue
+            op = {"op": "set_field", "uuid": target_uuid, "field": field,
+                  "value": collapse_ws(value), "effective_date": d}
+            if field not in first_write:
+                first_write.add(field)
+                op["expected_previous"] = str(
+                    current_md.get("md" + field, "") or "")
+            ops.append(op)
+        if sid.startswith("dt:"):
+            src = sid[3:]
+            for fd, fact in (s.get("facts") or []):
+                log_lines.append(
+                    fact_line(valid_date(fd) or d, str(fact), src))
+        if s.get("interacted") and s.get("kind") != "fact" and d > last_contact:
+            last_contact = d
+    if log_lines:
+        ops.append({"op": "append_log", "uuid": target_uuid,
+                    "lines": log_lines})
+    if last_contact:
+        ops.append({"op": "bump_lastcontact", "uuid": target_uuid,
+                    "date": last_contact})
+    return ops
+
+
+def bounce_candidate(rec, data, reason, near, dry_run):
+    if dry_run:
+        log.info("[dry-run] would bounce candidate %r: %s", data["name"],
+                 reason)
+        return
+    run_bridge([
+        {"op": "set_text", "uuid": rec["uuid"],
+         "text": ec.render_candidate(data, near, notice=reason)},
+        {"op": "move_to", "uuid": rec["uuid"], "group": ec.CANDIDATES_PATH},
+    ])
+    log.warning("candidate not promoted: %s", reason,
+                extra={"record_name": rec["name"], "record_uuid": rec["uuid"]})
+
+
+def promote_candidates(dry_run):
+    """Promote every record in _Candidates/Approved via the staged,
+    crash-resumable protocol: preflight (no mutation), resolve-or-create the
+    target, alias completion, guarded evidence ops, then trash the
+    candidate. The candidate stays in Approved until the final step, so a
+    crash anywhere re-runs the whole protocol idempotently (ensure_person
+    re-resolves the created name; fact dedup, FieldAsOf, and the LastContact
+    guard absorb the replays)."""
+    approved = run_bridge([{"op": "list_candidates"}])[0]["approved"]
+    if not approved:
+        return
+    for stale_rec in approved:
+        lock = ec.acquire_candidates_lock()
+        try:
+            listing, people = run_bridge([
+                {"op": "list_candidates"},
+                {"op": "dump_people", "include_bodies": False},
+            ])
+            rec = next((r for r in listing["approved"]
+                        if r["uuid"] == stale_rec["uuid"]), None)
+            if rec is None:
+                continue
+            if rec["name"].startswith(ec.QUARANTINE_PREFIX):
+                continue
+            try:
+                data = ec.parse_candidate(rec["text"])
+            except ValueError as exc:
+                log.warning("approved candidate has an unreadable data fence "
+                            "(%s); quarantining", exc,
+                            extra={"record_name": rec["name"],
+                                   "record_uuid": rec["uuid"]})
+                if not dry_run:
+                    run_bridge(ec.quarantine_ops(
+                        [(rec["uuid"], rec["name"], str(exc))]))
+                continue
+            index = roster_index(people)
+            target, reason, near = promotion_target(
+                data, rec.get("md", {}), people, index)
+            if reason:
+                bounce_candidate(rec, data, reason, near, dry_run)
+                continue
+            if dry_run:
+                log.info("[dry-run] would promote %r into %s", data["name"],
+                         target or "a new Person record")
+                continue
+            variants = [data["name"]] + list(data["name_variants"])
+            if target is None:
+                aliases = [v for v in data["name_variants"]
+                           if norm(v) != norm(data["name"])]
+                created = run_bridge([{"op": "ensure_person",
+                                       "name": data["name"],
+                                       "aliases": ", ".join(aliases)}])[0]
+                target = created["uuid"]
+                current_md = {}
+            else:
+                person = next(p for p in people if p["uuid"] == target)
+                covered = {norm(person["name"])}
+                covered.update(norm(a)
+                               for a in person.get("aliases", "").split(","))
+                missing = [v for v in variants
+                           if norm(v) and norm(v) not in covered]
+                if missing:
+                    run_bridge([{"op": "add_aliases", "uuid": target,
+                                 "aliases": ", ".join(missing)}])
+                current_md = person.get("md", {})
+            ops = promotion_evidence_ops(data, target, current_md)
+            ops.append({"op": "trash", "uuid": rec["uuid"]})
+            results = run_bridge(ops)
+            for op, res in zip(ops, results):
+                if op["op"] == "set_field" and isinstance(res, dict) \
+                        and res.get("stale"):
+                    log.info("stale %s update refused during promotion "
+                             "(current value %r is newer)", op["field"],
+                             res.get("previous"),
+                             extra={"record_name": rec["name"],
+                                    "record_uuid": rec["uuid"]})
+            log.info("promoted candidate %r into person %s (%d sighting(s))",
+                     data["name"], target, len(data["sightings"]),
+                     extra={"record_name": rec["name"],
+                            "record_uuid": rec["uuid"]})
+        finally:
+            lock.close()
+
+
+def _find_candidate(listing, uuid):
+    for group in ("pending", "approved", "ignored"):
+        for rec in listing[group]:
+            if rec["uuid"] == uuid:
+                return rec, group
+    return None, None
+
+
+def split_candidate(cand_uuid, sids, dry_run):
+    """Move the named sightings into a new Pending candidate. The original
+    keeps its keys (and every future automatic sighting); the split-off half
+    derives keys only from its own sightings' emails, so an email-less
+    split-off is created detached and must be decided by hand."""
+    lock = ec.acquire_candidates_lock()
+    try:
+        listing, people = run_bridge([
+            {"op": "list_candidates"},
+            {"op": "dump_people", "include_bodies": False},
+        ])
+        rec, group = _find_candidate(listing, cand_uuid)
+        if rec is None:
+            log.error("--split-candidate: no candidate record %s", cand_uuid)
+            return 1
+        data = ec.parse_candidate(rec["text"])
+        sids = list(dict.fromkeys(sids))
+        missing = [s for s in sids if s not in data["sightings"]]
+        if missing:
+            log.error("--split-candidate: sighting id(s) not on %r: %s",
+                      data["name"], ", ".join(missing))
+            return 1
+        if len(sids) >= len(data["sightings"]):
+            log.error("--split-candidate: refusing to move every sighting — "
+                      "that is a rename, not a split")
+            return 1
+        moved = {s: data["sightings"].pop(s) for s in sids}
+        ec.recompute_derived(data)
+        new_data = ec.new_candidate(
+            next(iter(moved.values())).get("person") or data["name"])
+        new_data["sightings"] = moved
+        ec.recompute_derived(new_data)
+        if not new_data["emails"]:
+            new_data["detached"] = True
+        if dry_run:
+            log.info("[dry-run] would split %d sighting(s) off %r into %r%s",
+                     len(moved), data["name"], new_data["name"],
+                     " (detached)" if new_data["detached"] else "")
+            return 0
+        near = ec.near_matches(new_data["name"], people)
+        run_bridge([
+            {"op": "set_text", "uuid": rec["uuid"],
+             "text": ec.render_candidate(
+                 data, ec.near_matches(data["name"], people))},
+            {"op": "create_record",
+             "name": ec.record_name(new_data),
+             "path": ec.CANDIDATES_PATH,
+             "text": ec.render_candidate(new_data, near),
+             "fields": {"entitytype": "Candidate"}},
+        ])
+        log.info("split %d sighting(s) off %r into new candidate %r%s",
+                 len(moved), data["name"], new_data["name"],
+                 " (detached)" if new_data["detached"] else "",
+                 extra={"record_name": rec["name"], "record_uuid": cand_uuid})
+        return 0
+    finally:
+        lock.close()
+
+
+def merge_candidates(a_uuid, b_uuid, dry_run):
+    """Fold candidate b's sightings into candidate a and trash b — the
+    manual convergence for one human the conservative key policy split
+    across two records. a's sighting wins a shared sighting id (the two
+    halves of an earlier split re-merging)."""
+    lock = ec.acquire_candidates_lock()
+    try:
+        listing, people = run_bridge([
+            {"op": "list_candidates"},
+            {"op": "dump_people", "include_bodies": False},
+        ])
+        a_rec, _a_group = _find_candidate(listing, a_uuid)
+        b_rec, _b_group = _find_candidate(listing, b_uuid)
+        if a_rec is None or b_rec is None:
+            log.error("--merge-candidates: no candidate record %s",
+                      a_uuid if a_rec is None else b_uuid)
+            return 1
+        a = ec.parse_candidate(a_rec["text"])
+        b = ec.parse_candidate(b_rec["text"])
+        for sid, s in b["sightings"].items():
+            a["sightings"].setdefault(sid, s)
+        ec.recompute_derived(a)
+        for v in [b["name"]] + b["name_variants"]:
+            ec.add_variant(a, v)
+        for e in b["emails"]:
+            ec.add_email(a, e)
+        if dry_run:
+            log.info("[dry-run] would merge %r (%d sighting(s)) into %r",
+                     b["name"], len(b["sightings"]), a["name"])
+            return 0
+        run_bridge([
+            {"op": "set_text", "uuid": a_uuid,
+             "text": ec.render_candidate(
+                 a, ec.near_matches(a["name"], people))},
+            {"op": "trash", "uuid": b_uuid},
+        ])
+        log.info("merged candidate %r into %r (%d sighting(s) total)",
+                 b["name"], a["name"], len(a["sightings"]),
+                 extra={"record_name": a_rec["name"], "record_uuid": a_uuid})
+        return 0
+    finally:
+        lock.close()
 
 
 # ---------------------------------------------------------------------------
@@ -1951,11 +2292,13 @@ def pick_transport(config):
 
 
 def scan(config, state, dry_run, force_uuid, user_invoked):
-    people, sources = run_bridge([
+    people, sources, listing = run_bridge([
         {"op": "dump_people", "include_bodies": False},
         {"op": "list_sources"},
+        {"op": "list_candidates"},
     ])
     index = roster_index(people)
+    ignored = ec.CandidateIndex(listing).ignored_names()
     selves = self_names(config)
 
     min_roster = int(config["MIN_ROSTER"])
@@ -2115,9 +2458,11 @@ def scan(config, state, dry_run, force_uuid, user_invoked):
                                        source_date)
             plans += build_event_plans(extracted_events, index, selves,
                                        source_date)
+            plans, handled = divert_new_plans(
+                plans, source, source_date, text, index, ignored, dry_run)
             mode = effective_filing_mode(source["kind"], filing_mode)
             file_source(config, state, source, source_date, plans, mode,
-                        dry_run, text)
+                        dry_run, text, candidate_handled=handled)
         except BridgeUnavailable:
             raise
         except Exception as exc:
@@ -2142,8 +2487,72 @@ def review_group_has_name(name):
                run_bridge([{"op": "list_group", "path": REVIEW_PATH}])[0])
 
 
+def candidate_mentions(plans, source, source_date, text):
+    """(kept plans, mentions) — every `new` plan leaves the proposal path and
+    becomes a candidate mention; everything else files as before."""
+    kept, mentions = [], []
+    text_hash = hashlib.sha256(text.encode()).hexdigest()
+    for plan in plans:
+        if plan["kind"] != "new":
+            kept.append(plan)
+            continue
+        mentions.append({
+            "name": plan["name"],
+            "email": (plan.get("updates") or {}).get("email", ""),
+            "sid": ec.dt_sighting_id(source["uuid"]),
+            "sighting": {
+                "person": plan["name"],
+                "name": source["name"],
+                "kind": source.get("kind", ""),
+                "date": source_date,
+                "hash": text_hash,
+                "interacted": bool(plan.get("interacted")),
+                "facts": [[d, f] for d, f in plan.get("facts", [])],
+                "updates": dict(plan.get("updates") or {}),
+                "evidence": "extraction",
+            },
+            "plan": plan,
+        })
+    return kept, mentions
+
+
+def divert_new_plans(plans, source, source_date, text, index, ignored,
+                     dry_run):
+    """Route unresolved people into the candidate store; filter Ignored
+    names out of event attendee lists (roster-first: an attendee who now
+    resolves is the roster's, whatever the Ignored group says). Returns
+    (plans to file, count handled by candidates)."""
+    kept, mentions = candidate_mentions(plans, source, source_date, text)
+    for plan in kept:
+        if plan["kind"] == "event":
+            plan["attendees"] = [
+                a for a in plan["attendees"]
+                if index.get(norm(a)) or norm(a) not in ignored]
+    if not mentions:
+        return kept, 0
+    handled = 0
+    for m, disposition in ec.upsert_mentions(run_bridge, mentions, log,
+                                             dry_run=dry_run):
+        if disposition == "resolved":
+            # The roster got them mid-run (a racing promotion): keep the
+            # plan on the proposal path — its frozen ensure_person resolves
+            # to the existing record at apply time and files there.
+            kept.append(m["plan"])
+        elif disposition == "ignored":
+            log.info("dropped mention of ignored candidate %r", m["name"],
+                     extra={"record_name": source["name"],
+                            "record_uuid": source["uuid"]})
+        else:
+            handled += 1
+            log.info("candidate %s for %r (%d fact(s))", disposition,
+                     m["name"], len(m["sighting"]["facts"]),
+                     extra={"record_name": source["name"],
+                            "record_uuid": source["uuid"]})
+    return kept, handled
+
+
 def file_source(config, state, source, source_date, plans, filing_mode,
-                dry_run, text):
+                dry_run, text, candidate_handled=0):
     is_fact = source.get("kind") == "fact"
     filed_ops = [{"op": "mark_filed", "uuid": source["uuid"]}]
     if is_fact:
@@ -2173,9 +2582,12 @@ def file_source(config, state, source, source_date, plans, filing_mode,
     fence_ops.append({"op": "mark_filed", "uuid": source["uuid"]})
 
     # A deliberately-authored fact must never vanish: when extraction yields
-    # nothing to apply or propose, surface the raw capture for manual review
-    # instead of silently marking it filed.
-    empty_fact = is_fact and not direct_ops and not proposal_plans
+    # nothing to apply, propose, or record on a candidate, surface the raw
+    # capture for manual review instead of silently marking it filed. A
+    # capture whose people all landed on Pending/Approved candidates is
+    # handled — the evidence lives on the candidate awaiting decision.
+    empty_fact = is_fact and not direct_ops and not proposal_plans \
+        and not candidate_handled
 
     if dry_run:
         log.info("[dry-run] %s: %d direct ops, %d proposal plans%s",
@@ -2265,6 +2677,156 @@ def file_source(config, state, source, source_date, plans, filing_mode,
 # ---------------------------------------------------------------------------
 
 
+IDENTITY_PROVENANCE_FILE = os.path.expanduser(
+    "~/.local/state/devonthink/identity-provenance.json")
+BRIEF_LOCK_FILE = os.path.expanduser(
+    "~/.local/state/devonthink/dt-morning-brief.lock")
+
+
+def migrate_candidates(dry_run):
+    """One-shot conversion of the brief's calendar candidate ledger into the
+    candidate store: a still-pending calendar proposal becomes a Pending
+    candidate (through the normal lookup-create path, so it unifies with any
+    filing-opened candidate); a gone proposal whose name now resolves is
+    dropped (they got tracked); a gone proposal with no roster hit becomes an
+    Ignored candidate, preserving the ledger's never-repropose promise."""
+    try:
+        with open(IDENTITY_PROVENANCE_FILE) as f:
+            prov = json.load(f)
+    except FileNotFoundError:
+        log.info("no identity-provenance state; nothing to migrate")
+        return 0
+    ledger = (prov or {}).get("candidates") or {}
+    if not ledger:
+        log.info("calendar candidate ledger is empty; nothing to migrate")
+        return 0
+    brief_lock = open(BRIEF_LOCK_FILE, "w")
+    try:
+        fcntl.flock(brief_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        log.error("dt-morning-brief is running; re-run migration when it "
+                  "finishes")
+        return 1
+    try:
+        review, people = run_bridge([
+            {"op": "list_group", "path": REVIEW_PATH},
+            {"op": "dump_people", "include_bodies": False},
+        ])
+        by_uuid = {r["uuid"]: r for r in review}
+        rkeys = ec.roster_keys(people)
+        pending_mentions = []
+        ignored_data = []
+        for key, entry in sorted(ledger.items()):
+            puuid = str((entry or {}).get("proposal_uuid", ""))
+            event_date = valid_date((entry or {}).get("event_date", "")) or ""
+            rec = by_uuid.get(puuid)
+            if rec is not None:
+                text = run_bridge([{"op": "get_text", "uuid": puuid}])[0]["text"]
+                name, email = "", ""
+                try:
+                    for op in proposal_ops(text) or []:
+                        if op.get("op") == "ensure_person":
+                            name = str(op.get("name", "")).strip()
+                            email = str(
+                                (op.get("fields") or {}).get("email", ""))
+                except ValueError:
+                    pass
+                if not name:
+                    log.warning("ledger entry %r: pending proposal %s has no "
+                                "readable ensure_person op; leaving both",
+                                key, puuid)
+                    continue
+                pending_mentions.append(({
+                    "name": name,
+                    "email": email,
+                    "sid": "cal:migrated-" + hashlib.sha256(
+                        key.encode()).hexdigest()[:24],
+                    "sighting": {
+                        "person": name,
+                        "email": ec.norm_email(email),
+                        "kind": "calendar",
+                        "date": event_date,
+                        "title": "(migrated calendar candidate)",
+                        "interacted": False,
+                        "facts": [],
+                        "updates": {},
+                        "evidence": "calendar attendee",
+                    },
+                }, puuid))
+                continue
+            if key in rkeys:
+                log.info("ledger entry %r resolves in the roster; dropping",
+                         key)
+                continue
+            name = key
+            email = key if "@" in key else ""
+            data = ec.new_candidate(name)
+            if email:
+                ec.add_email(data, email)
+            data["sightings"]["cal:migrated-" + hashlib.sha256(
+                key.encode()).hexdigest()[:24]] = {
+                "person": name, "email": email, "kind": "calendar",
+                "date": event_date, "title": "(migrated calendar candidate, "
+                "previously rejected)", "interacted": False, "facts": [],
+                "updates": {}, "evidence": "calendar attendee",
+            }
+            ignored_data.append((key, data))
+        if dry_run:
+            log.info("[dry-run] would migrate %d pending proposal(s) and "
+                     "create %d Ignored candidate(s) from %d ledger entries",
+                     len(pending_mentions), len(ignored_data), len(ledger))
+            return 0
+        results = ec.upsert_mentions(
+            run_bridge, [m for m, _p in pending_mentions], log)
+        trashed = []
+        for (m, puuid), (_m, disposition) in zip(pending_mentions, results):
+            log.info("migrated pending calendar proposal for %r (%s)",
+                     m["name"], disposition)
+            trashed.append({"op": "trash", "uuid": puuid})
+        if trashed:
+            run_bridge(trashed)
+        if ignored_data:
+            lock = ec.acquire_candidates_lock()
+            try:
+                listing = run_bridge(ec.ensure_group_ops()
+                                     + [{"op": "list_candidates"}])[-1]
+                index = ec.CandidateIndex(listing)
+                ops = []
+                for key, data in ignored_data:
+                    hit, _action = index.lookup(
+                        data["name"], next(iter(data["emails"]), ""))
+                    if hit is not None:
+                        log.warning(
+                            "ledger entry %r (previously rejected) collides "
+                            "with live candidate %r — leaving the candidate; "
+                            "ignore it by hand if still unwanted",
+                            key, hit["data"]["name"])
+                        continue
+                    ops.append({"op": "create_record",
+                                "name": ec.record_name(data),
+                                "path": ec.CANDIDATES_IGNORED_PATH,
+                                "text": ec.render_candidate(data),
+                                "fields": {"entitytype": "Candidate"}})
+                if ops:
+                    run_bridge(ops)
+                log.info("created %d Ignored candidate(s) from rejected "
+                         "ledger entries", len(ops))
+            finally:
+                lock.close()
+        prov["candidates"] = {}
+        fd, tmp = tempfile.mkstemp(
+            dir=os.path.dirname(IDENTITY_PROVENANCE_FILE),
+            prefix=".identity-provenance.", suffix=".tmp")
+        with os.fdopen(fd, "w") as f:
+            json.dump(prov, f, indent=2, sort_keys=True)
+        os.replace(tmp, IDENTITY_PROVENANCE_FILE)
+        log.info("calendar candidate ledger retired (%d entries migrated)",
+                 len(ledger))
+        return 0
+    finally:
+        brief_lock.close()
+
+
 def should_record_success(dry_run):
     return not dry_run
 
@@ -2285,8 +2847,29 @@ def main():
         idx = args.index("--force")
         if idx + 1 < len(args):
             force_uuid = args[idx + 1]
+    migrate = "--migrate-candidates" in args
+    split_args = merge_args = None
+    if "--split-candidate" in args:
+        idx = args.index("--split-candidate")
+        split_args = []
+        for a in args[idx + 1:]:
+            if a.startswith("--"):
+                break
+            split_args.append(a)
+        if len(split_args) < 2:
+            print("usage: entity-filing.py --split-candidate "
+                  "<candidate-uuid> <sighting-id>...", file=sys.stderr)
+            sys.exit(2)
+    if "--merge-candidates" in args:
+        idx = args.index("--merge-candidates")
+        merge_args = args[idx + 1:idx + 3]
+        if len(merge_args) != 2:
+            print("usage: entity-filing.py --merge-candidates <keep-uuid> "
+                  "<fold-uuid>", file=sys.stderr)
+            sys.exit(2)
     user_invoked = bool(dry_run or force_uuid or apply_only or scan_only
-                        or rebuild_state)
+                        or rebuild_state or migrate or split_args
+                        or merge_args)
 
     if not dry_run:
         subprocess.run(
@@ -2326,6 +2909,12 @@ def main():
     state = load_state()
 
     try:
+        if split_args:
+            sys.exit(split_candidate(split_args[0], split_args[1:], dry_run))
+        if merge_args:
+            sys.exit(merge_candidates(merge_args[0], merge_args[1], dry_run))
+        if migrate:
+            sys.exit(migrate_candidates(dry_run))
         if rebuild_state or not state_file_existed:
             added = rebuild_processed_from_dt(state)
             if added or rebuild_state:
@@ -2337,6 +2926,7 @@ def main():
                 return
         if not scan_only:
             things_decisions(config, dry_run)
+            promote_candidates(dry_run)
             apply_approved(dry_run)
         if not apply_only:
             scan(config, state, dry_run, force_uuid, user_invoked)

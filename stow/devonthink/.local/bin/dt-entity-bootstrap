@@ -2,9 +2,10 @@
 # dt-entity-bootstrap
 # Idempotently prepares the entity layer's group scaffold in DEVONthink.
 # The JXA bridge assumes /20_ENTITIES/{People,Places,Events,_Review,_Review/
-# Approved,_Facts} already exist, but nothing creates them; hand-created Person/
-# Place/Event markdown records also lack the EntityType metadata that scripted
-# creation stamps. This command closes both gaps.
+# Approved,_Facts,_Candidates,_Candidates/{Approved,Ignored}} already exist,
+# but nothing creates them; hand-created Person/Place/Event markdown records
+# also lack the EntityType metadata that scripted creation stamps. This
+# command closes both gaps.
 #
 # What it does (each step is safe to repeat):
 #   - Creates any missing entity group, reporting created vs already present.
@@ -37,8 +38,8 @@ cat > "$BOOTSTRAP_SCRIPT" <<'BOOTSTRAP_APPLESCRIPT'
 on run argv
     set dbName to item 1 of argv
 
-    set groupPaths to {"/20_ENTITIES/People", "/20_ENTITIES/Places", "/20_ENTITIES/Events", "/20_ENTITIES/_Review", "/20_ENTITIES/_Review/Approved", "/20_ENTITIES/_Facts"}
-    set excludePaths to {"/20_ENTITIES/People", "/20_ENTITIES/_Review", "/20_ENTITIES/_Review/Approved", "/20_ENTITIES/_Facts"}
+    set groupPaths to {"/20_ENTITIES/People", "/20_ENTITIES/Places", "/20_ENTITIES/Events", "/20_ENTITIES/_Review", "/20_ENTITIES/_Review/Approved", "/20_ENTITIES/_Facts", "/20_ENTITIES/_Candidates", "/20_ENTITIES/_Candidates/Approved", "/20_ENTITIES/_Candidates/Ignored"}
+    set excludePaths to {"/20_ENTITIES/People", "/20_ENTITIES/_Review", "/20_ENTITIES/_Review/Approved", "/20_ENTITIES/_Facts", "/20_ENTITIES/_Candidates", "/20_ENTITIES/_Candidates/Approved", "/20_ENTITIES/_Candidates/Ignored"}
     set stampSpecs to {{"/20_ENTITIES/People", "Person"}, {"/20_ENTITIES/Places", "Place"}, {"/20_ENTITIES/Events", "Event"}}
 
     set report to ""

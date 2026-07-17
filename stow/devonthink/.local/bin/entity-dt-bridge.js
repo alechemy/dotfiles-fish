@@ -54,6 +54,9 @@
 //   sort_logs          {dry_run?}                       -> {records,changed,
 //                                                           records_changed}
 //   trash              {uuid}                           -> {uuid}
+//   add_aliases        {uuid,aliases}                   -> {uuid,aliases}
+//   list_candidates    {}                               -> {pending:[{uuid,name,md,text}],
+//                                                           approved:[...],ignored:[...]}
 
 ObjC.import('Foundation')
 
@@ -65,6 +68,9 @@ const EVENTS_PATH = ENTITIES_PATH + '/Events'
 const DAILY_PATH = '/10_DAILY'
 const JOURNAL_PATH = '/15_JOURNAL'
 const FACTS_PATH = ENTITIES_PATH + '/_Facts'
+const CANDIDATES_PATH = ENTITIES_PATH + '/_Candidates'
+const CANDIDATES_APPROVED_PATH = CANDIDATES_PATH + '/Approved'
+const CANDIDATES_IGNORED_PATH = CANDIDATES_PATH + '/Ignored'
 const NOTES_SECTION = "## Today's Notes"
 const LOG_SECTION = '## Biographical Log'
 const EVENT_LOG_SECTION = '## Log'
@@ -732,6 +738,41 @@ function run(argv) {
 
     list_group(op) {
       return groupAt(op.path).children().map(r => ({ uuid: r.uuid(), name: r.name() }))
+    },
+
+    add_aliases(op) {
+      const rec = byUuid(op.uuid)
+      rec.aliases = unionAliases(rec.aliases(), op.aliases)
+      entityIndex = null
+      peopleIndex = null
+      return { uuid: op.uuid, aliases: String(rec.aliases() || '') }
+    },
+
+    list_candidates() {
+      // Missing groups (bootstrap not yet run) read as empty, not an error,
+      // so filing degrades to today's behavior instead of failing the batch.
+      const listOne = (path) => {
+        const g = dt.getRecordAt(path, { in: db })
+        if (!g) return []
+        const c = g.children
+        const types = c.recordType()
+        const uuids = c.uuid()
+        const names = c.name()
+        const mds = c.customMetaData()
+        const bodies = c.plainText()
+        const out = []
+        for (let i = 0; i < uuids.length; i++) {
+          if (types[i] !== 'markdown') continue
+          out.push({ uuid: uuids[i], name: names[i],
+                     md: mds[i] || {}, text: String(bodies[i] || '') })
+        }
+        return out
+      }
+      return {
+        pending: listOne(CANDIDATES_PATH),
+        approved: listOne(CANDIDATES_APPROVED_PATH),
+        ignored: listOne(CANDIDATES_IGNORED_PATH),
+      }
     },
 
     search(op) {

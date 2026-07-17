@@ -26,7 +26,10 @@ filing proposals sit unreviewed in `/20_ENTITIES/_Review`, an
 
 The brief reads live from the records, so it is never stale. Mutations are the
 daily-note section insert (idempotent via an HTML comment marker per section per
-day), review-only Person candidates, and LastContact bumps from two sources: every
+day), candidate sightings for unmatched attendees (recorded in the shared
+/20_ENTITIES/_Candidates store — see entity_candidates.py — where each
+stranger holds one record until tracked, ignored, or forgotten), and
+LastContact bumps from two sources: every
 person matched in YESTERDAY's calendar — yesterday because the day is
 complete, so a meeting that was cancelled after the morning run never
 counts as contact — and everyone texted with since yesterday, read from
@@ -123,6 +126,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path.home() / ".local" / "bin"))
 from pipeline_log import setup as setup_log
+
+import entity_candidates as ec
 
 log = setup_log("morning-brief")
 
@@ -281,7 +286,7 @@ def acquire_lock():
     """Hold a non-blocking exclusive lock for the run's lifetime, mirroring
     entity-filing.py's own lock — a launchd retry overlapping a hand-run brief
     would otherwise last-writer-win identity-provenance.json, silently
-    dropping a candidate-ledger entry or a whole --backfill-contacts harvest.
+    dropping a context observation or a whole --backfill-contacts harvest.
     Returns the open fd (kept referenced to hold the lock) or None if another
     run holds it."""
     os.makedirs(os.path.dirname(LOCK_FILE), exist_ok=True)
@@ -360,7 +365,6 @@ def empty_identity_provenance():
     return {
         "version": IDENTITY_PROVENANCE_VERSION,
         "people": {},
-        "candidates": {},
         "series_lookback": None,
     }
 
@@ -373,9 +377,6 @@ def load_identity_provenance():
     if state.get("version") != IDENTITY_PROVENANCE_VERSION \
             or not isinstance(state.get("people"), dict):
         raise ValueError("unsupported or malformed identity provenance state")
-    state.setdefault("candidates", {})
-    if not isinstance(state["candidates"], dict):
-        raise ValueError("malformed calendar candidate state")
     state.setdefault("series_lookback", None)
     return state
 
@@ -383,10 +384,10 @@ def load_identity_provenance():
 def load_identity_provenance_or_quarantine(when):
     """load_identity_provenance(), quarantining a corrupt or unsupported
     state file instead of raising, so one bad write never takes the whole
-    brief down. Context observations self-rebuild from the next
-    SERIES_LOOKBACK_DAYS-wide series lookback; the candidate never-repropose
-    ledger does not, so a candidate rejected before the quarantine may be
-    proposed again once."""
+    brief down. Everything here is rebuildable: context observations
+    self-rebuild from the next SERIES_LOOKBACK_DAYS-wide series lookback,
+    and candidate truth lives in DEVONthink's _Candidates records, not this
+    file."""
     try:
         return load_identity_provenance()
     except (OSError, ValueError, json.JSONDecodeError) as exc:
@@ -396,17 +397,14 @@ def load_identity_provenance_or_quarantine(when):
             log.warning(
                 "identity provenance state unreadable (%s) — quarantined to "
                 "%s; calendar-context observations self-rebuild via the "
-                "%d-day series lookback, but the candidate never-repropose "
-                "ledger is lost — a previously rejected calendar candidate "
-                "may be proposed again once", exc, dest, SERIES_LOOKBACK_DAYS)
+                "%d-day series lookback", exc, dest, SERIES_LOOKBACK_DAYS)
         return empty_identity_provenance()
 
 
 def prune_context_observations(state, today):
     """Drop context observations older than SERIES_LOOKBACK_DAYS. They exist
     only so repeat_series can recognize a meeting within that window;
-    anything older is unbounded growth with no future read. The candidate
-    ledger is never pruned by age — see propose_calendar_candidates."""
+    anything older is unbounded growth with no future read."""
     cutoff = (date.fromisoformat(today)
               - timedelta(days=SERIES_LOOKBACK_DAYS)).isoformat()
     changed = False
@@ -1057,28 +1055,6 @@ def calendar_candidate_key(name):
     return hashlib.sha256(norm(name).encode()).hexdigest()[:24]
 
 
-def calendar_candidate_ledger_key(name, email):
-    """The candidate never-repropose ledger's storage key. An email
-    distinguishes two different people who happen to share a name, so
-    rejecting one no longer burns every future same-named candidate; with no
-    email there is nothing sharper to key on, so the key stays the legacy
-    name-only one."""
-    if not email:
-        return calendar_candidate_key(name)
-    return hashlib.sha256(f"{norm(name)}|{norm(email)}".encode()).hexdigest()[:24]
-
-
-def candidate_ledger_keys(candidate):
-    """Ledger keys to check for `candidate`, new-style first. An entry
-    written before the ledger began distinguishing by email is still found
-    through the legacy name-only fallback, so the live file needs no
-    migration."""
-    new = calendar_candidate_ledger_key(candidate["name"], candidate["email"])
-    if not candidate["email"]:
-        return [new]
-    return [new, calendar_candidate_key(candidate["name"])]
-
-
 def possible_existing_people(name, people):
     tokens = {token for token in norm(name).split() if len(token) >= 3}
     return [
@@ -1149,6 +1125,7 @@ def calendar_person_candidates(events, people, contacts, skip_re, contexts,
                     "context": context,
                     "event_title": ev["title"],
                     "event_date": event_date,
+                    "sid": ec.cal_fingerprint(ev),
                     "near": possible_existing_people(name, people),
                 }
         for phrase in title_person_phrases(ev["title"]):
@@ -1185,6 +1162,7 @@ def calendar_person_candidates(events, people, contacts, skip_re, contexts,
                 "context": context,
                 "event_title": ev["title"],
                 "event_date": event_date,
+                "sid": ec.cal_fingerprint(ev),
                 "near": possible_existing_people(name, people),
             }
         if dropped:
@@ -1195,86 +1173,36 @@ def calendar_person_candidates(events, people, contacts, skip_re, contexts,
     return list(candidates.values())
 
 
-def calendar_candidate_body(candidate):
-    fields = {"email": candidate["email"]} if candidate["email"] else {}
-    op = {
-        "op": "ensure_person",
-        "name": candidate["name"],
-        "fields": fields,
-    }
-    if candidate.get("near"):
-        op["confirm_new"] = True
-    ops = [op]
-    lines = [
-        f"# Calendar person candidate: {candidate['name']}",
-        "",
-        f"Evidence: {candidate['evidence']}",
-        f"Calendar context: {candidate['context']}",
-        f"Event: {candidate['event_date']} — {candidate['event_title']}",
-        "",
-        "This proposal creates only a Person record. It does not infer facts or "
-        "mark the meeting as completed contact.",
-        "",
-        "Move this record into `20_ENTITIES/_Review/Approved` to create the "
-        "person, or delete it to reject this identity.",
-    ]
-    if candidate.get("near"):
-        lines += [
-            "",
-            "Possible existing records: " + ", ".join(candidate["near"]),
-            "",
-            "This candidate is marked as a separate identity. If it is actually "
-            "one of these people, add the candidate name as an alias to that "
-            "record and delete this proposal.",
-        ]
-    lines += [
-        "",
-        "## Ops",
-        "",
-        "```json",
-        json.dumps(ops, indent=2),
-        "```",
-        "",
-    ]
-    return "\n".join(lines)
-
-
-def propose_calendar_candidates(candidates, state, dry_run):
-    known = state.setdefault("candidates", {})
-    unseen = [candidate for candidate in candidates
-              if not any(k in known for k in candidate_ledger_keys(candidate))]
-    pending = {}
-    if unseen and not dry_run:
-        pending = {
-            record["name"]: record for record in
-            run_bridge([{"op": "list_group", "path": REVIEW_PATH}])[0]
-        }
-    changed = False
-    for candidate in unseen:
-        if dry_run:
-            print(f"[dry-run] would propose new Person {candidate['name']} "
-                  f"from {candidate['evidence']}")
-            continue
-        proposal_name = f"Calendar person: {candidate['name']}"
-        result = pending.get(proposal_name)
-        if result is None:
-            result = run_bridge([{
-                "op": "create_record",
-                "name": proposal_name,
-                "path": REVIEW_PATH,
-                "text": calendar_candidate_body(candidate),
-            }])[0]
-            pending[proposal_name] = result
-        known[candidate_ledger_keys(candidate)[0]] = {
-            "proposal_uuid": result["uuid"],
-            "created": datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
-            "event_date": candidate["event_date"],
-        }
-        changed = True
-        log.info("created calendar Person candidate",
-                 extra={"record_name": candidate["name"],
-                        "record_uuid": result["uuid"]})
-    return changed
+def propose_calendar_candidates(candidates, dry_run):
+    """Record today's unmatched calendar attendees as sightings in the shared
+    candidate store (entity_candidates). The candidate record is itself the
+    never-repropose ledger: however many meetings a stranger appears in, they
+    hold one Pending record until decided, and an Ignored record drops them
+    wholesale. Attendance infers no facts and never bumps LastContact."""
+    mentions = [{
+        "name": c["name"],
+        "email": c["email"],
+        "sid": c["sid"],
+        "sighting": {
+            "person": c["name"],
+            "email": ec.norm_email(c["email"]),
+            "kind": "calendar",
+            "date": c["event_date"],
+            "title": c["event_title"],
+            "interacted": False,
+            "facts": [],
+            "updates": {},
+            "evidence": c["evidence"],
+        },
+    } for c in candidates]
+    for m, disposition in ec.upsert_mentions(run_bridge, mentions, log,
+                                             dry_run=dry_run):
+        if dry_run and disposition in ("created", "attached", "upgraded"):
+            print(f"[dry-run] would record calendar sighting of {m['name']} "
+                  f"({disposition})")
+        elif disposition == "created":
+            log.info("calendar candidate created",
+                     extra={"record_name": m["name"]})
 
 
 def strip_symbols(s):
@@ -1739,14 +1667,21 @@ def parked_lines(parked):
 
 def review_backlog(today, excluded=()):
     """Filing review backlog: pending/approved counts, the parked state-file
-    dict, and each review group's UUID so the nudge can link straight to it.
-    None when the bridge count failed (BridgeUnavailable still propagates)."""
+    dict, candidate attention counts, and each review group's UUID so the
+    nudge can link straight to it. Candidates surface only when they demand
+    attention — an urgent (fact-capture) Pending candidate, or one wedged in
+    _Candidates/Approved that promotion keeps bouncing. Ordinary Pending
+    totals are deliberately absent: an undecided stranger is meant to sit
+    quietly, and a daily count would recreate the nag the candidate store
+    exists to end. None when the bridge count failed (BridgeUnavailable
+    still propagates)."""
     try:
-        children, approved, review_group, approved_group = run_bridge([
+        children, approved, review_group, approved_group, listing = run_bridge([
             {"op": "list_group", "path": REVIEW_PATH},
             {"op": "list_group", "path": APPROVED_PATH},
             {"op": "get_at_path", "path": REVIEW_PATH},
             {"op": "get_at_path", "path": APPROVED_PATH},
+            {"op": "list_candidates"},
         ])
     except BridgeUnavailable:
         raise
@@ -1754,6 +1689,15 @@ def review_backlog(today, excluded=()):
         log.warning("could not count review proposals: %s", exc)
         return None
     ex_re = excluded_re(excluded)
+    cindex = ec.CandidateIndex(listing)
+    urgent = sum(
+        1 for e in cindex.entries
+        if e["group"] == "pending" and e["data"].get("urgent")
+        and not text_excluded(e["data"]["name"], ex_re, excluded))
+    stuck = sum(
+        1 for e in cindex.entries
+        if e["group"] == "approved"
+        and not text_excluded(e["data"]["name"], ex_re, excluded))
     # parked_lines renders last_error too, and an extraction error quotes the
     # text it choked on ("ambiguous person: <name>").
     pending = [c for c in children if c["name"] != "Approved"]
@@ -1766,6 +1710,8 @@ def review_backlog(today, excluded=()):
         "pending": len(pending),
         "approved": len(approved),
         "parked": parked,
+        "urgent_candidates": urgent,
+        "stuck_candidates": stuck,
         "review_uuid": (review_group or {}).get("uuid"),
         "approved_uuid": (approved_group or {}).get("uuid"),
     }
@@ -1791,7 +1737,10 @@ def render_review(backlog, today):
     pending = backlog["pending"]
     approved = backlog["approved"]
     parked = backlog["parked"]
-    if not pending and not approved and not parked:
+    urgent = backlog.get("urgent_candidates", 0)
+    stuck = backlog.get("stuck_candidates", 0)
+    if not pending and not approved and not parked and not urgent \
+            and not stuck:
         return None
     lines = [f"<!-- review-nudge:{today} -->", ""]
     if pending:
@@ -1803,6 +1752,15 @@ def render_review(backlog, today):
         link = group_link("20_ENTITIES/_Review/Approved",
                           backlog["approved_uuid"])
         lines.append(f"- {approved} approved {noun} in {link} did not apply "
+                     f"— see `entity-filing` in the pipeline log")
+    if urgent:
+        noun = "candidate carries" if urgent == 1 else "candidates carry"
+        lines.append(f"- {urgent} pending {noun} a deliberately captured "
+                     f"fact in `20_ENTITIES/_Candidates`")
+    if stuck:
+        noun = "candidate" if stuck == 1 else "candidates"
+        lines.append(f"- {stuck} approved {noun} in "
+                     f"`20_ENTITIES/_Candidates/Approved` did not promote "
                      f"— see `entity-filing` in the pipeline log")
     lines.extend(parked_lines(parked))
     return "\n".join(lines)
@@ -2352,8 +2310,7 @@ def main():
     candidates = calendar_person_candidates(
         events, people, contacts, skip_re, contexts, excluded, skip_cals,
         provenance)
-    if propose_calendar_candidates(candidates, provenance, dry_run):
-        save_identity_provenance(provenance, today)
+    propose_calendar_candidates(candidates, dry_run)
     overdue = reconnect_overdue(people, today)
     bdays = birthday_rows(contacts, people, today)
     backlog = review_backlog(today, excluded)

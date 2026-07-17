@@ -1150,5 +1150,587 @@ class ShouldRecordSuccess(unittest.TestCase):
         self.assertFalse(ef.should_record_success(True))
 
 
+import shutil
+
+import entity_candidates as ec
+
+
+class CandidateLockSandbox(unittest.TestCase):
+    """Base for tests that reach candidate code paths taking the shared
+    lock — the real lock file must never be touched from the suite."""
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp()
+        self.original_lock = ec.CANDIDATE_LOCK_FILE
+        ec.CANDIDATE_LOCK_FILE = os.path.join(self.dir, "candidates.lock")
+        self.original_bridge = ef.run_bridge
+
+    def tearDown(self):
+        ef.run_bridge = self.original_bridge
+        ec.CANDIDATE_LOCK_FILE = self.original_lock
+        shutil.rmtree(self.dir, ignore_errors=True)
+
+    def install_bridge(self, listing=None, people=(), extra=None):
+        calls = []
+
+        def bridge(ops, timeout=300):
+            calls.append(ops)
+            results = []
+            for op in ops:
+                if op["op"] == "list_candidates":
+                    results.append(listing or {
+                        "pending": [], "approved": [], "ignored": []})
+                elif op["op"] == "dump_people":
+                    results.append(list(people))
+                elif extra is not None and op["op"] in extra:
+                    results.append(extra[op["op"]](op))
+                else:
+                    results.append({"uuid": "NEW-1", "created": True})
+            return results
+
+        bridge.calls = calls
+        ef.run_bridge = bridge
+        return bridge
+
+    def sent(self, bridge, op_name):
+        return [o for ops in bridge.calls for o in ops if o["op"] == op_name]
+
+
+def cand_record(data, uuid="CAND-1", md=None):
+    return {"uuid": uuid, "name": ec.record_name(data), "md": md or {},
+            "text": ec.render_candidate(data)}
+
+
+def new_plan(name="Jordan Pike", facts=(("2026-03-16", "moved to Denver"),),
+             updates=None, interacted=True):
+    return {"kind": "new", "name": name, "single_token": False, "near": [],
+            "interacted": interacted, "facts": [tuple(f) for f in facts],
+            "updates": dict(updates or {})}
+
+
+SRC = {"uuid": "SRC-1", "name": "2026-03-16 Call", "kind": "granola"}
+
+
+class CandidateDiversion(CandidateLockSandbox):
+    def test_new_plans_become_mentions_with_provenance(self):
+        kept, mentions = ef.candidate_mentions(
+            [new_plan(), {"kind": "existing", "name": "Cara Quill",
+                          "uuid": "P1", "md": {}, "facts": [], "updates": {}}],
+            SRC, "2026-03-16", "text")
+        self.assertEqual([p["kind"] for p in kept], ["existing"])
+        self.assertEqual(len(mentions), 1)
+        m = mentions[0]
+        self.assertEqual(m["sid"], "dt:SRC-1")
+        self.assertEqual(m["sighting"]["person"], "Jordan Pike")
+        self.assertEqual(m["sighting"]["kind"], "granola")
+        self.assertTrue(m["sighting"]["hash"])
+
+    def test_diverted_plan_is_handled_and_creates_a_candidate(self):
+        bridge = self.install_bridge()
+        plans, handled = ef.divert_new_plans(
+            [new_plan()], SRC, "2026-03-16", "text", {}, set(), False)
+        self.assertEqual(plans, [])
+        self.assertEqual(handled, 1)
+        self.assertEqual(len(self.sent(bridge, "create_record")), 1)
+
+    def test_ignored_mention_is_dropped_not_handled(self):
+        data = ec.new_candidate("Jordan Pike")
+        data["sightings"]["dt:OLD"] = {"person": "Jordan Pike",
+                                       "kind": "granola",
+                                       "date": "2026-03-01", "facts": [],
+                                       "updates": {}}
+        listing = {"pending": [], "approved": [],
+                   "ignored": [cand_record(data)]}
+        self.install_bridge(listing)
+        plans, handled = ef.divert_new_plans(
+            [new_plan()], SRC, "2026-03-16", "text", {}, set(), False)
+        self.assertEqual((plans, handled), ([], 0))
+
+    def test_resolved_mention_keeps_its_proposal_plan(self):
+        self.install_bridge(people=[person("Jordan Pike")])
+        plans, handled = ef.divert_new_plans(
+            [new_plan()], SRC, "2026-03-16", "text", {}, set(), False)
+        self.assertEqual([p["kind"] for p in plans], ["new"])
+        self.assertEqual(handled, 0)
+
+    def test_event_attendees_filter_is_roster_first(self):
+        self.install_bridge()
+        index = ef.roster_index([person("Jordan Pike")])
+        event_plan = {"kind": "event", "name": "Trip", "date": "2026-03-16",
+                      "location": "", "summary": "",
+                      "attendees": ["Jordan Pike", "Casey Doyle", "Ava Reed"]}
+        plans, _handled = ef.divert_new_plans(
+            [event_plan], SRC, "2026-03-16", "text", index,
+            {"jordan pike", "casey doyle"}, False)
+        self.assertEqual(plans[0]["attendees"], ["Jordan Pike", "Ava Reed"])
+
+
+class FileSourceCandidateHandled(CandidateLockSandbox):
+    def file_fact(self, candidate_handled):
+        bridge = self.install_bridge(extra={
+            "get_source": lambda op: {"uuid": "FACT-1", "name": "Fact",
+                                      "kind": "fact", "modified": "m"},
+            "get_text": lambda op: {"text": "Jordan Pike moved."},
+            "list_group": lambda op: [],
+        })
+        state = {"processed": {}, "attempts": {}, "parked": {}}
+        saved = ef.save_state
+        ef.save_state = lambda s: None
+        try:
+            ef.file_source({}, state,
+                           {"uuid": "FACT-1", "name": "Fact", "kind": "fact"},
+                           "2026-03-16", [], "auto", False,
+                           "Jordan Pike moved.",
+                           candidate_handled=candidate_handled)
+        finally:
+            ef.save_state = saved
+        return bridge
+
+    def test_candidate_handled_fact_files_without_a_review_stub(self):
+        bridge = self.file_fact(candidate_handled=1)
+        stubs = [o for o in self.sent(bridge, "create_record")
+                 if o["name"].startswith("Review capture:")]
+        self.assertEqual(stubs, [])
+        self.assertTrue(self.sent(bridge, "mark_filed"))
+
+    def test_unhandled_empty_fact_still_surfaces_a_stub(self):
+        bridge = self.file_fact(candidate_handled=0)
+        stubs = [o for o in self.sent(bridge, "create_record")
+                 if o["name"].startswith("Review capture:")]
+        self.assertEqual(len(stubs), 1)
+
+
+class PromotionTarget(unittest.TestCase):
+    def preflight(self, data, md=None, people=()):
+        people = list(people)
+        return ef.promotion_target(data, md or {}, people,
+                                   ef.roster_index(people))
+
+    def data(self, name="Jordan Pike", variants=(), emails=()):
+        d = ec.new_candidate(name)
+        for v in variants:
+            ec.add_variant(d, v)
+        for e in emails:
+            ec.add_email(d, e)
+        return d
+
+    def test_clean_name_with_no_hits_creates(self):
+        target, reason, _near = self.preflight(self.data())
+        self.assertIsNone(target)
+        self.assertIsNone(reason)
+
+    def test_unique_exact_hit_files_into_that_person(self):
+        p = person("Jordan Pike", uuid="P1")
+        target, reason, _near = self.preflight(self.data(), people=[p])
+        self.assertEqual(target, "P1")
+        self.assertIsNone(reason)
+
+    def test_identifier_divergence_bounces(self):
+        people = [person("Jordan Pike", uuid="P1"),
+                  person("J. Pike", uuid="P2")]
+        target, reason, _near = self.preflight(
+            self.data(variants=["J. Pike"]), people=people)
+        self.assertIsNone(target)
+        self.assertIn("multiple people", reason)
+
+    def test_email_resolution_counts_as_an_identifier(self):
+        p = person("Someone Unrelated", uuid="P1", email="jp@x.com")
+        target, reason, _near = self.preflight(
+            self.data(emails=["jp@x.com"]), people=[p])
+        self.assertEqual(target, "P1")
+        self.assertIsNone(reason)
+
+    def test_track_target_must_be_a_person_uuid(self):
+        target, reason, _near = self.preflight(
+            self.data(), md={"mdtracktarget": "NOPE"})
+        self.assertIsNone(target)
+        self.assertIn("not a Person record", reason)
+
+    def test_track_target_alias_collision_bounces(self):
+        people = [person("Jordan Pike", uuid="P1"),
+                  person("Target Person", uuid="P2")]
+        target, reason, _near = self.preflight(
+            self.data(), md={"mdtracktarget": "P2"}, people=people)
+        self.assertIsNone(target)
+        self.assertIn("alias collision", reason)
+
+    def test_track_target_wins_when_compatible(self):
+        people = [person("Target Person", uuid="P2")]
+        target, reason, _near = self.preflight(
+            self.data(), md={"mdtracktarget": "P2"}, people=people)
+        self.assertEqual(target, "P2")
+        self.assertIsNone(reason)
+
+    def test_near_match_requires_confirmation(self):
+        target, reason, near = self.preflight(
+            self.data(), people=[person("Jordan Vale")])
+        self.assertIsNone(target)
+        self.assertIn("needs confirmation", reason)
+        self.assertEqual(near, ["Jordan Vale"])
+
+    def test_create_distinct_overrides_near_match(self):
+        target, reason, _near = self.preflight(
+            self.data(), md={"mdcreatedistinct": "1"},
+            people=[person("Jordan Vale")])
+        self.assertIsNone(target)
+        self.assertIsNone(reason)
+
+    def test_single_token_requires_confirmation(self):
+        target, reason, _near = self.preflight(self.data(name="Jordan"))
+        self.assertIsNone(target)
+        self.assertIn("needs confirmation", reason)
+
+
+class PromotionEvidenceOps(unittest.TestCase):
+    def data_with(self, sightings):
+        d = ec.new_candidate("Jordan Pike")
+        d["sightings"] = sightings
+        return d
+
+    def test_fields_apply_chronologically_with_guards(self):
+        data = self.data_with({
+            "dt:S2": {"person": "Jordan Pike", "kind": "granola",
+                      "date": "2026-03-20", "facts": [],
+                      "updates": {"employer": "Globex"}, "interacted": False},
+            "dt:S1": {"person": "Jordan Pike", "kind": "granola",
+                      "date": "2026-03-10", "facts": [],
+                      "updates": {"employer": "Initech"}, "interacted": False},
+        })
+        ops = ef.promotion_evidence_ops(data, "P1", {"mdemployer": "Acme"})
+        sets = [o for o in ops if o["op"] == "set_field"]
+        self.assertEqual([o["value"] for o in sets], ["Initech", "Globex"])
+        self.assertEqual([o["effective_date"] for o in sets],
+                         ["2026-03-10", "2026-03-20"])
+        self.assertEqual(sets[0]["expected_previous"], "Acme")
+        self.assertNotIn("expected_previous", sets[1])
+
+    def test_fact_lines_keep_source_provenance(self):
+        data = self.data_with({
+            "dt:SRC-9": {"person": "Jordan Pike", "kind": "granola",
+                         "date": "2026-03-10",
+                         "facts": [["2026-03-10", "moved to Denver"]],
+                         "updates": {}, "interacted": True},
+        })
+        ops = ef.promotion_evidence_ops(data, "P1", {})
+        logs = [o for o in ops if o["op"] == "append_log"]
+        self.assertEqual(len(logs), 1)
+        self.assertIn("x-devonthink-item://SRC-9", logs[0]["lines"][0])
+
+    def test_lastcontact_bumps_from_latest_interacted_non_fact(self):
+        data = self.data_with({
+            "dt:S1": {"person": "Jordan Pike", "kind": "granola",
+                      "date": "2026-03-10", "facts": [], "updates": {},
+                      "interacted": True},
+            "dt:S2": {"person": "Jordan Pike", "kind": "fact",
+                      "date": "2026-03-20", "facts": [], "updates": {},
+                      "interacted": True},
+            "cal:X": {"person": "Jordan Pike", "kind": "calendar",
+                      "date": "2026-03-15", "facts": [], "updates": {},
+                      "interacted": False},
+        })
+        ops = ef.promotion_evidence_ops(data, "P1", {})
+        bumps = [o for o in ops if o["op"] == "bump_lastcontact"]
+        self.assertEqual([o["date"] for o in bumps], ["2026-03-10"])
+
+    def test_calendar_sightings_produce_no_fact_lines(self):
+        data = self.data_with({
+            "cal:X": {"person": "Jordan Pike", "kind": "calendar",
+                      "date": "2026-03-15",
+                      "facts": [["2026-03-15", "should not appear"]],
+                      "updates": {}, "interacted": False},
+        })
+        ops = ef.promotion_evidence_ops(data, "P1", {})
+        self.assertEqual([o for o in ops if o["op"] == "append_log"], [])
+
+
+class IgnoredConflicts(unittest.TestCase):
+    def test_zero_hit_ignored_name_conflicts(self):
+        ops = [{"op": "ensure_person", "name": "Jordan Pike"}]
+        got = ef.ignored_conflicts(ops, {}, {"jordan pike"})
+        self.assertEqual(got, ["Jordan Pike"])
+
+    def test_roster_wins_over_the_ignored_group(self):
+        index = ef.roster_index([person("Jordan Pike")])
+        ops = [{"op": "ensure_person", "name": "Jordan Pike"}]
+        self.assertEqual(ef.ignored_conflicts(ops, index, {"jordan pike"}), [])
+
+    def test_event_attendees_are_checked_too(self):
+        ops = [{"op": "ensure_event", "name": "Trip",
+                "attendees": ["Jordan Pike", "Ava Reed"]}]
+        got = ef.ignored_conflicts(ops, {}, {"jordan pike"})
+        self.assertEqual(got, ["Jordan Pike"])
+
+
+class PromoteCandidates(CandidateLockSandbox):
+    def approved_listing(self, data, md=None, uuid="CAND-1"):
+        return {"pending": [], "ignored": [],
+                "approved": [cand_record(data, uuid=uuid, md=md)]}
+
+    def promote(self, data, md=None, people=()):
+        listing = self.approved_listing(data, md=md)
+        bridge = self.install_bridge(listing, people=people)
+        ef.promote_candidates(False)
+        return bridge
+
+    def test_clean_promotion_creates_person_and_files_evidence(self):
+        data = ec.new_candidate("Jordan Pike")
+        ec.upsert_sighting(data, "dt:SRC-1", {
+            "person": "Jordan Pike", "name": "Call", "kind": "granola",
+            "date": "2026-03-16", "hash": "h",
+            "interacted": True,
+            "facts": [["2026-03-16", "moved to Denver"]],
+            "updates": {"employer": "Initech"}, "evidence": "extraction"})
+        bridge = self.promote(data)
+        ensures = self.sent(bridge, "ensure_person")
+        self.assertEqual([o["name"] for o in ensures], ["Jordan Pike"])
+        self.assertTrue(self.sent(bridge, "append_log"))
+        self.assertTrue(self.sent(bridge, "set_field"))
+        self.assertTrue(self.sent(bridge, "bump_lastcontact"))
+        self.assertEqual([o["uuid"] for o in self.sent(bridge, "trash")],
+                         ["CAND-1"])
+
+    def test_calendar_candidate_email_reaches_the_person(self):
+        data = ec.new_candidate("Jordan Pike")
+        ec.upsert_sighting(data, "cal:X", {
+            "person": "Jordan Pike", "email": "jp@x.com",
+            "kind": "calendar", "date": "2026-03-16", "title": "Lease review",
+            "interacted": False, "facts": [], "updates": {},
+            "evidence": "calendar attendee"})
+        bridge = self.promote(data)
+        sets = self.sent(bridge, "set_field")
+        self.assertEqual(
+            [(o["field"], o["value"]) for o in sets], [("email", "jp@x.com")])
+        self.assertEqual(sets[0]["effective_date"], "2026-03-16")
+        self.assertEqual(self.sent(bridge, "bump_lastcontact"), [])
+
+    def test_bounce_rewrites_body_and_moves_back_to_pending(self):
+        data = ec.new_candidate("Jordan")
+        data["sightings"]["dt:S"] = {"person": "Jordan", "kind": "granola",
+                                     "date": "2026-03-16", "facts": [],
+                                     "updates": {}}
+        bridge = self.promote(data)
+        self.assertEqual(self.sent(bridge, "ensure_person"), [])
+        self.assertEqual(self.sent(bridge, "trash"), [])
+        sets = self.sent(bridge, "set_text")
+        self.assertEqual(len(sets), 1)
+        self.assertIn("Needs attention", sets[0]["text"])
+        moves = self.sent(bridge, "move_to")
+        self.assertEqual([m["group"] for m in moves], [ec.CANDIDATES_PATH])
+
+    def test_merge_into_existing_adds_missing_aliases(self):
+        data = ec.new_candidate("Jordan Pike")
+        ec.add_variant(data, "J. Pike")
+        data["sightings"]["dt:S"] = {"person": "Jordan Pike",
+                                     "kind": "granola",
+                                     "date": "2026-03-16", "facts": [],
+                                     "updates": {}}
+        p = person("Target Person", uuid="P2")
+        bridge = self.promote(data, md={"mdtracktarget": "P2"}, people=[p])
+        adds = self.sent(bridge, "add_aliases")
+        self.assertEqual(len(adds), 1)
+        self.assertEqual(adds[0]["uuid"], "P2")
+        self.assertIn("Jordan Pike", adds[0]["aliases"])
+        self.assertIn("J. Pike", adds[0]["aliases"])
+        self.assertEqual(self.sent(bridge, "ensure_person"), [])
+
+    def test_vanished_or_moved_record_is_skipped(self):
+        data = ec.new_candidate("Jordan Pike")
+        data["sightings"]["dt:S"] = {"person": "Jordan Pike",
+                                     "kind": "granola",
+                                     "date": "2026-03-16", "facts": [],
+                                     "updates": {}}
+        stale = self.approved_listing(data)
+        fresh = {"pending": [], "approved": [], "ignored": []}
+        calls = []
+
+        def bridge(ops, timeout=300):
+            calls.append(ops)
+            results = []
+            for op in ops:
+                if op["op"] == "list_candidates":
+                    results.append(stale if len(calls) == 1 else fresh)
+                elif op["op"] == "dump_people":
+                    results.append([])
+                else:
+                    results.append({})
+            return results
+
+        ef.run_bridge = bridge
+        ef.promote_candidates(False)
+        self.assertEqual(
+            [o for ops in calls for o in ops
+             if o["op"] not in ("list_candidates", "dump_people")], [])
+
+    def test_unreadable_approved_candidate_is_quarantined(self):
+        rec = {"uuid": "CAND-1", "name": "Candidate: X", "md": {},
+               "text": "no fence"}
+        listing = {"pending": [], "approved": [rec], "ignored": []}
+        bridge = self.install_bridge(listing)
+        ef.promote_candidates(False)
+        renames = self.sent(bridge, "set_name")
+        self.assertEqual(len(renames), 1)
+        self.assertTrue(renames[0]["name"].startswith(ec.QUARANTINE_PREFIX))
+
+
+class SplitMerge(CandidateLockSandbox):
+    def two_sighting_candidate(self):
+        data = ec.new_candidate("Jordan Pike")
+        for i, (sid, email) in enumerate(
+                [("dt:S1", ""), ("cal:X", "jp@x.com")]):
+            ec.upsert_sighting(data, sid, {
+                "person": "Jordan Pike" if i == 0 else "J. Pike",
+                "email": email, "kind": "granola" if i == 0 else "calendar",
+                "date": f"2026-03-1{i}", "facts": [], "updates": {},
+                "interacted": False, "title": "Meet"})
+        return data
+
+    def test_split_refuses_to_move_every_sighting(self):
+        data = self.two_sighting_candidate()
+        listing = {"pending": [cand_record(data)], "approved": [],
+                   "ignored": []}
+        self.install_bridge(listing)
+        rc = ef.split_candidate("CAND-1", ["dt:S1", "cal:X"], False)
+        self.assertEqual(rc, 1)
+
+    def test_split_moves_sightings_and_recomputes_both_halves(self):
+        data = self.two_sighting_candidate()
+        listing = {"pending": [cand_record(data)], "approved": [],
+                   "ignored": []}
+        bridge = self.install_bridge(listing)
+        rc = ef.split_candidate("CAND-1", ["cal:X"], False)
+        self.assertEqual(rc, 0)
+        sets = self.sent(bridge, "set_text")
+        creates = self.sent(bridge, "create_record")
+        self.assertEqual((len(sets), len(creates)), (1, 1))
+        original = ec.parse_candidate(sets[0]["text"])
+        self.assertEqual(list(original["sightings"]), ["dt:S1"])
+        self.assertEqual(original["emails"], [])
+        new = ec.parse_candidate(creates[0]["text"])
+        self.assertEqual(list(new["sightings"]), ["cal:X"])
+        self.assertEqual(new["name"], "J. Pike")
+        self.assertEqual(new["emails"], ["jp@x.com"])
+        self.assertFalse(new["detached"])
+
+    def test_email_less_split_off_is_detached(self):
+        data = self.two_sighting_candidate()
+        listing = {"pending": [cand_record(data)], "approved": [],
+                   "ignored": []}
+        bridge = self.install_bridge(listing)
+        ef.split_candidate("CAND-1", ["dt:S1"], False)
+        new = ec.parse_candidate(self.sent(bridge, "create_record")[0]["text"])
+        self.assertTrue(new["detached"])
+        self.assertEqual(ec.candidate_keys(new), [])
+
+    def test_merge_folds_sightings_variants_and_emails(self):
+        a = ec.new_candidate("Jordan Pike")
+        ec.upsert_sighting(a, "dt:S1", {"person": "Jordan Pike",
+                                        "kind": "granola",
+                                        "date": "2026-03-10", "facts": [],
+                                        "updates": {}})
+        b = ec.new_candidate("J. Pike")
+        ec.upsert_sighting(b, "cal:X", {"person": "J. Pike",
+                                        "email": "jp@x.com",
+                                        "kind": "calendar",
+                                        "date": "2026-03-12", "facts": [],
+                                        "updates": {}, "title": "Meet"})
+        listing = {"pending": [cand_record(a, uuid="CAND-A"),
+                               cand_record(b, uuid="CAND-B")],
+                   "approved": [], "ignored": []}
+        bridge = self.install_bridge(listing)
+        rc = ef.merge_candidates("CAND-A", "CAND-B", False)
+        self.assertEqual(rc, 0)
+        merged = ec.parse_candidate(self.sent(bridge, "set_text")[0]["text"])
+        self.assertEqual(set(merged["sightings"]), {"dt:S1", "cal:X"})
+        self.assertIn("J. Pike", merged["name_variants"])
+        self.assertEqual(merged["emails"], ["jp@x.com"])
+        self.assertEqual([o["uuid"] for o in self.sent(bridge, "trash")],
+                         ["CAND-B"])
+
+
+class MigrateCandidates(CandidateLockSandbox):
+    def setUp(self):
+        super().setUp()
+        self.original_paths = (ef.IDENTITY_PROVENANCE_FILE,
+                               ef.BRIEF_LOCK_FILE)
+        ef.IDENTITY_PROVENANCE_FILE = os.path.join(self.dir, "prov.json")
+        ef.BRIEF_LOCK_FILE = os.path.join(self.dir, "brief.lock")
+
+    def tearDown(self):
+        (ef.IDENTITY_PROVENANCE_FILE, ef.BRIEF_LOCK_FILE) = \
+            self.original_paths
+        super().tearDown()
+
+    def write_ledger(self, entries):
+        with open(ef.IDENTITY_PROVENANCE_FILE, "w") as f:
+            json.dump({"version": 1, "people": {}, "candidates": entries}, f)
+
+    def read_ledger(self):
+        with open(ef.IDENTITY_PROVENANCE_FILE) as f:
+            return json.load(f)["candidates"]
+
+    def proposal_text(self, name, email=""):
+        fields = {"email": email} if email else {}
+        return ("# Calendar person candidate\n\n```json\n"
+                + json.dumps([{"op": "ensure_person", "name": name,
+                               "fields": fields}]) + "\n```\n")
+
+    def test_pending_proposal_converts_and_is_trashed(self):
+        self.write_ledger({"k1": {"proposal_uuid": "PROP-1",
+                                  "created": "2026-07-01T00:00:00",
+                                  "event_date": "2026-07-01"}})
+        bridge = self.install_bridge(extra={
+            "list_group": lambda op: [{"uuid": "PROP-1",
+                                       "name": "Calendar person: Jordan Pike"}],
+            "get_text": lambda op: {
+                "text": self.proposal_text("Jordan Pike", "jp@x.com")},
+        })
+        rc = ef.migrate_candidates(False)
+        self.assertEqual(rc, 0)
+        creates = self.sent(bridge, "create_record")
+        self.assertEqual([c["path"] for c in creates], [ec.CANDIDATES_PATH])
+        self.assertEqual([o["uuid"] for o in self.sent(bridge, "trash")],
+                         ["PROP-1"])
+        self.assertEqual(self.read_ledger(), {})
+
+    def test_resolved_entry_is_dropped(self):
+        self.write_ledger({"jordan pike": {"proposal_uuid": "GONE",
+                                           "created": "c",
+                                           "event_date": "2026-07-01"}})
+        bridge = self.install_bridge(
+            people=[person("Jordan Pike")],
+            extra={"list_group": lambda op: []})
+        self.assertEqual(ef.migrate_candidates(False), 0)
+        self.assertEqual(self.sent(bridge, "create_record"), [])
+        self.assertEqual(self.read_ledger(), {})
+
+    def test_rejected_entry_becomes_an_ignored_candidate(self):
+        self.write_ledger({"jordan pike": {"proposal_uuid": "GONE",
+                                           "created": "c",
+                                           "event_date": "2026-07-01"}})
+        bridge = self.install_bridge(extra={"list_group": lambda op: []})
+        self.assertEqual(ef.migrate_candidates(False), 0)
+        creates = self.sent(bridge, "create_record")
+        self.assertEqual([c["path"] for c in creates],
+                         [ec.CANDIDATES_IGNORED_PATH])
+        self.assertEqual(self.read_ledger(), {})
+
+    def test_rejected_entry_colliding_with_live_candidate_leaves_it(self):
+        self.write_ledger({"jordan pike": {"proposal_uuid": "GONE",
+                                           "created": "c",
+                                           "event_date": "2026-07-01"}})
+        live = ec.new_candidate("Jordan Pike")
+        live["sightings"]["dt:S"] = {"person": "Jordan Pike",
+                                     "kind": "granola",
+                                     "date": "2026-07-10", "facts": [],
+                                     "updates": {}}
+        listing = {"pending": [cand_record(live)], "approved": [],
+                   "ignored": []}
+        bridge = self.install_bridge(listing,
+                                     extra={"list_group": lambda op: []})
+        self.assertEqual(ef.migrate_candidates(False), 0)
+        self.assertEqual(self.sent(bridge, "create_record"), [])
+        self.assertEqual(self.read_ledger(), {})
+
+
 if __name__ == "__main__":
     unittest.main()

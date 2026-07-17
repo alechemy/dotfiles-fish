@@ -11,6 +11,8 @@ from helpers import attendee, capture_logs, contact, event, load, person
 
 mb = load("dt-morning-brief.py", "dt_morning_brief")
 
+import entity_candidates as ec
+
 ROOM_RE = re.compile(r"\bVC\b|\bConference\b|\bRoom\b|\d+\s?ppl", re.IGNORECASE)
 
 
@@ -430,54 +432,19 @@ class CalendarPersonCandidates(unittest.TestCase):
         self.assertEqual(got[0]["evidence"], "calendar attendee")
         self.assertEqual(got[0]["email"], "jp@x.com")
 
-    def test_proposal_creates_no_facts_or_lastcontact(self):
-        candidate = self.candidates([
+    def test_candidates_carry_a_stable_event_fingerprint(self):
+        got = self.candidates([
             event("Lease review",
                   [attendee("Jordan Pike", "jp@x.com")],
                   calendar="Home", event_id="event-1")
-        ])[0]
-        body = mb.calendar_candidate_body(candidate)
-        ops = json.loads(re.findall(
-            r"```json\n(.*?)\n```", body, re.DOTALL)[-1])
-        self.assertEqual(ops, [{
-            "op": "ensure_person",
-            "name": "Jordan Pike",
-            "fields": {"email": "jp@x.com"},
-        }])
-
-    def test_near_name_candidate_confirms_distinct_identity(self):
-        candidate = self.candidates([
+        ])
+        again = self.candidates([
             event("Lease review",
                   [attendee("Jordan Pike", "jp@x.com")],
                   calendar="Home", event_id="event-1")
-        ], people=[person("Jordan Vale")])[0]
-        body = mb.calendar_candidate_body(candidate)
-        ops = json.loads(re.findall(
-            r"```json\n(.*?)\n```", body, re.DOTALL)[-1])
-        self.assertTrue(ops[0]["confirm_new"])
-        self.assertNotIn("add `\"confirm_new\": true`", body)
-
-    def test_existing_review_proposal_repairs_missing_local_state(self):
-        candidate = self.candidates([
-            event("Lease review",
-                  [attendee("Jordan Pike", "jp@x.com")],
-                  calendar="Home", event_id="event-1")
-        ])[0]
-        state = mb.empty_identity_provenance()
-        with mock.patch.object(
-                mb, "run_bridge", return_value=[[{
-                    "uuid": "PROPOSAL-1",
-                    "name": "Calendar person: Jordan Pike",
-                }]]) as bridge:
-            changed = mb.propose_calendar_candidates([candidate], state, False)
-        self.assertTrue(changed)
-        ledger_key = mb.calendar_candidate_ledger_key(
-            candidate["name"], candidate["email"])
-        self.assertEqual(
-            state["candidates"][ledger_key]["proposal_uuid"], "PROPOSAL-1")
-        self.assertEqual(bridge.call_count, 1)
-        self.assertEqual(
-            bridge.call_args.args[0][0]["op"], "list_group")
+        ])
+        self.assertTrue(got[0]["sid"].startswith("cal:"))
+        self.assertEqual(got[0]["sid"], again[0]["sid"])
 
 
 class BuildReconnect(unittest.TestCase):
@@ -1906,7 +1873,7 @@ class LoadIdentityProvenanceQuarantine(unittest.TestCase):
             mb.IDENTITY_PROVENANCE_FILE + ".corrupt-20260716T051500"))
         messages = cap.messages()
         self.assertEqual(len(messages), 1)
-        self.assertIn("candidate", messages[0])
+        self.assertIn("lookback", messages[0])
 
     def test_unsupported_version_is_quarantined(self):
         with open(mb.IDENTITY_PROVENANCE_FILE, "w") as f:
@@ -1931,7 +1898,7 @@ class LoadIdentityProvenanceQuarantine(unittest.TestCase):
 class PruneContextObservations(unittest.TestCase):
     """C03: context observations exist only to recognize a series inside
     SERIES_LOOKBACK_DAYS, so anything older is unbounded growth with no
-    future read. The candidate ledger is exempt."""
+    future read."""
 
     def test_drops_observations_older_than_the_lookback_window(self):
         state = mb.empty_identity_provenance()
@@ -1964,15 +1931,6 @@ class PruneContextObservations(unittest.TestCase):
              "date": "2026-07-01", "evidence": "email"},
         ])
         self.assertFalse(mb.prune_context_observations(state, "2026-07-16"))
-
-    def test_the_candidate_ledger_is_never_touched(self):
-        state = mb.empty_identity_provenance()
-        state["candidates"]["k1"] = {
-            "proposal_uuid": "U", "created": "2020-01-01T00:00:00",
-            "event_date": "2020-01-01"}
-        mb.prune_context_observations(state, "2026-07-16")
-        self.assertIn("k1", state["candidates"])
-
 
 class AcquireLock(unittest.TestCase):
     """C41: a non-blocking exclusive lock, mirroring entity-filing.py's own,
@@ -2065,100 +2023,129 @@ class CalendarPersonCandidateCap(unittest.TestCase):
         self.assertEqual(got[0]["evidence"], "calendar attendee")
 
 
-class CalendarCandidateLedgerKeying(unittest.TestCase):
-    """C78: the ledger must not let a rejected "John Smith" burn every
-    future John Smith — a second, differently-emailed person who shares the
-    name gets their own memory."""
+class CalendarCandidateStore(unittest.TestCase):
+    """C78 successor: the candidate record itself is the never-repropose
+    memory. One stranger holds one Pending record across meetings; an
+    Ignored record drops them; a differently-emailed same-named person gets
+    their own record; attendance never files facts or bumps LastContact."""
 
-    def make_candidate(self, name="Jordan Pike", email="jp@x.com"):
+    def setUp(self):
+        self.dir = tempfile.mkdtemp()
+        self.original_lock = ec.CANDIDATE_LOCK_FILE
+        ec.CANDIDATE_LOCK_FILE = os.path.join(self.dir, "candidates.lock")
+
+    def tearDown(self):
+        ec.CANDIDATE_LOCK_FILE = self.original_lock
+        shutil.rmtree(self.dir, ignore_errors=True)
+
+    def make_candidate(self, name="Jordan Pike", email="jp@x.com",
+                       sid="cal:aaaaaaaaaaaaaaaaaaaaaaaa"):
         return {"key": mb.calendar_candidate_key(name), "name": name,
                 "email": email, "evidence": "calendar attendee",
                 "context": "neutral", "event_title": "Lease review",
-                "event_date": "2026-07-13", "near": []}
+                "event_date": "2026-07-13", "sid": sid, "near": []}
 
-    def propose(self, candidate, state, proposal_uuid):
-        with mock.patch.object(
-                mb, "run_bridge",
-                side_effect=[
-                    [[]],
-                    [{"uuid": proposal_uuid,
-                      "name": f"Calendar person: {candidate['name']}"}],
-                ]):
-            return mb.propose_calendar_candidates([candidate], state, False)
+    def propose(self, candidates, listing=None, people=()):
+        listing = listing or {"pending": [], "approved": [], "ignored": []}
+        calls = []
 
-    def test_no_email_key_matches_the_legacy_name_key(self):
+        def bridge(ops):
+            calls.append(ops)
+            results = []
+            for op in ops:
+                if op["op"] == "list_candidates":
+                    results.append(listing)
+                elif op["op"] == "dump_people":
+                    results.append(list(people))
+                else:
+                    results.append({"uuid": "NEW-1"})
+            return results
+
+        with mock.patch.object(mb, "run_bridge", bridge):
+            mb.propose_calendar_candidates(candidates, False)
+        return [op for ops in calls for op in ops]
+
+    def pending_record(self, data):
+        return {"uuid": "CAND-1", "name": ec.record_name(data), "md": {},
+                "text": ec.render_candidate(data)}
+
+    def test_new_stranger_creates_one_pending_candidate(self):
+        ops = self.propose([self.make_candidate()])
+        creates = [o for o in ops if o["op"] == "create_record"]
+        self.assertEqual(len(creates), 1)
+        self.assertEqual(creates[0]["path"], ec.CANDIDATES_PATH)
+        data = ec.parse_candidate(creates[0]["text"])
+        self.assertEqual(data["emails"], ["jp@x.com"])
+        sighting = data["sightings"]["cal:aaaaaaaaaaaaaaaaaaaaaaaa"]
+        self.assertFalse(sighting["interacted"])
+        self.assertEqual(sighting["facts"], [])
+
+    def test_attendance_never_files_facts_or_lastcontact(self):
+        ops = self.propose([self.make_candidate()])
         self.assertEqual(
-            mb.calendar_candidate_ledger_key("Jordan Pike", ""),
-            mb.calendar_candidate_key("Jordan Pike"))
+            [o for o in ops if o["op"] in
+             ("append_log", "bump_lastcontact", "ensure_person")], [])
 
-    def test_an_email_produces_a_different_key_than_name_alone(self):
-        self.assertNotEqual(
-            mb.calendar_candidate_ledger_key("Jordan Pike", "jp@x.com"),
-            mb.calendar_candidate_key("Jordan Pike"))
+    def test_second_meeting_attaches_to_the_existing_record(self):
+        data = ec.new_candidate("Jordan Pike")
+        ec.upsert_sighting(
+            data, "cal:aaaaaaaaaaaaaaaaaaaaaaaa",
+            {"person": "Jordan Pike", "email": "jp@x.com",
+             "kind": "calendar", "date": "2026-07-13",
+             "title": "Lease review", "interacted": False, "facts": [],
+             "updates": {}, "evidence": "calendar attendee"})
+        listing = {"pending": [self.pending_record(data)],
+                   "approved": [], "ignored": []}
+        ops = self.propose(
+            [self.make_candidate(sid="cal:bbbbbbbbbbbbbbbbbbbbbbbb")],
+            listing)
+        self.assertEqual([o for o in ops if o["op"] == "create_record"], [])
+        sets = [o for o in ops if o["op"] == "set_text"]
+        self.assertEqual(len(sets), 1)
+        updated = ec.parse_candidate(sets[0]["text"])
+        self.assertEqual(len(updated["sightings"]), 2)
 
-    def test_two_different_emails_get_different_keys(self):
-        self.assertNotEqual(
-            mb.calendar_candidate_ledger_key("Jordan Pike", "jp1@x.com"),
-            mb.calendar_candidate_ledger_key("Jordan Pike", "jp2@x.com"))
+    def test_ignored_candidate_is_silently_dropped(self):
+        data = ec.new_candidate("Jordan Pike")
+        ec.upsert_sighting(
+            data, "cal:aaaaaaaaaaaaaaaaaaaaaaaa",
+            {"person": "Jordan Pike", "email": "jp@x.com",
+             "kind": "calendar", "date": "2026-07-13",
+             "title": "Lease review", "interacted": False, "facts": [],
+             "updates": {}, "evidence": "calendar attendee"})
+        listing = {"pending": [], "approved": [],
+                   "ignored": [self.pending_record(data)]}
+        ops = self.propose(
+            [self.make_candidate(sid="cal:bbbbbbbbbbbbbbbbbbbbbbbb")],
+            listing)
+        self.assertEqual(
+            [o for o in ops if o["op"] in ("create_record", "set_text")], [])
 
-    def test_candidate_ledger_keys_checks_new_style_then_legacy(self):
-        candidate = self.make_candidate(email="jp@x.com")
-        self.assertEqual(mb.candidate_ledger_keys(candidate), [
-            mb.calendar_candidate_ledger_key("Jordan Pike", "jp@x.com"),
-            mb.calendar_candidate_key("Jordan Pike"),
-        ])
+    def test_differently_emailed_same_name_gets_a_second_record(self):
+        data = ec.new_candidate("Jordan Pike")
+        ec.upsert_sighting(
+            data, "cal:aaaaaaaaaaaaaaaaaaaaaaaa",
+            {"person": "Jordan Pike", "email": "jp1@x.com",
+             "kind": "calendar", "date": "2026-07-13",
+             "title": "Lease review", "interacted": False, "facts": [],
+             "updates": {}, "evidence": "calendar attendee"})
+        listing = {"pending": [self.pending_record(data)],
+                   "approved": [], "ignored": []}
+        ops = self.propose(
+            [self.make_candidate(email="jp2@x.com",
+                                 sid="cal:bbbbbbbbbbbbbbbbbbbbbbbb")],
+            listing)
+        creates = [o for o in ops if o["op"] == "create_record"]
+        self.assertEqual(len(creates), 1)
+        self.assertEqual(
+            ec.parse_candidate(creates[0]["text"])["emails"], ["jp2@x.com"])
 
-    def test_candidate_ledger_keys_without_email_has_one_key(self):
-        candidate = self.make_candidate(email="")
-        self.assertEqual(mb.candidate_ledger_keys(candidate),
-                         [mb.calendar_candidate_key("Jordan Pike")])
-
-    def test_a_second_differently_emailed_same_named_person_is_not_blocked(self):
-        state = mb.empty_identity_provenance()
-        first = self.make_candidate(email="jp1@x.com")
-        self.assertTrue(self.propose(first, state, "PROPOSAL-1"))
-
-        second = self.make_candidate(email="jp2@x.com")
-        self.assertTrue(self.propose(second, state, "PROPOSAL-2"))
-
-        self.assertEqual(len(state["candidates"]), 2)
-
-    def test_two_same_named_candidates_without_email_still_collide(self):
-        """With nothing sharper to key on, this is the pre-fix behavior and
-        stays that way — the fix only helps once an email is known."""
-        state = mb.empty_identity_provenance()
-        first = self.make_candidate(email="")
-        self.assertTrue(self.propose(first, state, "PROPOSAL-1"))
-
-        second = self.make_candidate(email="")
-        with mock.patch.object(mb, "run_bridge") as bridge:
-            changed = mb.propose_calendar_candidates([second], state, False)
-        self.assertFalse(changed)
-        bridge.assert_not_called()
-
-    def test_a_legacy_name_only_ledger_entry_still_suppresses(self):
-        """An entry written before the ledger began distinguishing by email
-        must still stop a reproposal — no migration of the live file."""
-        state = mb.empty_identity_provenance()
-        legacy_key = mb.calendar_candidate_key("Jordan Pike")
-        state["candidates"][legacy_key] = {
-            "proposal_uuid": "OLD", "created": "2020-01-01T00:00:00",
-            "event_date": "2020-01-01"}
-        candidate = self.make_candidate(email="jp@x.com")
-        with mock.patch.object(mb, "run_bridge") as bridge:
-            changed = mb.propose_calendar_candidates([candidate], state, False)
-        self.assertFalse(changed)
-        bridge.assert_not_called()
-
-    def test_a_new_entry_is_keyed_on_name_and_email_not_legacy(self):
-        state = mb.empty_identity_provenance()
-        candidate = self.make_candidate(email="jp@x.com")
-        self.propose(candidate, state, "PROPOSAL-1")
-        expected_key = mb.calendar_candidate_ledger_key(
-            "Jordan Pike", "jp@x.com")
-        self.assertIn(expected_key, state["candidates"])
-        self.assertNotIn(
-            mb.calendar_candidate_key("Jordan Pike"), state["candidates"])
+    def test_roster_resolved_attendee_is_not_recorded(self):
+        ops = self.propose(
+            [self.make_candidate()],
+            people=[person("Jordan Pike", email="jp@x.com")])
+        self.assertEqual(
+            [o for o in ops if o["op"] in ("create_record", "set_text")], [])
 
 
 class ShouldRecordSuccess(unittest.TestCase):
