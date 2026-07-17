@@ -73,6 +73,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import urllib.error
 import urllib.request
 from datetime import date
@@ -94,6 +95,7 @@ DONE_DIR = os.path.join(BOOX_DIR, "done")
 STATE_FILE = os.path.join(BOOX_DIR, "state.json")
 LOCK_FILE = os.path.join(BOOX_DIR, "boox-process.lock")
 LLM_LOCK_FILE = os.path.join(STATE_DIR, "local-llm.lock")
+SUCCESS_FILE = os.path.join(STATE_DIR, "boox-process.last-success")
 STATE_SCHEMA_VERSION = 1
 
 JOURNAL_GROUP = "/15_JOURNAL"
@@ -799,6 +801,12 @@ def process_notebook(pdf_path, state, config, dry_run, force, budget,
 
     pdf_sha = sha256_file(pdf_path)
     if pdf_sha != nb["render_sha"]:
+        if dry_run:
+            # render_pages rmtrees+rewrites workdir, which a real run may be
+            # relying on concurrently — a preview must not touch it.
+            log.info("[dry-run] %s: changed since last render — page-level "
+                     "preview unavailable without a real run", basename)
+            return 0
         log.info("rendering %s at %s dpi", basename, config["DENSITY"])
         try:
             pngs = render_pages(pdf_path, workdir, config["DENSITY"])
@@ -818,16 +826,18 @@ def process_notebook(pdf_path, state, config, dry_run, force, budget,
                 nb["dirty"] = True
         nb["pages"] = pages
         nb["render_sha"] = pdf_sha
-        if not dry_run:
-            save_state(state)
+        save_state(state)
     else:
         pngs = sorted(glob.glob(os.path.join(workdir, "page-*.png")))
         if len(pngs) != len(nb["pages"]):
+            if dry_run:
+                log.info("[dry-run] %s: workdir out of sync — page-level "
+                         "preview unavailable without a real run", basename)
+                return 0
             # Workdir lost (cleanup, reboot of a mid-backfill run): drop the
             # render stamp so the next run re-renders from the staged PDF.
             nb["render_sha"] = ""
-            if not dry_run:
-                save_state(state)
+            save_state(state)
             log.warning("workdir out of sync for %s, will re-render next run",
                         basename)
             return 0
@@ -1004,7 +1014,7 @@ def file_note_if_needed(nb, stem, pdf_path, workdir, config, state):
 # ---------------------------------------------------------------------------
 
 
-def rebuild_state(state):
+def rebuild_state(state, dry_run=False):
     """Reseed entries maps from the records in /15_JOURNAL. Render stamps
     and page arrays are left empty: the next staged export re-renders and
     re-derives them, with matching text hashes preventing DT churn."""
@@ -1039,6 +1049,10 @@ def rebuild_state(state):
                     text["text"].encode()).hexdigest(),
             }
             rebuilt += 1
+    if dry_run:
+        log.info("[dry-run] state rebuild: %d entr(ies) would be reseeded "
+                 "from DT, not saved", rebuilt)
+        return
     save_state(state)
     log.info("state rebuild: %d entr(ies) reseeded from DT", rebuilt)
 
@@ -1087,11 +1101,15 @@ def main():
     rebuild = "--rebuild-state" in args
     user_invoked = bool(dry_run or force or status or rebuild)
 
-    subprocess.run(
-        [os.path.expanduser("~/.local/bin/pipeline-record-run"),
-         "boox-process", "1800"],
-        check=False,
-    )
+    # --dry-run/--status are pure inspection: a human running one to check on
+    # a possibly-dead agent must not itself refresh the liveness stamp it's
+    # trying to read.
+    if not dry_run and not status:
+        subprocess.run(
+            [os.path.expanduser("~/.local/bin/pipeline-record-run"),
+             "boox-process", "1800"],
+            check=False,
+        )
 
     if status:
         print_status(load_state())
@@ -1117,13 +1135,20 @@ def main():
         if lock_fd is None:
             log.info("another boox-process run holds the lock, exiting")
             return
+        # A fresh .last-run only proves the process ticked; this proves it
+        # also got past the role/battery gates instead of being silently
+        # skipped by them every time (dt-watchdog checks the two against
+        # each other).
+        os.makedirs(STATE_DIR, exist_ok=True)
+        with open(SUCCESS_FILE, "w") as f:
+            f.write(str(int(time.time())))
 
     config = load_config()
     state_file_existed = os.path.exists(STATE_FILE)
     state = load_state()
 
     if rebuild:
-        rebuild_state(state)
+        rebuild_state(state, dry_run=dry_run)
         return
 
     auto_rebuild_if_missing(state, state_file_existed, dry_run)

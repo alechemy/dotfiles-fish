@@ -132,6 +132,13 @@ class ConfigParsing(unittest.TestCase):
                          "https://trmnl.com/api/custom_plugins/abc")
         self.assertEqual(cfg["TRMNL_PAYLOAD_LIMIT"], "5120")
 
+    def test_inline_comment_after_value_is_stripped(self):
+        cfg = self.parse(
+            "TRMNL_PAYLOAD_LIMIT=2048    # bytes; TRMNL+ accounts may "
+            "raise to 5120\n")
+        self.assertEqual(cfg["TRMNL_PAYLOAD_LIMIT"], "2048")
+        self.assertEqual(int(cfg["TRMNL_PAYLOAD_LIMIT"]), 2048)
+
     def test_missing_file_is_empty_config(self):
         old = tp.CONFIG_FILE
         tp.CONFIG_FILE = "/nonexistent/trmnl.conf"

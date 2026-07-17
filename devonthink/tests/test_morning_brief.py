@@ -2137,5 +2137,13 @@ class CalendarCandidateLedgerKeying(unittest.TestCase):
             mb.calendar_candidate_key("Jordan Pike"), state["candidates"])
 
 
+class ShouldRecordSuccess(unittest.TestCase):
+    def test_records_on_a_real_run(self):
+        self.assertTrue(mb.should_record_success(False))
+
+    def test_skips_on_a_dry_run(self):
+        self.assertFalse(mb.should_record_success(True))
+
+
 if __name__ == "__main__":
     unittest.main()

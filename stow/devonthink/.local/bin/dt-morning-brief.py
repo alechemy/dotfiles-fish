@@ -64,7 +64,7 @@ daily and the data is computed on every run anyway.
 Usage:
     dt-morning-brief.py              # normal launchd-driven run
     dt-morning-brief.py --dry-run    # print the sections, write nothing
-    dt-morning-brief.py --force      # bypass battery/role gates
+    dt-morning-brief.py --force      # bypass the driver gate
     dt-morning-brief.py --weekly     # include the Reconnect section today
     dt-morning-brief.py --date YYYY-MM-DD
                                      # read-only replay of a past day, no
@@ -226,6 +226,8 @@ SNAPSHOT_FILE = os.path.expanduser(
 IDENTITY_PROVENANCE_FILE = os.path.expanduser(
     "~/.local/state/devonthink/identity-provenance.json")
 LOCK_FILE = os.path.expanduser("~/.local/state/devonthink/dt-morning-brief.lock")
+SUCCESS_FILE = os.path.expanduser(
+    "~/.local/state/devonthink/dt-morning-brief.last-success")
 TRMNL_PUSH = os.path.expanduser("~/.local/bin/trmnl-push-brief.py")
 DEFAULT_SKIP_ATTENDEE = r"\bVC\b|\bConference\b|\bRoom\b|\d+\s?ppl"
 BACKFILL_DAYS = 365
@@ -2136,6 +2138,15 @@ def sections_for_upsert(sections, failed_sources):
             if SECTION_SOURCES.get(header) not in failed_sources]
 
 
+def should_record_success(dry_run):
+    return not dry_run
+
+
+def record_success():
+    with open(SUCCESS_FILE, "w") as f:
+        f.write(str(int(datetime.now().timestamp())))
+
+
 def main():
     args = sys.argv[1:]
     dry_run = "--dry-run" in args
@@ -2160,23 +2171,14 @@ def main():
             sys.exit(1)
         dry_run = effective_dry_run(dry_run, today, real_today)
 
-    subprocess.run(
-        [os.path.expanduser("~/.local/bin/pipeline-record-run"),
-         "dt-morning-brief", "86400"],
-        check=False,
-    )
+    if not dry_run:
+        subprocess.run(
+            [os.path.expanduser("~/.local/bin/pipeline-record-run"),
+             "dt-morning-brief", "86400"],
+            check=False,
+        )
 
     if not user_invoked:
-        # --urgent: the brief is deadline-bound (it must exist before the
-        # first meeting), so battery alone doesn't skip it.
-        gate = subprocess.run(
-            [os.path.expanduser("~/.local/bin/should-run-background-job"),
-             "--urgent"],
-            capture_output=True, text=True,
-        )
-        if gate.returncode != 0:
-            log.info("skipping: battery gate")
-            return
         gate = subprocess.run(
             [os.path.expanduser("~/.local/bin/should-run-dt-driver")],
             capture_output=True, text=True,
@@ -2191,6 +2193,9 @@ def main():
         if lock_fd is None:
             log.info("another morning-brief run holds the lock, exiting")
             return
+
+    if should_record_success(dry_run):
+        record_success()
 
     try:
         conf = load_config()

@@ -23,10 +23,19 @@
 #   Add --force to --apply to proceed while DEVONthink is running. Refused by
 #   default: the app rewrites these plists at runtime and would clobber or be
 #   clobbered by the copy.
+#
+# CustomMetaData.plist is the exception to both the compare and the apply: it
+# is a schema seed-devonthink-config.sh merges by identifier rather than
+# copying whole (see that script's header), so a byte/XML compare here would
+# report the merge's own `index` reassignment as permanent drift, and a plain
+# copy on --apply would drop any field a machine picked up locally. Both
+# route through normalize-devonthink-plist.py's --custom-metadata-* modes
+# instead, which implement the identical identifier-aware algorithm.
 set -euo pipefail
 
 DOTFILES="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SEED_ROOT="$DOTFILES/stow/devonthink/_seed"
+META_REL="Library/Application Support/DEVONthink/CustomMetaData.plist"
 
 if [ ! -d "$SEED_ROOT" ]; then
   echo "No DEVONthink seed directory at $SEED_ROOT; nothing to reconcile." >&2
@@ -53,8 +62,14 @@ fi
 # Echoes one of: missing | same | differs
 status_of() {
   local seed_file="$1" live="$2"
+  local rel="${seed_file#"$SEED_ROOT"/}"
   if [ ! -e "$live" ]; then
     echo "missing"
+    return 0
+  fi
+  if [ "$rel" = "$META_REL" ]; then
+    "$DOTFILES/scripts/normalize-devonthink-plist.py" \
+      --custom-metadata-status "$seed_file" "$live"
     return 0
   fi
   case "$seed_file" in
@@ -147,7 +162,12 @@ for rel in "${to_apply[@]}"; do
     backed_up=$((backed_up + 1))
   fi
   mkdir -p "$(dirname "$live")"
-  cp -p "$src" "$live"
+  if [ "$rel" = "$META_REL" ]; then
+    "$DOTFILES/scripts/normalize-devonthink-plist.py" \
+      --custom-metadata-merge "$src" "$live" >/dev/null
+  else
+    cp -p "$src" "$live"
+  fi
   echo "  applied $rel"
   applied=$((applied + 1))
 done

@@ -87,8 +87,10 @@ scan_log() {
     offset=$(cat "$offset_file" 2>/dev/null)
     [[ "$offset" =~ ^[0-9]+$ ]] || offset=0
     [[ "$size" -lt "$offset" ]] && offset=0
-    echo "$size" > "$offset_file"
-    [[ "$size" -le "$offset" ]] && return 0
+    if [[ "$size" -le "$offset" ]]; then
+        echo "$size" > "$offset_file"
+        return 0
+    fi
     while IFS= read -r line; do
         count=$((count + 1))
         if [[ "$count" -le "$MAX_NOTIFY_PER_LOG" ]]; then
@@ -100,6 +102,9 @@ scan_log() {
     if [[ "$count" -gt "$MAX_NOTIFY_PER_LOG" ]]; then
         surface_line "$(basename "$logfile"): $((count - MAX_NOTIFY_PER_LOG)) further failure line(s) since last check"
     fi
+    # Persisted only after the delta is fully scanned and notified, so a
+    # crash mid-scan re-scans the same lines next run instead of dropping them.
+    echo "$size" > "$offset_file"
 }
 
 # Prune notified signatures older than a week so the state file stays small.
@@ -137,6 +142,29 @@ if [[ "$IS_DRIVER" == 1 ]]; then
     else
         surface_line "cannot read $BOOX_PATHS — Boox stale-export check skipped"
     fi
+fi
+
+# ── 1b. Role marker sanity (NOT gated on IS_DRIVER) ──────────────────────────
+# IS_DRIVER above only answers "should this Mac run driver work"; it trusts
+# the same marker it's reading. A role file that's gone missing or flipped to
+# follower while the driver launchd agents are still loaded silently turns
+# every driver tick into a no-op — and every driver-only check below (4, 4b)
+# is gated on IS_DRIVER, so it goes quiet in exactly this failure mode.
+ROLE_FILE="$HOME/.config/dt-pipeline/role"
+DRIVER_AGENT_LABELS="com.user.dt-daily-note com.user.singlefile-watcher com.user.boox-import-watcher com.user.boox-process com.user.github-stars-import com.user.dt-morning-brief com.user.entity-filing com.user.dt-database-archive"
+driver_agent_loaded() {
+    for label in $DRIVER_AGENT_LABELS; do
+        launchctl list "$label" >/dev/null 2>&1 && return 0
+    done
+    return 1
+}
+if [[ -r "$ROLE_FILE" ]]; then
+    ROLE_VALUE=$(tr -d '[:space:]' < "$ROLE_FILE" 2>/dev/null | tr '[:upper:]' '[:lower:]')
+    if [[ "$ROLE_VALUE" == follower ]] && driver_agent_loaded; then
+        surface_line "role marker says follower but driver launchd agents are still loaded — role is stale or this Mac was never demoted"
+    fi
+elif driver_agent_loaded; then
+    surface_line "role marker $ROLE_FILE is missing or unreadable but driver launchd agents are loaded — this Mac may be silently running as a follower"
 fi
 
 # ── 2. Ensure DEVONthink is running ──────────────────────────────────────────
@@ -238,6 +266,18 @@ if [[ "$IS_DRIVER" == 1 ]]; then
         AGENT_GAP=$((NOW_EPOCH - AGENT_LAST))
         if [[ "$AGENT_GAP" -gt "$AGENT_MAX_AGE" ]]; then
             surface_line "$AGENT_JOB has not run in $((AGENT_GAP / 3600))h (label $AGENT_LABEL is loaded but silent)"
+            continue
+        fi
+        # A fresh tick proves the process ran, not that it did anything — a
+        # gate-skipped run still touches .last-run. Only components that write
+        # a .last-success stamp (epoch seconds) get this check.
+        AGENT_SUCCESS_STATE="$HOME/.local/state/devonthink/${AGENT_JOB}.last-success"
+        [[ -f "$AGENT_SUCCESS_STATE" ]] || continue
+        AGENT_SUCCESS_LAST=$(cat "$AGENT_SUCCESS_STATE" 2>/dev/null || echo 0)
+        [[ "$AGENT_SUCCESS_LAST" =~ ^[0-9]+$ ]] || AGENT_SUCCESS_LAST=0
+        SUCCESS_GAP=$((AGENT_LAST - AGENT_SUCCESS_LAST))
+        if [[ "$SUCCESS_GAP" -gt "$AGENT_MAX_AGE" ]]; then
+            surface_line "$AGENT_JOB has ticked recently but last reached real work $((SUCCESS_GAP / 3600))h ago (label $AGENT_LABEL — work may be silently gated)"
         fi
     done <<'AGENTS'
 com.user.dt-daily-note:dt-daily-note:180000

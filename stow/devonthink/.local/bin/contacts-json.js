@@ -85,12 +85,17 @@ function run() {
 
   const out = []
   const seen = {}
+  let failedContainers = 0
   for (let i = 0; i < containers.count; i++) {
     const cid = containers.objectAtIndex(i).identifier
     const pred = $.CNContact.predicateForContactsInContainerWithIdentifier(cid)
+    const errRef = Ref()
     const contacts = store.unifiedContactsMatchingPredicateKeysToFetchError(
-      pred, keys, Ref())
-    if (!contacts || contacts.isNil()) continue
+      pred, keys, errRef)
+    if (!contacts || contacts.isNil()) {
+      failedContainers++
+      continue
+    }
     for (let j = 0; j < contacts.count; j++) {
       const c = contacts.objectAtIndex(j)
       // A unified contact linked across containers repeats per container.
@@ -133,6 +138,16 @@ function run() {
         birthday: birthday,
       })
     }
+  }
+  // A partial dump must not pass ok:true — the caller's BriefingSuppressed
+  // redaction guard is fail-closed only when it can tell "unavailable" from
+  // "empty on purpose".
+  if (failedContainers > 0) {
+    return JSON.stringify({
+      ok: false,
+      error: failedContainers + ' of ' + containers.count +
+        ' contact container(s) failed to fetch',
+    })
   }
   out.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
   return JSON.stringify({ ok: true, contacts: out })

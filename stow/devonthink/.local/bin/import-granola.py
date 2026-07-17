@@ -68,11 +68,12 @@ if "--force" in sys.argv:
 
 # dt-watchdog scans this log and pages on failure tokens; the /manual tag
 # tells it a human was driving (same convention as pipeline_log.py).
-_COMPONENT = (
-    "granola-import/manual"
-    if sys.stdout.isatty() or os.environ.get("PIPELINE_MANUAL") == "1"
-    else "granola-import"
-)
+def _is_manual():
+    return (os.environ.get("PIPELINE_MANUAL") == "1"
+            or sys.stdout.isatty() or sys.stderr.isatty())
+
+
+_COMPONENT = "granola-import/manual" if _is_manual() else "granola-import"
 
 
 def log(msg):

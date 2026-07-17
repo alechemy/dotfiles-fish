@@ -473,44 +473,34 @@ class ProposalRoundTrip(unittest.TestCase):
 
 class PickTransport(unittest.TestCase):
     def setUp(self):
-        self.saved = (ef.omlx_available, ef.ollama_available)
+        self.saved = ef.omlx_available
         ef.omlx_available = lambda c: True
-        ef.ollama_available = lambda c: True
 
     def tearDown(self):
-        ef.omlx_available, ef.ollama_available = self.saved
+        ef.omlx_available = self.saved
 
-    def test_off_disables_every_kind(self):
-        for kind in ("meeting", "handwritten", "daily", "journal", "fact"):
-            self.assertIsNone(ef.pick_transport({"TRANSPORT": "off"}, kind), kind)
-
-    def test_local_never_returns_dtchat(self):
-        self.assertEqual(ef.pick_transport({"TRANSPORT": "local"}, "meeting"), "omlx")
+    def test_off_disables_extraction_regardless_of_availability(self):
+        self.assertIsNone(ef.pick_transport({"TRANSPORT": "off"}))
         ef.omlx_available = lambda c: False
-        self.assertEqual(ef.pick_transport({"TRANSPORT": "local"}, "meeting"), "ollama")
-        ef.ollama_available = lambda c: False
-        self.assertIsNone(ef.pick_transport({"TRANSPORT": "local"}, "meeting"))
+        self.assertIsNone(ef.pick_transport({"TRANSPORT": "off"}))
 
-    def test_daily_notes_never_reach_dtchat(self):
-        self.assertIsNone(ef.pick_transport({"TRANSPORT": "dtchat"}, "daily"))
-        ef.omlx_available = lambda c: False
-        ef.ollama_available = lambda c: False
-        self.assertIsNone(ef.pick_transport({"TRANSPORT": "auto"}, "daily"))
+    def test_local_uses_omlx_when_available(self):
+        self.assertEqual(ef.pick_transport({"TRANSPORT": "local"}), "omlx")
 
-    def test_personal_kinds_never_reach_dtchat(self):
-        for kind in ("journal", "handwritten", "fact"):
-            self.assertIsNone(
-                ef.pick_transport({"TRANSPORT": "dtchat"}, kind), kind)
+    def test_local_waits_when_omlx_unavailable(self):
         ef.omlx_available = lambda c: False
-        ef.ollama_available = lambda c: False
-        for kind in ("journal", "handwritten", "fact"):
-            self.assertIsNone(
-                ef.pick_transport({"TRANSPORT": "auto"}, kind), kind)
+        self.assertIsNone(ef.pick_transport({"TRANSPORT": "local"}))
 
-    def test_auto_falls_back_to_dtchat_for_meetings(self):
-        ef.omlx_available = lambda c: False
-        ef.ollama_available = lambda c: False
-        self.assertEqual(ef.pick_transport({"TRANSPORT": "auto"}, "meeting"), "dtchat")
+    def test_can_only_ever_return_omlx_or_none(self):
+        """The privacy boundary now holds by construction: whatever the
+        config says and whatever oMLX's availability is, there is no third
+        outcome — never a cloud transport."""
+        for available in (True, False):
+            ef.omlx_available = lambda c, a=available: a
+            for transport in ("local", "omlx", "off", "auto", "dtchat",
+                              "ollama", "garbage"):
+                result = ef.pick_transport({"TRANSPORT": transport})
+                self.assertIn(result, ("omlx", None), (transport, available))
 
 
 class LoadState(unittest.TestCase):
@@ -534,15 +524,15 @@ class LoadState(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             self.run_with_state('{"version": 99, "processed_ids": []}')
 
-    def test_v1_state_migrates_in_place(self):
-        state = self.run_with_state(
-            '{"version": 1, "processed_ids": ["a"], "attempts": {"b": 2}}')
-        self.assertEqual(state["version"], 2)
-        self.assertIn("a", state["processed"])
-        self.assertIsNone(state["processed"]["a"]["hash"])
-        self.assertTrue(state["processed"]["a"]["modified"])
-        self.assertEqual(state["attempts"]["b"], {"count": 2})
-        self.assertEqual(state["parked"], {})
+    def test_fails_closed_on_v1_state(self):
+        """v1 (a bare processed-UUID list) predates the current schema. The
+        migration that once upgraded it in place is gone; restoring a v1
+        file now hits the same fail-closed path as any other unrecognized
+        schema, whose documented remedy (inspect and repair or remove)
+        already reproduces what the migration used to do automatically."""
+        with self.assertRaises(RuntimeError):
+            self.run_with_state(
+                '{"version": 1, "processed_ids": ["a"], "attempts": {"b": 2}}')
 
     def test_valid_v2_state_gets_default_maps(self):
         state = self.run_with_state('{"version": 2, "processed": {}}')
@@ -823,12 +813,20 @@ class ScanForceBypassesHashShortCircuit(unittest.TestCase):
             "according to her update just now.")
 
     def setUp(self):
-        self.saved = (ef.run_bridge, ef.save_state)
+        self.saved = (ef.run_bridge, ef.save_state, ef.omlx_available,
+                      ef.extract_omlx, ef.acquire_llm_lock)
         ef.save_state = lambda s: None
-        self.calls = []
+        ef.omlx_available = lambda c: True
+        ef.acquire_llm_lock = lambda: object()
+        self.extract_calls = []
+
+        def fake_extract_omlx(config, prompt):
+            self.extract_calls.append(prompt)
+            return '{"people": [], "events": []}'
+
+        ef.extract_omlx = fake_extract_omlx
 
         def fake_bridge(ops, timeout=300):
-            self.calls.append(ops)
             out = []
             for op in ops:
                 if op["op"] == "dump_people":
@@ -837,8 +835,6 @@ class ScanForceBypassesHashShortCircuit(unittest.TestCase):
                     out.append([self.SOURCE])
                 elif op["op"] == "get_text":
                     out.append({"text": self.TEXT})
-                elif op["op"] == "chat":
-                    out.append({"text": '{"people": [], "events": []}'})
                 elif op["op"] == "get_source":
                     out.append(dict(self.SOURCE))
                 else:
@@ -848,10 +844,11 @@ class ScanForceBypassesHashShortCircuit(unittest.TestCase):
         ef.run_bridge = fake_bridge
 
     def tearDown(self):
-        ef.run_bridge, ef.save_state = self.saved
+        (ef.run_bridge, ef.save_state, ef.omlx_available, ef.extract_omlx,
+         ef.acquire_llm_lock) = self.saved
 
     def config(self):
-        return {"TRANSPORT": "dtchat", "MIN_ROSTER": "0",
+        return {"TRANSPORT": "local", "MIN_ROSTER": "0",
                 "SKIP_SOURCE_TITLES": "", "MAX_PER_RUN": "3",
                 "FILING_MODE": "suggest", "IDLE_MINUTES": "10",
                 "SELF_NAME": ""}
@@ -862,17 +859,13 @@ class ScanForceBypassesHashShortCircuit(unittest.TestCase):
                                         "hash": h}},
                 "attempts": {}, "parked": {}}
 
-    def chat_call_count(self):
-        return sum(1 for batch in self.calls for op in batch
-                   if op["op"] == "chat")
-
     def test_force_target_extracts_despite_a_matching_hash(self):
         ef.scan(self.config(), self.matching_hash_state(), False, "SRC-1", True)
-        self.assertEqual(self.chat_call_count(), 1)
+        self.assertEqual(len(self.extract_calls), 1)
 
     def test_unforced_source_with_a_matching_hash_still_short_circuits(self):
         ef.scan(self.config(), self.matching_hash_state(), False, None, True)
-        self.assertEqual(self.chat_call_count(), 0)
+        self.assertEqual(len(self.extract_calls), 0)
 
 
 class ScanPreservesParkedDiagnosisOnDeferral(unittest.TestCase):
@@ -1147,6 +1140,14 @@ class RosterIndexEmailKey(unittest.TestCase):
         p = person("Cara Quill")
         index = ef.roster_index([p])
         self.assertEqual(set(index), {"cara quill"})
+
+
+class ShouldRecordSuccess(unittest.TestCase):
+    def test_records_on_a_real_run(self):
+        self.assertTrue(ef.should_record_success(False))
+
+    def test_skips_on_a_dry_run(self):
+        self.assertFalse(ef.should_record_success(True))
 
 
 if __name__ == "__main__":

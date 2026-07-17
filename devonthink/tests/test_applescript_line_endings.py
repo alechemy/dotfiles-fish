@@ -42,6 +42,14 @@ ONE_LINER = re.compile(r'do shell script\s+(?:¬\s*)?"\s*'
 UNTAINT = re.compile(r"\bparagraphs of\b")
 
 
+def _shares_modifier(expr):
+    """True when two or more `do shell script` calls sit in one expression
+    but the modifier appears fewer times than the calls — a single modifier
+    text can cover one call while leaving a second, adjacent one unflagged."""
+    calls = expr.count("do shell script")
+    return calls > 1 and expr.count(MODIFIER) < calls
+
+
 def sources():
     for path in sorted(REPO.rglob("*")):
         if not path.is_file() or path.suffix not in SOURCE_SUFFIXES:
@@ -95,12 +103,16 @@ def scan(text):
         if assign:
             var, expr = assign.group(1), assign.group(2)
             if "do shell script" in expr:
-                # The call's own result is what lands in the variable; a tainted
-                # argument (a tmpPath from mktemp) says nothing about its output.
-                dirty = MODIFIER not in expr and not ONE_LINER.search(expr)
+                # A tainted value fed into the command (echoed/piped back
+                # out), or a second unflagged call folded into an otherwise-
+                # flagged expression, still taints the result.
+                dirty = ((MODIFIER not in expr and not ONE_LINER.search(expr))
+                         or tainted(expr, shell) or _shares_modifier(expr))
                 shell.add(var) if dirty else shell.discard(var)
-                # The modifier says nothing about a `return` concatenated on after.
-                cr.add(var) if CR_BUILT.search(expr) else cr.discard(var)
+                # The modifier says nothing about a `return` concatenated on
+                # after, or a cr-tainted variable folded into the command.
+                cr.add(var) if (CR_BUILT.search(expr)
+                               or tainted(expr, cr)) else cr.discard(var)
                 continue
             if UNTAINT.search(expr):
                 shell.discard(var)
@@ -126,7 +138,8 @@ def scan(text):
 
         for expr in sink_hits:
             sinks += 1
-            if "do shell script" in expr and MODIFIER not in expr:
+            if "do shell script" in expr and (MODIFIER not in expr
+                                              or _shares_modifier(expr)):
                 offenders.append(f"{lineno}: inline unflagged shell output")
             for var in tainted(expr, shell):
                 offenders.append(f"{lineno}: {var} (shell output, no modifier)")
@@ -194,10 +207,26 @@ class RecordWritesKeepLinefeeds(unittest.TestCase):
             "cr_after_modifier": 'set x to (do shell script "helper" '
                                  f"{MODIFIER}) & return\n"
                                  "set plain text of r to x",
+            "cr_var_into_shell_arg": 'set d to "# " & date & return\n'
+                                     'set x to do shell script "echo " & '
+                                     f'quoted form of d & " | cat" {MODIFIER}\n'
+                                     "set plain text of r to x",
+            "tainted_var_beside_flagged_call": (
+                'set raw to do shell script "helper"\n'
+                'set x to raw & (do shell script "date")\n'
+                "set plain text of r to x"),
+            "shared_modifier": (
+                'set plain text of r to (do shell script "helper1") & '
+                f'(do shell script "helper2" {MODIFIER})'),
         }
         for name, src in cases.items():
             with self.subTest(shape=name):
                 self.assertTrue(scan(src)[0], f"{name} slipped through")
+
+    def test_two_flagged_calls_do_not_share_a_false_positive(self):
+        clean = ('set plain text of r to (do shell script "helper1" '
+                 f'{MODIFIER}) & (do shell script "helper2" {MODIFIER})')
+        self.assertEqual(scan(clean)[0], [])
 
     def test_modifier_and_linefeed_clear_the_scan(self):
         clean = (f'set x to do shell script "helper" {MODIFIER}\n'

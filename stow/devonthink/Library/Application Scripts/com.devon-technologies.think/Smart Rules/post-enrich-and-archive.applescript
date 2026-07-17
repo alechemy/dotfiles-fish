@@ -320,7 +320,7 @@ on performSmartRule(theRecords)
 				try
 					set mdText to plain text of theRecord
 					if mdText is not "" then
-						set titleForH1 to do shell script "echo " & quoted form of recName & " | sed 's/\\.[^.]*$//'"
+						set titleForH1 to do shell script "echo " & quoted form of recName & " | sed 's/\\.[^.]*$//'" without altering line endings
 						set tmpPath to do shell script "mktemp /tmp/dt-h1.XXXXXX"
 						set fileRef to open for access (POSIX file tmpPath) with write permission
 						write mdText to fileRef as «class utf8»

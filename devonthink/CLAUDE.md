@@ -161,4 +161,4 @@ The DEVONthink MCP server is the **interactive** interface — use it freely fro
 
 ## Custom metadata fields
 
-See the table in `README.md` → "Custom Metadata Setup" for the full list. The pipeline-critical boolean flags are: `NeedsProcessing`, `Handwritten`, `Recognized`, `Commented`, `AIEnriched`, `NameLocked`, `NeedsSingleFile`, `SkipSingleFile`, `SingleFileTooLarge`, `AIChatTranscript`. Granola imports also use `GranolaID` (Text) and `GranolaParticipants` (Multi-line Text).
+See the table in `README.md` → "Custom Metadata Setup" for the full list. The pipeline-critical boolean flags are: `NeedsProcessing`, `Handwritten`, `Recognized`, `Commented`, `AIEnriched`, `NameLocked`, `NeedsSingleFile`, `SkipSingleFile`, `SingleFileTooLarge`, `AIChatTranscript`. Granola imports (retired) also used `GranolaID` (Text) and `GranolaParticipants` (Multi-line Text).

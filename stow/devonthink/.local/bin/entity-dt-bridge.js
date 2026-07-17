@@ -36,7 +36,6 @@
 //   replace_file       {uuid,path}                      -> {uuid}
 //   move_to            {uuid,group}                     -> {uuid}
 //   list_tags          {}                               -> [name,...]
-//   chat               {prompt,role}                    -> {text}
 //   ensure_person      {name,aliases?,fields?,log_lines?} -> {uuid,created,
 //                       lastcontact_changed?,lastcontact_invalid?}
 //   ensure_event       {name,date,location?,attendees?,summary?,source_uuid,
@@ -580,7 +579,7 @@ function run(argv) {
     let tpl = readFile(PERSON_TEMPLATE)
     if (tpl === null) {
       tpl = '# Person Name\n\n**Role:** —\n**City:** —\n**Partner:** —\n' +
-        '**How we met:** —\n\n' + LOG_SECTION + '\n'
+        '**Kids:** —\n**How we met:** —\n\n' + LOG_SECTION + '\n'
     }
     const lines = tpl.split('\n')
     for (let i = 0; i < lines.length; i++) {
@@ -625,7 +624,6 @@ function run(argv) {
           name: name,
           kind: kind,
           eventdate: mdField(md, 'eventdate'),
-          participants: mdField(md, 'granolaparticipants'),
           added: added ? isoStamp(added).slice(0, 10) : '',
           modified: isoStamp(modified),
           entityfiled: flagSet(mdField(md, 'entityfiled')),
@@ -723,7 +721,6 @@ function run(argv) {
         name: r.name(),
         kind: kind,
         eventdate: mdValue(r, 'eventdate'),
-        participants: mdValue(r, 'granolaparticipants'),
         added: added ? isoStamp(added).slice(0, 10) : '',
         modified: isoStamp(r.modificationDate()),
         entityfiled: flagSet(mdValue(r, 'entityfiled')),
@@ -874,17 +871,6 @@ function run(argv) {
       const r = byUuid(op.uuid)
       r.plainText = op.text
       return { uuid: op.uuid }
-    },
-
-    chat(op) {
-      const text = dt.getChatResponseForMessage(op.prompt, {
-        role: op.role || 'You are an assistant that responds only with JSON.',
-        mode: 'text',
-        thinking: false,
-        toolCalls: false,
-        as: 'text',
-      })
-      return { text: String(text) }
     },
 
     ensure_person(op) {

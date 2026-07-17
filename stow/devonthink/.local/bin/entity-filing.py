@@ -20,12 +20,6 @@ Safety model:
   - auto mode (FILING_MODE=auto): ops for unambiguous existing people
     apply immediately; new-person creations and ambiguous matches still
     become proposals. A permanent manual-review path, per the design doc.
-  - Meeting attendance (GranolaParticipants) bumps LastContact for
-    matched people deterministically on every scan — no LLM involved, so
-    it applies in both modes. Dormant in practice: Granola reads a
-    subscribed Google calendar, and Google strips attendee lists from
-    one-way imports, so the field is always empty. Calendar-derived
-    contact tracking lives in dt-morning-brief.py instead.
   - Extraction is gated on a seeded roster (MIN_ROSTER). The prompt's
     whole resolution step is the roster, and a source is only extracted
     again when its content changes, so extracting against an empty People
@@ -54,43 +48,33 @@ state. Sources that fail MAX_ATTEMPTS times are parked with their last
 error and retry automatically when their content changes (or via
 --force).
 
-Privacy: daily notes live in /10_DAILY, which is excluded from
-DEVONthink's AI chat by design. This script honors that boundary — daily
-notes are only ever extracted through a local Ollama model, never through
-DT chat (which may be a cloud provider). Meeting notes and handwritten
-notes already flow through DT chat for enrichment, so either transport is
-acceptable for them.
+Privacy: extraction runs only through the local oMLX model. DT chat, which
+may be a cloud provider, is never used — there is no other transport.
 
 Config (~/.config/dt-pipeline/entities.conf, KEY=VALUE):
-  TRANSPORT=local|auto|omlx|ollama|dtchat|off
-                                     local (default): omlx, else ollama,
-                                     never dtchat — extraction stays
-                                     on-device. auto: omlx, else ollama,
-                                     else dtchat; auto/dtchat are an
-                                     explicit opt-in to whatever provider
-                                     DT chat is configured with.
+  TRANSPORT=local|off                local (default): extraction runs on
+                                     oMLX and waits when the server is
+                                     down. off: pause extraction entirely.
   OMLX_MODEL=<name>                  model id as listed by /v1/models
   OMLX_URL=http://127.0.0.1:8000
   OMLX_API_KEY=<key>                 required when oMLX auth is enabled
                                      (Settings -> auth.api_key)
-  OLLAMA_MODEL=<name>                required for the ollama transport
-  OLLAMA_URL=http://127.0.0.1:11434
   FILING_MODE=suggest|auto           default suggest
   MAX_PER_RUN=<n>                    extraction budget per run, default 3
   MIN_ROSTER=<n>                     extract only once People holds at least
                                      this many records, default 1. Applying
-                                     approved proposals and the attendance
-                                     pass are never gated. TRANSPORT=off is
-                                     the blunter pause: it stops extraction
-                                     without recording anything processed.
+                                     approved proposals is never gated.
+                                     TRANSPORT=off is the blunter pause: it
+                                     stops extraction without recording
+                                     anything processed.
   SELF_NAME=<name>                   extra self-alias to exclude
   SKIP_SOURCE_TITLES=<regex>         sources whose name matches are never
                                      extracted (recurring standups etc.);
                                      case-insensitive, unanchored
-  IDLE_MINUTES=<n>                   run local (Ollama) extraction only when
-                                     the user has been idle this long, so
-                                     inference never spins fans mid-work;
-                                     default 10, 0 disables the gate
+  IDLE_MINUTES=<n>                   run local extraction only when the user
+                                     has been idle this long, so inference
+                                     never spins fans mid-work; default 10,
+                                     0 disables the gate
   THINGS_SYNC=on|off                 default off. Mirror each pending
                                      proposal as a to-do in Things 3: the
                                      note carries an editable line-format
@@ -124,7 +108,7 @@ import sys
 import tempfile
 import urllib.error
 import urllib.request
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path.home() / ".local" / "bin"))
@@ -140,13 +124,13 @@ STATE_DIR = os.path.expanduser("~/.local/state/devonthink")
 STATE_FILE = os.path.join(STATE_DIR, "entity-filing-state.json")
 LOCK_FILE = os.path.join(STATE_DIR, "entity-filing.lock")
 LLM_LOCK_FILE = os.path.join(STATE_DIR, "local-llm.lock")
+SUCCESS_FILE = os.path.join(STATE_DIR, "entity-filing.last-success")
 STATE_SCHEMA_VERSION = 2
 REVIEW_PATH = "/20_ENTITIES/_Review"
 APPROVED_PATH = "/20_ENTITIES/_Review/Approved"
 FACTS_FILED_PATH = "/20_ENTITIES/_Facts/Filed"
 MAX_ATTEMPTS = 5
 UPDATE_FIELDS = ("employer", "role", "city", "email")
-BUMP_WINDOW_DAYS = 60
 THINGS_MAP_FILE = os.path.join(STATE_DIR, "things-filing-map.json")
 THINGS_MAP_VERSION = 1
 THINGS_URL_LIMIT = 3500
@@ -216,57 +200,6 @@ FACT_PREFACE = (
     "or too minor.\n\n"
 )
 
-EXTRACTION_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "people": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "properties": {
-                    "name": {"type": "string"},
-                    "match": {"type": ["string", "null"]},
-                    "interacted": {"type": "boolean"},
-                    "facts": {
-                        "type": "array",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "date": {"type": ["string", "null"]},
-                                "fact": {"type": "string"},
-                            },
-                            "required": ["fact"],
-                        },
-                    },
-                    "updates": {
-                        "type": "object",
-                        "properties": {
-                            f: {"type": ["string", "null"]} for f in UPDATE_FIELDS
-                        },
-                    },
-                },
-                "required": ["name", "facts", "interacted"],
-            },
-        },
-        "events": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "properties": {
-                    "name": {"type": "string"},
-                    "date": {"type": ["string", "null"]},
-                    "location": {"type": ["string", "null"]},
-                    "attendees": {"type": "array", "items": {"type": "string"}},
-                    "summary": {"type": ["string", "null"]},
-                },
-                "required": ["name"],
-            },
-        },
-    },
-    "required": ["people", "events"],
-}
-
-
 # ---------------------------------------------------------------------------
 # Config / state
 # ---------------------------------------------------------------------------
@@ -278,8 +211,6 @@ def load_config():
         "OMLX_MODEL": "",
         "OMLX_URL": "http://127.0.0.1:8000",
         "OMLX_API_KEY": "",
-        "OLLAMA_MODEL": "",
-        "OLLAMA_URL": "http://127.0.0.1:11434",
         "FILING_MODE": "suggest",
         "MAX_PER_RUN": "3",
         "MIN_ROSTER": "1",
@@ -300,25 +231,6 @@ def load_config():
     return config
 
 
-def migrate_v1_state(old):
-    """v1 kept only a processed-UUID list. Grandfather each entry as
-    processed-as-of-migration: it re-enters filing only if DEVONthink's
-    modification date advances past this stamp (a later edit, OCR pass, or
-    notebook re-export) — exactly the reprocessing v1 could never do."""
-    stamp = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
-    attempts = {}
-    for uuid, count in (old.get("attempts") or {}).items():
-        if isinstance(count, int):
-            attempts[uuid] = {"count": count}
-    return {
-        "version": STATE_SCHEMA_VERSION,
-        "processed": {u: {"modified": stamp, "hash": None}
-                      for u in old["processed_ids"]},
-        "attempts": attempts,
-        "parked": {},
-    }
-
-
 def load_state():
     """Fail closed like the Granola importer: an unreadable state file must
     pause filing, not silently re-extract (and re-propose) every source."""
@@ -333,12 +245,6 @@ def load_state():
             f"State file {STATE_FILE} is unreadable ({exc}). Filing is paused "
             f"until the file is inspected and repaired or removed."
         ) from exc
-    if (
-        isinstance(data, dict)
-        and data.get("version") == 1
-        and isinstance(data.get("processed_ids"), list)
-    ):
-        data = migrate_v1_state(data)
     if (
         isinstance(data, dict)
         and data.get("version") == STATE_SCHEMA_VERSION
@@ -500,25 +406,6 @@ def user_idle_seconds():
 _availability_cache = {}
 
 
-def ollama_available(config):
-    if "ollama" in _availability_cache:
-        return _availability_cache["ollama"]
-    ok = False
-    if config["OLLAMA_MODEL"]:
-        try:
-            with urllib.request.urlopen(
-                config["OLLAMA_URL"] + "/api/tags", timeout=3
-            ) as resp:
-                tags = json.load(resp)
-            names = {m.get("name", "") for m in tags.get("models", [])}
-            model = config["OLLAMA_MODEL"]
-            ok = model in names or f"{model}:latest" in names
-        except (urllib.error.URLError, OSError, json.JSONDecodeError):
-            ok = False
-    _availability_cache["ollama"] = ok
-    return ok
-
-
 def omlx_available(config):
     if "omlx" in _availability_cache:
         return _availability_cache["omlx"]
@@ -551,8 +438,7 @@ def extract_omlx(config, prompt):
     # No response_format: oMLX's strict json_schema decoding degenerates
     # with some models (Qwen3-VL burns the full max_tokens per call and
     # returns an empty object). Free-form decode at temperature 0 yields
-    # valid JSON from every model tested, and parse_extraction already
-    # validates the dtchat transport's unconstrained output the same way.
+    # valid JSON from every model tested, and parse_extraction validates it.
     payload = json.dumps({
         "model": config["OMLX_MODEL"],
         "messages": [
@@ -573,40 +459,6 @@ def extract_omlx(config, prompt):
     with urllib.request.urlopen(req, timeout=600) as resp:
         out = json.load(resp)
     return out["choices"][0]["message"]["content"]
-
-
-def extract_ollama(config, prompt):
-    payload = json.dumps({
-        "model": config["OLLAMA_MODEL"],
-        "messages": [
-            {"role": "system", "content": CHAT_ROLE},
-            {"role": "user", "content": prompt},
-        ],
-        "stream": False,
-        "format": EXTRACTION_SCHEMA,
-        # keep_alive: return the ~22 GB of unified memory promptly after a
-        # batch instead of Ollama's 5-minute default residency.
-        "keep_alive": "1m",
-        # num_ctx: Ollama's default silently truncates the head of long
-        # prompts (capped note + roster can reach ~12k tokens).
-        # presence_penalty: some tags ship nonzero defaults, which degrade
-        # repetitive JSON keys.
-        "options": {"temperature": 0, "num_ctx": 16384, "presence_penalty": 0},
-    }).encode()
-    req = urllib.request.Request(
-        config["OLLAMA_URL"] + "/api/chat",
-        data=payload,
-        headers={"Content-Type": "application/json"},
-    )
-    with urllib.request.urlopen(req, timeout=600) as resp:
-        out = json.load(resp)
-    return out["message"]["content"]
-
-
-def extract_dtchat(prompt):
-    return run_bridge(
-        [{"op": "chat", "prompt": prompt, "role": CHAT_ROLE}], timeout=360
-    )[0]["text"]
 
 
 def close_orphaned_arrays(text):
@@ -2092,33 +1944,10 @@ def normalize_source_text(kind, text):
     return text
 
 
-LOCAL_TRANSPORTS = ("omlx", "ollama")
-
-
-def pick_transport(config, kind):
-    transport = config["TRANSPORT"]
-    if transport == "off":
+def pick_transport(config):
+    if config["TRANSPORT"] == "off":
         return None
-
-    def local_pick(allowed):
-        if "omlx" in allowed and omlx_available(config):
-            return "omlx"
-        if "ollama" in allowed and ollama_available(config):
-            return "ollama"
-        return None
-
-    if transport in LOCAL_TRANSPORTS:
-        return local_pick((transport,))
-    if transport == "local":
-        return local_pick(LOCAL_TRANSPORTS)
-    if kind in ("daily", "journal", "handwritten", "fact"):
-        # Daily notes, journal entries, handwritten notes, and fact captures
-        # are local-only by policy: personal content never reaches DT chat,
-        # which may be a cloud provider.
-        return local_pick(LOCAL_TRANSPORTS) if transport == "auto" else None
-    if transport == "dtchat":
-        return "dtchat"
-    return local_pick(LOCAL_TRANSPORTS) or "dtchat"
+    return "omlx" if omlx_available(config) else None
 
 
 def scan(config, state, dry_run, force_uuid, user_invoked):
@@ -2128,30 +1957,6 @@ def scan(config, state, dry_run, force_uuid, user_invoked):
     ])
     index = roster_index(people)
     selves = self_names(config)
-
-    # Deterministic attendance pass: meeting participants bump LastContact
-    # whether or not extraction can run. bump_lastcontact only ever raises
-    # the date, so a meeting older than the window can no longer change any
-    # LastContact — re-scanning the whole archive each tick is pure waste.
-    window_start = (date.today() - timedelta(days=BUMP_WINDOW_DAYS)).isoformat()
-    bump_ops = []
-    for source in sources:
-        if source["kind"] != "meeting":
-            continue
-        d = source_date_of(source)
-        added = source.get("added", "")
-        if d < window_start and (not added or added < window_start):
-            continue
-        for raw_name in (source.get("participants") or "").split(","):
-            n = norm(raw_name)
-            if not n or n in selves:
-                continue
-            hits = index.get(n) or []
-            if len(hits) == 1:
-                bump_ops.append({"op": "bump_lastcontact",
-                                 "uuid": hits[0]["uuid"], "date": d})
-    if bump_ops and not dry_run:
-        run_bridge(bump_ops)
 
     min_roster = int(config["MIN_ROSTER"])
     if len(people) < min_roster and not force_uuid:
@@ -2236,26 +2041,25 @@ def scan(config, state, dry_run, force_uuid, user_invoked):
                 save_state(state)
             continue
 
-        transport = pick_transport(config, source["kind"])
+        transport = pick_transport(config)
         if transport is None:
             no_transport += 1
-            continue  # no eligible transport (e.g. daily note without Ollama)
-        if transport in LOCAL_TRANSPORTS and not idle_ok:
+            continue
+        if not idle_ok:
             # Local inference is deferrable by design; never spin fans while
             # the user is actively working. Candidates wait for an idle run.
             if not idle_skip_logged:
                 log.info("user active, deferring local extraction to an idle run")
                 idle_skip_logged = True
             continue
-        if transport in LOCAL_TRANSPORTS:
-            if llm_lock is None and not llm_lock_failed:
-                llm_lock = acquire_llm_lock()
-                if llm_lock is None:
-                    llm_lock_failed = True
-                    log.info("local-llm lock held (journal OCR?), deferring "
-                             "local extraction to the next run")
+        if llm_lock is None and not llm_lock_failed:
+            llm_lock = acquire_llm_lock()
             if llm_lock is None:
-                continue
+                llm_lock_failed = True
+                log.info("local-llm lock held (journal OCR?), deferring "
+                         "local extraction to the next run")
+        if llm_lock is None:
+            continue
 
         source_date = source_date_of(source)
         text = run_bridge([{"op": "get_text", "uuid": uuid}])[0]["text"]
@@ -2293,12 +2097,7 @@ def scan(config, state, dry_run, force_uuid, user_invoked):
                  extra={"record_name": source["name"],
                         "record_uuid": source["uuid"]})
         try:
-            if transport == "omlx":
-                raw = extract_omlx(config, prompt)
-            elif transport == "ollama":
-                raw = extract_ollama(config, prompt)
-            else:
-                raw = extract_dtchat(prompt)
+            raw = extract_omlx(config, prompt)
             extracted_people, extracted_events = parse_extraction(raw)
         except BridgeUnavailable:
             raise
@@ -2368,10 +2167,10 @@ def file_source(config, state, source, source_date, plans, filing_mode,
         else:
             proposal_plans.append(plan)
 
-    proposal_ops = []
+    fence_ops = []
     for plan in proposal_plans:
-        proposal_ops.extend(ops_for_plan(plan, source, source_date))
-    proposal_ops.append({"op": "mark_filed", "uuid": source["uuid"]})
+        fence_ops.extend(ops_for_plan(plan, source, source_date))
+    fence_ops.append({"op": "mark_filed", "uuid": source["uuid"]})
 
     # A deliberately-authored fact must never vanish: when extraction yields
     # nothing to apply or propose, surface the raw capture for manual review
@@ -2383,7 +2182,7 @@ def file_source(config, state, source, source_date, plans, filing_mode,
                  source["name"], len(direct_ops), len(proposal_plans),
                  " (empty fact → review stub)" if empty_fact else "")
         print(json.dumps({"source": source["name"], "direct": direct_ops,
-                          "proposal": proposal_ops}, indent=2))
+                          "proposal": fence_ops}, indent=2))
         return
 
     if direct_ops:
@@ -2409,7 +2208,7 @@ def file_source(config, state, source, source_date, plans, filing_mode,
                                "record_uuid": source["uuid"]})
             run_bridge(filed_ops)
         else:
-            body = proposal_body(source, source_date, proposal_plans, proposal_ops)
+            body = proposal_body(source, source_date, proposal_plans, fence_ops)
             run_bridge([{
                 "op": "create_record",
                 "name": proposal_name,
@@ -2466,6 +2265,15 @@ def file_source(config, state, source, source_date, plans, filing_mode,
 # ---------------------------------------------------------------------------
 
 
+def should_record_success(dry_run):
+    return not dry_run
+
+
+def record_success():
+    with open(SUCCESS_FILE, "w") as f:
+        f.write(str(int(datetime.now().timestamp())))
+
+
 def main():
     args = sys.argv[1:]
     dry_run = "--dry-run" in args
@@ -2480,11 +2288,12 @@ def main():
     user_invoked = bool(dry_run or force_uuid or apply_only or scan_only
                         or rebuild_state)
 
-    subprocess.run(
-        [os.path.expanduser("~/.local/bin/pipeline-record-run"),
-         "entity-filing", "1800"],
-        check=False,
-    )
+    if not dry_run:
+        subprocess.run(
+            [os.path.expanduser("~/.local/bin/pipeline-record-run"),
+             "entity-filing", "1800"],
+            check=False,
+        )
 
     if not user_invoked:
         gate = subprocess.run(
@@ -2509,12 +2318,10 @@ def main():
             log.info("another entity-filing run holds the lock, exiting")
             return
 
+    if should_record_success(dry_run):
+        record_success()
+
     config = load_config()
-    if config["TRANSPORT"] in ("auto", "dtchat"):
-        log.info("TRANSPORT=%s allows extraction through DEVONthink chat, "
-                 "which may be a cloud provider; prompts include the People "
-                 "roster. Set TRANSPORT=local to keep extraction on-device.",
-                 config["TRANSPORT"])
     state_file_existed = os.path.exists(STATE_FILE)
     state = load_state()
 

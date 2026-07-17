@@ -3,6 +3,7 @@ import os
 import tempfile
 import unittest
 from datetime import datetime, timedelta
+from unittest import mock
 
 from helpers import load
 
@@ -49,6 +50,31 @@ class _SilenceLog(unittest.TestCase):
 
     def tearDown(self):
         gs.log = self._orig_log
+
+
+class ManualDetection(unittest.TestCase):
+    """Must align with pipeline_log.py's rule (PIPELINE_MANUAL=1, or either
+    stream a TTY) — a hand run with piped stdout still has to tag itself
+    /manual so dt-watchdog doesn't page on its failures."""
+
+    def test_stderr_tty_alone_is_manual(self):
+        with mock.patch.object(gs.sys.stdout, "isatty", return_value=False), \
+             mock.patch.object(gs.sys.stderr, "isatty", return_value=True), \
+             mock.patch.dict(gs.os.environ, {}, clear=True):
+            self.assertTrue(gs._is_manual())
+
+    def test_pipeline_manual_env_alone_is_manual(self):
+        with mock.patch.object(gs.sys.stdout, "isatty", return_value=False), \
+             mock.patch.object(gs.sys.stderr, "isatty", return_value=False), \
+             mock.patch.dict(gs.os.environ, {"PIPELINE_MANUAL": "1"},
+                             clear=True):
+            self.assertTrue(gs._is_manual())
+
+    def test_neither_stream_nor_env_is_not_manual(self):
+        with mock.patch.object(gs.sys.stdout, "isatty", return_value=False), \
+             mock.patch.object(gs.sys.stderr, "isatty", return_value=False), \
+             mock.patch.dict(gs.os.environ, {}, clear=True):
+            self.assertFalse(gs._is_manual())
 
 
 class FetchStopsAtFirstImported(_SilenceLog):

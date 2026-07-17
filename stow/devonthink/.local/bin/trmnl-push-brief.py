@@ -67,6 +67,7 @@ def load_config():
                 if not line or line.startswith("#") or "=" not in line:
                     continue
                 key, _, value = line.partition("=")
+                value = value.split("#", 1)[0]
                 cfg[key.strip()] = value.strip()
     except OSError:
         return {}
@@ -266,4 +267,8 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as exc:
+        log.error("FATAL: %s: %s", type(exc).__name__, exc)
+        sys.exit(1)

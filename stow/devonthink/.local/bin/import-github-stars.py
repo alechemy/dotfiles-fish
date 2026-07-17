@@ -62,11 +62,12 @@ if "--force" in sys.argv:
 
 # dt-watchdog scans this log and pages on failure tokens; the /manual tag
 # tells it a human was driving (same convention as pipeline_log.py).
-_COMPONENT = (
-    "github-stars/manual"
-    if sys.stdout.isatty() or os.environ.get("PIPELINE_MANUAL") == "1"
-    else "github-stars"
-)
+def _is_manual():
+    return (os.environ.get("PIPELINE_MANUAL") == "1"
+            or sys.stdout.isatty() or sys.stderr.isatty())
+
+
+_COMPONENT = "github-stars/manual" if _is_manual() else "github-stars"
 
 MANUAL_RUN = _COMPONENT.endswith("/manual")
 

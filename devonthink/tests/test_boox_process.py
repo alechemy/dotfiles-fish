@@ -210,6 +210,76 @@ class RebuildState(unittest.TestCase):
             with self.assertRaises(jp.BridgeUnavailable):
                 jp.rebuild_state(state)
 
+    def test_dry_run_does_not_save_state(self):
+        state = {"schema": jp.STATE_SCHEMA_VERSION, "notebooks": {}}
+        with mock.patch.object(jp, "run_bridge", return_value=[[]]), \
+             mock.patch.object(jp, "save_state") as save:
+            jp.rebuild_state(state, dry_run=True)
+        save.assert_not_called()
+
+
+class ProcessNotebookDryRun(unittest.TestCase):
+    """A dry-run preview must never rmtree+rewrite the shared render cache
+    (WORK_DIR) or persist state — both are live inputs a concurrent real run
+    depends on."""
+
+    def _pdf(self, tmp, name="Some Notebook.pdf"):
+        path = os.path.join(tmp, name)
+        with open(path, "wb") as f:
+            f.write(b"stub pdf bytes")
+        return path
+
+    def test_changed_notebook_skips_render_and_save(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            pdf_path = self._pdf(tmp)
+            state = {"schema": jp.STATE_SCHEMA_VERSION, "notebooks": {}}
+            with mock.patch.object(jp, "render_pages") as render, \
+                 mock.patch.object(jp, "save_state") as save:
+                processed = jp.process_notebook(
+                    pdf_path, state, jp.DEFAULTS, dry_run=True, force=False,
+                    budget=5, chat_warned={})
+            self.assertEqual(processed, 0)
+            render.assert_not_called()
+            save.assert_not_called()
+
+    def test_out_of_sync_workdir_skips_save(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            pdf_path = self._pdf(tmp)
+            pdf_sha = jp.sha256_file(pdf_path)
+            state = {"schema": jp.STATE_SCHEMA_VERSION, "notebooks": {
+                "Some Notebook": {
+                    "render_sha": pdf_sha,
+                    "pages": [{"sig": "s", "date": "", "text": "",
+                              "parked": "", "attempts": 0}],
+                    "entries": {},
+                }}}
+            old_work_dir = jp.WORK_DIR
+            jp.WORK_DIR = os.path.join(tmp, "work")
+            try:
+                with mock.patch.object(jp, "save_state") as save:
+                    processed = jp.process_notebook(
+                        pdf_path, state, jp.DEFAULTS, dry_run=True,
+                        force=False, budget=5, chat_warned={})
+            finally:
+                jp.WORK_DIR = old_work_dir
+            self.assertEqual(processed, 0)
+            save.assert_not_called()
+
+    def test_real_run_still_renders_and_saves(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            pdf_path = self._pdf(tmp)
+            state = {"schema": jp.STATE_SCHEMA_VERSION, "notebooks": {}}
+            with mock.patch.object(jp, "render_pages",
+                                   return_value=["page-0000.png"]) as render, \
+                 mock.patch.object(jp, "page_signatures",
+                                   return_value=["sig1"]), \
+                 mock.patch.object(jp, "save_state") as save:
+                jp.process_notebook(pdf_path, state, jp.DEFAULTS,
+                                    dry_run=False, force=False, budget=0,
+                                    chat_warned={})
+            render.assert_called_once()
+            save.assert_called_once()
+
 
 class AutoRebuildIfMissing(unittest.TestCase):
     def test_rebuilds_when_state_file_was_absent(self):

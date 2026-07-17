@@ -461,8 +461,7 @@ with no contact history. `dt-morning-brief.py --backfill-contacts [--days N]`
 replays a range (default 365 days) through the same matcher, keeping only each
 person's most recent date — one calendar dump, a few seconds, idempotent.
 Run it once after a seeding session. The calendar and Messages are the only
-historical sources of contact dates; see the note on `GranolaParticipants`
-below.
+historical sources of contact dates.
 
 The brief also writes an `## Entity Review` section counting proposals that
 need attention: those awaiting review in `_Review`, and separately any left
@@ -517,7 +516,7 @@ missing).
 
 **Extraction is gated on a seeded roster** (`MIN_ROSTER`, default 1): below
 the threshold the scan logs why and stops before any extraction, while the
-apply phase, the attendance pass, and `--force` keep working. The roster *is*
+apply phase and `--force` keep working. The roster *is*
 the prompt's entire resolution step, and a source is only extracted again
 when its content changes — so running against an empty People group spends
 every source on a proposal full of bare first names ("Alison", "Mom") that
@@ -553,23 +552,6 @@ workplace-workflow trivia, and a review queue full of trivia is how the
 review habit dies. `--force <uuid>` bypasses the skip for a specific record.
 The extraction prompt itself also sets a high bar: biographical changes only,
 no working-style observations, and "an empty list is a good answer".
-
-Meeting attendance is deterministic and LLM-free: any `GranolaParticipants`
-name that uniquely matches a Person record bumps its `LastContact` on every
-scan (bump only ever raises the date). The pass is bounded to meetings from
-the last 60 days — an older meeting can no longer raise anyone's `LastContact`,
-so re-scanning the whole archive each tick is skipped.
-
-**This pass is dormant, and not because of a bug here.** Granola reads a
-*subscribed* Google calendar (`…@import.calendar.google.com`), and Google
-strips attendee lists from one-way ICS imports, so `documents.people.attendees`
-and `google_calendar_event.attendees` are empty on every meeting and
-`import-granola.py` has nothing to write into `GranolaParticipants`. The code
-is kept because it starts working the moment Granola is pointed at a real
-Google Calendar connection. Until then, all contact tracking comes from the
-macOS Calendar via `dt-morning-brief.py`, whose Exchange events do carry
-attendees. Do not "fix" this by reading attendees out of the meeting note's
-body text — the pipeline's guarantee is that attendance is LLM-free.
 
 **Review loop:** proposals land in `/20_ENTITIES/_Review` with a human
 summary and the exact ops as a fenced JSON block. Move a proposal into
@@ -702,12 +684,10 @@ exception scoped to proposal content (never the roster, never source bodies).
 `~/.config/dt-pipeline/entities.conf` (KEY=VALUE, all optional):
 
 ```
-TRANSPORT=local       # auto | local | omlx | ollama | dtchat | off
+TRANSPORT=local       # local | off
 OMLX_MODEL=Qwen3-VL-32B-Instruct-4bit
 OMLX_URL=http://127.0.0.1:8000
 OMLX_API_KEY=…        # oMLX auth key (Settings → auth.api_key); conf is 600
-OLLAMA_MODEL=         # optional fallback server; empty = not installed
-OLLAMA_URL=http://127.0.0.1:11434
 FILING_MODE=suggest   # suggest | auto
 MAX_PER_RUN=3
 MIN_ROSTER=1          # extract only once People holds this many records
@@ -734,30 +714,18 @@ mid-work, and oMLX's per-model idle TTL
 batch. Once the backlog drains, inference happens only when a new
 meeting/handwritten/daily note appears — a few short runs a day.
 
-The deployed posture is **local-only** (`TRANSPORT=local`), and `local` is
-also the **code default** — the value the script uses when `entities.conf` is
-missing or unreadable — so a lost or damaged config fails safe on-device
-rather than silently widening the privacy boundary. Extraction runs on
-**oMLX** (`Qwen3-VL-32B-Instruct-4bit`, MLX backend, ~10–60 s per
+The deployed posture is **local-only** (`TRANSPORT=local`), which is also the
+**code default** — the value the script uses when `entities.conf` is missing
+or unreadable — so a lost or damaged config fails safe on-device. Extraction
+runs on **oMLX** (`Qwen3-VL-32B-Instruct-4bit`, MLX backend, ~10–60 s per
 extraction — the model is shared with journal OCR so only one ~18 GB set
 of weights is ever resident) and
-*waits* when the server is down rather than ever falling back to a cloud
-provider — filing is latency-tolerant by design, so an outage costs nothing
-but delay. The code also carries an Ollama transport (same `local` chain,
-tried after oMLX); it is currently uninstalled — reinstate with
-`brew install ollama`, a model pull, and `OLLAMA_MODEL=` in the conf.
+*waits* when the server is down rather than falling back anywhere else —
+filing is latency-tolerant by design, so an outage costs nothing but delay.
+There is no cloud transport: the privacy boundary holds by construction, not
+by a config gate. `TRANSPORT=off` pauses extraction entirely.
 
-`auto` and `dtchat` are the **explicit cloud opt-ins**, and they are the only
-transports that can leave the machine. `auto` restores the DT-chat fallback
-for meeting notes when a local model is unavailable; `dtchat` forces DT chat
-for those sources. Handwritten notes are excluded from both — like daily
-notes and journal entries, they are local-only regardless of transport. The catch is that the extraction prompt
-embeds the full People roster (every name and alias), so each DT-chat
-extraction ships the *whole roster* — not just the note being extracted — to
-DT chat's configured provider. Because that is a real privacy-boundary change,
-selecting `auto` or `dtchat` logs a prominent notice on every run; leave it on
-`local` unless you have decided availability matters more than keeping the
-roster on-device. oMLX serves an OpenAI-compatible API on :8000
+oMLX serves an OpenAI-compatible API on :8000
 (`extract_omlx` decodes free-form at temperature 0 with
 `chat_template_kwargs: {enable_thinking: false}` — do **not** add
 `response_format: json_schema`: oMLX's strict constrained decoding
@@ -785,13 +753,13 @@ temperature 0, ≥16k usable context, ≤~25 GB quantized.
 
 Boundaries hard-coded regardless of config:
 
-- **Daily notes, journal entries, handwritten notes, and fact captures are
-  local-only.** `/10_DAILY`, `/15_JOURNAL`, and `/20_ENTITIES/_Facts` are
-  excluded from DT's AI chat by design, and handwritten notebooks are
-  transcribed on-device (see `boox-local.md`); the filing step honors all
-  four: the `daily`, `journal`, `handwritten`, and `fact` kinds are only ever
-  extracted through a local transport, never DT chat. Handwritten sources read
-  from the Finder comment (the transcription), not the image's OCR text layer.
+- **Every source kind is local-only.** Daily notes, journal entries,
+  handwritten notes, meeting notes, and fact captures are only ever
+  extracted through oMLX, never DT chat. `/10_DAILY`, `/15_JOURNAL`, and
+  `/20_ENTITIES/_Facts` are additionally excluded from DT's AI chat by
+  design, and handwritten notebooks are transcribed on-device (see
+  `boox-local.md`). Handwritten sources read from the Finder comment (the
+  transcription), not the image's OCR text layer.
 - **`/20_ENTITIES/People`, `_Review`, and `_Review/Approved` are excluded from
   DT's AI chat** (`excludeFromChat`), because Person records are distilled dossiers — more
   sensitive than any single source note. The automation is unaffected
@@ -799,11 +767,6 @@ Boundaries hard-coded regardless of config:
   cannot read them. Revert deliberately if conversational retrieval over the
   graph is ever wanted:
   `osascript -e 'tell application id "DNtp" to set exclude from chat of (get record at "/20_ENTITIES/People" in database "Lorebook") to false'`
-
-Extraction runs at temperature 0 with a JSON schema (`format`) and
-`num_ctx=16384` (Ollama's default context would silently truncate long
-prompts) on the Ollama path; the DT-chat path uses a JSON-only role prompt
-plus fence-stripping and strict validation in Python.
 
 ## Fact provenance and correction propagation
 
@@ -910,8 +873,10 @@ rg 'entity-filing|morning-brief' ~/Library/Logs/devonthink-pipeline.log
 ```
 
 Both agents are driver-only (loaded by `setup.sh` alongside the ingest
-agents) and gate on `should-run-background-job` + `should-run-dt-driver`; the
-brief passes `--urgent` to the battery gate because it is deadline-bound.
+agents) and gate on `should-run-dt-driver`; filing also gates on
+`should-run-background-job` — the brief has no battery gate, since it is
+deadline-bound and runs on a fixed morning schedule regardless of power
+source.
 
 ## Deliberately not built (yet)
 
