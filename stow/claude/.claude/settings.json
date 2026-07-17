@@ -5,7 +5,6 @@
   "permissions": {
     "defaultMode": "bypassPermissions"
   },
-  "model": "claude-fable-5[1m]",
   "hooks": {
     "PreToolUse": [
       {
@@ -67,7 +66,10 @@
     ]
   },
   "enabledPlugins": {
-    "chrome-devtools-mcp@chrome-devtools-plugins": true
+    "chrome-devtools-mcp@chrome-devtools-plugins": true,
+    "figma@claude-plugins-official": true,
+    "swift-lsp@claude-plugins-official": true,
+    "posthog@claude-plugins-official": true
   },
   "extraKnownMarketplaces": {
     "expo-plugins": {
@@ -88,11 +90,12 @@
   "awaySummaryEnabled": false,
   "tui": "fullscreen",
   "voice": {
-    "enabled": true,
+    "enabled": false,
     "mode": "tap"
   },
   "skipDangerousModePermissionPrompt": true,
   "theme": "dark",
   "editorMode": "normal",
-  "voiceEnabled": true
+  "voiceEnabled": false,
+  "model": "claude-fable-5[1m]"
 }
