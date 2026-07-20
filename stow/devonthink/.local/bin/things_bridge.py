@@ -115,7 +115,12 @@ def _fire(url):
 def prewarm():
     """Launch Things hidden in the background if needed. The local DB only
     receives Things Cloud pushes while the app runs, so a closed app would
-    silently stall the whole review loop."""
+    silently stall the whole review loop. A running app is left alone:
+    `open -a` would deliver a reopen event that re-creates a closed main
+    window on the user's screen (`-g`/`-j` don't suppress it)."""
+    if subprocess.run(["/usr/bin/pgrep", "-xq", "Things3"],
+                      check=False).returncode == 0:
+        return
     subprocess.run(["/usr/bin/open", "-g", "-j", "-a", "Things3"], check=False)
     time.sleep(0.4)
 

@@ -71,7 +71,10 @@ def existing_titles(project):
 
 def ensure_running():
     # Launch Things in the BACKGROUND if needed (-g no foreground, -j hidden) so a
-    # tiling WM / Spaces never yanks you to it. Near no-op if already running.
+    # tiling WM / Spaces never yanks you to it. On a running app `open -a` delivers
+    # a reopen event that re-creates a closed main window, so skip it entirely.
+    if subprocess.run(["pgrep", "-xq", "Things3"]).returncode == 0:
+        return
     subprocess.run(["open", "-g", "-j", "-a", "Things3"]); time.sleep(0.4)
 
 OSA_DISMISS = '''tell application "System Events" to tell (first process whose name contains "Things")

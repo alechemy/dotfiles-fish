@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import subprocess
 import tempfile
 import unittest
 
@@ -1080,6 +1081,33 @@ class UpdateTodoShortCircuit(unittest.TestCase):
                 "T-1", "tok", {"completed": "true"}, {"status": 3}))
         finally:
             tb.read_tasks, tb._fire = orig_read, orig_fire
+
+
+class Prewarm(unittest.TestCase):
+    def _calls(self, pgrep_rc):
+        calls = []
+
+        def fake_run(argv, **kwargs):
+            calls.append(argv)
+            rc = pgrep_rc if "pgrep" in argv[0] else 0
+            return subprocess.CompletedProcess(argv, rc)
+
+        orig_run, orig_sleep = tb.subprocess.run, tb.time.sleep
+        tb.subprocess.run = fake_run
+        tb.time.sleep = lambda _s: None
+        try:
+            tb.prewarm()
+        finally:
+            tb.subprocess.run, tb.time.sleep = orig_run, orig_sleep
+        return calls
+
+    def test_running_app_gets_no_reopen(self):
+        calls = self._calls(pgrep_rc=0)
+        self.assertEqual([argv for argv in calls if "open" in argv[0]], [])
+
+    def test_launches_hidden_when_not_running(self):
+        calls = self._calls(pgrep_rc=1)
+        self.assertIn(["/usr/bin/open", "-g", "-j", "-a", "Things3"], calls)
 
 
 class AuthToken(unittest.TestCase):
