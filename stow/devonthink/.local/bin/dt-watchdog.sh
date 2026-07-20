@@ -38,10 +38,9 @@ if "$HOME/.local/bin/should-run-dt-driver" 2>/dev/null; then
 fi
 
 # ── 0. Record run time + alert on missed runs ────────────────────────────────
-# launchd's StartInterval (300s) doesn't fire during sleep. The pseudo-interval
-# is 3600, not 300: on this hardware every lid-close nap exceeds the 2×300s
-# threshold, and a dozen expected sleep-gap ALERTs a week buries real ones.
-# Only 2h+ gaps alert.
+# The pseudo-interval is 3600, not 300: record-run discounts sleep, but on
+# battery launchd defers timers well past 2×300s even while awake, and that
+# noise would bury real stalls. Only 2h+ awake gaps alert.
 "$HOME/.local/bin/pipeline-record-run" dt-watchdog 3600 || true
 
 # ── 1. Surface new failures from the pipeline logs ───────────────────────────
@@ -249,8 +248,9 @@ fi
 # AGAIN. Check each label is loaded and its recorded last run is fresh.
 # Only components that have run on this machine before (a .last-run file
 # exists) are checked, so a deliberately unprovisioned agent stays quiet.
-# Thresholds are loose on purpose: sleep gaps are routine, and
-# surface_line's dedup caps repeats at daily.
+# Silence is judged on awake time (awake-seconds) so sleep never pages;
+# thresholds stay loose for battery-deferred timers, and surface_line's
+# dedup caps repeats at daily.
 if [[ "$IS_DRIVER" == 1 ]]; then
     NOW_EPOCH=$(date +%s)
     while IFS=: read -r AGENT_LABEL AGENT_JOB AGENT_MAX_AGE AGENT_SUCCESS_MAX_AGE; do
@@ -265,8 +265,13 @@ if [[ "$IS_DRIVER" == 1 ]]; then
         [[ "$AGENT_LAST" =~ ^[0-9]+$ && "$AGENT_LAST" -gt 0 ]] || continue
         AGENT_GAP=$((NOW_EPOCH - AGENT_LAST))
         if [[ "$AGENT_GAP" -gt "$AGENT_MAX_AGE" ]]; then
-            surface_line "$AGENT_JOB has not run in $((AGENT_GAP / 3600))h (label $AGENT_LABEL is loaded but silent)"
-            continue
+            AGENT_AWAKE=$("$HOME/.local/bin/awake-seconds" "$AGENT_LAST" "$NOW_EPOCH" 2>/dev/null || true)
+            [[ "$AGENT_AWAKE" =~ ^[0-9]+$ ]] || AGENT_AWAKE=$AGENT_GAP
+            if [[ "$AGENT_AWAKE" -gt "$AGENT_MAX_AGE" ]]; then
+                surface_line "$AGENT_JOB has not run in $((AGENT_GAP / 3600))h (label $AGENT_LABEL is loaded but silent)"
+                continue
+            fi
+            log "skip: $AGENT_JOB silent for $((AGENT_GAP / 3600))h but awake only $((AGENT_AWAKE / 60))m of it"
         fi
         # A fresh tick proves the process ran, not that it did anything — a
         # gate-skipped run still touches .last-run. Only components that write

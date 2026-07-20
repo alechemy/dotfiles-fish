@@ -1,0 +1,93 @@
+#!/usr/bin/python3
+"""Print how many seconds of a time window the machine spent awake.
+
+Usage: awake-seconds <start-epoch> [<end-epoch>]
+
+Sleep/Wake transitions come from `pmset -g log`. Missed-run alerting on a
+laptop can't tell a stalled job from a lid-close nap by wall clock alone —
+launchd timers don't fire during sleep — so callers compare a job's silence
+against awake time instead.
+
+DarkWake counts as asleep: launchd jobs do start in SleepService dark-wake
+windows, but the windows are seconds long (cap ~180s) and a job can't be
+relied on to get one, so silence across them is still expected. Stretches
+with no log coverage count as awake, so a parsing gap can only over-alert,
+never suppress a real stall. On failure nothing is printed and the exit is
+non-zero; callers fall back to the full wall-clock gap.
+"""
+
+import re
+import subprocess
+import sys
+import time
+from datetime import datetime
+
+# The trailing \s+\t pins the match to the end of the padded domain column:
+# "Wake Requests" and "Sleep/Wake failure" are distinct domains that would
+# otherwise match on their first word.
+EVENT_RE = re.compile(
+    r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} [+-]\d{4})\s+"
+    r"(Sleep|DarkWake|Wake|Start)\s+\t"
+)
+
+ASLEEP = {"Sleep", "DarkWake"}
+
+
+def parse_events(lines):
+    events = []
+    for line in lines:
+        m = EVENT_RE.match(line)
+        if not m:
+            continue
+        try:
+            when = datetime.strptime(m.group(1), "%Y-%m-%d %H:%M:%S %z")
+        except ValueError:
+            continue
+        events.append((int(when.timestamp()), m.group(2) in ASLEEP))
+    events.sort(key=lambda e: e[0])
+    return events
+
+
+def awake_seconds(events, start, end):
+    if end <= start:
+        return 0
+    total = 0
+    cursor = start
+    awake = True
+    for when, asleep in events:
+        if when <= start:
+            awake = not asleep
+            continue
+        if when >= end:
+            break
+        if awake:
+            total += when - cursor
+        cursor = when
+        awake = not asleep
+    if awake:
+        total += end - cursor
+    return total
+
+
+def main(argv):
+    try:
+        start = int(argv[1])
+        end = int(argv[2]) if len(argv) > 2 else int(time.time())
+    except (IndexError, ValueError):
+        print("usage: awake-seconds <start-epoch> [<end-epoch>]",
+              file=sys.stderr)
+        return 2
+    try:
+        out = subprocess.run(
+            ["/usr/bin/pmset", "-g", "log"],
+            capture_output=True, text=True, timeout=60, check=True,
+        ).stdout
+    except (OSError, subprocess.SubprocessError) as exc:
+        print(f"pmset -g log failed: {exc}", file=sys.stderr)
+        return 1
+    print(awake_seconds(parse_events(out.splitlines()), start, end))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

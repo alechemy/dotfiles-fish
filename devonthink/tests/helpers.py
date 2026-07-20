@@ -7,6 +7,7 @@ otherwise a test that exercises a warning path writes to the file dt-watchdog
 scans, and the run raises a desktop notification.
 """
 
+import importlib.machinery
 import importlib.util
 import logging
 import sys
@@ -36,7 +37,12 @@ def load(filename, module_name):
     _stub_pipeline_log()
     if str(BIN) not in sys.path:
         sys.path.insert(0, str(BIN))
-    spec = importlib.util.spec_from_file_location(module_name, BIN / filename)
+    # An explicit loader lets extensionless CLI-named scripts (awake-seconds)
+    # load; spec_from_file_location alone only infers one for *.py paths.
+    spec = importlib.util.spec_from_file_location(
+        module_name, BIN / filename,
+        loader=importlib.machinery.SourceFileLoader(
+            module_name, str(BIN / filename)))
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module

@@ -3,8 +3,10 @@
 #
 # Records the current run time for a pipeline job and logs an ALERT-level
 # warning if the gap since the previous run exceeds 2x the expected interval.
-# Designed to surface missed runs on a laptop where launchd's StartInterval
-# does not fire while the machine is asleep.
+# The gap is judged on awake time (awake-seconds): launchd's StartInterval
+# does not fire while the machine is asleep, so on a laptop a lid-close nap
+# or a day of travel is expected silence, not a stalled job. A sleep-covered
+# gap is still logged, at INFO, so the history stays visible without paging.
 #
 # An interval of 0 records the run without ever alerting — for KeepAlive
 # jobs that only call this at startup, where the gap since the previous
@@ -35,9 +37,17 @@ if [[ "$INTERVAL" -gt 0 && -f "$STATE_FILE" ]]; then
         if [[ "$GAP" -gt "$THRESHOLD" ]]; then
             GAP_MIN=$((GAP / 60))
             EXPECTED_MIN=$((INTERVAL / 60))
-            "$PIPELINE_LOG" "$JOB" WARN \
-                "ALERT: gap of ${GAP_MIN}m since last run (interval is ${EXPECTED_MIN}m)" \
-                || true
+            AWAKE=$("$HOME/.local/bin/awake-seconds" "$LAST" "$NOW" 2>/dev/null || true)
+            [[ "$AWAKE" =~ ^[0-9]+$ ]] || AWAKE=$GAP
+            if [[ "$AWAKE" -le "$THRESHOLD" ]]; then
+                "$PIPELINE_LOG" "$JOB" INFO \
+                    "gap of ${GAP_MIN}m since last run, awake for only $((AWAKE / 60))m of it (interval is ${EXPECTED_MIN}m)" \
+                    || true
+            else
+                "$PIPELINE_LOG" "$JOB" WARN \
+                    "ALERT: gap of ${GAP_MIN}m since last run (interval is ${EXPECTED_MIN}m)" \
+                    || true
+            fi
         fi
     fi
 fi
