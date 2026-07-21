@@ -1,7 +1,5 @@
 #!/usr/bin/env bash
 
-source "$CONFIG_DIR/plugins/lib/display_mode.sh"
-
 if [ -z "$FOCUSED_WORKSPACE" ]; then
   FOCUSED_WORKSPACE=$(/opt/homebrew/bin/aerospace list-workspaces --focused)
 fi
@@ -13,15 +11,24 @@ else
   sketchybar --set "$NAME" background.drawing=off
 fi
 
-# Emoji icons cost horizontal space; on the MacBook display drop them and keep
-# just the workspace number. Recompute only on display changes / startup, not on
-# every workspace switch, to avoid a per-space ioreg call on each focus change.
-case "$SENDER" in
-display_change | forced | routine | "")
-  if [ "$(display_mode)" = "compact" ]; then
-    sketchybar --set "$NAME" icon.drawing=off
+# Docked: emoji + workspace number. Portable: emoji + "(window count)" — roots
+# are h_accordion there (aerospace-display-mode.sh), so the count marks windows
+# stacked behind the front one; an empty workspace keeps just the emoji. The
+# mode file replaces an ioreg call; counts refresh on workspace/display events
+# only, so a count staled by a window opening or closing corrects on the next
+# switch.
+if [ "$(cat "$HOME/.cache/aerospace-gaps/display-mode" 2>/dev/null)" = "portable" ]; then
+  count=$(/opt/homebrew/bin/aerospace list-windows --workspace "$1" --count 2>/dev/null)
+  case "$count" in '' | *[!0-9]*) count=0 ;; esac
+  if [ "$count" -ge 1 ]; then
+    sketchybar --set "$NAME" icon.drawing=on label.drawing=on label="$count" \
+      label.font="Helvetica Neue:Regular:11.0" label.color=0xb0ffffff \
+      label.y_offset=4 label.padding_left=1
   else
-    sketchybar --set "$NAME" icon.drawing=on
+    sketchybar --set "$NAME" icon.drawing=on label.drawing=off
   fi
-  ;;
-esac
+else
+  sketchybar --set "$NAME" icon.drawing=on label.drawing=on label="$1" \
+    label.font="Helvetica Neue:Regular:14.0" label.color=0xffffffff \
+    label.y_offset=0 label.padding_left=7
+fi

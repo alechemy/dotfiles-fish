@@ -148,13 +148,16 @@ sketchybar --add item front_app left \
   label.font="Helvetica Neue:Bold:14.0" \
   --subscribe front_app front_app_switched
 
-# Auto-gaps on app hide — invisible helper, no UI. AeroSpace fires no callback
-# when an app is hidden (Cmd-H), but macOS posts NSWorkspaceDidActivateApplication
-# as the next app comes forward, which SketchyBar surfaces as front_app_switched.
-# This item rides that event to recompute outer gaps. See plugins/aerospace_gaps.sh.
+# Auto-gaps + dock transitions — invisible helper, no UI. AeroSpace fires no
+# callback when an app is hidden (Cmd-H) or when a monitor appears/disappears.
+# front_app_switched covers the former (macOS posts
+# NSWorkspaceDidActivateApplication as the next app comes forward);
+# display_change and system_woke cover dock, undock, and undock-while-asleep.
+# The script rides these to recompute gaps and fire the display-mode hook. See
+# plugins/aerospace_gaps.sh.
 sketchybar --add item aerospace_gaps left \
   --set aerospace_gaps drawing=off script="$PLUGIN_DIR/aerospace_gaps.sh" \
-  --subscribe aerospace_gaps front_app_switched
+  --subscribe aerospace_gaps front_app_switched display_change system_woke
 
 # Feishin Now Playing — leftmost
 sketchybar --add item feishin right \

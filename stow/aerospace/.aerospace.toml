@@ -23,6 +23,7 @@ enable-normalization-opposite-orientation-for-nested-containers = true
 # See: https://nikitabobko.github.io/AeroSpace/guide#layouts
 # The 'accordion-padding' specifies the size of accordion padding
 # You can set 0 to disable the padding feature
+# The portable runtime copy bakes a smaller value (see aerospace-auto-gaps.sh).
 accordion-padding = 30
 
 # Possible values: tiles|accordion
@@ -69,6 +70,16 @@ on-mode-changed = [
     "exec-and-forget bash -c 'if [ \"$(aerospace list-modes --current)\" = \"service\" ]; then borders active_color=0xffff4444 inactive_color=0xff7a2222; else borders active_color=0xffe2e2e3 inactive_color=0xff414550; fi'"
 ]
 
+# Park the scratchpad workspace on a travel secondary display (Sidecar iPad or
+# portable monitor). 'secondary' matches any non-main display by position rather
+# than by name, so swapping the panel needs no config change, and it is inert in
+# both single-display modes: the DELL and the built-in are each 'main' when they
+# are the only screen.
+# Must stay below every top-level key: a TOML table header absorbs all bare keys
+# that follow it, so a higher placement captures on-mode-changed into this table.
+[workspace-to-monitor-force-assignment]
+    5 = 'secondary'
+
 # Possible values: (qwerty|dvorak|colemak)
 # See https://nikitabobko.github.io/AeroSpace/guide#key-mapping
 [key-mapping]
@@ -103,10 +114,12 @@ on-mode-changed = [
     cmd-alt-ctrl-shift-rightSquareBracket = 'layout accordion horizontal vertical'
 
     # See: https://nikitabobko.github.io/AeroSpace/commands#focus
-    cmd-alt-ctrl-shift-h = 'focus --ignore-floating left'
-    cmd-alt-ctrl-shift-j = 'focus --ignore-floating down'
-    cmd-alt-ctrl-shift-k = 'focus --ignore-floating up'
-    cmd-alt-ctrl-shift-l = 'focus --ignore-floating right'
+    # --wrap-around keeps hjkl useful in accordion roots: focus cycles instead
+    # of dead-ending at the last window.
+    cmd-alt-ctrl-shift-h = 'focus --ignore-floating --wrap-around left'
+    cmd-alt-ctrl-shift-j = 'focus --ignore-floating --wrap-around down'
+    cmd-alt-ctrl-shift-k = 'focus --ignore-floating --wrap-around up'
+    cmd-alt-ctrl-shift-l = 'focus --ignore-floating --wrap-around right'
     cmd-alt-ctrl-shift-w = 'close'
     cmd-alt-ctrl-shift-backtick = 'exec-and-forget bash -c "$HOME/.dotfiles/scripts/aerospace-cycle-window.sh next"'
 
@@ -120,7 +133,8 @@ on-mode-changed = [
     cmd-alt-ctrl-shift-down  = 'move down'
     cmd-alt-ctrl-shift-up    = 'move up'
     cmd-alt-ctrl-shift-right = 'move right'
-    cmd-alt-ctrl-shift-space = 'fullscreen'
+    # Edge-to-edge on the laptop panel, gap-bounded on the ultrawide.
+    cmd-alt-ctrl-shift-space = 'exec-and-forget bash -c "$HOME/.dotfiles/scripts/aerospace-fullscreen.sh"'
 
     # See: https://nikitabobko.github.io/AeroSpace/commands#resize
     # With 2+ tiled windows this is a native `resize smart`; with a single tiled

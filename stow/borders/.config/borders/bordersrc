@@ -1,8 +1,15 @@
 #!/bin/bash
 
+# Thinner border on the laptop panel. The mode file is written by
+# aerospace-display-mode.sh; missing file defaults to the docked width.
+width=6.0
+if [ "$(cat "$HOME/.cache/aerospace-gaps/display-mode" 2>/dev/null)" = "portable" ]; then
+    width=4.0
+fi
+
 options=(
     style=round
-    width=6.0
+    width=$width
     hidpi=off
     active_color=0xffe2e2e3
     inactive_color=0xff414550

@@ -13,7 +13,16 @@
 # script's own flock and idempotent early-exit make the extra invocations on
 # ordinary app switches (and the redundant one on unhide, which on-focus-changed
 # already handles) safe and cheap.
+#
+# display_change and system_woke are the dock/undock (and undock-while-asleep)
+# triggers for the display-mode hook inside the gap script; they get a longer
+# settle because windows are still migrating between monitors when they fire.
 
-if [ "$SENDER" = "front_app_switched" ]; then
+case "$SENDER" in
+front_app_switched)
   ( sleep 0.5; "$HOME/.dotfiles/scripts/aerospace-auto-gaps.sh" front-app-switched ) >/dev/null 2>&1 &
-fi
+  ;;
+display_change | system_woke)
+  ( sleep 1; "$HOME/.dotfiles/scripts/aerospace-auto-gaps.sh" "$SENDER" ) >/dev/null 2>&1 &
+  ;;
+esac

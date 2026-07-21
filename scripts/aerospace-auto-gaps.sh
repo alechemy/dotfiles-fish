@@ -3,8 +3,10 @@
 # every window keeps a constant width (one third of the monitor; see
 # aerospace-gaps-lib.sh for the math).
 # Triggered from AeroSpace callbacks (on-window-detected, on-focus-changed,
-# exec-on-workspace-change), the SketchyBar front_app_switched hook, and
-# aerospace-hide.sh. $1 is an optional trigger label for the log.
+# exec-on-workspace-change), the SketchyBar hook (front_app_switched,
+# display_change, system_woke), and aerospace-hide.sh. $1 is an optional
+# trigger label for the log. Steady-state display-mode flips (dock/undock) are
+# detected here and handed to aerospace-display-mode.sh.
 #
 # Single-flight worker. Callback bursts (cmd-W fires focus-changed +
 # front_app_switched + sometimes workspace-change within milliseconds) must
@@ -32,6 +34,10 @@ export PATH="/opt/homebrew/bin:$PATH"
 # When true, manual hyper-g cycles suppress auto-mode for the active workspace
 # until you leave it. Set to false to disable suppression entirely.
 SUPPRESSION_ENABLED=true
+
+# accordion-padding baked into the portable runtime copy. 30 pt of peek per
+# hidden window is fine on the ultrawide but costs real estate at 14".
+PORTABLE_ACCORDION_PADDING=10
 
 SOURCE_FILE="$HOME/.dotfiles/stow/aerospace/.aerospace.toml"
 RUNTIME_FILE="$HOME/.aerospace.toml"
@@ -73,37 +79,68 @@ cg_onscreen_ids() {
     ' 2>/dev/null || true
 }
 
-# Skip when more than one monitor is connected (e.g. clamshell + lid open) so
-# the manual + automatic gap states don't fight during transient configs.
-# The TOML's named-monitor gap rule already keeps the laptop's built-in panel
-# on the 4 px fallback regardless of what's written here.
-mons_json=$(aerospace list-monitors --json 2>/dev/null || echo '[]')
-if [ "$(jq 'length' <<<"$mons_json" 2>/dev/null || echo 1)" -gt 1 ]; then
-    exit 0
-fi
+read_gap() {
+    # Extracts the gap integer assigned to the named monitor on outer.left,
+    # ignoring the digits embedded in the monitor name itself ("U4025QW").
+    # Always exits 0 so set -e doesn't kill the script when the pattern is
+    # absent (e.g. during a TOML format migration). Caller treats empty as
+    # "fall back to source".
+    sed -nE 's/.*outer\.left = \[\{ monitor\."DELL U4025QW" = ([0-9]+).*/\1/p' "$1" 2>/dev/null \
+        | head -n1 || true
+}
 
-# Auto-gaps only rewrites the DELL's outer gaps; the built-in display always
-# uses the outer fallback, so its window widths never vary with the count. When
-# the DELL isn't connected (laptop mode) there is no gap to adjust, but source
-# edits must still propagate to the runtime copy — otherwise reload_wm reloads
-# a stale runtime for the whole portable session. Sync (under the shared lock,
-# so a concurrent cycle-gaps rebuild can't race the copy) and exit. The plain
-# copy is safe: the DELL gap values are inert undocked, and the first docked
-# event recomputes them.
+read_padding() {
+    # Same contract as read_gap, for the accordion-padding line.
+    sed -nE 's/^accordion-padding = ([0-9]+).*/\1/p' "$1" 2>/dev/null | head -n1 || true
+}
+
+mons_json=$(aerospace list-monitors --json 2>/dev/null || echo '[]')
+
+# Auto-gaps only rewrites the DELL's outer gaps; every other display uses the
+# outer fallback, so its window widths never vary with the count. With no DELL
+# attached there is no gap to adjust — whether that's the laptop alone or the
+# laptop plus a travel secondary — but source edits must still propagate to the
+# runtime copy, otherwise reload_wm reloads a stale runtime for the whole
+# portable session. This branch must precede the multi-monitor gate below, which
+# would otherwise swallow the sync for the entire time a secondary is attached.
+# Sync (under the shared lock, so a concurrent cycle-gaps rebuild can't race the
+# copy) and exit. The rebuild bakes the portable accordion-padding; the DELL gap
+# values it copies are inert undocked, and the first docked event recomputes
+# them. The padding check makes the bake self-healing: a runtime built docked
+# carries the source padding and triggers a rebuild here without relying on the
+# transition hook having fired.
 if ! jq -e --arg m 'DELL U4025QW' 'any(.[]; ."monitor-name" | contains($m))' \
         <<<"$mons_json" >/dev/null 2>&1; then
-    if [ ! -f "$RUNTIME_FILE" ] || [ -L "$RUNTIME_FILE" ] || [ "$SOURCE_FILE" -nt "$RUNTIME_FILE" ]; then
+    if [ "$(cat "$STATE_DIR/display-mode" 2>/dev/null)" != "portable" ]; then
+        "$HOME/.dotfiles/scripts/aerospace-display-mode.sh" portable || true
+    fi
+    if [ ! -f "$RUNTIME_FILE" ] || [ -L "$RUNTIME_FILE" ] || [ "$SOURCE_FILE" -nt "$RUNTIME_FILE" ] \
+            || [ "$(read_padding "$RUNTIME_FILE")" != "$PORTABLE_ACCORDION_PADDING" ]; then
         exec 9>"$STATE_DIR/lock"
         flock 9
         TMP=$(mktemp "$RUNTIME_FILE.XXXXXX")
         trap 'rm -f "$TMP"' EXIT
         cp "$SOURCE_FILE" "$TMP"
+        sed -i '' "s/^accordion-padding = [0-9]*/accordion-padding = $PORTABLE_ACCORDION_PADDING/" "$TMP"
         chmod 0644 "$TMP"
         mv "$TMP" "$RUNTIME_FILE"
         aerospace reload-config
         log "portable-sync source->runtime trigger=$TRIGGER"
     fi
     exit 0
+fi
+
+# Reached only with the DELL attached, so a second monitor here means a dock
+# transition or lid-open-while-docked: skip so the manual and automatic gap
+# states don't fight during a transient config. The gap math below reads
+# NSScreen.mainScreen, which follows the focused window rather than the DELL, so
+# it is only correct while the DELL is the sole display.
+if [ "$(jq 'length' <<<"$mons_json" 2>/dev/null || echo 1)" -gt 1 ]; then
+    exit 0
+fi
+
+if [ "$(cat "$STATE_DIR/display-mode" 2>/dev/null)" != "docked" ]; then
+    "$HOME/.dotfiles/scripts/aerospace-display-mode.sh" docked || true
 fi
 
 # Mark pending before trying the lock: marking after a failed flock leaves a
@@ -115,16 +152,6 @@ exec 9>"$STATE_DIR/lock"
 if ! flock -n 9; then
     exit 0
 fi
-
-read_gap() {
-    # Extracts the gap integer assigned to the named monitor on outer.left,
-    # ignoring the digits embedded in the monitor name itself ("U4025QW").
-    # Always exits 0 so set -e doesn't kill the script when the pattern is
-    # absent (e.g. during a TOML format migration). Caller treats empty as
-    # "fall back to source".
-    sed -nE 's/.*outer\.left = \[\{ monitor\."DELL U4025QW" = ([0-9]+).*/\1/p' "$1" 2>/dev/null \
-        | head -n1 || true
-}
 
 compute_gap_presets || exit 0
 
@@ -193,9 +220,12 @@ for pass in 1 2 3 4 5; do
         *)   target=$gap_full ;;
     esac
 
-    # Decide whether the runtime needs rebuilding from source.
+    # Decide whether the runtime needs rebuilding from source. The padding
+    # check restores the source accordion-padding after a portable session
+    # baked the smaller value.
     needs_rebuild=false
-    if [ ! -f "$RUNTIME_FILE" ] || [ -L "$RUNTIME_FILE" ] || [ "$SOURCE_FILE" -nt "$RUNTIME_FILE" ]; then
+    if [ ! -f "$RUNTIME_FILE" ] || [ -L "$RUNTIME_FILE" ] || [ "$SOURCE_FILE" -nt "$RUNTIME_FILE" ] \
+            || [ "$(read_padding "$RUNTIME_FILE")" != "$(read_padding "$SOURCE_FILE")" ]; then
         needs_rebuild=true
     fi
 
