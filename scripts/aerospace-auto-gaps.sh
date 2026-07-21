@@ -47,6 +47,7 @@ STATE_DIR="$HOME/.cache/aerospace-gaps"
 mkdir -p "$STATE_DIR"
 SUPPRESS_FILE="$STATE_DIR/suppressed-workspace"
 PENDING_FILE="$STATE_DIR/pending"
+COUNTS_FILE="$STATE_DIR/ws-counts"
 LOG_FILE="$STATE_DIR/gaps.log"
 TRIGGER="${1:-unlabeled}"
 
@@ -126,6 +127,27 @@ if ! jq -e --arg m 'DELL U4025QW' 'any(.[]; ."monitor-name" | contains($m))' \
         mv "$TMP" "$RUNTIME_FILE"
         aerospace reload-config
         log "portable-sync source->runtime trigger=$TRIGGER"
+    fi
+
+    # Badge freshness: window open/close fires the AeroSpace callbacks that land
+    # here but no sketchybar trigger, so the count badges go stale until the
+    # next workspace switch. Poke the bar whenever the per-workspace tally
+    # moves — one list-windows call per event; the poke (5 plugin runs) only on
+    # a real change, with the counts riding the trigger so the plugins make no
+    # CLI calls of their own. The settle mirrors the docked loop: callbacks fire
+    # while the tree is still mutating. Lock losers just exit — a follow-up
+    # event (focus always shifts after open/close) re-samples.
+    exec 7>"$STATE_DIR/counts-lock"
+    if flock -n 7; then
+        sleep 0.3
+        counts=$(aerospace list-windows --all --format '%{workspace}' 2>/dev/null \
+            | sort | uniq -c | awk '{printf "%s:%s ", $2, $1}')
+        if [ "$counts" != "$(cat "$COUNTS_FILE" 2>/dev/null)" ]; then
+            printf '%s\n' "$counts" >"$COUNTS_FILE"
+            sketchybar --trigger aerospace_workspace_change \
+                FOCUSED_WORKSPACE="$(aerospace list-workspaces --focused)" \
+                COUNTS="$counts" >/dev/null 2>&1 || true
+        fi
     fi
     exit 0
 fi

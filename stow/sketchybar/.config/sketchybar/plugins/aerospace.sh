@@ -11,15 +11,23 @@ else
   sketchybar --set "$NAME" background.drawing=off
 fi
 
-# Docked: emoji + workspace number. Portable: emoji + "(window count)" — roots
-# are h_accordion there (aerospace-display-mode.sh), so the count marks windows
+# Docked: emoji + workspace number. Portable: emoji + window count — roots are
+# h_accordion there (aerospace-display-mode.sh), so the count marks windows
 # stacked behind the front one; an empty workspace keeps just the emoji. The
-# mode file replaces an ioreg call; counts refresh on workspace/display events
-# only, so a count staled by a window opening or closing corrects on the next
-# switch.
+# mode file replaces an ioreg call. COUNTS ("1:5 3:2", absent workspaces are
+# zero) rides the pokes aerospace-auto-gaps.sh fires on window open/close, so
+# those refreshes cost no per-item CLI call; workspace-change triggers carry no
+# COUNTS and fall back to asking aerospace.
 if [ "$(cat "$HOME/.cache/aerospace-gaps/display-mode" 2>/dev/null)" = "portable" ]; then
-  count=$(/opt/homebrew/bin/aerospace list-windows --workspace "$1" --count 2>/dev/null)
-  case "$count" in '' | *[!0-9]*) count=0 ;; esac
+  if [ -n "$COUNTS" ]; then
+    count=0
+    for pair in $COUNTS; do
+      case "$pair" in "$1":*) count="${pair#*:}" ;; esac
+    done
+  else
+    count=$(/opt/homebrew/bin/aerospace list-windows --workspace "$1" --count 2>/dev/null)
+    case "$count" in '' | *[!0-9]*) count=0 ;; esac
+  fi
   if [ "$count" -ge 1 ]; then
     sketchybar --set "$NAME" icon.drawing=on label.drawing=on label="$count" \
       label.font="Helvetica Neue:Regular:11.0" label.color=0xb0ffffff \

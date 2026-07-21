@@ -242,6 +242,10 @@ if.app-id = 'ru.keepcoder.Telegram'
 run = 'move-node-to-workspace 3'
 
 [[on-window-detected]]
+if.app-id = 'com.devon-technologies.think'
+run = 'move-node-to-workspace 5'
+
+[[on-window-detected]]
 if.app-name-regex-substring = 'Qobuz'
 run = 'move-node-to-workspace 4'
 
