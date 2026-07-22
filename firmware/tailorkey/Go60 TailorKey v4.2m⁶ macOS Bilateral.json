@@ -9624,13 +9624,6 @@
         {
           "code": "&zip_click_to_right_click_mapper",
           "params": []
-        },
-        {
-          "code": "&zip_temp_layer",
-          "params": [
-            14,
-            500
-          ]
         }
       ],
       "nodes": [
@@ -9743,7 +9736,7 @@
           "code": "&zip_temp_layer",
           "params": [
             14,
-            500
+            400
           ]
         }
       ],

@@ -336,14 +336,16 @@ Only the left-hand listener is touched; `&cirque_rh_listener` is unchanged (it's
 
 The first keypress after the timeout is spent waking + reconnecting BLE (a beat of latency, and on a split the right half re-links a moment after the left), not typing. No HID descriptor changes, so no unpair/re-pair is needed — unlike the `HID_POINTING` change on the Glove80.
 
-#### Tweak F: Mouse-layer hold-open lengthened after touchpad use
+#### Tweak F: Mouse-layer hold-open confined to the right touchpad
 
-Each Cirque listener (`&cirque_lh_listener`, `&cirque_rh_listener`) ends its `inputProcessors` chain with `&zip_temp_layer [layer, timeout-ms]`, which momentarily activates the Mouse layer (14) while the touchpad is in use and holds it that many ms after the last motion. Both were bumped from the stock `250` to `500` so the layer stays live for half a second after you lift off — long enough to reach a click without the layer dropping. Kept the two listeners in sync.
+Upstream, each Cirque listener ends its `inputProcessors` chain with `&zip_temp_layer [layer, timeout-ms]`, which momentarily activates the Mouse layer (14) while that touchpad is in use and holds it that many ms after the last motion.
 
-| Listener              | Upstream `&zip_temp_layer` | Yours      |
-|-----------------------|----------------------------|------------|
-| `&cirque_lh_listener` | `[14, 250]`                | `[14, 500]` |
-| `&cirque_rh_listener` | `[14, 250]`                | `[14, 500]` |
+The right (pointer) pad keeps the processor at `400` ms, so the layer stays live long enough after lift-off to reach a click without dropping. The left pad has it removed entirely: it is the scroll pad, so arming the Mouse layer there masks the home row as mouse buttons through every scroll, and a scroll is rarely a prelude to a click. Scrolling and its tap-to-right-click still work — both come from the listener's own chain, not from layer 14.
+
+| Listener              | Upstream `&zip_temp_layer` | Yours       |
+|-----------------------|----------------------------|-------------|
+| `&cirque_lh_listener` | `[14, 250]`                | *(removed)* |
+| `&cirque_rh_listener` | `[14, 250]`                | `[14, 400]` |
 
 ---
 
