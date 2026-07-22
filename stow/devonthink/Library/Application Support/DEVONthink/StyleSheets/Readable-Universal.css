@@ -71,7 +71,8 @@ Install:
   --font-size-base: 17px;
   --line-height-body: 1.65;
   --line-height-heading: 1.25;
-  --measure: 72ch;
+  --measure: 65ch;
+  --image-filter: none;
 
   /* Light mode palette */
   --color-bg: #fbfaf7;
@@ -102,6 +103,7 @@ Install:
    The inverted rules later override these when Marked is active. */
 @media (prefers-color-scheme: dark) {
   :root {
+    --image-filter: brightness(0.9);
     --color-bg: #1c1e22;
     --color-text: #d8d4cc;
     --color-muted: #9a9287;
@@ -274,6 +276,17 @@ body > h2:first-child,
   margin-top: 0;
 }
 
+/* Anchor jumps (TOC links, footnote refs) land with breathing room */
+h1,
+h2,
+h3,
+h4,
+h5,
+h6,
+:target {
+  scroll-margin-top: 1.5rem;
+}
+
 /* ============================================================
    LISTS
    ============================================================ */
@@ -287,6 +300,8 @@ li {
   margin: 0.35em 0;
   font-size: 1rem;
   line-height: var(--line-height-body);
+  hyphens: auto;
+  text-wrap: pretty;
 }
 
 li > p {
@@ -356,7 +371,7 @@ blockquote code {
   border-radius: 4px;
   font-size: 0.88em;
   font-weight: 500;
-  white-space: nowrap;
+  overflow-wrap: break-word;
 }
 
 /* Code blocks */
@@ -404,7 +419,6 @@ blockquote {
   margin: 1.5em 0;
   padding: 0.2em 1.2em;
   border-left: 3px solid var(--color-quote-border);
-  color: var(--color-muted);
   font-style: normal;
 }
 blockquote p {
@@ -468,6 +482,7 @@ body img,
   height: auto;
   border-radius: 4px;
   box-sizing: content-box;
+  filter: var(--image-filter);
 }
 
 figure {
@@ -725,6 +740,7 @@ math {
    ============================================================ */
 @media screen {
   .inverted {
+    --image-filter: brightness(0.9);
     --color-bg: #1c1e22;
     --color-text: #d8d4cc;
     --color-muted: #9a9287;
@@ -776,6 +792,7 @@ math {
    beats pseudo-class in the cascade when both apply).
    ============================================================ */
 [data-theme="dark"] {
+  --image-filter: brightness(0.9);
   --color-bg: #1c1e22;
   --color-text: #d8d4cc;
   --color-muted: #9a9287;
@@ -799,6 +816,7 @@ math {
 }
 
 [data-theme="light"] {
+  --image-filter: none;
   --color-bg: #fbfaf7;
   --color-text: #1f2328;
   --color-muted: #5a6270;
@@ -876,9 +894,12 @@ math {
     --measure: 100%;
   }
 
+  /* DEVONthink To Go wraps the web view in ~30px of its own
+     content inset per side, so the sheet contributes only a
+     sliver — larger values compound into double-wide gutters */
   body,
   #wrapper {
-    padding: 1.5rem 1.1rem 3rem;
+    padding: 1.5rem 0.3rem 3rem;
     max-width: 100%;
   }
 
@@ -907,12 +928,12 @@ math {
 
   /* Tables: wrap in a horizontally-scrollable container.
        display:block + overflow-x:auto lets the table scroll
-       independently of the page. */
+       independently of the page. Cells wrap normally, so only
+       genuinely wide tables scroll. */
   table {
     display: block;
     overflow-x: auto;
     font-size: 0.88rem;
-    white-space: nowrap;
   }
 
   /* Blockquotes: tighter horizontal padding */
@@ -954,8 +975,9 @@ math {
 /* ============================================================
    MOBILE — TEXT WRAPPING & LINE BREAKING
    These rules trade desktop-quality line breaking for phone
-   ergonomics: plain wrapping over balanced lines, and wrapped
-   code over horizontal scroll. They are additionally gated on
+   ergonomics: plain wrapping over balanced lines, no auto-
+   hyphenation, and wrapped code over horizontal scroll. They
+   are additionally gated on
    (pointer: coarse) so they fire on real touch devices only.
    A narrow desktop window — Marked 2 sized down, or with a max
    line width set — keeps text-wrap: pretty/balance and code
@@ -973,6 +995,7 @@ math {
 
   /* Drop the costlier line-balancing; plain wrapping on phones */
   p,
+  li,
   h1,
   h2,
   h3,
@@ -980,6 +1003,14 @@ math {
   h5,
   h6 {
     text-wrap: auto;
+  }
+
+  /* At phone measure auto-hyphenation fires constantly and reads
+     as visual churn; manual still honors explicit &shy; marks. */
+  p,
+  li {
+    -webkit-hyphens: manual;
+    hyphens: manual;
   }
 
   /* Code blocks: wrap instead of horizontal scroll on a phone.
@@ -991,14 +1022,6 @@ math {
     overflow-wrap: anywhere;
   }
 
-  /* Inline code: allow wrapping so long identifiers don't
-     push the paragraph off-screen. */
-  p code,
-  li code,
-  td code {
-    white-space: normal;
-    word-break: break-word;
-  }
 }
 
 /* Narrower phones (iPhone SE, older models in portrait) */
@@ -1012,7 +1035,7 @@ math {
 
   body,
   #wrapper {
-    padding: 1.25rem 0.9rem 2.5rem;
+    padding: 1.25rem 0.3rem 2.5rem;
   }
 }
 
@@ -1020,6 +1043,11 @@ math {
    PRINT
    ============================================================ */
 @media print {
+  /* rem-based sizes all key off html, so scaling here scales the
+     whole hierarchy for both the DEVONthink and Marked paths */
+  html {
+    font-size: 11pt;
+  }
   body {
     background: #fff;
     color: #000;
@@ -1030,7 +1058,6 @@ math {
   #wrapper {
     max-width: none;
     padding: 0;
-    font-size: 11pt;
   }
   a {
     color: #000;
@@ -1052,6 +1079,16 @@ math {
   h5,
   h6 {
     page-break-after: avoid;
+  }
+  p,
+  li,
+  blockquote {
+    orphans: 3;
+    widows: 3;
+  }
+  body img,
+  #wrapper img {
+    filter: none;
   }
   pre {
     background: #f6f6f6 !important;
