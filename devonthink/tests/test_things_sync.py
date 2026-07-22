@@ -368,7 +368,8 @@ class PhaseHarness(unittest.TestCase):
                       ("things_bridge", "run_bridge", "save_things_map",
                        "load_things_map")}
         ef.things_bridge = self.fake
-        ef.save_things_map = lambda m: self.saved.append(json.loads(json.dumps(m)))
+        ef.save_things_map = \
+            lambda m, path=None: self.saved.append(json.loads(json.dumps(m)))
         self.config = {"THINGS_SYNC": "on", "THINGS_PROJECT": "Entity Filing",
                        "SELF_NAME": ""}
 
@@ -377,7 +378,7 @@ class PhaseHarness(unittest.TestCase):
             setattr(ef, name, value)
 
     def use_map(self, m):
-        ef.load_things_map = lambda: m
+        ef.load_things_map = lambda path=None: m
 
     def bridge(self, **results):
         fake = FakeBridge(**results)

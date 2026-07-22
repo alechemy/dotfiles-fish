@@ -230,7 +230,7 @@ Parked pages never retry on their own — same input, same misread.
 # once every page has transcribed.
 ~/.local/bin/boox-process.py --status
 
-# Re-queue parked pages and run now (bypasses battery/idle gates).
+# Re-queue parked pages and run now (bypasses battery/memory-pressure gates).
 ~/.local/bin/boox-process.py --force
 
 # Nothing staged at all? The notebook must be named on the device —

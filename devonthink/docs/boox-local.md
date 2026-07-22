@@ -20,8 +20,8 @@ for markdown, bookmarks, and other non-handwritten record types.
 3. `boox-process.py` (launchd: `com.user.boox-process`, WatchPaths on the
    staging dir + 30-min interval) does the heavy work behind the usual
    gates — `pipeline-record-run` first, then battery
-   (`should-run-background-job`), driver role, and the entity-layer idle
-   gate (`IDLE_MINUTES`):
+   (`should-run-background-job`), driver role, and the memory-pressure
+   check (plus the optional `IDLE_MINUTES` idle gate):
    - renders each page once per export (grayscale PNG, `DENSITY` dpi)
      into a per-notebook workdir and identifies pages by ImageMagick
      **pixel signature** (`%#`), so unchanged pages are never re-OCR'd
@@ -115,7 +115,8 @@ server is configured once; `OMLX_MODEL` is deliberately *not* inherited.
 ```
 OMLX_MODEL=Qwen3-VL-32B-Instruct-4bit
 MAX_PER_RUN=5        # pages OCR'd per tick
-IDLE_MINUTES=10      # 0 disables the idle gate
+IDLE_MINUTES=0       # optional idle gate on top of the memory-pressure
+                     # check; 0 (default) = off
 DENSITY=200          # page render dpi
 THINGS_TASKS=off     # journal-only Things extraction (see above)
 ```
@@ -132,7 +133,7 @@ rg 'boox-(stage|process)' ~/Library/Logs/devonthink-pipeline.log | tail -20
 # Plan without writing (renders + page diff only, no OCR, no DT writes).
 boox-process.py --dry-run
 
-# Re-queue parked pages and bypass battery/driver/idle gates.
+# Re-queue parked pages and bypass battery/driver/memory-pressure gates.
 boox-process.py --force
 
 # State lost or the driver role moved: reseed journal entries from DT.

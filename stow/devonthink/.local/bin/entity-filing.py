@@ -78,16 +78,25 @@ Config (~/.config/dt-pipeline/entities.conf, KEY=VALUE):
   SKIP_SOURCE_TITLES=<regex>         sources whose name matches are never
                                      extracted (recurring standups etc.);
                                      case-insensitive, unanchored
-  IDLE_MINUTES=<n>                   run local extraction only when the user
-                                     has been idle this long, so inference
-                                     never spins fans mid-work; default 10,
-                                     0 disables the gate
+  IDLE_MINUTES=<n>                   optional idle gate: additionally require
+                                     this many minutes of user inactivity
+                                     before local extraction; default 0
+                                     (off). Extraction always defers while
+                                     macOS reports elevated memory pressure,
+                                     so inference never lands on an
+                                     already-tight machine.
   THINGS_SYNC=on|off                 default off. Mirror each pending
                                      proposal as a to-do in Things 3: the
                                      note carries an editable line-format
                                      rendering of the proposal, completing
                                      the to-do approves it (edits included),
                                      canceling or deleting it rejects it.
+                                     Pending candidates mirror too, as one
+                                     to-do each with a compact summary and
+                                     DT link (never the evidence): complete
+                                     = track, cancel/delete = ignore, and a
+                                     decision made in DEVONthink first wins
+                                     — the task just closes to match.
                                      Person names and facts sync through
                                      Things Cloud — an explicit exception
                                      to the entity layer's local-only rule.
@@ -146,6 +155,7 @@ FACTS_FILED_PATH = "/20_ENTITIES/_Facts/Filed"
 MAX_ATTEMPTS = 5
 UPDATE_FIELDS = ("employer", "role", "city", "email")
 THINGS_MAP_FILE = os.path.join(STATE_DIR, "things-filing-map.json")
+THINGS_CAND_MAP_FILE = os.path.join(STATE_DIR, "things-candidates-map.json")
 THINGS_MAP_VERSION = 1
 THINGS_URL_LIMIT = 3500
 THINGS_WHEN = "today"
@@ -153,6 +163,7 @@ BOUNCE_LIMIT = 3
 SPEC_SENTINEL = "=== proposed v1 ==="
 BANNER_PREFIX = "⚠ entity-filing:"
 PROPOSAL_MARKER = "Proposal: x-devonthink-item://"
+CANDIDATE_MARKER = "Candidate: x-devonthink-item://"
 
 CHAT_ROLE = (
     "You are a personal-CRM extraction assistant that responds only with JSON."
@@ -230,7 +241,7 @@ def load_config():
         "MIN_ROSTER": "1",
         "SELF_NAME": "",
         "SKIP_SOURCE_TITLES": "",
-        "IDLE_MINUTES": "10",
+        "IDLE_MINUTES": "0",
         "THINGS_SYNC": "off",
         "THINGS_PROJECT": "Entity Filing",
     }
@@ -417,6 +428,20 @@ def user_idle_seconds():
     return None
 
 
+def memory_pressure_normal():
+    """True when macOS reports normal memory pressure (level 1; warn is 2,
+    critical 4), so a ~19 GB model load never lands on an already-tight
+    machine. Fails open: oMLX's own load-time memory guard is the backstop
+    when the probe is unavailable."""
+    try:
+        out = subprocess.check_output(
+            ["/usr/sbin/sysctl", "-n", "kern.memorystatus_vm_pressure_level"],
+            text=True)
+        return int(out.strip()) <= 1
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return True
+
+
 _availability_cache = {}
 
 
@@ -448,6 +473,22 @@ def _omlx_headers(config):
     return headers
 
 
+class LLMUnavailable(RuntimeError):
+    """oMLX could not serve the request for a reason unrelated to the
+    source: connection failure, timeout, or a server-side refusal (5xx or
+    429 — including the memory guard declining to load the model under RAM
+    pressure). Transient by nature, so callers defer extraction to a later
+    tick without charging the source an attempt.
+    """
+
+
+def _http_error_detail(exc):
+    try:
+        return exc.read().decode("utf-8", "replace")[:300].strip()
+    except Exception:
+        return str(exc.reason)
+
+
 def extract_omlx(config, prompt):
     # No response_format: oMLX's strict json_schema decoding degenerates
     # with some models (Qwen3-VL burns the full max_tokens per call and
@@ -470,8 +511,16 @@ def extract_omlx(config, prompt):
         data=payload,
         headers=_omlx_headers(config),
     )
-    with urllib.request.urlopen(req, timeout=600) as resp:
-        out = json.load(resp)
+    try:
+        with urllib.request.urlopen(req, timeout=600) as resp:
+            out = json.load(resp)
+    except urllib.error.HTTPError as exc:
+        if exc.code >= 500 or exc.code == 429:
+            raise LLMUnavailable(
+                f"HTTP {exc.code}: {_http_error_detail(exc)}") from exc
+        raise
+    except OSError as exc:
+        raise LLMUnavailable(exc) from exc
     return out["choices"][0]["message"]["content"]
 
 
@@ -1691,35 +1740,38 @@ def strip_banner(notes):
     return "\n".join(lines)
 
 
-def load_things_map():
+def load_things_map(path=None):
     """None means the map is unusable; the Things phases skip this run.
     Recovery is moving the file aside — the marker in every task's notes
     lets the next run rebuild the map from Things itself."""
-    if not os.path.exists(THINGS_MAP_FILE):
+    path = path or THINGS_MAP_FILE
+    if not os.path.exists(path):
         return {"version": THINGS_MAP_VERSION, "project_uuid": None, "tasks": {}}
     try:
-        with open(THINGS_MAP_FILE) as f:
+        with open(path) as f:
             data = json.load(f)
     except (OSError, json.JSONDecodeError) as exc:
         log.warning("Things map %s is unreadable (%s); move it aside to rebuild",
-                    THINGS_MAP_FILE, exc)
+                    path, exc)
         return None
     if not (isinstance(data, dict) and data.get("version") == THINGS_MAP_VERSION
             and isinstance(data.get("tasks"), dict)):
         log.warning("Things map %s has an unrecognized schema; move it aside "
-                    "to rebuild", THINGS_MAP_FILE)
+                    "to rebuild", path)
         return None
     data.setdefault("project_uuid", None)
     return data
 
 
-def save_things_map(m):
-    os.makedirs(STATE_DIR, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=STATE_DIR, prefix=".things-map.", suffix=".tmp")
+def save_things_map(m, path=None):
+    path = path or THINGS_MAP_FILE
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path),
+                               prefix=".things-map.", suffix=".tmp")
     try:
         with os.fdopen(fd, "w") as f:
             json.dump(m, f, indent=2, sort_keys=True)
-        os.replace(tmp, THINGS_MAP_FILE)
+        os.replace(tmp, path)
     except Exception:
         try:
             os.unlink(tmp)
@@ -1733,7 +1785,7 @@ def save_things_map(m):
 # ---------------------------------------------------------------------------
 
 
-def _mirror_lost(config, m, dry_run):
+def _mirror_lost(config, m, dry_run, path=None, what="proposal(s)"):
     """True when the mirror project itself was deleted or completed out from
     under mapped tasks — a project-level event, not N individual decisions.
     Callers must not act on any mapped task this tick when this fires; the
@@ -1743,19 +1795,19 @@ def _mirror_lost(config, m, dry_run):
     if not puuid or things_bridge.project_alive(puuid) or not m["tasks"]:
         return False
     log.warning("Things project %r is gone or completed while %d mirrored "
-                "proposal(s) still existed; treating this as a lost mirror "
+                "%s still existed; treating this as a lost mirror "
                 "rather than acting on each task — dropping the stale "
                 "mapping so it re-mirrors into a fresh project",
-                config["THINGS_PROJECT"], len(m["tasks"]))
+                config["THINGS_PROJECT"], len(m["tasks"]), what)
     if dry_run:
         return True
     m["tasks"] = {}
     m["project_uuid"] = None
-    save_things_map(m)
+    save_things_map(m, path)
     return True
 
 
-def _things_project(config, m, dry_run):
+def _things_project(config, m, dry_run, path=None):
     if m.get("project_uuid") and things_bridge.project_alive(m["project_uuid"]):
         return m["project_uuid"]
     if dry_run:
@@ -1764,7 +1816,7 @@ def _things_project(config, m, dry_run):
         return None
     uuid = things_bridge.ensure_project(config["THINGS_PROJECT"])
     m["project_uuid"] = uuid
-    save_things_map(m)
+    save_things_map(m, path)
     return uuid
 
 
@@ -2344,11 +2396,15 @@ def scan(config, state, dry_run, force_uuid, user_invoked):
     limit = int(config["MAX_PER_RUN"])
     filing_mode = config["FILING_MODE"]
     idle_min = float(config["IDLE_MINUTES"])
-    idle_ok = True
-    if idle_min > 0 and not user_invoked:
-        idle = user_idle_seconds()
-        idle_ok = idle is None or idle >= idle_min * 60
-    idle_skip_logged = False
+    defer_reason = None
+    if not user_invoked:
+        if idle_min > 0:
+            idle = user_idle_seconds()
+            if idle is not None and idle < idle_min * 60:
+                defer_reason = "user active"
+        if defer_reason is None and not memory_pressure_normal():
+            defer_reason = "memory pressure elevated"
+    defer_logged = False
     no_transport = 0
     extracted_count = 0
     llm_lock = None
@@ -2388,12 +2444,11 @@ def scan(config, state, dry_run, force_uuid, user_invoked):
         if transport is None:
             no_transport += 1
             continue
-        if not idle_ok:
-            # Local inference is deferrable by design; never spin fans while
-            # the user is actively working. Candidates wait for an idle run.
-            if not idle_skip_logged:
-                log.info("user active, deferring local extraction to an idle run")
-                idle_skip_logged = True
+        if defer_reason:
+            if not defer_logged:
+                log.info("%s, deferring local extraction to a later run",
+                         defer_reason)
+                defer_logged = True
             continue
         if llm_lock is None and not llm_lock_failed:
             llm_lock = acquire_llm_lock()
@@ -2442,6 +2497,10 @@ def scan(config, state, dry_run, force_uuid, user_invoked):
         try:
             raw = extract_omlx(config, prompt)
             extracted_people, extracted_events = parse_extraction(raw)
+        except LLMUnavailable as exc:
+            log.info("oMLX unavailable (%s), deferring remaining extraction "
+                     "to the next run", exc)
+            break
         except BridgeUnavailable:
             raise
         except Exception as exc:
@@ -2675,6 +2734,332 @@ def file_source(config, state, source, source_date, plans, filing_mode,
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# Things candidate mirror
+# ---------------------------------------------------------------------------
+
+
+CAND_MARKER_RE = re.compile(re.escape(CANDIDATE_MARKER) + r"([A-Za-z0-9-]+)")
+
+
+def candidate_uuid_from_notes(notes):
+    m = CAND_MARKER_RE.search(notes or "")
+    return m.group(1) if m else None
+
+
+def candidate_task_summary(uuid, data, near):
+    """Compact title/notes for a candidate's to-do: counts, hints, and the
+    DT link — never the accumulated evidence, which lives on the record (the
+    URL transport degrades past THINGS_URL_LIMIT)."""
+    title = ("! " if data.get("urgent") else "") + ec.record_name(data)
+    dates = ec.sighting_dates(data)
+    lines = [
+        "Complete this to-do to track this person; cancel or delete it to "
+        "ignore them permanently. Evidence:",
+        f"{CANDIDATE_MARKER}{uuid}",
+        f"Sightings: {len(data['sightings'])}"
+        + (f" (last {dates[-1]})" if dates else ""),
+    ]
+    if ec.needs_confirmation(data, near):
+        hint = f" (possible existing: {', '.join(near)})" if near else \
+            " (single-word name)"
+        lines.append("Completing alone will bounce" + hint + " — set "
+                     "TrackTarget or CreateDistinct on the record in "
+                     "DEVONthink first.")
+    if data.get("urgent"):
+        lines.append("URGENT: contains a deliberately captured fact.")
+    return title, "\n".join(lines)
+
+
+def summary_hash(title, notes):
+    return hashlib.sha256(f"{title}\n{notes}".encode()).hexdigest()
+
+
+def load_cand_map():
+    return load_things_map(THINGS_CAND_MAP_FILE)
+
+
+def save_cand_map(m):
+    save_things_map(m, THINGS_CAND_MAP_FILE)
+
+
+def _cand_pending(listing):
+    return {r["uuid"]: r for r in listing["pending"]
+            if not r["name"].startswith(ec.QUARANTINE_PREFIX)}
+
+
+def _close_out_task(entry, token, decided, cuuid):
+    """DT decided first — the task closes to match, never the reverse."""
+    attrs, expect = ({"completed": "true"}, {"status": 3}) \
+        if decided == "approved" else ({"canceled": "true"}, {"status": 2})
+    if things_bridge.update_todo(entry["task_uuid"], token, attrs, expect):
+        log.info("candidate %s decided in DEVONthink (%s); closed its Things "
+                 "task to match", cuuid, decided)
+        return True
+    log.info("could not close the Things task for candidate %s (missing "
+             "auth token?); will retry", cuuid)
+    return False
+
+
+def candidate_things_decisions(config, dry_run):
+    if config["THINGS_SYNC"] != "on":
+        return
+    try:
+        _candidate_things_decisions(config, dry_run)
+    except BridgeUnavailable:
+        raise
+    except Exception as exc:
+        log.warning("Things candidate decisions phase failed: %s: %s",
+                    type(exc).__name__, exc)
+
+
+def _candidate_things_decisions(config, dry_run):
+    m = load_cand_map()
+    if m is None:
+        return
+    if _mirror_lost(config, m, dry_run, THINGS_CAND_MAP_FILE, "candidate(s)"):
+        return
+    project = _things_project(config, m, dry_run, THINGS_CAND_MAP_FILE)
+    if project is None:
+        return
+    tasks = m["tasks"]
+    things_bridge.prewarm()
+    token = things_bridge.auth_token()
+    listing = run_bridge([{"op": "list_candidates"}])[0]
+    pending = _cand_pending(listing)
+    decided = {r["uuid"]: "approved" for r in listing["approved"]}
+    decided.update({r["uuid"]: "ignored" for r in listing["ignored"]})
+
+    # Rebuild mappings from task notes (map lost/aside) and adopt only tasks
+    # whose candidate is still pending — decided candidates' tasks are
+    # closed out below; a task for a vanished candidate is canceled.
+    rebuilt = 0
+    for row in things_bridge.read_project_tasks(m["project_uuid"]):
+        cuuid = candidate_uuid_from_notes(row["notes"])
+        if not cuuid or cuuid in tasks or row["trashed"]:
+            continue
+        if cuuid in pending or cuuid in decided:
+            if row["status"] == 0 or cuuid in pending:
+                tasks[cuuid] = {"task_uuid": row["uuid"], "summary": None,
+                                "created": datetime.now().strftime(
+                                    "%Y-%m-%dT%H:%M:%S")}
+                rebuilt += 1
+        elif row["status"] == 0:
+            if dry_run:
+                log.info("[dry-run] would cancel the orphaned Things task "
+                         "for vanished candidate %s", cuuid)
+            elif things_bridge.update_todo(row["uuid"], token,
+                                           {"canceled": "true"}, {"status": 2}):
+                log.info("canceled an orphaned Things task for a candidate "
+                         "that no longer exists",
+                         extra={"record_uuid": row["uuid"]})
+            else:
+                log.info("could not cancel orphaned Things task %s (missing "
+                         "auth token?); will retry", row["uuid"])
+    if rebuilt:
+        log.info("rebuilt %d Things candidate map entries from task notes",
+                 rebuilt)
+        if not dry_run:
+            save_cand_map(m)
+
+    rows = things_bridge.read_tasks([e["task_uuid"] for e in tasks.values()])
+    for cuuid in list(tasks):
+        entry = tasks[cuuid]
+        row = rows.get(entry["task_uuid"])
+        if row is None:
+            log.info("Things task for candidate %s is gone (emptied trash?); "
+                     "dropping the mapping — a still-pending candidate gets "
+                     "a new task", cuuid)
+            if not dry_run:
+                tasks.pop(cuuid)
+                save_cand_map(m)
+            continue
+        if cuuid in decided:
+            if dry_run:
+                log.info("[dry-run] would close the Things task for %s "
+                         "(decided in DEVONthink)", cuuid)
+            elif _close_out_task(entry, token, decided[cuuid], cuuid):
+                tasks.pop(cuuid)
+                save_cand_map(m)
+            continue
+        if cuuid not in pending:
+            # Promoted or hard-deleted candidate whose earlier close-out
+            # never landed (no auth token): the task must not stay mapped
+            # and open forever. A terminal task already reflects a decision,
+            # so only an open one is canceled.
+            if row["status"] != 0 or row["trashed"]:
+                if not dry_run:
+                    tasks.pop(cuuid)
+                    save_cand_map(m)
+            elif dry_run:
+                log.info("[dry-run] would cancel the Things task for "
+                         "vanished candidate %s", cuuid)
+            elif things_bridge.update_todo(entry["task_uuid"], token,
+                                           {"canceled": "true"}, {"status": 2}):
+                log.info("candidate %s no longer exists; canceled its Things "
+                         "task", cuuid)
+                tasks.pop(cuuid)
+                save_cand_map(m)
+            else:
+                log.info("could not cancel the Things task for vanished "
+                         "candidate %s (missing auth token?); will retry",
+                         cuuid)
+            continue
+        if row["status"] == 0 and not row["trashed"]:
+            if entry.pop("settle", None) is not None and not dry_run:
+                save_cand_map(m)
+            continue
+        snap = settle_snapshot(row)
+        if entry.get("settle") != snap:
+            entry["settle"] = snap
+            if not dry_run:
+                save_cand_map(m)
+            log.info("Things task for candidate %s reached a terminal state; "
+                     "acting next run once it settles", cuuid)
+            continue
+        target = ec.CANDIDATES_APPROVED_PATH \
+            if row["status"] == 3 and not row["trashed"] \
+            else ec.CANDIDATES_IGNORED_PATH
+        verb = "track" if target == ec.CANDIDATES_APPROVED_PATH else "ignore"
+        if dry_run:
+            log.info("[dry-run] would %s candidate %s (decided in Things)",
+                     verb, cuuid)
+            continue
+        lock = ec.acquire_candidates_lock()
+        try:
+            fresh = run_bridge([{"op": "list_candidates"}])[0]
+            if cuuid in _cand_pending(fresh):
+                run_bridge([{"op": "move_to", "uuid": cuuid, "group": target}])
+                log.info("candidate decided from Things (%s)", verb,
+                         extra={"record_uuid": cuuid})
+            else:
+                log.info("candidate %s was decided in DEVONthink while its "
+                         "Things decision settled; DT wins, dropping the "
+                         "mapping", cuuid)
+        finally:
+            lock.close()
+        tasks.pop(cuuid)
+        save_cand_map(m)
+
+
+def mirror_candidates(config, dry_run):
+    if config["THINGS_SYNC"] != "on":
+        return
+    try:
+        _mirror_candidates(config, dry_run)
+    except BridgeUnavailable:
+        raise
+    except Exception as exc:
+        log.warning("Things candidate mirror phase failed: %s: %s",
+                    type(exc).__name__, exc)
+
+
+def _mirror_candidates(config, dry_run):
+    m = load_cand_map()
+    if m is None:
+        return
+    if _mirror_lost(config, m, dry_run, THINGS_CAND_MAP_FILE, "candidate(s)"):
+        return
+    listing, people = run_bridge([
+        {"op": "list_candidates"},
+        {"op": "dump_people", "include_bodies": False},
+    ])
+    pending = _cand_pending(listing)
+    if not pending and not m["tasks"]:
+        return
+    project = _things_project(config, m, dry_run, THINGS_CAND_MAP_FILE)
+    if project is None and not dry_run:
+        return
+    tasks = m["tasks"]
+    token = things_bridge.auth_token()
+    rows = things_bridge.read_tasks([e["task_uuid"] for e in tasks.values()])
+    # A live marker-carrying task must be adopted, never duplicated: with the
+    # map lost (or the decisions phase racing), add_todo here would mint a
+    # second to-do the decisions loop will never read.
+    live_by_cuuid = {}
+    if project is not None:
+        for row in things_bridge.read_project_tasks(project):
+            cuuid = candidate_uuid_from_notes(row["notes"])
+            if cuuid and not row["trashed"] and row["status"] == 0:
+                live_by_cuuid.setdefault(cuuid, []).append(row)
+    for cuuid, rec in pending.items():
+        try:
+            data = ec.parse_candidate(rec["text"])
+        except ValueError:
+            continue
+        near = ec.near_matches(data["name"], people)
+        title, notes = candidate_task_summary(cuuid, data, near)
+        digest = summary_hash(title, notes)
+        entry = tasks.get(cuuid)
+        if entry is None and cuuid in live_by_cuuid:
+            live = live_by_cuuid[cuuid]
+            if len(live) > 1:
+                log.warning("two live Things tasks carry candidate %s; trash "
+                            "one of them to proceed", cuuid)
+                continue
+            if not dry_run:
+                tasks[cuuid] = {"task_uuid": live[0]["uuid"], "summary": None,
+                                "created": datetime.now().strftime(
+                                    "%Y-%m-%dT%H:%M:%S")}
+                save_cand_map(m)
+                rows[live[0]["uuid"]] = live[0]
+            entry = tasks.get(cuuid)
+            if entry is None:
+                continue
+        if entry is None:
+            if dry_run:
+                log.info("[dry-run] would mirror candidate %r to Things",
+                         data["name"])
+                continue
+            when = THINGS_WHEN if data.get("urgent") else None
+            url = things_bridge.build_url("add", things_bridge.add_todo_params(
+                project, title, notes, when))
+            if len(url) > THINGS_URL_LIMIT:
+                notes = (f"Review in DEVONthink.\n{CANDIDATE_MARKER}{cuuid}")
+                digest = summary_hash(title, notes)
+            try:
+                task_uuid = things_bridge.add_todo(
+                    project, title, notes, f"{CANDIDATE_MARKER}{cuuid}", when)
+            except things_bridge.ThingsError as exc:
+                log.warning("mirroring candidate %r failed: %s",
+                            data["name"], exc)
+                continue
+            tasks[cuuid] = {"task_uuid": task_uuid, "summary": digest,
+                            "created": datetime.now().strftime(
+                                "%Y-%m-%dT%H:%M:%S")}
+            save_cand_map(m)
+            log.info("mirrored candidate to Things",
+                     extra={"record_name": rec["name"], "record_uuid": cuuid})
+            continue
+        if entry.get("summary") == digest:
+            continue
+        row = rows.get(entry["task_uuid"])
+        # Only an open task refreshes: a terminal one is mid-settle in the
+        # decisions phase, and rewriting it would fight the user's decision.
+        if row is None or row["status"] != 0 or row["trashed"]:
+            continue
+        if dry_run:
+            log.info("[dry-run] would refresh the Things summary for %r",
+                     data["name"])
+            continue
+        update_url = things_bridge.build_url("update", {
+            "auth-token": token or "", "id": entry["task_uuid"],
+            "title": title, "notes": notes})
+        if len(update_url) > THINGS_URL_LIMIT:
+            notes = (f"Review in DEVONthink.\n{CANDIDATE_MARKER}{cuuid}")
+            digest = summary_hash(title, notes)
+        if things_bridge.update_todo(entry["task_uuid"], token,
+                                     {"title": title, "notes": notes},
+                                     {"title": title, "notes": notes}):
+            entry["summary"] = digest
+            save_cand_map(m)
+            log.info("refreshed the Things summary for candidate %r "
+                     "(sightings/urgency/hints changed)", data["name"])
+        else:
+            log.info("could not refresh the Things task for %r (missing "
+                     "auth token?); will retry", data["name"])
 
 
 IDENTITY_PROVENANCE_FILE = os.path.expanduser(
@@ -2926,12 +3311,14 @@ def main():
                 return
         if not scan_only:
             things_decisions(config, dry_run)
+            candidate_things_decisions(config, dry_run)
             promote_candidates(dry_run)
             apply_approved(dry_run)
         if not apply_only:
             scan(config, state, dry_run, force_uuid, user_invoked)
         if not scan_only:
             things_reconcile(config, dry_run)
+            mirror_candidates(config, dry_run)
     except BridgeUnavailable as exc:
         log.info("skipping: %s", exc)
 

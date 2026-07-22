@@ -1,9 +1,11 @@
 import hashlib
+import io
 import json
 import os
 import re
 import tempfile
 import unittest
+import urllib.error
 
 from helpers import load, person
 
@@ -1647,6 +1649,252 @@ class SplitMerge(CandidateLockSandbox):
                          ["CAND-B"])
 
 
+class FakeThingsBridge:
+    """Stand-in for things_bridge: canned rows, recorded writes, all
+    confirmations succeed."""
+
+    ThingsError = RuntimeError
+
+    def __init__(self, project_rows=(), rows_by_uuid=None):
+        self.project_rows = list(project_rows)
+        self.rows_by_uuid = dict(rows_by_uuid or {})
+        self.updates = []
+        self.adds = []
+
+    def auth_token(self):
+        return "TOKEN"
+
+    def prewarm(self):
+        pass
+
+    def project_alive(self, uuid):
+        return True
+
+    def ensure_project(self, title):
+        return "PROJ-1"
+
+    def read_project_tasks(self, project_uuid):
+        return list(self.project_rows)
+
+    def read_tasks(self, uuids):
+        return {u: self.rows_by_uuid[u] for u in uuids
+                if u in self.rows_by_uuid}
+
+    def update_todo(self, task_uuid, token, attrs, expect):
+        self.updates.append((task_uuid, dict(attrs)))
+        return True
+
+    def add_todo(self, project_uuid, title, notes, marker, when=None):
+        self.adds.append((title, notes, when))
+        return f"TASK-{len(self.adds)}"
+
+    def build_url(self, command, params):
+        return f"things:///{command}?" + "&".join(
+            f"{k}={v}" for k, v in params.items())
+
+    def add_todo_params(self, project_uuid, title, notes, when=None):
+        params = {"title": title, "notes": notes,
+                  "list-id": project_uuid or "", "reveal": "false"}
+        if when:
+            params["when"] = when
+        return params
+
+
+def task_row(uuid, notes, status=0, trashed=0):
+    return {"uuid": uuid, "title": "t", "notes": notes, "status": status,
+            "trashed": trashed, "project": "PROJ-1", "heading": None,
+            "stopDate": None, "userModificationDate": 1.0}
+
+
+class ThingsCandidateMirror(CandidateLockSandbox):
+    CONFIG = {"THINGS_SYNC": "on", "THINGS_PROJECT": "Entity Filing"}
+
+    def setUp(self):
+        super().setUp()
+        self.original_things = ef.things_bridge
+        self.original_map = ef.THINGS_CAND_MAP_FILE
+        ef.THINGS_CAND_MAP_FILE = os.path.join(self.dir, "cand-map.json")
+
+    def tearDown(self):
+        ef.things_bridge = self.original_things
+        ef.THINGS_CAND_MAP_FILE = self.original_map
+        super().tearDown()
+
+    def write_map(self, tasks, project="PROJ-1"):
+        with open(ef.THINGS_CAND_MAP_FILE, "w") as f:
+            json.dump({"version": 1, "project_uuid": project,
+                       "tasks": tasks}, f)
+
+    def read_map(self):
+        with open(ef.THINGS_CAND_MAP_FILE) as f:
+            return json.load(f)["tasks"]
+
+    def pending_candidate(self, name="Jordan Pike", urgent=False):
+        data = ec.new_candidate(name)
+        data["sightings"]["dt:S"] = {"person": name, "kind": "granola",
+                                     "date": "2026-03-16", "facts": [],
+                                     "updates": {}}
+        if urgent:
+            data["urgent"] = True
+        return data
+
+    def test_pending_candidate_gets_a_compact_todo(self):
+        data = self.pending_candidate()
+        listing = {"pending": [cand_record(data)], "approved": [],
+                   "ignored": []}
+        self.install_bridge(listing)
+        things = FakeThingsBridge()
+        ef.things_bridge = things
+        ef.mirror_candidates(self.CONFIG, False)
+        self.assertEqual(len(things.adds), 1)
+        title, notes, when = things.adds[0]
+        self.assertEqual(title, "Candidate: Jordan Pike")
+        self.assertIn(ef.CANDIDATE_MARKER + "CAND-1", notes)
+        self.assertNotIn("moved to", notes)
+        self.assertIsNone(when)
+        self.assertIn("CAND-1", self.read_map())
+
+    def test_urgent_candidate_is_flagged_and_scheduled_today(self):
+        data = self.pending_candidate(urgent=True)
+        listing = {"pending": [cand_record(data)], "approved": [],
+                   "ignored": []}
+        self.install_bridge(listing)
+        things = FakeThingsBridge()
+        ef.things_bridge = things
+        ef.mirror_candidates(self.CONFIG, False)
+        title, _notes, when = things.adds[0]
+        self.assertTrue(title.startswith("! "))
+        self.assertEqual(when, ef.THINGS_WHEN)
+
+    def test_summary_refresh_only_when_changed_and_open(self):
+        data = self.pending_candidate()
+        listing = {"pending": [cand_record(data)], "approved": [],
+                   "ignored": []}
+        self.install_bridge(listing)
+        things = FakeThingsBridge(
+            rows_by_uuid={"TASK-1": task_row("TASK-1", "n")})
+        ef.things_bridge = things
+        self.write_map({"CAND-1": {"task_uuid": "TASK-1",
+                                   "summary": "stale"}})
+        ef.mirror_candidates(self.CONFIG, False)
+        self.assertEqual(len(things.updates), 1)
+        things.updates.clear()
+        ef.mirror_candidates(self.CONFIG, False)
+        self.assertEqual(things.updates, [])
+
+    def test_terminal_task_is_never_refreshed(self):
+        data = self.pending_candidate()
+        listing = {"pending": [cand_record(data)], "approved": [],
+                   "ignored": []}
+        self.install_bridge(listing)
+        things = FakeThingsBridge(
+            rows_by_uuid={"TASK-1": task_row("TASK-1", "n", status=3)})
+        ef.things_bridge = things
+        self.write_map({"CAND-1": {"task_uuid": "TASK-1",
+                                   "summary": "stale"}})
+        ef.mirror_candidates(self.CONFIG, False)
+        self.assertEqual(things.updates, [])
+
+    def decide(self, listing, row, tasks=None):
+        self.install_bridge(listing)
+        things = FakeThingsBridge(rows_by_uuid={"TASK-1": row})
+        ef.things_bridge = things
+        self.write_map(tasks if tasks is not None
+                       else {"CAND-1": {"task_uuid": "TASK-1",
+                                        "summary": "s"}})
+        ef.candidate_things_decisions(self.CONFIG, False)
+        return things
+
+    def test_completion_settles_two_ticks_then_tracks(self):
+        data = self.pending_candidate()
+        listing = {"pending": [cand_record(data)], "approved": [],
+                   "ignored": []}
+        marker = ef.CANDIDATE_MARKER + "CAND-1"
+        row = task_row("TASK-1", marker, status=3)
+        bridge = self.install_bridge(listing)
+        things = FakeThingsBridge(rows_by_uuid={"TASK-1": row})
+        ef.things_bridge = things
+        self.write_map({"CAND-1": {"task_uuid": "TASK-1", "summary": "s"}})
+        ef.candidate_things_decisions(self.CONFIG, False)
+        self.assertEqual(self.sent(bridge, "move_to"), [])
+        self.assertIn("settle", self.read_map()["CAND-1"])
+        ef.candidate_things_decisions(self.CONFIG, False)
+        moves = self.sent(bridge, "move_to")
+        self.assertEqual([(o["uuid"], o["group"]) for o in moves],
+                         [("CAND-1", ec.CANDIDATES_APPROVED_PATH)])
+        self.assertEqual(self.read_map(), {})
+
+    def test_cancellation_settles_then_ignores(self):
+        data = self.pending_candidate()
+        listing = {"pending": [cand_record(data)], "approved": [],
+                   "ignored": []}
+        row = task_row("TASK-1", ef.CANDIDATE_MARKER + "CAND-1", status=2)
+        bridge = self.install_bridge(listing)
+        things = FakeThingsBridge(rows_by_uuid={"TASK-1": row})
+        ef.things_bridge = things
+        self.write_map({"CAND-1": {"task_uuid": "TASK-1", "summary": "s"}})
+        ef.candidate_things_decisions(self.CONFIG, False)
+        ef.candidate_things_decisions(self.CONFIG, False)
+        moves = self.sent(bridge, "move_to")
+        self.assertEqual([(o["uuid"], o["group"]) for o in moves],
+                         [("CAND-1", ec.CANDIDATES_IGNORED_PATH)])
+
+    def test_dt_decision_wins_and_closes_the_task(self):
+        data = self.pending_candidate()
+        listing = {"pending": [], "approved": [],
+                   "ignored": [cand_record(data)]}
+        row = task_row("TASK-1", ef.CANDIDATE_MARKER + "CAND-1")
+        things = self.decide(listing, row)
+        self.assertEqual(things.updates,
+                         [("TASK-1", {"canceled": "true"})])
+        self.assertEqual(self.read_map(), {})
+
+    def test_dt_approval_completes_the_task(self):
+        data = self.pending_candidate()
+        listing = {"pending": [], "approved": [cand_record(data)],
+                   "ignored": []}
+        row = task_row("TASK-1", ef.CANDIDATE_MARKER + "CAND-1")
+        things = self.decide(listing, row)
+        self.assertEqual(things.updates,
+                         [("TASK-1", {"completed": "true"})])
+
+    def test_hard_deleted_task_drops_the_mapping(self):
+        data = self.pending_candidate()
+        listing = {"pending": [cand_record(data)], "approved": [],
+                   "ignored": []}
+        self.install_bridge(listing)
+        things = FakeThingsBridge()
+        ef.things_bridge = things
+        self.write_map({"CAND-1": {"task_uuid": "TASK-GONE",
+                                   "summary": "s"}})
+        ef.candidate_things_decisions(self.CONFIG, False)
+        self.assertEqual(self.read_map(), {})
+
+    def test_map_rebuilds_from_task_notes(self):
+        data = self.pending_candidate()
+        listing = {"pending": [cand_record(data)], "approved": [],
+                   "ignored": []}
+        row = task_row("TASK-1", ef.CANDIDATE_MARKER + "CAND-1")
+        self.install_bridge(listing)
+        things = FakeThingsBridge(project_rows=[row],
+                                  rows_by_uuid={"TASK-1": row})
+        ef.things_bridge = things
+        self.write_map({})
+        ef.candidate_things_decisions(self.CONFIG, False)
+        self.assertEqual(self.read_map()["CAND-1"]["task_uuid"], "TASK-1")
+
+    def test_orphaned_task_for_vanished_candidate_is_canceled(self):
+        listing = {"pending": [], "approved": [], "ignored": []}
+        row = task_row("TASK-9", ef.CANDIDATE_MARKER + "GONE-1")
+        self.install_bridge(listing)
+        things = FakeThingsBridge(project_rows=[row])
+        ef.things_bridge = things
+        self.write_map({})
+        ef.candidate_things_decisions(self.CONFIG, False)
+        self.assertEqual(things.updates,
+                         [("TASK-9", {"canceled": "true"})])
+
+
 class MigrateCandidates(CandidateLockSandbox):
     def setUp(self):
         super().setUp()
@@ -1730,6 +1978,176 @@ class MigrateCandidates(CandidateLockSandbox):
         self.assertEqual(ef.migrate_candidates(False), 0)
         self.assertEqual(self.sent(bridge, "create_record"), [])
         self.assertEqual(self.read_ledger(), {})
+
+
+class MemoryPressureNormal(unittest.TestCase):
+    def with_probe(self, result):
+        saved = ef.subprocess.check_output
+
+        def fake(cmd, text=True):
+            if isinstance(result, Exception):
+                raise result
+            return result
+
+        ef.subprocess.check_output = fake
+        try:
+            return ef.memory_pressure_normal()
+        finally:
+            ef.subprocess.check_output = saved
+
+    def test_normal_level_passes(self):
+        self.assertTrue(self.with_probe("1\n"))
+
+    def test_warn_and_critical_defer(self):
+        self.assertFalse(self.with_probe("2\n"))
+        self.assertFalse(self.with_probe("4\n"))
+
+    def test_probe_failure_fails_open(self):
+        self.assertTrue(self.with_probe(OSError("no sysctl")))
+
+
+class ExtractOmlxTransportClassification(unittest.TestCase):
+    CONFIG = {"OMLX_MODEL": "m", "OMLX_URL": "http://x", "OMLX_API_KEY": ""}
+
+    def call_with(self, exc):
+        saved = ef.urllib.request.urlopen
+
+        def fake(req, timeout=600):
+            raise exc
+
+        ef.urllib.request.urlopen = fake
+        try:
+            ef.extract_omlx(self.CONFIG, "prompt")
+        finally:
+            ef.urllib.request.urlopen = saved
+
+    def test_5xx_refusal_is_transient_and_carries_the_body(self):
+        body = io.BytesIO(b'{"error": "does not fit under the memory ceiling"}')
+        exc = urllib.error.HTTPError("http://x", 503, "busy", {}, body)
+        with self.assertRaises(ef.LLMUnavailable) as ctx:
+            self.call_with(exc)
+        self.assertIn("memory ceiling", str(ctx.exception))
+
+    def test_429_is_transient(self):
+        exc = urllib.error.HTTPError("http://x", 429, "slow down", {},
+                                     io.BytesIO(b""))
+        with self.assertRaises(ef.LLMUnavailable):
+            self.call_with(exc)
+
+    def test_connection_failure_is_transient(self):
+        with self.assertRaises(ef.LLMUnavailable):
+            self.call_with(urllib.error.URLError("connection refused"))
+
+    def test_client_error_still_charges_the_source(self):
+        exc = urllib.error.HTTPError("http://x", 400, "bad request", {},
+                                     io.BytesIO(b""))
+        with self.assertRaises(urllib.error.HTTPError):
+            self.call_with(exc)
+
+
+class ScanExtractionStubs(unittest.TestCase):
+    """Shared scan() harness: bridge, locks, and transport stubbed so tests
+    steer extract_omlx and the gate probes per case."""
+
+    SOURCES = [
+        {"uuid": "SRC-1", "name": "2026-03-16 Alpha Sync", "kind": "meeting",
+         "modified": "2026-03-16T10:00:00", "ready": True},
+        {"uuid": "SRC-2", "name": "2026-03-15 Beta Sync", "kind": "meeting",
+         "modified": "2026-03-15T10:00:00", "ready": True},
+    ]
+    TEXT = ("Dana Parker mentioned during today's call that her son started "
+            "at Reed College this fall and things are going well so far "
+            "according to her update just now.")
+
+    def setUp(self):
+        self.saved = (ef.run_bridge, ef.save_state, ef.omlx_available,
+                      ef.extract_omlx, ef.acquire_llm_lock,
+                      ef.user_idle_seconds, ef.memory_pressure_normal)
+        ef.save_state = lambda s: None
+        ef.omlx_available = lambda c: True
+        ef.acquire_llm_lock = lambda: object()
+        ef.user_idle_seconds = lambda: 0.0
+        ef.memory_pressure_normal = lambda: True
+        self.extract_calls = []
+
+        def fake_extract_omlx(config, prompt):
+            self.extract_calls.append(prompt)
+            return '{"people": [], "events": []}'
+
+        ef.extract_omlx = fake_extract_omlx
+
+        def fake_bridge(ops, timeout=300):
+            out = []
+            for op in ops:
+                if op["op"] == "dump_people":
+                    out.append([])
+                elif op["op"] == "list_sources":
+                    out.append(list(self.SOURCES))
+                elif op["op"] == "get_text":
+                    out.append({"text": self.TEXT})
+                elif op["op"] == "list_group":
+                    out.append([])
+                else:
+                    out.append({})
+            return out
+
+        ef.run_bridge = fake_bridge
+
+    def tearDown(self):
+        (ef.run_bridge, ef.save_state, ef.omlx_available, ef.extract_omlx,
+         ef.acquire_llm_lock, ef.user_idle_seconds,
+         ef.memory_pressure_normal) = self.saved
+
+    def config(self, **overrides):
+        base = {"TRANSPORT": "local", "MIN_ROSTER": "0",
+                "SKIP_SOURCE_TITLES": "", "MAX_PER_RUN": "3",
+                "FILING_MODE": "suggest", "IDLE_MINUTES": "0",
+                "SELF_NAME": ""}
+        base.update(overrides)
+        return base
+
+    def fresh_state(self):
+        return {"processed": {}, "attempts": {}, "parked": {}}
+
+
+class ScanDefersWhenLLMUnavailable(ScanExtractionStubs):
+    def test_no_attempt_charged_and_the_run_stops(self):
+        def refusing_extract(config, prompt):
+            self.extract_calls.append(prompt)
+            raise ef.LLMUnavailable("HTTP 503: memory ceiling")
+
+        ef.extract_omlx = refusing_extract
+        state = self.fresh_state()
+        ef.scan(self.config(), state, False, None, True)
+        self.assertEqual(len(self.extract_calls), 1)
+        self.assertEqual(state["attempts"], {})
+        self.assertEqual(state["processed"], {})
+
+
+class ScanMemoryPressureGate(ScanExtractionStubs):
+    def test_active_user_extracts_at_normal_pressure(self):
+        ef.scan(self.config(), self.fresh_state(), False, None, False)
+        self.assertEqual(len(self.extract_calls), 2)
+
+    def test_elevated_pressure_defers_without_state_writes(self):
+        ef.memory_pressure_normal = lambda: False
+        state = self.fresh_state()
+        ef.scan(self.config(), state, False, None, False)
+        self.assertEqual(self.extract_calls, [])
+        self.assertEqual(state["attempts"], {})
+        self.assertEqual(state["processed"], {})
+
+    def test_idle_minutes_opts_the_idle_gate_back_in(self):
+        ef.user_idle_seconds = lambda: 30.0
+        ef.scan(self.config(IDLE_MINUTES="10"), self.fresh_state(),
+                False, None, False)
+        self.assertEqual(self.extract_calls, [])
+
+    def test_manual_runs_bypass_both_gates(self):
+        ef.memory_pressure_normal = lambda: False
+        ef.scan(self.config(IDLE_MINUTES="10"), self.fresh_state(),
+                False, None, True)
+        self.assertEqual(len(self.extract_calls), 2)
 
 
 if __name__ == "__main__":

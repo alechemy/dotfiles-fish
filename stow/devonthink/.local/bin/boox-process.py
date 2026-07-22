@@ -45,8 +45,10 @@ configured once):
   OMLX_URL=http://127.0.0.1:8000
   OMLX_API_KEY=<key>
   MAX_PER_RUN=<n>        OCR budget per run (backfill pacing), default 5
-  IDLE_MINUTES=<n>       run OCR only after this much user inactivity,
-                         default 10, 0 disables the gate
+  IDLE_MINUTES=<n>       optional idle gate: additionally require this much
+                         user inactivity before OCR; default 0 (off). OCR
+                         always defers while macOS reports elevated memory
+                         pressure.
   DENSITY=<dpi>          page render density, default 200
   THINGS_TASKS=on|off    journal only: send bullets under a Tasks:/Action
                          Items: section to Things 3, default off —
@@ -112,7 +114,7 @@ DEFAULTS = {
     "OMLX_URL": "http://127.0.0.1:8000",
     "OMLX_API_KEY": "",
     "MAX_PER_RUN": "5",
-    "IDLE_MINUTES": "10",
+    "IDLE_MINUTES": "0",
     "DENSITY": "200",
     "THINGS_TASKS": "off",
 }
@@ -361,6 +363,22 @@ def page_signatures(pngs):
 # ---------------------------------------------------------------------------
 
 
+class LLMUnavailable(RuntimeError):
+    """oMLX could not serve the request for a reason unrelated to the page:
+    connection failure, timeout, or a server-side refusal (5xx or 429 —
+    including the memory guard declining to load the model under RAM
+    pressure). Transient by nature, so the run ends quietly without
+    charging the page an attempt.
+    """
+
+
+def _http_error_detail(exc):
+    try:
+        return exc.read().decode("utf-8", "replace")[:300].strip()
+    except Exception:
+        return str(exc.reason)
+
+
 def _chat(config, role, content, timeout=900):
     payload = json.dumps({
         "model": config["OMLX_MODEL"],
@@ -377,8 +395,16 @@ def _chat(config, role, content, timeout=900):
     req = urllib.request.Request(
         config["OMLX_URL"] + "/v1/chat/completions",
         data=payload, headers=headers)
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        out = json.load(resp)
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            out = json.load(resp)
+    except urllib.error.HTTPError as exc:
+        if exc.code >= 500 or exc.code == 429:
+            raise LLMUnavailable(
+                f"HTTP {exc.code}: {_http_error_detail(exc)}") from exc
+        raise
+    except OSError as exc:
+        raise LLMUnavailable(exc) from exc
     return out["choices"][0]["message"]["content"].strip()
 
 
@@ -412,8 +438,8 @@ def extract_metadata(config, name, text, tags_pool, today):
     try:
         raw = strip_fence(_chat(config, METADATA_ROLE, prompt))
         meta = json.loads(raw)
-    except (urllib.error.URLError, OSError, json.JSONDecodeError,
-            KeyError, TypeError, AttributeError) as exc:
+    except (LLMUnavailable, urllib.error.URLError, OSError,
+            json.JSONDecodeError, KeyError, TypeError, AttributeError) as exc:
         log.warning("metadata extraction failed for %s: %s", name, exc)
         return None
     ed = str(meta.get("eventDate") or "")
@@ -513,6 +539,20 @@ def user_idle_seconds():
     except Exception:
         pass
     return None
+
+
+def memory_pressure_normal():
+    """True when macOS reports normal memory pressure (level 1; warn is 2,
+    critical 4), so a ~19 GB model load never lands on an already-tight
+    machine. Fails open: oMLX's own load-time memory guard is the backstop
+    when the probe is unavailable."""
+    try:
+        out = subprocess.check_output(
+            ["/usr/sbin/sysctl", "-n", "kern.memorystatus_vm_pressure_level"],
+            text=True)
+        return int(out.strip()) <= 1
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return True
 
 
 # ---------------------------------------------------------------------------
@@ -1158,10 +1198,14 @@ def main():
         return
 
     idle_min = int(config["IDLE_MINUTES"])
-    if not user_invoked and idle_min > 0:
-        idle = user_idle_seconds()
-        if idle is not None and idle < idle_min * 60:
-            log.info("user active, deferring OCR to an idle run")
+    if not user_invoked:
+        if idle_min > 0:
+            idle = user_idle_seconds()
+            if idle is not None and idle < idle_min * 60:
+                log.info("user active, deferring OCR to a later run")
+                return
+        if not memory_pressure_normal():
+            log.info("memory pressure elevated, deferring OCR")
             return
 
     llm_lock = None
@@ -1185,6 +1229,9 @@ def main():
                 budget - processed, chat_warned)
         except BridgeUnavailable as exc:
             log.info("DEVONthink unavailable, ending run: %s", exc)
+            break
+        except LLMUnavailable as exc:
+            log.info("oMLX unavailable, ending run: %s", exc)
             break
         except (RuntimeError, subprocess.SubprocessError) as exc:
             log.error("processing failed for %s: %s",

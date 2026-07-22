@@ -1,6 +1,8 @@
+import io
 import os
 import tempfile
 import unittest
+import urllib.error
 from datetime import date
 from unittest import mock
 
@@ -396,6 +398,72 @@ class FileRegularNote(unittest.TestCase):
         fields = self._run(
             {"eventDate": "2026-07-04", "tags": [], "summary": ""})
         self.assertEqual(fields["EventDate"], "2026-07-04")
+
+
+class ChatTransportClassification(unittest.TestCase):
+    CONFIG = {"OMLX_MODEL": "m", "OMLX_URL": "http://x", "OMLX_API_KEY": ""}
+
+    def call_with(self, exc):
+        with mock.patch.object(jp.urllib.request, "urlopen", side_effect=exc):
+            jp._chat(self.CONFIG, "role", "content")
+
+    def test_5xx_refusal_is_transient(self):
+        err = urllib.error.HTTPError(
+            "http://x", 503, "busy", {},
+            io.BytesIO(b"does not fit under the memory ceiling"))
+        with self.assertRaises(jp.LLMUnavailable) as ctx:
+            self.call_with(err)
+        self.assertIn("memory ceiling", str(ctx.exception))
+
+    def test_connection_failure_is_transient(self):
+        with self.assertRaises(jp.LLMUnavailable):
+            self.call_with(urllib.error.URLError("connection refused"))
+
+    def test_client_error_passes_through(self):
+        err = urllib.error.HTTPError("http://x", 400, "bad", {},
+                                     io.BytesIO(b""))
+        with self.assertRaises(urllib.error.HTTPError):
+            self.call_with(err)
+
+
+class LLMUnavailableDoesNotChargePages(unittest.TestCase):
+    def test_note_page_attempts_stay_untouched(self):
+        nb = {"pages": [{"sig": "s", "date": "", "text": "", "parked": "",
+                         "attempts": 0}]}
+        with mock.patch.object(jp, "ocr_page",
+                               side_effect=jp.LLMUnavailable("down")), \
+             mock.patch.object(jp, "save_state", lambda state: None):
+            with self.assertRaises(jp.LLMUnavailable):
+                jp.process_note_pages(nb, "Note.pdf", "/nonexistent", [0],
+                                      self.config(), 5, {})
+        self.assertEqual(nb["pages"][0]["attempts"], 0)
+        self.assertEqual(nb["pages"][0]["parked"], "")
+
+    def test_metadata_degrades_to_none(self):
+        with mock.patch.object(jp, "_chat",
+                               side_effect=jp.LLMUnavailable("down")):
+            self.assertIsNone(jp.extract_metadata(
+                self.config(), "Note", "text", [], date(2026, 7, 21)))
+
+    def config(self):
+        return {"OMLX_MODEL": "m", "OMLX_URL": "http://x", "OMLX_API_KEY": ""}
+
+
+class MemoryPressureGate(unittest.TestCase):
+    def test_warn_defers(self):
+        with mock.patch.object(jp.subprocess, "check_output",
+                               return_value="2\n"):
+            self.assertFalse(jp.memory_pressure_normal())
+
+    def test_normal_passes(self):
+        with mock.patch.object(jp.subprocess, "check_output",
+                               return_value="1\n"):
+            self.assertTrue(jp.memory_pressure_normal())
+
+    def test_probe_failure_fails_open(self):
+        with mock.patch.object(jp.subprocess, "check_output",
+                               side_effect=OSError("no sysctl")):
+            self.assertTrue(jp.memory_pressure_normal())
 
 
 if __name__ == "__main__":

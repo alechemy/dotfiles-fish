@@ -21,12 +21,16 @@ Groups (all in Lorebook):
 | `/20_ENTITIES/_Review` | Filing proposals awaiting review |
 | `/20_ENTITIES/_Review/Approved` | Drop zone: move a proposal here and the next filing run applies it |
 | `/20_ENTITIES/_Facts` | Person-fact captures from the "Capture Person Fact" Drafts action, awaiting extraction (source kind `fact`) |
+| `/20_ENTITIES/_Candidates` | One machine-owned record per **unknown** person seen in sources or on the calendar, accumulating sightings until decided (see Candidates under Filing) |
+| `/20_ENTITIES/_Candidates/Approved` | Drop zone: move a candidate here and the next filing run promotes them to a Person |
+| `/20_ENTITIES/_Candidates/Ignored` | Candidates never to propose again; resolution drops their names everywhere |
 
 **Bootstrap the groups first.** The bridge assumes all of the above already
 exist; nothing in `setup.sh` creates them. Run `~/.local/bin/dt-entity-bootstrap`
 once on the driver before seeding People — it is idempotent and does three
 things: creates any missing entity group, applies the `exclude from chat`
-flag to `People`, `_Review`, `_Review/Approved`, and `_Facts`, and stamps `EntityType`
+flag to `People`, `_Review`, `_Review/Approved`, `_Facts`, and the
+`_Candidates` groups, and stamps `EntityType`
 (`Person`/`Place`/`Event`) on any hand-authored markdown record inside the
 matching group that lacks it (scripted creation already stamps it; this covers
 records made from templates by hand). Re-run it any time you hand-author a
@@ -239,20 +243,22 @@ not an identity key: exact email or full name always overrides it, and one
 observation never establishes a hard boundary. Bare-name matches never teach
 provenance, which prevents an initial mistake from reinforcing itself.
 
-Unknown-person discovery is asynchronous and proposal-only. An unmatched
-structured attendee can create a Person proposal directly. A full name parsed
-from a narrow `with X` title pattern must also match a macOS Contacts card. This
-keeps the old broad parser's false positives such as bands, films, clinics, and
-project titles out of `_Review`. The proposal contains only `ensure_person`,
-optionally with the attendee email. It invents no facts and does not set
-`LastContact` before the meeting occurs. Candidate identities are remembered by
-hash so rejecting one does not recreate it on every morning retry. A bare title
-such as "Meet with Jordan" can also propose the unique full-name Contacts card,
-but only when every roster record aliased `Jordan` has established history in
-the opposite calendar context. When a candidate shares a name token with an
-existing record, its op carries `confirm_new` because the candidate resolver has
-already classified it as a distinct identity. Approval is the human confirmation;
-no second JSON edit is required to bypass the generic near-name guard.
+Unknown-person discovery is asynchronous and never touches the roster
+directly: an unmatched structured attendee becomes a **sighting on a
+candidate record** in the shared `/20_ENTITIES/_Candidates` store (see the
+Candidates section under Filing — the same store the filing pass feeds, so
+one stranger holds one record however many surfaces they appear on). A full
+name parsed from a narrow `with X` title pattern must also match a macOS
+Contacts card, which keeps the old broad parser's false positives such as
+bands, films, clinics, and project titles out of the store. A calendar
+sighting carries the attendee email when known (the stronger identity key),
+invents no facts, and never sets `LastContact` — attendance is evidence of
+existence, not of contact. The candidate record itself is the
+never-repropose memory: a recurring meeting bumps the one record instead of
+proposing daily, and an Ignored record drops the person everywhere. A bare
+title such as "Meet with Jordan" can also open a candidate for the unique
+full-name Contacts card, but only when every roster record aliased `Jordan`
+has established history in the opposite calendar context.
 
 Matched people get their header facts plus newly filed Biographical Log entries.
 Unrecognised **attendees** are still listed as "no entity record yet" (collapsed
@@ -407,7 +413,10 @@ is louder than the noise the flag silences.
 The mute is a noise control, not a privacy one: it filters structured plans, not
 free text, so an Event *summary* that names them is not scrubbed. To keep a name
 out of rendered output, that is `BriefingSuppressed`'s job. Set both if a person
-needs both.
+needs both. The flag is for people the roster *tracks*; muting someone with no
+Person record is the Ignored candidates group's job (see Candidates under
+Filing) — the two are the same idea applied on either side of the roster
+boundary.
 
 Sections are appended *after* `## Today's Notes` (created if missing) because
 `insert-jot-into-daily-note.py` targets the last bullet *before* that header —
@@ -538,10 +547,9 @@ re-verifies every claimed match deterministically:
 - exactly one roster hit → file to that record (auto mode applies it;
   suggest mode proposes it)
 - multiple hits → flagged AMBIGUOUS, always a proposal
-- no hit → new-person plan, always a proposal (single-word names are flagged
-  for extra scrutiny, and any roster person sharing a name token is listed as
-  a possible existing match — usually the fix is adding an alias to that
-  record rather than approving a duplicate)
+- no hit → never a proposal: the mention becomes a sighting on a candidate
+  record (next section), carrying the extracted facts and updates until the
+  person is tracked, ignored, or forgotten
 
 Extraction also carries an `events` channel: when a note documents a
 distinct occasion (trip, celebration, milestone — never a routine meeting or
@@ -572,9 +580,83 @@ if its name matches no record or alias yet shares a name token with one
 left in `Approved` with a warning naming the collision, rather than silently
 creating a second record. Resolve it by adding the short form as an alias on
 the existing record, or by setting `"confirm_new": true` on that op when the
-two really are different people. This is the same near-match check that
-writes the "possible existing match" hints into a proposal, applied a second
-time at the moment the ops actually run.
+two really are different people. (Filing no longer emits `ensure_person`
+ops — candidates own person-creation — but the validator is permanent:
+grandfathered, hand-edited, synced, or restored proposals can carry them
+forever.) Apply also checks frozen ops against the Ignored candidates,
+roster-first: a zero-roster-hit `ensure_person` name or `ensure_event`
+attendee matching an Ignored candidate bounces the proposal back to
+`_Review` for re-approval with a warning — the approved fence is exactly
+what runs, so nothing is ever filtered out of it silently.
+
+#### Candidates (`/20_ENTITIES/_Candidates`) — unknown people, one record each
+
+A person mentioned in sources but absent from the roster never generates
+proposals. Instead they get exactly one **candidate record** — machine-owned
+markdown holding a human summary plus a fenced JSON block of per-source
+**sightings** (dates, facts, field updates, provenance) — fed by both
+discovery surfaces: filing extraction (`dt:` sightings, keyed by source
+UUID + content hash, so a re-extracted source *replaces* its contribution)
+and the brief's calendar pass (`cal:` sightings, keyed by an event
+fingerprint, capped at the newest `MAX_CAL_SIGHTINGS` so a recurring meeting
+cannot grow the record forever). This is what ends the old noise loop:
+rejecting a stranger used to mean rejecting them again after every meeting;
+now they hold one Pending record that quietly accumulates evidence until a
+decision is made — and "no decision" is silent by design.
+
+Decisions are group moves, never body edits (the body is regenerated
+wholesale on every upsert):
+
+- **Track** — move the record into `_Candidates/Approved`. The next run
+  promotes it: a preflight resolves *every* identifier (canonical name, all
+  observed name variants, all emails) against the live roster with no
+  mutation — divergence, ambiguity, or an alias collision bounces the record
+  back to Pending with the reason prepended — then the Person is resolved or
+  created, missing variants union into its aliases, and the accumulated
+  evidence files through the same guards as normal filing (fact-level dedup,
+  `FieldAsOf` stale-write protection, monotonic `LastContact`). Because the
+  candidate stays in Approved until the final trash, a crash anywhere simply
+  re-runs the protocol idempotently.
+- **Ignore** — move it into `_Candidates/Ignored`. The name (and every
+  observed variant) is dropped from filing plans, event attendee lists, and
+  calendar candidacy from then on — roster-first, so a *tracked* person who
+  happens to share the name is never suppressed. Move it back out to
+  reverse.
+- **Forget** — delete the record. A future sighting re-opens a fresh
+  candidate; deletion is the reset path, not a decision.
+
+Two custom-metadata fields steer promotion when bare approval is too weak
+(near-matches in the roster, or a single-word name): `TrackTarget` (a Person
+record UUID) files the evidence into that existing person instead of
+creating one — this is also the alias-merge gesture, replacing the old
+"add an alias, delete the proposal, re-run `--force`" dance — and
+`CreateDistinct` confirms a genuinely new person despite the hints. The
+record's body says which is required and why.
+
+Identity keys are deliberately conservative: a candidate with a known email
+is looked up by email only; a candidate without one is the single
+**name-only** record for its normalized name, so name-only lookup stays
+deterministic. The same human seen email-keyed by calendar and name-only by
+filing therefore yields two records — the accepted cost of never merging two
+strangers automatically. `--merge-candidates <keep> <fold>` converges them
+(and promoting both into the same Person converges too); `--split-candidate
+<uuid> <sighting-id>...` is the inverse, for two same-named humans collapsed
+into one record — the split-off half derives keys only from its own
+sightings' emails and is created *detached* (no keys, no automatic
+sightings) when it has none. A candidate record whose JSON fence is
+hand-mangled is quarantined by rename (`[unreadable] ` prefix), logged, and
+skipped — never overwritten.
+
+The morning brief surfaces candidates only when they demand attention — an
+**urgent** Pending candidate (one carrying a deliberately captured fact) or
+a record wedged in `_Candidates/Approved` that promotion keeps bouncing.
+Ordinary Pending totals are deliberately absent from every daily surface:
+an undecided stranger sitting quietly is the point.
+
+The one-shot `entity-filing.py --migrate-candidates` converted the calendar
+pass's old never-repropose ledger (`identity-provenance.json`) into the
+store: still-pending calendar proposals became Pending candidates,
+previously rejected ones became Ignored candidates, and the ledger retired.
 
 #### Fact capture (Drafts → `_Facts`, kind `fact`)
 
@@ -610,18 +692,22 @@ bundled with everything else you wrote, and never same-day. Filing treats the
   evidence — the calendar and Messages passes own that clock. Field updates
   (employer/role/city/email) still auto-apply, logged with a transition line
   and stale-guarded.
-- **Never silently lost.** If extraction yields nothing to apply or propose,
-  filing writes a *"Review capture: …"* stub to `_Review` (empty `[]` ops
-  fence, so approving it is a harmless clear) rather than marking the source
-  filed with no trace — surfaced in the brief's `## Entity Review` count.
+- **Never silently lost.** A capture about an unknown person lands as an
+  *urgent* sighting on their Pending candidate (flagged in the record body
+  and the brief) — handled, not vanished. Only when extraction yields
+  nothing to apply, propose, *or* record on a candidate — including a
+  capture whose only person is Ignored — does filing write a *"Review
+  capture: …"* stub to `_Review` (empty `[]` ops fence, so approving it is a
+  harmless clear) rather than marking the source filed with no trace —
+  surfaced in the brief's `## Entity Review` count.
 - The capture record persists in `_Facts` (`EntityFiled=1`) as the clickable
   `([source](…))` provenance anchor. **Don't label a `_Facts` record** — the
   global "After Labelling, Move to 99_ARCHIVE" rule would archive it out of
   reach of filing.
 
-Latency: filing runs on the ≤30-min tick under the usual AC + idle gates, so a
-capture files on the next idle/AC tick, not instantly. `entity-filing.py
---scan-only` drains it now. Setup (bootstrap creates `_Facts` and prints its
+Latency: filing runs on the ≤30-min tick under the AC + memory-pressure
+gates, so a capture files on the next eligible tick, not instantly.
+`entity-filing.py --scan-only` drains it now. Setup (bootstrap creates `_Facts` and prints its
 UUID; paste into the action) is in `entities-howto.md` and `drafts/README.md`.
 
 ### Things review loop (optional, `THINGS_SYNC=on`)
@@ -631,9 +717,26 @@ The review loop above requires being at the Mac inside DEVONthink. With
 project (`THINGS_PROJECT`, default "Entity Filing") and scheduled for **Today**
 so it surfaces without opening the project, and the decision travels
 back: **complete** the to-do to approve, **cancel or delete** it to reject —
-from any device Things syncs to. Both new phases ride the existing 30-minute
-entity-filing tick (no new launchd agent, same battery/driver gates);
-`--scan-only` skips them, `--dry-run` logs without firing anything.
+from any device Things syncs to. All the Things phases ride the existing
+30-minute entity-filing tick (no new launchd agent, same battery/driver
+gates); `--scan-only` skips them, `--dry-run` logs without firing anything.
+
+**Pending candidates mirror too**, one to-do each in the same project —
+title `Candidate: <name>` (`! ` prefix and a Today schedule when urgent;
+otherwise unscheduled, preserving the quiet default) with a *compact,
+non-editable* note: sighting count, last-seen date, the
+TrackTarget/CreateDistinct requirement when bare approval would bounce, and
+the `Candidate: x-devonthink-item://…` link to the evidence (never the
+evidence itself — the URL transport degrades past ~3.5 KB). **Complete** =
+move to `_Candidates/Approved` (promotion next run), **cancel or delete** =
+move to `_Candidates/Ignored`. The note refreshes when sightings, urgency,
+or hints change, so the summary a decision is made from is never stale.
+DEVONthink is durable truth and the first decision wins: a candidate decided
+in DT while its task sat open gets the task closed to match (completed for
+tracked, canceled for ignored), never the reverse. The map at
+`~/.local/state/devonthink/things-candidates-map.json` is a rebuildable
+cache like the proposal map, and terminal states settle one tick the same
+way.
 
 The to-do's note is an *editable* rendering of the proposal below a
 `=== proposed v1 ===` sentinel — one `PERSON Name (kind[, met])` or
@@ -704,20 +807,26 @@ SKIP_CALENDARS=       # calendars never briefed on (comma-separated titles,
 PERSONAL_CALENDARS=   # personal calendar titles, calendar IDs, or source IDs
 WORK_CALENDARS=       # work calendar titles, calendar IDs, or source IDs
 SKIP_SOURCE_TITLES=Round ?Table|Standup|…   # sources never extracted
-IDLE_MINUTES=10       # local extraction waits for user inactivity; 0 = off
+IDLE_MINUTES=0        # optional idle gate on top of the memory-pressure
+                      # check; 0 (default) = off
 THINGS_SYNC=off       # on = mirror proposals to Things 3 (see review loop)
 THINGS_PROJECT=Entity Filing   # Things project holding the proposal to-dos
 ```
 
 Resource behavior: a run with nothing to extract never loads the model (the
-availability check is a tags ping), local extraction runs only after
-`IDLE_MINUTES` of user inactivity (HIDIdleTime) and only on AC power — any
-manual flag (`--dry-run`, `--force`, `--apply-only`, `--scan-only`,
-`--rebuild-state`) bypasses both gates — so it can't spin fans or take memory
-mid-work, and oMLX's per-model idle TTL
-(admin panel, seconds) unloads the ~18 GB of weights shortly after each
-batch. Once the backlog drains, inference happens only when a new
-meeting/handwritten/daily note appears — a few short runs a day.
+availability check is a tags ping), and local extraction runs only on AC
+power and while macOS reports normal memory pressure
+(`kern.memorystatus_vm_pressure_level`), so a ~19 GB model load never lands
+on an already-tight machine — set `IDLE_MINUTES` to also require user
+inactivity (HIDIdleTime). Any manual flag (`--dry-run`, `--force`,
+`--apply-only`, `--scan-only`, `--rebuild-state`) bypasses all three gates.
+oMLX's own load-time memory guard is the backstop: a refusal (or any 5xx/429
+or connection failure) raises `LLMUnavailable`, which ends the extraction
+pass quietly without charging the source an attempt — the next tick retries.
+oMLX's per-model idle TTL (admin panel, seconds) unloads the ~18 GB of
+weights shortly after each batch. Once the backlog drains, inference happens
+only when a new meeting/handwritten/daily note appears — a few short runs a
+day.
 
 The deployed posture is **local-only** (`TRANSPORT=local`), which is also the
 **code default** — the value the script uses when `entities.conf` is missing
@@ -851,8 +960,15 @@ review-gated proposal, never an auto-apply.
 # re-extract one source (e.g. after editing it)
 ~/.local/bin/entity-filing.py --force <UUID>
 
-# apply approved proposals right now
+# apply approved proposals (and promote approved candidates) right now
 ~/.local/bin/entity-filing.py --apply-only
+
+# fold two candidate records that are one human (keep, fold)
+~/.local/bin/entity-filing.py --merge-candidates <keep-uuid> <fold-uuid>
+
+# pull sightings that belong to a different same-named human out into their
+# own candidate (list sighting ids from the record's JSON fence)
+~/.local/bin/entity-filing.py --split-candidate <uuid> <sighting-id>...
 
 # after seeding People: replay past calendar days into LastContact
 ~/.local/bin/dt-morning-brief.py --backfill-contacts --dry-run
@@ -863,8 +979,8 @@ review-gated proposal, never an auto-apply.
 ~/.local/bin/dt-morning-brief.py --backfill-messages --days 730
 
 # drain the extraction backlog by hand — manual runs bypass the battery and
-# idle gates entirely; each pass extracts MAX_PER_RUN sources, so repeat (or
-# loop) until the log stops saying "extracting"
+# memory-pressure gates entirely; each pass extracts MAX_PER_RUN sources, so
+# repeat (or loop) until the log stops saying "extracting"
 ~/.local/bin/entity-filing.py --scan-only
 
 # re-sort every entity log newest-first (`dry_run: true` to preview). The

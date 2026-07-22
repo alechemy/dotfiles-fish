@@ -71,6 +71,13 @@ calendar titles, EventKit calendar identifiers, or source identifiers.
   proposals — see the walkthrough below. The briefing's `## Entity Review`
   line counts what's waiting, and separately flags anything still sitting in
   `_Review/Approved`, which means the run refused to apply it.
+- **Whenever you feel like it:** open `20_ENTITIES/_Candidates` — one record
+  per unknown person seen in your notes or meetings, holding everything
+  observed about them so far. Move it to `Approved` to start tracking them
+  (their accumulated facts file automatically), to `Ignored` to never hear
+  about them again, or just leave it — undecided candidates sit silently and
+  are never re-proposed. The brief only nags about a candidate when a fact
+  you deliberately captured is waiting on one.
 - **Monday:** the `## Reconnect` section lists active people past their
   contact threshold (family/close friends 30 days, friends 60, colleagues
   90). Text someone, or set their `entitystatus` to `dormant` to silence
@@ -327,8 +334,8 @@ over days of normal breaks. To speed that up, run
 ~/.local/bin/entity-filing.py --scan-only
 ```
 
-a few times — manual runs bypass the battery and idle gates, and each pass
-extracts 3 notes (fish: `for i in (seq 10); ~/.local/bin/entity-filing.py
+a few times — manual runs bypass the battery and memory-pressure gates, and
+each pass extracts `MAX_PER_RUN` notes (fish: `for i in (seq 10); ~/.local/bin/entity-filing.py
 --scan-only; end`). Stop whenever; there's no penalty for leaving the rest
 to the schedule. Each note takes a few seconds.
 
