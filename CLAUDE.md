@@ -10,11 +10,11 @@ Personal dotfiles managed with GNU Stow on macOS. All packages under `stow/` mir
 
 ## Hardware setup
 
-This dotfiles setup runs on a MacBook (with notch) used in two mutually exclusive modes. In portable mode the lid is open and the laptop is standalone. In docked mode the lid is closed (clamshell) and an ultrawide external monitor is the only active display. The user never runs with both displays active at once.
+This dotfiles setup runs on a MacBook (with notch) used in three modes. In portable mode the lid is open and the laptop is standalone. In docked mode the lid is closed (clamshell) and an ultrawide external monitor (`DELL U4025QW`) is the only active display. In travel mode the lid is open and a small secondary display — a Sidecar iPad, or a portable monitor — is active alongside the built-in panel.
 
 Two implications when designing or evaluating features in this repo:
 
-1. **Single active display.** Even though two physical displays exist, only one is in use at any given moment. Workflows that depend on switching focus between monitors, mirroring across displays, or coordinating UI state across multiple active screens do not apply here and should not be proposed.
+1. **The DELL is always alone; the built-in may not be.** Docked and portable are single-display, but travel mode runs two active screens, so display *count* and display *identity* are not interchangeable signals. Gate ultrawide-specific behavior on the DELL being present by name, never on "exactly one monitor" — a monitor-count check that means "am I docked?" silently fires in travel mode too. Travel mode is rare and deliberately unoptimized: it should degrade cleanly rather than get its own tuned code paths. Multi-display workflows (mirroring, cross-screen UI coordination) still do not apply and should not be proposed.
 
 2. **Battery awareness.** Display mode and power source are independent signals: docked mode is reliably on AC, but portable mode can be on AC or battery — never infer the power source from the absence of the external monitor (or vice versa). Display-dependent behavior (e.g. gap calculations) keys off monitor presence; power-dependent behavior keys off actual power state via `pmset`. Features that poll on a timer, hit the network repeatedly, or otherwise wake the CPU should either degrade gracefully when on battery (longer intervals, deferred work) or skip entirely until the machine is plugged in. Apply this thinking both when adding new functionality and when reviewing existing code that may not have considered it.
 
