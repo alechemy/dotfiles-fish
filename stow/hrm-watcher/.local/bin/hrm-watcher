@@ -1,0 +1,148 @@
+#!/usr/bin/python3
+"""Run hrm-reconcile whenever a HID interface appears or disappears.
+
+Sole trigger for the HRM.app keyboard-aware toggle (see hrm/README.md): the
+Glove80 (USB) and Go60 (Bluetooth) both surface as IOHIDInterface entries, so
+subscribing to IOKit first-match/termination notifications on that class
+covers attach and detach on both transports with one mechanism. The process
+blocks in its CFRunLoop between events — no polling, battery-clean, and no
+wake race: notifications fire when a board actually (re-)enumerates, not when
+the Mac wakes.
+
+Every event is a dumb "something changed" nudge; hrm-reconcile re-derives the
+desired state from device presence, so unrelated HID churn is harmless. A
+short debounce coalesces the burst of interfaces one board enumerates.
+
+Exits 0 when HRM.app isn't installed, leaving the agent dormant under
+KeepAlive.SuccessfulExit=false (same pattern as lock-watcher). TCC-free: no
+AppleEvents, no protected folders, and device matching notifications need no
+Input Monitoring grant.
+"""
+
+import ctypes
+import os
+import subprocess
+import sys
+import threading
+import time
+
+HRM_APP = "/Applications/HRM.app"
+RECONCILE = os.path.expanduser("~/.local/bin/hrm-reconcile")
+DEBOUNCE = 1.0
+
+iokit = ctypes.CDLL("/System/Library/Frameworks/IOKit.framework/IOKit")
+cf = ctypes.CDLL("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation")
+
+# Without explicit restypes ctypes assumes c_int and truncates 64-bit pointers.
+iokit.IOServiceMatching.restype = ctypes.c_void_p
+iokit.IOServiceMatching.argtypes = [ctypes.c_char_p]
+iokit.IONotificationPortCreate.restype = ctypes.c_void_p
+iokit.IONotificationPortCreate.argtypes = [ctypes.c_uint32]
+iokit.IONotificationPortGetRunLoopSource.restype = ctypes.c_void_p
+iokit.IONotificationPortGetRunLoopSource.argtypes = [ctypes.c_void_p]
+IOServiceMatchedCallback = ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.c_uint32)
+iokit.IOServiceAddMatchingNotification.restype = ctypes.c_int
+iokit.IOServiceAddMatchingNotification.argtypes = [
+    ctypes.c_void_p,
+    ctypes.c_char_p,
+    ctypes.c_void_p,
+    IOServiceMatchedCallback,
+    ctypes.c_void_p,
+    ctypes.POINTER(ctypes.c_uint32),
+]
+iokit.IOIteratorNext.restype = ctypes.c_uint32
+iokit.IOIteratorNext.argtypes = [ctypes.c_uint32]
+iokit.IOObjectRelease.restype = ctypes.c_int
+iokit.IOObjectRelease.argtypes = [ctypes.c_uint32]
+cf.CFRunLoopGetCurrent.restype = ctypes.c_void_p
+cf.CFRunLoopAddSource.restype = None
+cf.CFRunLoopAddSource.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p]
+cf.CFRunLoopRun.restype = None
+
+
+def log(msg):
+    print(f"{time.strftime('%Y-%m-%d %H:%M:%S')} hrm-watcher: {msg}", flush=True)
+
+
+_timer_lock = threading.Lock()
+_timer = None
+
+
+def run_reconcile():
+    try:
+        subprocess.run([RECONCILE], check=False)
+    except OSError as e:
+        log(f"failed to run {RECONCILE}: {e}")
+
+
+def schedule_reconcile():
+    global _timer
+    with _timer_lock:
+        if _timer is not None:
+            _timer.cancel()
+        _timer = threading.Timer(DEBOUNCE, run_reconcile)
+        _timer.daemon = True
+        _timer.start()
+
+
+def drain(iterator):
+    n = 0
+    while True:
+        obj = iokit.IOIteratorNext(iterator)
+        if not obj:
+            return n
+        iokit.IOObjectRelease(obj)
+        n += 1
+
+
+def _on_hid_change(refcon, iterator):
+    drain(iterator)
+    schedule_reconcile()
+
+
+# Module-level reference keeps the callback thunk alive for the process lifetime.
+HID_CALLBACK = IOServiceMatchedCallback(_on_hid_change)
+
+
+def arm(port, notification_type):
+    iterator = ctypes.c_uint32(0)
+    # Each call consumes one reference to the matching dict, so create it fresh
+    # per notification type. Draining the returned iterator (which enumerates
+    # the already-present interfaces) is what arms future notifications.
+    kr = iokit.IOServiceAddMatchingNotification(
+        port,
+        notification_type,
+        iokit.IOServiceMatching(b"IOHIDInterface"),
+        HID_CALLBACK,
+        None,
+        ctypes.byref(iterator),
+    )
+    if kr != 0:
+        log(f"IOServiceAddMatchingNotification({notification_type.decode()}) failed: {kr:#x}")
+        sys.exit(1)
+    return drain(iterator.value)
+
+
+def main():
+    if not os.path.isdir(HRM_APP):
+        log(f"{HRM_APP} not installed; exiting")
+        sys.exit(0)
+
+    port = iokit.IONotificationPortCreate(0)
+    if not port:
+        log("IONotificationPortCreate failed")
+        sys.exit(1)
+    cf.CFRunLoopAddSource(
+        cf.CFRunLoopGetCurrent(),
+        iokit.IONotificationPortGetRunLoopSource(port),
+        ctypes.c_void_p.in_dll(cf, "kCFRunLoopDefaultMode"),
+    )
+    present = arm(port, b"IOServiceFirstMatch")
+    arm(port, b"IOServiceTerminate")
+    log(f"armed; {present} HID interface(s) present")
+    run_reconcile()
+    cf.CFRunLoopRun()
+
+
+if __name__ == "__main__":
+    main()

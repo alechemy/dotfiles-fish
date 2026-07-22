@@ -8,10 +8,10 @@
 # Kill the software layer whenever a firmware board is present; otherwise
 # launch it.
 #
-# Idempotent: safe to run from any trigger (Keyboard Maestro USB/wake macro,
-# Shortcuts Bluetooth automation, manual invocation), any number of times. Every
-# trigger is just a "something changed, re-check" nudge; this script is the sole
-# authority on the desired state, derived fresh from device presence each run.
+# Idempotent: safe to run from any trigger (the hrm-watcher launch agent,
+# manual invocation), any number of times. Every trigger is just a "something
+# changed, re-check" nudge; this script is the sole authority on the desired
+# state, derived fresh from device presence each run.
 #
 # TCC-free by design: ioreg, pkill, pgrep, and open are Apple-signed and send no
 # AppleEvents, so this never trips the Automation-grant rotation that launchd
@@ -19,9 +19,8 @@
 # (not `osascript ... to quit`) is deliberate for the same reason.
 #
 # Both boards surface as IOHIDInterface entries regardless of transport (USB or
-# Bluetooth), so a single ioreg query covers both. Confirm the Go60's exact
-# Product string the first time it is connected and update BOARDS if it differs:
-#   ioreg -r -c IOHIDInterface -d1 | grep -i go60
+# Bluetooth) with Product strings matching these patterns, so a single ioreg
+# query covers both.
 
 BOARDS='Glove80|Go60'
 

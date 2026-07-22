@@ -7,29 +7,28 @@ both do home row mods in firmware, so running HRM.app on top of either
 double-applies the behavior. This setup quits HRM.app whenever a firmware board
 is attached and relaunches it when only the built-in keyboard remains.
 
-This replaces the old approach of quitting/launching HRM.app on AC power
-connect/disconnect, which used "docked == Glove80" as a lossy proxy and had no
-concept of the Go60-over-Bluetooth case at all.
-
 ## Architecture
 
-One idempotent **reconciler** is the sole authority on the desired state; every
-trigger is just a dumb "something changed, re-check" nudge. Add a trigger, miss a
-trigger, fire a trigger twice — the reconciler always converges on the right
-state because it derives truth fresh from device presence each run.
+One idempotent **reconciler** is the sole authority on the desired state; the
+**watcher** is a dumb "something changed, re-check" nudge. Miss an event, get a
+spurious one, fire twice — the reconciler always converges on the right state
+because it derives truth fresh from device presence each run.
 
 ```
-Glove80 USB attach/detach ─┐
-Go60 Bluetooth conn/disc  ─┼─► hrm-reconcile ─► HRM.app on/off
-wake / login              ─┘    (reads ioreg; pkill or open)
+any IOHIDInterface        ┌──────────────┐
+first-match/termination ─►│ hrm-watcher  │─► hrm-reconcile ─► HRM.app on/off
+(USB and Bluetooth alike) │ (launchd,    │    (reads ioreg;
+                          │  IOKit notif)│     pkill or open)
+                          └──────────────┘
 ```
 
-### The brain (tracked)
+### The brain
 
 `~/.local/bin/hrm-reconcile` — stowed from `stow/bin/.local/bin/hrm-reconcile`.
 Reads `ioreg -r -c IOHIDInterface` for a Glove80/Go60 match (both transports
-surface there), then `pkill -x HRM` or `open -gja HRM`. Apple-signed binaries
-only, no AppleEvents, so it is TCC-free regardless of what invokes it.
+surface there; the Go60's Bluetooth Product string is a confirmed match), then
+`pkill -x HRM` or `open -gja HRM`. Apple-signed binaries only, no AppleEvents,
+so it is TCC-free regardless of what invokes it.
 
 Run it by hand any time to force-correct the state:
 
@@ -37,90 +36,52 @@ Run it by hand any time to force-correct the state:
 hrm-reconcile
 ```
 
-### The triggers (GUI, not auto-stowed — rebuild manually per the steps below)
+### The trigger
 
-Keyboard Maestro and Shortcuts ride supported, vendor-maintained device triggers
-(more robust than scraping `log stream`), and KM already holds stable
-Accessibility/Automation grants. Their config lives in the respective GUIs; the
-steps to recreate it are below.
+`com.user.hrm-watcher` (KeepAlive launch agent, `stow/hrm-watcher/`) runs
+`~/.local/bin/hrm-watcher` under `/usr/bin/python3`. It subscribes to IOKit
+matching notifications (`IOServiceAddMatchingNotification`, first-match +
+termination) on the `IOHIDInterface` class — the same event source `ioreg`
+reads — and calls the reconciler on each event, debounced 1 s to coalesce the
+burst of interfaces one board enumerates. Between events it blocks in its
+CFRunLoop: no polling, battery-clean, same shape as `lock-watcher`.
 
-#### 1. Keyboard Maestro macro — USB (Glove80) + wake + login
+Why this beats per-transport triggers (the previous Keyboard Maestro USB macro
++ Shortcuts Bluetooth automation design):
 
-Create one macro, e.g. **"HRM: reconcile"**, in an always-available group:
+- **One mechanism, both transports.** A HID interface arriving is a HID
+  interface arriving, whether over USB (Glove80) or Bluetooth (Go60).
+- **No wake race.** A wake-time trigger fires before Bluetooth re-pairs and
+  sees only the built-in keyboard; the IOKit notification fires when the board
+  actually (re-)enumerates.
+- **Tracked and auto-stowed.** No GUI-only automation that can silently not
+  exist (the Shortcuts half of the old design was never created — the Go60
+  side had no trigger at all).
 
-- **Triggers** (add all to the single macro):
-  - _This USB Device_ → **Glove80 Left** → **is attached**
-  - _This USB Device_ → **Glove80 Left** → **is detached**
-  - _At system wake_
-  - _At engine launch_ (covers login / reboot / cold start)
-- **Action:** _Execute a Shell Script_ → **ignore results** →
-  ```sh
-  "$HOME/.local/bin/hrm-reconcile"
-  ```
+It also runs the reconciler once at startup, which covers login/reboot. On
+machines without `/Applications/HRM.app` it exits 0 and the agent stays
+dormant (`KeepAlive.SuccessfulExit=false`).
 
-The Glove80 is a split board and enumerates as **two** USB devices. Use the
-**Left** half — that's the one cabled to the host, so its attach/detach tracks
-docking. The Right entry is redundant (the reconciler re-checks everything
-regardless of which event fires).
+TCC-free end to end: no AppleEvents, no protected folders, and IOKit device
+*matching* notifications need no Input Monitoring grant (the watcher never
+opens the devices).
 
-| Name (as KM lists it) | Vendor | idVendor:idProduct |
-| --------------------- | ------ | ------------------ |
-| **Glove80 Left**      | MoErgo | `0x16C0:0x310B`    |
-| Glove80 Right         | MoErgo | `0x16C0:0x1100`    |
+## Decommission the old triggers
 
-> KM's USB trigger is a popup of **currently-attached** devices, not a
-> type-to-autocomplete field — plug the Glove80 in **before** adding the trigger
-> or it won't be listed. To dump the exact names/IDs KM is reading:
-> `system_profiler SPUSBDataType | grep -iE 'Glove|Product ID|Vendor ID'`.
-> If KM keys off IDs rather than the name, match `0x16C0:0x310B`. As a last
-> resort, "Any USB Device" for both attach and remove also works — the
-> reconciler is idempotent, so spurious runs on unrelated devices are harmless.
-
-#### 2. Shortcuts automation — Bluetooth (Go60)
-
-macOS Shortcuts has no USB-attach trigger but does have a Bluetooth one. It can
-only scope to "AirPods" or "Any Device" — that's fine here, because the body just
-calls the reconciler, which re-derives truth from `ioreg`; no per-device check is
-needed in the automation.
-
-- New **Personal Automation** → **Bluetooth**
-  - Device: **Any Device**
-  - Check **both** _Is Connected_ **and** _Is Disconnected_
-  - **Run Immediately** (not Run After Confirmation)
-- Action: **Run Shell Script**
-  ```sh
-  "$HOME/.local/bin/hrm-reconcile"
-  ```
-
-Export it as `hrm.shortcut` into this folder once created (File → Export) so the
-automation body is at least recorded in the repo.
-
-> Fires on every Bluetooth connect/disconnect (AirPods, headphones, etc.), not
-> just the Go60. Harmless — the reconciler is cheap and idempotent.
-
-## First-time Go60 confirmation
-
-The Go60 was not connected when this was built, so its exact HID Product string
-is unverified. The first time you use the Go60, confirm it matches and update
-`BOARDS` in `hrm-reconcile` if it reports as something other than `Go60`:
-
-```sh
-ioreg -r -c IOHIDInterface -d1 | grep -i go60
-```
-
-## Decommission the old automation
-
-Delete the Shortcuts power automations that this replaces:
-
-- "When Alec's MacBook Pro is connected to power" (Quit/Open HRM)
-- "When Alec's MacBook Pro is disconnected from power" (Quit App and Open App)
+- Delete the Keyboard Maestro macro **"Run HRM Reconciler"** (Glove80 USB
+  attach/detach + wake + engine-launch triggers). Harmless if kept — the
+  reconciler is idempotent — but the watcher makes it fully redundant.
+- The Shortcuts Bluetooth automation from the old design was never created;
+  nothing to remove. The old power-connect/disconnect automations are already
+  gone.
 
 ## Debugging
 
-The reconciler logs each decision to the unified log. Watch it fire live while
-testing the triggers (use the absolute path — a shell `log` function may shadow
-the binary, and `--level info` is required because the messages log at info
-level):
+The watcher logs to `/tmp/hrm-watcher.log` (startup, arming, any failure to
+spawn the reconciler). The reconciler logs each decision to the unified log.
+Watch decisions live (use the absolute path — a shell `log` function may
+shadow the binary, and `--level info` is required because the messages log at
+info level):
 
 ```sh
 /usr/bin/log stream --level info --predicate 'eventMessage CONTAINS "hrm-reconcile"'

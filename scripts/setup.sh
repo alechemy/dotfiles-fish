@@ -513,6 +513,13 @@ EOF
         info "  Approve the 'osascript wants to control Keyboard Maestro Engine' prompt if it appears"
     fi
 
+    # Keyboard-aware HRM.app toggle. The watcher exits 0 when HRM.app isn't
+    # installed, so the agent stays dormant on machines without it (same
+    # KeepAlive.SuccessfulExit=false pattern as the watchers above).
+    if [ -d "/Applications/HRM.app" ]; then
+        load_launch_agent "$HOME/Library/LaunchAgents/com.user.hrm-watcher.plist" "hrm-watcher"
+    fi
+
     # Git SSH commit-signing key. The tracked gitconfig sets commit.gpgsign=true
     # with gpg.format=ssh, so a signing key must exist or every `git commit`
     # fails. Per-machine ed25519 key, no passphrase so signing stays headless.
