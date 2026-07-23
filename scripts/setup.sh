@@ -637,6 +637,10 @@ EOF
             info "Seeding DEVONthink config (smart rules, custom metadata)..."
             "$DOTFILES/scripts/seed-devonthink-config.sh"
 
+            info "Building dtnote:// URL handler (DTNote.app)..."
+            chmod +x "$DOTFILES/scripts/build-dtnote-handler.sh"
+            "$DOTFILES/scripts/build-dtnote-handler.sh"
+
             info "Loading launchd agents..."
             # Bootstrap each plist, surfacing real failures while tolerating the
             # "already loaded" case (launchctl exits 37 / Bootstrap failed: 17).

@@ -1595,9 +1595,9 @@ class SeriesLookbackStamp(unittest.TestCase):
 
 class BriefEventLinks(unittest.TestCase):
     """Every event title links into the note layer: to the note that owns
-    the event, or to a createMarkdown URL that births one on click. The
-    links re-derive from LinkedEvent metadata each run, so the wholesale
-    section replace can never lose an attachment."""
+    the event, or to a dtnote:// URL whose handler opens-or-creates one on
+    click. The links re-derive from LinkedEvent metadata each run, so the
+    wholesale section replace can never lose an attachment."""
 
     TODAY = "2026-07-14"
 
@@ -1609,35 +1609,29 @@ class BriefEventLinks(unittest.TestCase):
 
     def test_a_noteless_event_gets_a_create_link(self):
         got = mb.render_brief(self.blocks([event("Call Priya")]), self.TODAY,
-                              {}, "ARCHIVE-UUID")
-        self.assertIn("- 9:00am — [Call Priya](x-devonthink://createMarkdown"
-                      "?title=2026-07-14%20Call%20Priya", got)
-        self.assertIn("&destination=ARCHIVE-UUID", got)
-        self.assertNotIn("location=", got)
-
-    def test_without_an_archive_group_the_title_stays_plain(self):
-        got = mb.render_brief(self.blocks([event("Call Priya")]), self.TODAY,
-                              {}, None)
-        self.assertIn("- 9:00am — Call Priya", got)
-        self.assertNotIn("createMarkdown", got)
+                              {})
+        self.assertIn("- 9:00am — [Call Priya](dtnote://open"
+                      "?date=2026-07-14&title=Call%20Priya)", got)
 
     def test_the_owning_meeting_note_takes_the_title_link(self):
         notes = {self.key("Call Priya"): [
             {"uuid": "N1", "name": "2026-07-14 Call Priya",
              "handwritten": False, "documenttype": "Meeting Notes"}]}
         got = mb.render_brief(self.blocks([event("Call Priya")]), self.TODAY,
-                              notes, "ARCHIVE-UUID")
+                              notes)
         self.assertIn("- 9:00am — [Call Priya](x-devonthink-item://N1)", got)
-        self.assertNotIn("createMarkdown", got)
+        self.assertNotIn("dtnote://", got)
 
     def test_a_handwritten_match_renders_as_a_sub_bullet(self):
+        """A handwritten attachment doesn't claim the title: clicking it must
+        still create the typed note, whatever else got attached."""
         notes = {self.key("Call Priya"): [
             {"uuid": "HW", "name": "Call with Priya",
              "handwritten": True, "documenttype": ""}]}
         got = mb.render_brief(self.blocks([event("Call Priya")]), self.TODAY,
-                              notes, "ARCHIVE-UUID")
+                              notes)
         self.assertIn("  - [✏️ Call with Priya](x-devonthink-item://HW)", got)
-        self.assertIn("createMarkdown", got)
+        self.assertIn("dtnote://", got)
 
     def test_owning_note_links_the_title_while_others_stay_bullets(self):
         notes = {self.key("Call Priya"): [
@@ -1646,7 +1640,7 @@ class BriefEventLinks(unittest.TestCase):
             {"uuid": "N1", "name": "2026-07-14 Call Priya",
              "handwritten": False, "documenttype": "Meeting Notes"}]}
         got = mb.render_brief(self.blocks([event("Call Priya")]), self.TODAY,
-                              notes, "ARCHIVE-UUID")
+                              notes)
         self.assertIn("- 9:00am — [Call Priya](x-devonthink-item://N1)", got)
         self.assertIn("  - [✏️ Call with Priya](x-devonthink-item://HW)", got)
         self.assertEqual(got.count("x-devonthink-item://N1"), 1)
@@ -1657,25 +1651,28 @@ class BriefEventLinks(unittest.TestCase):
              "handwritten": False, "documenttype": "Meeting Notes"}]}
         got = mb.render_brief(
             self.blocks([event("Call Priya", rsvp="tentative")]), self.TODAY,
-            notes, "ARCHIVE-UUID")
+            notes)
         self.assertIn(
             "- 9:00am — [Call Priya](x-devonthink-item://N1) (tentative)",
             got)
 
     def test_a_redacted_title_never_becomes_a_link(self):
-        """A create URL embeds the title — a private event's real title must
+        """A dtnote URL embeds the title — a private event's real title must
         not leak into it, and the placeholder must not be clickable either."""
         got = mb.render_brief(
             mb.brief_blocks([event("Lunch with Priya Raman")], [], ROOM_RE,
                             {"priya raman"}),
-            self.TODAY, {}, "ARCHIVE-UUID")
+            self.TODAY, {})
         self.assertIn(f"- 9:00am — {mb.REDACTED_TITLE}", got)
-        self.assertNotIn("createMarkdown", got)
+        self.assertNotIn("dtnote://", got)
         self.assertNotIn("Lunch", got)
 
-    def test_rendering_without_the_note_layer_matches_the_legacy_shape(self):
+    def test_the_create_link_needs_no_note_index(self):
+        """A dtnote URL derives from the event alone, so a render with no
+        LinkedEvent lookups at all still makes every title clickable."""
         got = mb.render_brief(self.blocks([event("Call Priya")]), self.TODAY)
-        self.assertIn("- 9:00am — Call Priya", got)
+        self.assertIn("- 9:00am — [Call Priya](dtnote://open"
+                      "?date=2026-07-14&title=Call%20Priya)", got)
 
 
 class BriefNews(unittest.TestCase):
@@ -1731,7 +1728,8 @@ class BriefNews(unittest.TestCase):
         ev = event("Weekly Sync", [attendee("Priya Raman", "p@x.com")])
         got = self.rendered([ev], repeats={mb.series_key(ev)})
         self.assertEqual(got.strip().splitlines()[-1],
-                         "- 9:00am — Weekly Sync")
+                         "- 9:00am — [Weekly Sync](dtnote://open"
+                         "?date=2026-07-14&title=Weekly%20Sync)")
 
     def test_a_redacted_event_never_carries_news(self):
         ev = event("Lunch with Priya Raman", [attendee("Priya Raman", "p@x.com")])
@@ -1747,7 +1745,8 @@ class BriefNews(unittest.TestCase):
                                    [attendee("Priya Raman", "p@x.com")])])
         body = got.split("-->\n\n", 1)[1]
         self.assertEqual(body.splitlines(), [
-            "- 9:00am — Kickoff",
+            "- 9:00am — [Kickoff](dtnote://open?date=2026-07-14"
+            "&title=Kickoff)",
             "  - [Priya Raman](x-devonthink-item://uuid-priya-raman)"
             " — last contact 2026-07-10",
             "    - 2026-07-13 — moved to Denver.",
@@ -1854,7 +1853,10 @@ class BriefBlocksTimeline(unittest.TestCase):
 
     def test_person_less_event_renders_without_a_trailing_blank(self):
         got = mb.render_brief(self.blocks([event("Perio cleaning")]), "2026-07-13")
-        self.assertTrue(got.endswith("- 9:00am — Perio cleaning"), repr(got))
+        self.assertTrue(
+            got.endswith("- 9:00am — [Perio cleaning](dtnote://open"
+                         "?date=2026-07-13&title=Perio%20cleaning)"),
+            repr(got))
 
 
 class SectionsForUpsert(unittest.TestCase):

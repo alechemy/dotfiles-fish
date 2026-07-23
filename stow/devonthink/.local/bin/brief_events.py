@@ -8,16 +8,17 @@ metadata is the durable record; briefing text is a rendering of it.
 dt-morning-brief re-derives each event's note links from LinkedEvent on every
 regeneration (its scheduled runs replace the whole ## Briefing span, so
 anything spliced into the text alone would not survive a RunAtLoad rerun),
-while the smart rules stamp the metadata and splice the same links into the
-already-rendered briefing so they appear without waiting for a regen:
+while the writers stamp the metadata:
 
-  - adopt-meeting-note: notes born from the briefing's create-on-click links
-    (tag "Meeting Note", name "YYYY-MM-DD <event title>") — swaps the event
-    title's createMarkdown URL for the note's item link.
+  - dtnote-open.py: the dtnote:// handler behind a note-less event title —
+    opens the owning note, creating it fully stamped only when missing.
+  - adopt-meeting-note: backstop for meeting notes that arrive by hand (tag
+    "Meeting Note", name "YYYY-MM-DD <event title>") — stamps them and swaps
+    the day's briefing title link for the note's item link in place.
   - post-enrich-and-archive: handwritten notes matched to an event by name —
     adds the note as an indented sub-bullet under the event line.
 
-Both rules also pre-set DailyNoteLinked so a briefing-linked note never
+All writers also pre-set DailyNoteLinked so a briefing-linked note never
 double-lists under ## Today's Notes.
 
 Matching is deliberately conservative: stopword-filtered token overlap with a
@@ -90,15 +91,14 @@ def parse_name_date(name):
     return m.group(1), m.group(2)
 
 
-def create_url(name, destination, text=""):
-    """createMarkdown URL command. No `location` parameter, ever: DT treats
-    a location as "download this URL as the document" and ignores `text`."""
+def dtnote_url(date, title):
+    """Create-on-click link for a note-less event, handled by DTNote.app →
+    dtnote-open.py: opens the event's owning note, creating it first only if
+    missing — semantics x-devonthink://createMarkdown cannot provide (it
+    neither checks for an existing record nor navigates, so every click
+    minted a fresh one)."""
     q = lambda s: quote(s, safe="")
-    url = (f"x-devonthink://createMarkdown?title={q(name)}"
-           f"&destination={q(destination)}&tags={q(CREATE_TAG)}&noselector=1")
-    if text:
-        url += f"&text={q(text)}"
-    return url
+    return f"dtnote://open?date={q(date)}&title={q(title)}"
 
 
 def brief_span(lines):

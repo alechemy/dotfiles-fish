@@ -23,6 +23,7 @@
 //   list_group         {path}                           -> [{uuid,name}]
 //   search             {query,limit?}                   -> [{uuid,name,eventdate,documenttype}]
 //   get_at_path        {path}                           -> {uuid,name} | null
+//   open_record        {uuid}                           -> {uuid}
 //   get_text           {uuid}                           -> {uuid,text}
 //   set_text           {uuid,text}                      -> {uuid}
 //   ensure_group       {path,exclude_chat?}             -> {uuid,created,chat_excluded}
@@ -792,6 +793,13 @@ function run(argv) {
       const r = dt.getRecordAt(op.path, { in: db })
       if (!r) return null
       return { uuid: r.uuid(), name: r.name() }
+    },
+
+    open_record(op) {
+      const r = byUuid(op.uuid)
+      dt.activate()
+      dt.openTabFor({ record: r })
+      return { uuid: op.uuid }
     },
 
     get_text(op) {

@@ -28,7 +28,7 @@ BRIEF = """# Tuesday, July 14, 2026
 <!-- brief:2026-07-14 -->
 
 - 8:00am — SE / Prod Engineering Sync (tentative)
-- 11:00am — [Vendor Roundtable](x-devonthink://createMarkdown?title=X&destination=Y&tags=Meeting%20Note&noselector=1)
+- 11:00am — [Vendor Roundtable](dtnote://open?date=2026-07-14&title=Vendor%20Roundtable)
   - [Priya Raman](x-devonthink-item://uuid-priya-raman)
 - 12:00pm — Call Priya
 - 12:00pm — Weekly PCD CAB 2026 edition
@@ -64,23 +64,15 @@ class Keys(unittest.TestCase):
         self.assertIsNone(be.parse_name_date("2026-13-40 Call Priya"))
 
 
-class CreateUrl(unittest.TestCase):
-    def test_encodes_title_and_never_sends_location(self):
-        """A `location` parameter flips createMarkdown into download-that-URL
-        mode and silently discards `text` — it must never appear."""
-        url = be.create_url("2026-07-14 SE / Prod Engineering Sync",
-                            "ARCHIVE-UUID", text="# SE / Prod\n\n")
-        self.assertTrue(url.startswith("x-devonthink://createMarkdown?"))
-        self.assertIn("title=2026-07-14%20SE%20%2F%20Prod", url)
-        self.assertIn("&destination=ARCHIVE-UUID", url)
-        self.assertIn("&tags=Meeting%20Note", url)
-        self.assertIn("&noselector=1", url)
-        self.assertIn("&text=%23%20SE", url)
-        self.assertNotIn("location=", url)
-        self.assertNotIn("referrer=", url)
+class DtnoteUrl(unittest.TestCase):
+    def test_encodes_date_and_title(self):
+        url = be.dtnote_url(TODAY, "SE / Prod Engineering Sync")
+        self.assertEqual(
+            url, "dtnote://open?date=2026-07-14"
+                 "&title=SE%20%2F%20Prod%20Engineering%20Sync")
 
     def test_no_unencoded_parens_break_the_markdown_link(self):
-        url = be.create_url("2026-07-14 Sync (EU)", "U")
+        url = be.dtnote_url(TODAY, "Sync (EU)")
         self.assertNotIn("(", url)
         self.assertNotIn(")", url)
 
@@ -171,7 +163,7 @@ class LinkTitle(unittest.TestCase):
         self.assertIn(
             "- 11:00am — [Vendor Roundtable](x-devonthink-item://NOTE-UUID)",
             got)
-        self.assertNotIn("createMarkdown", got)
+        self.assertNotIn("dtnote://", got)
 
     def test_wraps_a_plain_title_preserving_the_tentative_suffix(self):
         key = be.event_key(TODAY, "SE / Prod Engineering Sync")

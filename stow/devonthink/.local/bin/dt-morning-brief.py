@@ -18,14 +18,13 @@ heard of already says so on its own face.
 Every event title is also a link into the note layer (see brief_events.py).
 Notes carrying the event's LinkedEvent key render under it — the owning
 meeting note as the title's item link, everything else (handwritten matches)
-as sub-bullets — and an event with no notes gets a createMarkdown URL that
-births "<date> <title>" in /99_ARCHIVE, tagged Meeting Note, on click and
-only on click. Because the links are re-derived from metadata each run, the
-wholesale section replace never loses an attachment; the smart rules
-(adopt-meeting-note, post-enrich-and-archive) stamp the metadata and splice
-the same links into the already-rendered text so nothing waits for a regen.
-Redacted events render as plain text: a private title must not leak into a
-create URL.
+as sub-bullets — and an event with no owning note gets a dtnote:// URL
+(DTNote.app → dtnote-open.py) that opens the note, creating "<date> <title>"
+in /99_ARCHIVE, tagged Meeting Note, only when it doesn't exist. No click,
+no record; repeat clicks reopen the same one. Because the links are
+re-derived from metadata each run, the wholesale section replace never loses
+an attachment. Redacted events render as plain text: a private title must
+not leak into a URL.
 
 On Mondays (or with --weekly) it
 also appends a `## Reconnect` section listing people whose LastContact
@@ -224,11 +223,6 @@ CANDIDATE_CAP_PER_EVENT = 5
 
 # A suppressed event keeps its place on the timeline under this title.
 REDACTED_TITLE = "Private event"
-
-# Where create-on-click meeting notes are born — their permanent home, not a
-# stop on the way to one: nothing may move a note someone is mid-meeting
-# typing into. Notes are retrieved by tag/DocumentType, not location.
-ARCHIVE_PATH = "/99_ARCHIVE"
 
 # RSVP states that mean you are going. Tentative counts, and says so in the
 # title; every other state (notably "unknown" — invited, never responded) does
@@ -1319,9 +1313,8 @@ def brief_blocks(events, people, skip_re, excluded=(),
 
 
 def event_note_index(blocks, today):
-    """LinkedEvent lookups for the day's events, plus the archive group UUID
-    create-on-click links target. One find_by_field per distinct event key;
-    a missing archive group just means titles render without create links."""
+    """LinkedEvent lookups for the day's events — one find_by_field per
+    distinct event key."""
     keys = []
     for b in blocks:
         raw = b.get("raw_title")
@@ -1330,19 +1323,17 @@ def event_note_index(blocks, today):
             if key not in keys:
                 keys.append(key)
     if not keys:
-        return {}, None
+        return {}
     results = run_bridge(
-        [{"op": "get_at_path", "path": ARCHIVE_PATH}]
-        + [{"op": "find_by_field", "field": "LinkedEvent", "value": key}
-           for key in keys])
-    archive = results[0] or {}
-    return dict(zip(keys, results[1:])), archive.get("uuid")
+        [{"op": "find_by_field", "field": "LinkedEvent", "value": key}
+         for key in keys])
+    return dict(zip(keys, results))
 
 
-def event_title_md(b, key, notes, create_dest, today):
+def event_title_md(b, notes, today):
     """The event line's title cell: an item link to the note that owns the
-    event, a createMarkdown URL when no note does, or plain text for a
-    redacted event (whose real title must not leak into a link)."""
+    event, a dtnote:// create-on-click URL when no note does, or plain text
+    for a redacted event (whose real title must not leak into a link)."""
     raw = b.get("raw_title")
     if not raw:
         return b["title"], None
@@ -1353,13 +1344,10 @@ def event_title_md(b, key, notes, create_dest, today):
     if primary:
         return (f"[{raw}](x-devonthink-item://{primary['uuid']}){suffix}",
                 primary)
-    if create_dest:
-        url = be.create_url(f"{today} {raw}", create_dest, text=f"# {raw}\n\n")
-        return f"[{raw}]({url}){suffix}", None
-    return b["title"], None
+    return f"[{raw}]({be.dtnote_url(today, raw)}){suffix}", None
 
 
-def render_brief(blocks, today, event_notes=None, create_dest=None):
+def render_brief(blocks, today, event_notes=None):
     if not blocks:
         return None
     out = []
@@ -1368,7 +1356,7 @@ def render_brief(blocks, today, event_notes=None, create_dest=None):
         key = (be.event_key(today, b["raw_title"])
                if b.get("raw_title") else None)
         notes = (event_notes or {}).get(key) or []
-        title_md, primary = event_title_md(b, key, notes, create_dest, today)
+        title_md, primary = event_title_md(b, notes, today)
         for n in notes:
             if primary is not None and n["uuid"] == primary["uuid"]:
                 continue
@@ -2389,9 +2377,8 @@ def main():
                     if journal_loaded else None)
     otd = on_this_day_rows(today, excluded)
 
-    event_notes, create_dest = event_note_index(blocks, today)
-    sections = [(BRIEF_HEADER,
-                 render_brief(blocks, today, event_notes, create_dest))]
+    event_notes = event_note_index(blocks, today)
+    sections = [(BRIEF_HEADER, render_brief(blocks, today, event_notes))]
     if weekly or date.fromisoformat(today).weekday() == 0:
         sections.append((RECONNECT_HEADER, render_reconnect(overdue, today)))
     sections.append((BIRTHDAYS_HEADER, render_birthdays(bdays, today)))

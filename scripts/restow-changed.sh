@@ -119,6 +119,11 @@ if grep -q '^stow/streamrip/.*config\.template\.toml$' <<<"$changed_files"; then
         echo "restow-changed: streamrip template changed but 1Password CLI is unavailable; run scripts/build-streamrip-config.sh by hand" >&2
     fi
 fi
+if grep -q '^devonthink/utils/dtnote-handler\.applescript$\|^scripts/build-dtnote-handler\.sh$' <<<"$changed_files"; then
+    if [ -d "$HOME/Applications/DTNote.app" ]; then
+        rebuild build-dtnote-handler.sh
+    fi
+fi
 if grep -q '^stow/navidrome/\.config/navidrome/env\.template$' <<<"$changed_files"; then
     echo "restow-changed: navidrome env.template changed; update ~/.config/navidrome/env by hand" >&2
 fi

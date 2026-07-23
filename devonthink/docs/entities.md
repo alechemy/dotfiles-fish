@@ -174,30 +174,37 @@ Rendering, per event (`event_note_index` → `render_brief`):
   renders as that note's item link.
 - Every other `LinkedEvent`-carrying note (handwritten matches) renders as an
   indented sub-bullet — `✏️` handwritten, `📝` otherwise.
-- An event with no owning note renders its title as an
-  `x-devonthink://createMarkdown` URL: clicking it — and only clicking it —
-  creates `"<date> <title>"` in `/99_ARCHIVE`, tagged `Meeting Note`, with an
-  H1 skeleton. No click, no record. Notes are born in their permanent home on
+- An event with no owning note renders its title as a
+  `dtnote://open?date=…&title=…` URL. The scheme belongs to **DTNote.app**
+  (`~/Applications`, built by `scripts/build-dtnote-handler.sh` from
+  `devonthink/utils/dtnote-handler.applescript`), a shim that hands the URL
+  to `dtnote-open.py`: look up the owning note by key and open it, creating
+  it first — in `/99_ARCHIVE`, tagged `Meeting Note`, fully stamped, with an
+  H1 skeleton — only when it doesn't exist. No click, no record; a second
+  click opens the same note. A custom handler exists because no DT URL
+  command can do this: `x-devonthink://createMarkdown` neither checks for an
+  existing record nor navigates to the one it creates, so every click
+  minted a fresh unopened note. Notes are born in their permanent home on
   purpose (nothing may move a note mid-meeting), and are retrieved by
-  tag/`DocumentType`, not location. The URL deliberately carries no
-  `location` parameter — DT would treat it as "download this URL as the
-  document" and discard `text`.
+  tag/`DocumentType`, not location. The applet sends no AppleEvents of its
+  own — all DT I/O runs through the bridge under `/usr/bin/osascript` — so
+  rebuilding it never costs an Automation grant. Clicking a stale dtnote
+  link in an *old* daily note retro-creates a correctly dated note that
+  files to that day.
 - A redacted event renders as plain text: its real title must not leak into a
-  create URL.
+  URL.
 
-Two smart rules stamp the metadata and splice the same links into the
-already-rendered briefing, so nothing waits for the next regen:
+Two smart rules cover the paths the handler doesn't own:
 
-- **Adopt Meeting Note** (fires on the `Meeting Note` tag) finishes what a
-  URL command cannot: it derives `EventDate` + `LinkedEvent` from the record
-  name, stamps `DocumentType="Meeting Notes"` (entity filing already sweeps
-  `mddocumenttype:~Meeting`, so the note becomes a fact source for free) and
-  `DailyNoteLinked=1` (no double-listing under `## Today's Notes`), then
-  swaps the day's create-link for the item link in place — clicking the
-  title twice opens the note instead of minting a duplicate. Clicking a
-  stale create-link in an *old* daily note retro-creates a correctly dated
-  note that files to that day; the adopt rule repairs that day's briefing
-  the same way.
+- **Adopt Meeting Note** (fires on the `Meeting Note` tag) is the backstop
+  for meeting notes that arrive without the handler — hand-made and
+  hand-tagged, named `"YYYY-MM-DD <event title>"`. It derives `EventDate` +
+  `LinkedEvent` from the record name, stamps `DocumentType="Meeting Notes"`
+  (entity filing already sweeps `mddocumenttype:~Meeting`, so the note
+  becomes a fact source for free) and `DailyNoteLinked=1` (no
+  double-listing under `## Today's Notes`), then swaps the day's briefing
+  title link for the item link in place. Handler-created notes arrive fully
+  stamped, so the rule's `LinkedEvent` guard skips them.
 - **Post-Enrich & Archive step 2b** tries the event match before its
   `## Today's Notes` fallback (`brief_events.py match`): stopword-filtered
   token overlap ≥ 2/3 with a **unique winner** required, so "Call with
