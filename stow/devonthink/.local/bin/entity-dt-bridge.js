@@ -798,7 +798,14 @@ function run(argv) {
     open_record(op) {
       const r = byUuid(op.uuid)
       dt.activate()
-      dt.openTabFor({ record: r })
+      // Untargeted, open tab for spawns a separate document window; a tab in
+      // the frontmost main (viewer) window only happens by asking for it.
+      const vws = dt.viewerWindows()
+      if (vws.length) {
+        dt.openTabFor({ record: r, in: vws[0] })
+      } else {
+        dt.openTabFor({ record: r })
+      }
       return { uuid: op.uuid }
     },
 
