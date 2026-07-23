@@ -70,7 +70,10 @@ on performSmartRule(theRecords)
 
 			if not isWebClip then
 				-- Shared values for daily notes processing
-				set docBaseName to do shell script "echo " & quoted form of recName & " | sed 's/\\.[^.]*$//'" without altering line endings
+				-- printf, not echo: `without altering line endings` also disables the
+				-- trailing-newline trim, and a newline inside docBaseName splits every
+				-- bullet it is spliced into across two physical lines.
+				set docBaseName to do shell script "printf '%s' " & quoted form of recName & " | sed 's/\\.[^.]*$//'" without altering line endings
 
 				set eventDate to ""
 				try
@@ -300,7 +303,9 @@ on performSmartRule(theRecords)
 										end if
 									end if
 								end repeat
-								if matchArgs is not "" then
+								if matchArgs is "" then
+									my pipelineLog("Post-Enrich & Archive", "INFO", "event match skipped: no candidate day carries event bullets", recName, recUUID)
+								else
 									set matchOut to do shell script "/usr/bin/python3 $HOME/.local/bin/brief_events.py match --name " & quoted form of docBaseName & matchArgs without altering line endings
 									if matchOut is not "" then
 										set oldTID to AppleScript's text item delimiters
@@ -311,6 +316,8 @@ on performSmartRule(theRecords)
 											set matchedDate to item 1 of matchParts as text
 											set matchedKey to item 2 of matchParts as text
 										end if
+									else
+										my pipelineLog("Post-Enrich & Archive", "INFO", "event match: no unique event for name", recName, recUUID)
 									end if
 								end if
 								repeat with tmpBrief in tmpFiles
@@ -318,6 +325,7 @@ on performSmartRule(theRecords)
 								end repeat
 							on error errMsg
 								log message "Post-Enrich & Archive: event match failed: " & errMsg info recName
+								my pipelineLog("Post-Enrich & Archive", "WARNING", "event match failed: " & errMsg, recName, recUUID)
 							end try
 
 							if matchedKey is not "" then
