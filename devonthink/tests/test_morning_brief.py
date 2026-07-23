@@ -1593,6 +1593,91 @@ class SeriesLookbackStamp(unittest.TestCase):
         self.assertEqual(mb.cached_repeats(reloaded, self.TODAY), repeats)
 
 
+class BriefEventLinks(unittest.TestCase):
+    """Every event title links into the note layer: to the note that owns
+    the event, or to a createMarkdown URL that births one on click. The
+    links re-derive from LinkedEvent metadata each run, so the wholesale
+    section replace can never lose an attachment."""
+
+    TODAY = "2026-07-14"
+
+    def blocks(self, events):
+        return mb.brief_blocks(events, [], ROOM_RE, set())
+
+    def key(self, title):
+        return mb.be.event_key(self.TODAY, title)
+
+    def test_a_noteless_event_gets_a_create_link(self):
+        got = mb.render_brief(self.blocks([event("Call Priya")]), self.TODAY,
+                              {}, "ARCHIVE-UUID")
+        self.assertIn("- 9:00am — [Call Priya](x-devonthink://createMarkdown"
+                      "?title=2026-07-14%20Call%20Priya", got)
+        self.assertIn("&destination=ARCHIVE-UUID", got)
+        self.assertNotIn("location=", got)
+
+    def test_without_an_archive_group_the_title_stays_plain(self):
+        got = mb.render_brief(self.blocks([event("Call Priya")]), self.TODAY,
+                              {}, None)
+        self.assertIn("- 9:00am — Call Priya", got)
+        self.assertNotIn("createMarkdown", got)
+
+    def test_the_owning_meeting_note_takes_the_title_link(self):
+        notes = {self.key("Call Priya"): [
+            {"uuid": "N1", "name": "2026-07-14 Call Priya",
+             "handwritten": False, "documenttype": "Meeting Notes"}]}
+        got = mb.render_brief(self.blocks([event("Call Priya")]), self.TODAY,
+                              notes, "ARCHIVE-UUID")
+        self.assertIn("- 9:00am — [Call Priya](x-devonthink-item://N1)", got)
+        self.assertNotIn("createMarkdown", got)
+
+    def test_a_handwritten_match_renders_as_a_sub_bullet(self):
+        notes = {self.key("Call Priya"): [
+            {"uuid": "HW", "name": "Call with Priya",
+             "handwritten": True, "documenttype": ""}]}
+        got = mb.render_brief(self.blocks([event("Call Priya")]), self.TODAY,
+                              notes, "ARCHIVE-UUID")
+        self.assertIn("  - [✏️ Call with Priya](x-devonthink-item://HW)", got)
+        self.assertIn("createMarkdown", got)
+
+    def test_owning_note_links_the_title_while_others_stay_bullets(self):
+        notes = {self.key("Call Priya"): [
+            {"uuid": "HW", "name": "Call with Priya",
+             "handwritten": True, "documenttype": ""},
+            {"uuid": "N1", "name": "2026-07-14 Call Priya",
+             "handwritten": False, "documenttype": "Meeting Notes"}]}
+        got = mb.render_brief(self.blocks([event("Call Priya")]), self.TODAY,
+                              notes, "ARCHIVE-UUID")
+        self.assertIn("- 9:00am — [Call Priya](x-devonthink-item://N1)", got)
+        self.assertIn("  - [✏️ Call with Priya](x-devonthink-item://HW)", got)
+        self.assertEqual(got.count("x-devonthink-item://N1"), 1)
+
+    def test_a_tentative_suffix_stays_outside_the_link(self):
+        notes = {self.key("Call Priya"): [
+            {"uuid": "N1", "name": "2026-07-14 Call Priya",
+             "handwritten": False, "documenttype": "Meeting Notes"}]}
+        got = mb.render_brief(
+            self.blocks([event("Call Priya", rsvp="tentative")]), self.TODAY,
+            notes, "ARCHIVE-UUID")
+        self.assertIn(
+            "- 9:00am — [Call Priya](x-devonthink-item://N1) (tentative)",
+            got)
+
+    def test_a_redacted_title_never_becomes_a_link(self):
+        """A create URL embeds the title — a private event's real title must
+        not leak into it, and the placeholder must not be clickable either."""
+        got = mb.render_brief(
+            mb.brief_blocks([event("Lunch with Priya Raman")], [], ROOM_RE,
+                            {"priya raman"}),
+            self.TODAY, {}, "ARCHIVE-UUID")
+        self.assertIn(f"- 9:00am — {mb.REDACTED_TITLE}", got)
+        self.assertNotIn("createMarkdown", got)
+        self.assertNotIn("Lunch", got)
+
+    def test_rendering_without_the_note_layer_matches_the_legacy_shape(self):
+        got = mb.render_brief(self.blocks([event("Call Priya")]), self.TODAY)
+        self.assertIn("- 9:00am — Call Priya", got)
+
+
 class BriefNews(unittest.TestCase):
     """The roster ages, the news does not: a standing meeting drops who is in
     the room but keeps what has been filed about them since you last met."""

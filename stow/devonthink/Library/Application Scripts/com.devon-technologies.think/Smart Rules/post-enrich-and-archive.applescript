@@ -2,8 +2,11 @@
 --
 -- Runs after AI enrichment completes. Performs four steps in a single pass:
 --   1. Extracts action items and sends them to Things 3 (handwritten docs only)
---   2. Processes daily notes: extracts journal sections from handwritten docs
---      and appends wikilinks for documents with EventDate (skipped for web clips)
+--   2. Processes daily notes: extracts journal sections from handwritten docs,
+--      then links each document into its daily note — under the matching
+--      ## Briefing event (name-matched via brief_events.py, which stamps
+--      LinkedEvent so dt-morning-brief keeps the link across regens) or,
+--      unmatched, under ## Today's Notes (skipped for web clips)
 --   3. Syncs H1 heading to record name for markdown documents
 --   4. Archives the record to 99_ARCHIVE
 --
@@ -247,7 +250,10 @@ on performSmartRule(theRecords)
 					end try
 				end if
 
-				-- 2b. Append wikilink to daily note (all non-web-clip documents)
+				-- 2b. Link into the daily note: as a sub-bullet under the matching
+				-- briefing event when the record's name finds one (brief_events.py,
+				-- which also stamps the LinkedEvent key dt-morning-brief re-renders
+				-- from), otherwise under ## Today's Notes.
 				if destGroup is not missing value then
 					set isLinked to (get custom meta data for "DailyNoteLinked" from theRecord)
 					if not my flagIsSet(isLinked) then
@@ -262,49 +268,122 @@ on performSmartRule(theRecords)
 								set targetDate to cYear & "-" & cMonth & "-" & cDay
 							end if
 
-							set targetNote to my getOrCreateDailyNote(targetDB, destGroup, groupPath, targetDate)
+							-- An EventDate pins the note to its day; without one the
+							-- upload may trail the meeting, so the day before the
+							-- creation date is searched too.
+							set candDates to {targetDate}
+							if not hasValidEventDate then
+								set end of candDates to (do shell script "date -j -v-1d -f %Y-%m-%d " & quoted form of targetDate & " +%Y-%m-%d")
+							end if
 
-							if targetNote is not missing value then
-								-- Determine emoji by document type
-								set docType to type of theRecord
-								if my flagIsSet(isHandwritten) then
-									set emoji to "✏️"
-								else if hasValidEventDate then
-									set emoji to "📅"
-								else if docType is bookmark then
-									set emoji to "🔗"
-								else if docType is PDF document then
-									set emoji to "📄"
-								else
-									set emoji to "📝"
+							set matchedDate to ""
+							set matchedKey to ""
+							try
+								set matchArgs to ""
+								set tmpFiles to {}
+								repeat with candDate in candDates
+									set candNote to missing value
+									try
+										set candNote to get record at (groupPath & "/" & candDate) in targetDB
+									end try
+									if candNote is not missing value then
+										set candText to plain text of candNote
+										if candText contains "## Briefing" then
+											set tmpBrief to do shell script "mktemp /tmp/dt-brief.XXXXXX"
+											set end of tmpFiles to tmpBrief
+											set fileRef to open for access (POSIX file tmpBrief) with write permission
+											write candText to fileRef as «class utf8»
+											close access fileRef
+											set matchArgs to matchArgs & " --cand " & quoted form of (candDate as text) & " " & quoted form of tmpBrief
+										end if
+									end if
+								end repeat
+								if matchArgs is not "" then
+									set matchOut to do shell script "/usr/bin/python3 $HOME/.local/bin/brief_events.py match --name " & quoted form of docBaseName & matchArgs without altering line endings
+									if matchOut is not "" then
+										set oldTID to AppleScript's text item delimiters
+										set AppleScript's text item delimiters to tab
+										set matchParts to text items of matchOut
+										set AppleScript's text item delimiters to oldTID
+										if (count of matchParts) ≥ 2 then
+											set matchedDate to item 1 of matchParts as text
+											set matchedKey to item 2 of matchParts as text
+										end if
+									end if
 								end if
+								repeat with tmpBrief in tmpFiles
+									do shell script "rm -f " & quoted form of tmpBrief
+								end repeat
+							on error errMsg
+								log message "Post-Enrich & Archive: event match failed: " & errMsg info recName
+							end try
 
-								-- Format creation time as h:mmam/pm
-								set recDate to creation date of theRecord
-								set secSinceMidnight to time of recDate
-								set cHour to secSinceMidnight div 3600
-								set cMin to (secSinceMidnight mod 3600) div 60
-								if cHour ≥ 12 then
-									set ampm to "pm"
-									if cHour > 12 then set cHour to cHour - 12
-								else
-									set ampm to "am"
-									if cHour is 0 then set cHour to 12
-								end if
-								set timeStr to (cHour as text) & ":" & text -2 thru -1 of ("0" & (cMin as text)) & ampm
-
+							if matchedKey is not "" then
 								set docUUID to uuid of theRecord
-								set itemLink to "x-devonthink-item://" & docUUID
-								set linkText to "- " & timeStr & ": [" & emoji & " " & docBaseName & "](" & itemLink & ")"
-
-								-- Only append if this document isn't already linked (by UUID)
-								if (plain text of targetNote) does not contain docUUID then
-									my appendToSection(targetNote, sectionHeader, linkText & linefeed)
+								if my flagIsSet(isHandwritten) then
+									set subEmoji to "✏️"
+								else
+									set subEmoji to "📝"
 								end if
-
+								set briefNote to get record at (groupPath & "/" & matchedDate) in targetDB
+								set briefText to plain text of briefNote
+								set tmpNote to do shell script "mktemp /tmp/dt-brief.XXXXXX"
+								set fileRef to open for access (POSIX file tmpNote) with write permission
+								write briefText to fileRef as «class utf8»
+								close access fileRef
+								set bulletLine to "- [" & subEmoji & " " & docBaseName & "](x-devonthink-item://" & docUUID & ")"
+								set newBrief to do shell script "/usr/bin/python3 $HOME/.local/bin/brief_events.py insert-subbullet " & quoted form of matchedDate & " " & quoted form of matchedKey & " " & quoted form of bulletLine & " < " & quoted form of tmpNote without altering line endings
+								do shell script "rm -f " & quoted form of tmpNote
+								if newBrief is not briefText then
+									set plain text of briefNote to newBrief
+								end if
+								add custom meta data matchedKey for "LinkedEvent" to theRecord
 								add custom meta data 1 for "DailyNoteLinked" to theRecord
 							else
-								log message "Post-Enrich & Archive: daily note (" & targetDate & ".md) could not be created, skipping wikilink" info recName
+								set targetNote to my getOrCreateDailyNote(targetDB, destGroup, groupPath, targetDate)
+
+								if targetNote is not missing value then
+									-- Determine emoji by document type
+									set docType to type of theRecord
+									if my flagIsSet(isHandwritten) then
+										set emoji to "✏️"
+									else if hasValidEventDate then
+										set emoji to "📅"
+									else if docType is bookmark then
+										set emoji to "🔗"
+									else if docType is PDF document then
+										set emoji to "📄"
+									else
+										set emoji to "📝"
+									end if
+
+									-- Format creation time as h:mmam/pm
+									set recDate to creation date of theRecord
+									set secSinceMidnight to time of recDate
+									set cHour to secSinceMidnight div 3600
+									set cMin to (secSinceMidnight mod 3600) div 60
+									if cHour ≥ 12 then
+										set ampm to "pm"
+										if cHour > 12 then set cHour to cHour - 12
+									else
+										set ampm to "am"
+										if cHour is 0 then set cHour to 12
+									end if
+									set timeStr to (cHour as text) & ":" & text -2 thru -1 of ("0" & (cMin as text)) & ampm
+
+									set docUUID to uuid of theRecord
+									set itemLink to "x-devonthink-item://" & docUUID
+									set linkText to "- " & timeStr & ": [" & emoji & " " & docBaseName & "](" & itemLink & ")"
+
+									-- Only append if this document isn't already linked (by UUID)
+									if (plain text of targetNote) does not contain docUUID then
+										my appendToSection(targetNote, sectionHeader, linkText & linefeed)
+									end if
+
+									add custom meta data 1 for "DailyNoteLinked" to theRecord
+								else
+									log message "Post-Enrich & Archive: daily note (" & targetDate & ".md) could not be created, skipping wikilink" info recName
+								end if
 							end if
 						on error errMsg
 							log message "Post-Enrich & Archive: wikilink append failed: " & errMsg info recName

@@ -88,7 +88,8 @@ The pipeline keys on the following custom metadata fields. You do **not** create
 | EnrichInputHash     | Text            | SHA-256 of the inputs the LLM saw (record name + filtered/truncated content) on the last successful enrichment. If the hash matches on a retry, Enrich: AI Metadata skips the LLM call entirely. Clear this field to force a fresh LLM call on otherwise-unchanged content                  |
 | ErrorCount          | Integer         | Tracks the number of times a document has timed out or failed processing in a pipeline step                                                                                                                                                                                                  |
 | PreviousTasks       | Multi-line Text | Stores a newline-separated list of tasks already sent to Things 3 to prevent duplicates on notebook updates                                                                                                                                                                                  |
-| DailyNoteLinked     | Boolean         | Tracks whether a document has been linked to its respective EventDate's daily note                                                                                                                                                                                                           |
+| DailyNoteLinked     | Boolean         | Tracks whether a document has been linked into its daily note — under a matched `## Briefing` event or under `## Today's Notes`. Pre-set by Adopt Meeting Note so briefing-owned notes never double-list                                                                                     |
+| LinkedEvent         | Text            | Event key `yyyy-mm-dd-<slug of title>` tying a note to a briefing calendar event. Stamped by Adopt Meeting Note (create-on-click notes) and Post-Enrich & Archive (name-matched documents); `dt-morning-brief.py` re-derives each event's title link and sub-bullets from it on every regeneration. Set or clear it by hand to fix a wrong match |
 | PreviousDailyNotes  | Multi-line Text | Stores a newline-separated list of extracted daily notes to prevent duplicates on notebook updates                                                                                                                                                                                           |
 | NeedsSingleFile     | Boolean         | Set on bookmarks by Extract: Web Content when the URL's hostname is NOT on the skip list. Signals to `capture-bookmarks-batch.py` that the bookmark still needs a browser-driven HTML snapshot. Cleared by `ingest-singlefile-html.py` once the bookmark has been captured                   |
 | SkipSingleFile      | Boolean         | Set on bookmarks by Extract: Web Content when the URL's hostname matches `~/.config/devonthink-pipeline/singlefile-skip-domains.txt` (e.g. youtube, spotify), or manually by the user to opt a single bookmark out. The queue-drain path of `capture-bookmarks-batch.py` filters these out; the selection path (--uuid) bypasses the check so explicit user selection always captures. **Skip wins:** the hourly `Util: Metadata Cleanup` rule clears `NeedsSingleFile` whenever `SkipSingleFile` is also set, so the two flags are never simultaneously true |
@@ -543,7 +544,7 @@ The script reads each field from the record and applies it:
 Runs after AI enrichment completes. Performs five steps in a single pass:
 
 1. **Action Items** — Parses the document for sections titled "Action Items", "Todos", or similar, and sends any bulleted tasks to Things 3 via AppleScript. Deduplication is handled via `PreviousTasks`. Skipped for web clip records (those with `WebClipSource` set).
-2. **Daily Notes** — Extracts "Daily Notes", "Today", "Journal", or "Log" sections from handwritten documents and appends them to today's daily note. Also appends a wikilink for any document with an `EventDate` to the respective date's daily note. Deduplication is handled via `PreviousDailyNotes` and `DailyNoteLinked`. Skipped for web clip records.
+2. **Daily Notes** — Extracts "Daily Notes", "Today", "Journal", or "Log" sections from handwritten documents and appends them to today's daily note. Then links the document into its daily note: if its name matches a `## Briefing` event title (`brief_events.py match` — candidate days are the `EventDate` when set, else the creation day plus the day before), the document gets `LinkedEvent` stamped and a `✏️`/`📝` sub-bullet spliced under that event line; otherwise a wikilink is appended under `## Today's Notes` on the `EventDate`-else-creation date's note. Deduplication is handled via `PreviousDailyNotes` and `DailyNoteLinked`. Skipped for web clip records. See `docs/entities.md` → "Every event title is a note link".
 3. **Sync H1** — For markdown documents, ensures the first `# Heading` matches the record's filename (minus extension). If the H1 differs it's replaced; if absent it's injected after any YAML frontmatter. This guarantees the AI-enriched title is reflected in the document body.
 4. **Web clip name propagation** — For markdown web clips (records with `WebClipSource` set), if the linked bookmark or HTML snapshot still carries a `"No title"` placeholder name, propagate the markdown's (post-enrichment) name to it. See [Untitled-page fallback](#untitled-page-fallback). `NameLocked` is set on the sibling _before_ the rename so `After Renaming, Lock Name` doesn't double-fire.
 5. **Archive** — Moves the record to `99_ARCHIVE` and clears `NeedsProcessing`. The move happens first; the flag is only cleared on success to prevent silent data loss.
@@ -561,6 +562,20 @@ This consolidates the previous Extract: Action Items, Process: Daily Notes, and 
   - Every Minute
 - Actions
   - Execute Script (AppleScript, external) — see [`post-enrich-and-archive.applescript`](../stow/devonthink/Library/Application%20Scripts/com.devon-technologies.think/Smart%20Rules/post-enrich-and-archive.applescript)
+
+### Adopt Meeting Note
+
+Finishes what a briefing create-link cannot do itself: `dt-morning-brief.py` renders every note-less briefing event title as an `x-devonthink://createMarkdown` URL (name `"<date> <event title>"`, destination `99_ARCHIVE`, tag `Meeting Note`), and a URL command cannot set custom metadata. This rule derives `EventDate` and the `LinkedEvent` key from the record name (`brief_events.py adopt-key`), stamps `DocumentType="Meeting Notes"` (so entity filing sweeps the note as a source) and `DailyNoteLinked=1` (so it never double-lists under `## Today's Notes`), then swaps that day's briefing create-link for the note's item link in place — clicking the title twice opens the note instead of minting a duplicate. See `docs/entities.md` → "Every event title is a note link".
+
+- Search in
+  - Lorebook
+- Criteria
+  - Kind is Markdown
+  - Tag is `Meeting Note`
+- Trigger
+  - On Creation; Every Minute (catch-up — the script no-ops once `LinkedEvent` is set)
+- Actions
+  - Execute Script (AppleScript, external) — see [`adopt-meeting-note.applescript`](../stow/devonthink/Library/Application%20Scripts/com.devon-technologies.think/Smart%20Rules/adopt-meeting-note.applescript)
 
 ### Process: Jots
 
@@ -682,6 +697,7 @@ The schedule is set to a daytime wake-hour rather than the small hours: `StartCa
 The primary DEVONthink smart rule pipeline integrates directly with daily notes through [Post-Enrich & Archive](#post-enrich--archive) (which absorbed the retired standalone "Process: Daily Notes" rule):
 
 - **Extracting Daily Logs:** For handwritten notes, the pipeline searches for headers like "Daily Notes", "Today", "Journal", or "Log". If found, it extracts the content beneath them and automatically appends it to today's daily note. Deduplication ensures that repeated notebook updates don't result in duplicated entries.
+- **Linking Briefing Events:** Before the wikilink fallback below, the pipeline tries to match the document's name against that day's `## Briefing` event titles (see [Adopt Meeting Note](#adopt-meeting-note) and `docs/entities.md` → "Every event title is a note link"); a match files the document as a sub-bullet under the event instead of under `## Today's Notes`.
 - **Linking Temporal Events:** For any document processed by the pipeline, if the AI enrichment step identified a specific `EventDate` (e.g., from meeting notes), the pipeline automatically appends a wikilink to that document on the daily note corresponding to that specific date. If the target note doesn't exist yet — a past/future `EventDate`, or a morning where the 5:00 AM `create-daily-note.sh` run was missed — Post-Enrich & Archive creates it on demand (matching `create-daily-note.sh`'s heading and `Daily Note` tag) rather than dropping the link. Extract: Web Content and `ingest-singlefile-html.py` create today's note on demand the same way, so captures landing between midnight and the 05:00 seeder keep their daily-note entry.
 
 ### Template Format

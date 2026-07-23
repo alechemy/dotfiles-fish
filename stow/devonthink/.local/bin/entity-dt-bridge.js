@@ -31,7 +31,8 @@
 //   set_comment        {uuid,comment}                   -> {uuid}
 //   set_name           {uuid,name}                      -> {uuid}
 //   set_tags           {uuid,tags}                      -> {uuid}
-//   find_by_field      {field,value}                    -> [{uuid,name,path,location}]
+//   find_by_field      {field,value}                    -> [{uuid,name,path,location,
+//                                                            handwritten,documenttype}]
 //   import_record      {path,group}                     -> {uuid,name}
 //   replace_file       {uuid,path}                      -> {uuid}
 //   move_to            {uuid,group}                     -> {uuid}
@@ -868,7 +869,9 @@ function run(argv) {
                                   { in: db.root() })) {
         if (mdValue(hit, key) === String(op.value)) {
           out.push({ uuid: hit.uuid(), name: hit.name(), path: hit.path(),
-                     location: hit.location() })
+                     location: hit.location(),
+                     handwritten: flagSet(mdValue(hit, 'handwritten')),
+                     documenttype: mdValue(hit, 'documenttype') })
         }
       }
       return out

@@ -157,6 +157,62 @@ Roster people are attached to an event two ways, deduped: from its **attendees**
 the **title** ("Call with Jake"). Attendees exist only on Exchange events —
 iCloud events carry none — which is why title matching exists at all.
 
+#### Every event title is a note link
+
+Each briefed event ties into the note layer through its **event key** —
+`YYYY-MM-DD-<slug of title>`, computed by `brief_events.py` and stored in the
+`LinkedEvent` custom-metadata field of every note attached to the event. The
+metadata is the durable record; the briefing text is only a rendering of it,
+re-derived on every run. That derivation is load-bearing: each run replaces
+the whole `## Briefing` span, so a link living only in the text would be
+wiped by the next regeneration (including the `RunAtLoad` rerun a mid-day
+reboot triggers).
+
+Rendering, per event (`event_note_index` → `render_brief`):
+
+- The note whose `DocumentType` contains "Meeting" owns the event: the title
+  renders as that note's item link.
+- Every other `LinkedEvent`-carrying note (handwritten matches) renders as an
+  indented sub-bullet — `✏️` handwritten, `📝` otherwise.
+- An event with no owning note renders its title as an
+  `x-devonthink://createMarkdown` URL: clicking it — and only clicking it —
+  creates `"<date> <title>"` in `/99_ARCHIVE`, tagged `Meeting Note`, with an
+  H1 skeleton. No click, no record. Notes are born in their permanent home on
+  purpose (nothing may move a note mid-meeting), and are retrieved by
+  tag/`DocumentType`, not location. The URL deliberately carries no
+  `location` parameter — DT would treat it as "download this URL as the
+  document" and discard `text`.
+- A redacted event renders as plain text: its real title must not leak into a
+  create URL.
+
+Two smart rules stamp the metadata and splice the same links into the
+already-rendered briefing, so nothing waits for the next regen:
+
+- **Adopt Meeting Note** (fires on the `Meeting Note` tag) finishes what a
+  URL command cannot: it derives `EventDate` + `LinkedEvent` from the record
+  name, stamps `DocumentType="Meeting Notes"` (entity filing already sweeps
+  `mddocumenttype:~Meeting`, so the note becomes a fact source for free) and
+  `DailyNoteLinked=1` (no double-listing under `## Today's Notes`), then
+  swaps the day's create-link for the item link in place — clicking the
+  title twice opens the note instead of minting a duplicate. Clicking a
+  stale create-link in an *old* daily note retro-creates a correctly dated
+  note that files to that day; the adopt rule repairs that day's briefing
+  the same way.
+- **Post-Enrich & Archive step 2b** tries the event match before its
+  `## Today's Notes` fallback (`brief_events.py match`): stopword-filtered
+  token overlap ≥ 2/3 with a **unique winner** required, so "Call with
+  Priya" finds the event "Call Priya", but a note named "Roundtable" on a
+  day with two roundtable events refuses to choose and falls back to
+  `## Today's Notes`. Candidate days are the document's `EventDate` when
+  set, else its creation day plus the day before (an upload can trail the
+  meeting); event titles are parsed from the daily notes' own rendered
+  briefings, so the matcher sees exactly the day you were briefed on, with
+  redacted events withheld.
+
+A wrong link is repaired by editing metadata, not text: set or clear
+`LinkedEvent` on the note and the next regeneration redraws today's briefing
+to match (past briefings never regenerate — fix those lines by hand).
+
 #### The roster ages; the news does not
 
 A block carries two kinds of content that read alike and age nothing alike, and
