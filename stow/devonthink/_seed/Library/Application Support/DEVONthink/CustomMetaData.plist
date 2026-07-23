@@ -908,5 +908,17 @@
 		<key>type</key>
 		<string>bool</string>
 	</dict>
+	<dict>
+		<key>date</key>
+		<real>806508494.281421</real>
+		<key>identifier</key>
+		<string>mdlinkedevent</string>
+		<key>index</key>
+		<integer>80</integer>
+		<key>title</key>
+		<string>LinkedEvent</string>
+		<key>type</key>
+		<string>string</string>
+	</dict>
 </array>
 </plist>
