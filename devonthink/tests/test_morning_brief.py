@@ -1607,8 +1607,8 @@ class BriefEventLinks(unittest.TestCase):
     def test_a_noteless_event_gets_a_create_link(self):
         got = self.timeline([event("Call Priya")], {})
         self.assertEqual(got[0]["line"],
-                         "- 9:00am: 📅 [Call Priya](dtnote://open"
-                         "?date=2026-07-14&title=Call%20Priya)")
+                         "- 9:00am: 📅 *[Call Priya](dtnote://open"
+                         "?date=2026-07-14&title=Call%20Priya)*")
 
     def test_the_owning_meeting_note_takes_the_title_link(self):
         notes = {self.key("Call Priya"): [
@@ -1627,7 +1627,7 @@ class BriefEventLinks(unittest.TestCase):
         got = self.timeline([event("Call Priya")], notes)
         self.assertIn("  - ✏️ [Call with Priya](x-devonthink-item://HW)",
                       got[0]["subLines"])
-        self.assertIn("dtnote://", got[0]["line"])
+        self.assertIn("*[Call Priya](dtnote://", got[0]["line"])
 
     def test_owning_note_links_the_title_while_others_stay_sub_lines(self):
         notes = {self.key("Call Priya"): [
@@ -1667,8 +1667,8 @@ class BriefEventLinks(unittest.TestCase):
         """A dtnote URL derives from the event alone, so a render with no
         LinkedEvent lookups at all still makes every title clickable."""
         got = self.timeline([event("Call Priya")])
-        self.assertIn("dtnote://open?date=2026-07-14&title=Call%20Priya",
-                      got[0]["line"])
+        self.assertIn("*[Call Priya](dtnote://open"
+                      "?date=2026-07-14&title=Call%20Priya)*", got[0]["line"])
 
     def test_blocks_carry_their_merge_identity(self):
         got = self.timeline([event("Call Priya")])
@@ -1743,8 +1743,8 @@ class BriefNews(unittest.TestCase):
         ev = event("Weekly Sync", [attendee("Priya Raman", "p@x.com")])
         got = self.rendered([ev], repeats={mb.series_key(ev)})
         self.assertEqual(got.strip().splitlines()[-1],
-                         "- 9:00am: 📅 [Weekly Sync](dtnote://open"
-                         "?date=2026-07-14&title=Weekly%20Sync)")
+                         "- 9:00am: 📅 *[Weekly Sync](dtnote://open"
+                         "?date=2026-07-14&title=Weekly%20Sync)*")
 
     def test_a_redacted_event_never_carries_news(self):
         ev = event("Lunch with Priya Raman", [attendee("Priya Raman", "p@x.com")])
@@ -1761,8 +1761,8 @@ class BriefNews(unittest.TestCase):
         got = self.rendered([event("Kickoff",
                                    [attendee("Priya Raman", "p@x.com")])])
         self.assertEqual(got.splitlines(), [
-            "- 9:00am: 📅 [Kickoff](dtnote://open?date=2026-07-14"
-            "&title=Kickoff)",
+            "- 9:00am: 📅 *[Kickoff](dtnote://open?date=2026-07-14"
+            "&title=Kickoff)*",
             "  - 👤 [Priya Raman](x-devonthink-item://uuid-priya-raman)"
             " — last contact 2026-07-10",
             "    - 2026-07-13 — moved to Denver.",
@@ -1874,8 +1874,8 @@ class BriefBlocksTimeline(unittest.TestCase):
         got = mb.brief_timeline_blocks(
             self.blocks([event("Perio cleaning")]), "2026-07-13")
         self.assertEqual(got[0]["line"],
-                         "- 9:00am: 📅 [Perio cleaning](dtnote://open"
-                         "?date=2026-07-13&title=Perio%20cleaning)")
+                         "- 9:00am: 📅 *[Perio cleaning](dtnote://open"
+                         "?date=2026-07-13&title=Perio%20cleaning)*")
         self.assertEqual(got[0]["subLines"], [])
 
 

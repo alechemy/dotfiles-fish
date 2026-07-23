@@ -262,6 +262,19 @@ class Merge(unittest.TestCase):
         out2 = self.merge(BODY, bad)
         self.assertNotIn("10:00am", out2["text"] or "")
 
+    def test_italic_noteless_lines_round_trip_and_self_migrate(self):
+        """A dtnote-linked title renders italicized (*[T](dtnote://…)*); the
+        italic form must satisfy the round-trip guard, match a plain-link
+        note-side copy of the same event, and be stable thereafter."""
+        italic = dict(BLOCKS[0],
+                      line="- 8:00am: 📅 *[SE Sync](dtnote://x)* (tentative)")
+        out = self.merge(BODY, [italic, BLOCKS[1], BLOCKS[2]])
+        self.assertEqual(out["skipped"], 0)
+        self.assertIn("*[SE Sync](dtnote://x)* (tentative)", out["text"])
+        again = self.merge(out["text"].split("\n"),
+                           [italic, BLOCKS[1], BLOCKS[2]])
+        self.assertFalse(again["changed"])
+
     def test_blank_separated_manual_sublines_travel_on_reschedule(self):
         body = BODY[:8] + ["  ", "  - manual two after spacer"] + BODY[8:]
         blocks = [BLOCKS[0],

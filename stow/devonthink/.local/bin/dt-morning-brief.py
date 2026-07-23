@@ -1331,8 +1331,9 @@ def event_note_index(blocks, today):
 
 def event_title_md(b, notes, today):
     """The event line's title cell: an item link to the note that owns the
-    event, a dtnote:// create-on-click URL when no note does, or plain text
-    for a redacted event (whose real title must not leak into a link)."""
+    event, an italicized dtnote:// create-on-click URL when no note does
+    (the italics mark it as not yet backed by a note), or plain text for a
+    redacted event (whose real title must not leak into a link)."""
     raw = b.get("raw_title")
     if not raw:
         return b["title"], None
@@ -1343,7 +1344,7 @@ def event_title_md(b, notes, today):
     if primary:
         return (f"[{raw}](x-devonthink-item://{primary['uuid']}){suffix}",
                 primary)
-    return f"[{raw}]({be.dtnote_url(today, raw)}){suffix}", None
+    return f"*[{raw}]({be.dtnote_url(today, raw)})*{suffix}", None
 
 
 def brief_timeline_blocks(blocks, today, event_notes=None):

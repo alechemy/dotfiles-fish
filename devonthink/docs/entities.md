@@ -176,8 +176,10 @@ Rendering, per event (`event_note_index` → `brief_timeline_blocks`):
   renders as that note's item link.
 - Every other `LinkedEvent`-carrying note (handwritten matches) renders as an
   indented sub-bullet — `✏️` handwritten, `📝` otherwise.
-- An event with no owning note renders its title as a
-  `dtnote://open?date=…&title=…` URL. The scheme belongs to **DTNote.app**
+- An event with no owning note renders its title as an *italicized*
+  `dtnote://open?date=…&title=…` URL — the italics read as "no note behind
+  this yet" and disappear when the title link becomes an item link. The
+  scheme belongs to **DTNote.app**
   (`~/Applications`, built by `scripts/build-dtnote-handler.sh` from
   `devonthink/utils/dtnote-handler.applescript`), a shim that hands the URL
   to `dtnote-open.py`: look up the owning note by key and open it, creating

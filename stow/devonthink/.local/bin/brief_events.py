@@ -32,7 +32,9 @@ The timeline grammar's machine/manual discriminator is a type emoji directly
 after the time separator (📅 calendar, 🔗 web, 📄 PDF, ✏️ handwritten,
 📝 note, 📔 journal — the untimed pinned form); machine sub-lines under an
 event open with ✏️/📝 (note links), 👤 (people), ⚠️ (warnings), or a
-"YYYY-MM-DD — " news-date prefix. Manual bullets carry no leading emoji and
+"YYYY-MM-DD — " news-date prefix. An event title still carrying a dtnote://
+create-on-click link renders italicized — the italics read as "no note behind
+this yet" and disappear when the title link becomes an item link. Manual bullets carry no leading emoji and
 are never rewritten; is_machine_bullet/is_machine_subline are the shared
 classifiers (entity-filing strips machine lines before fact extraction).
 
@@ -91,6 +93,8 @@ MACHINE_BULLET_RE = re.compile(
 MACHINE_SUBLINE_RE = re.compile(
     rf"^\s+- \[?[{SUBLINE_EMOJI}]\ufe0f? |^\s{{4,}}- \d{{4}}-\d{{2}}-\d{{2}} — ")
 LINKED_TITLE_RE = re.compile(r"^\[(.+?)\]\(([^)\s]*)\)(.*)$")
+# A note-less event's title link renders italicized (*[title](dtnote://…)*).
+ITALIC_LINKED_TITLE_RE = re.compile(r"^\*\[(.+?)\]\(([^)\s]*)\)\*(.*)$")
 TENTATIVE_RE = re.compile(r"\s*\(tentative\)\s*$")
 HEADING_RE = re.compile(r"^#{1,2}\s")
 ITEM_LINK_RE = re.compile(r"x-devonthink-item://([A-Za-z0-9-]+)")
@@ -243,7 +247,7 @@ def _parse_event_rest(rest):
     """(title, url, suffix) from the text after an event line's prefix."""
     url = None
     suffix = ""
-    lm = LINKED_TITLE_RE.match(rest)
+    lm = ITALIC_LINKED_TITLE_RE.match(rest) or LINKED_TITLE_RE.match(rest)
     if lm:
         title, url, suffix = lm.groups()
     else:

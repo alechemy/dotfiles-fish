@@ -41,13 +41,14 @@ BRIEF = """# Tuesday, July 14, 2026
 - something old
 """
 
-# A flat note: events are 📅 bullets in the root timeline, ": " separator.
+# A flat note: events are 📅 bullets in the root timeline, ": " separator;
+# a note-less event's dtnote link renders italicized.
 TIMELINE = """# Tuesday, July 14, 2026
 
 - 7:20am: slow start, skipped the run
 - 8:00am: 📅 SE / Prod Engineering Sync (tentative)
 - 9:01am: 📄 [Some scan](x-devonthink-item://SCAN)
-- 11:00am: 📅 [Vendor Roundtable](dtnote://open?date=2026-07-14&title=Vendor%20Roundtable)
+- 11:00am: 📅 *[Vendor Roundtable](dtnote://open?date=2026-07-14&title=Vendor%20Roundtable)*
   - 👤 [Priya Raman](x-devonthink-item://uuid-priya-raman)
 - 12:00pm: 📅 Call Priya
 - 12:00pm: 📅 Weekly PCD CAB 2026 edition
@@ -297,6 +298,7 @@ class LinkTitle(unittest.TestCase):
         self.assertIn("- 11:00am: 📅 [Vendor Roundtable]"
                       "(x-devonthink-item://NOTE-UUID)", got)
         self.assertNotIn("dtnote://", got)
+        self.assertNotIn("*[Vendor", got)
 
     def test_timeline_plain_title_keeps_the_tentative_suffix(self):
         key = be.event_key(TODAY, "SE / Prod Engineering Sync")
