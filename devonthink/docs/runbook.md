@@ -204,7 +204,7 @@ rather than retried forever. See the README "SingleFile Ingestion Pipeline."
 
 A note stopped producing proposals. After `MAX_ATTEMPTS` (5) failed extractions
 a source is **parked**; the morning brief's entity-review digest (on the
-TRMNL snapshot) lists parked sources so they stay visible.
+TRMNL snapshot) carries a parked-source count so they stay visible.
 
 A parked source retries automatically when its content changes, or on demand:
 

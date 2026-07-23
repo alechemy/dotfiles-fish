@@ -1676,6 +1676,18 @@ class BriefEventLinks(unittest.TestCase):
         self.assertEqual(got[0]["minutes"], 9 * 60)
         self.assertFalse(got[0]["redacted"])
 
+    def test_a_newline_in_a_title_never_splits_the_bullet_line(self):
+        """The rendered line is the block's merge identity; a second physical
+        line would leave a note-side copy no run can ever re-match."""
+        got = self.timeline([event("Planning\nsession")])
+        self.assertEqual(got[0]["title"], "Planning session")
+        self.assertNotIn("\n", got[0]["line"])
+
+    def test_an_empty_title_still_renders_a_parseable_event(self):
+        got = self.timeline([event("")])
+        self.assertEqual(got[0]["title"], "(untitled)")
+        self.assertIn("[(untitled)]", got[0]["line"])
+
 
 class BriefNews(unittest.TestCase):
     """The roster ages, the news does not: a standing meeting drops who is in

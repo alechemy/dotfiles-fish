@@ -69,8 +69,8 @@ calendar titles, EventKit calendar identifiers, or source identifiers.
   "Capturing a fact" below.
 - **Every day or two (2 minutes):** open `20_ENTITIES/_Review` and process
   proposals — see the walkthrough below. The TRMNL brief's entity-review
-  count shows what's waiting, and separately flags anything still sitting in
-  `_Review/Approved`, which means the run refused to apply it.
+  count shows what's waiting; a proposal still sitting in `_Review/Approved`
+  means the run refused to apply it (the pipeline log has the reason).
 - **Whenever you feel like it:** open `20_ENTITIES/_Candidates` — one record
   per unknown person seen in your notes or meetings, holding everything
   observed about them so far. Move it to `Approved` to start tracking them

@@ -49,14 +49,25 @@ def sort_timed_items(lines, header_idx):
         end += 1
     if end - start < 2:
         return
-    block = lines[start:end]
-    # Items without a time prefix keep their original relative position at the end.
+    # Sort whole blocks — a top-level bullet plus its indented sub-lines —
+    # by the parent bullet's time; a sub-line must never sort independently
+    # away from its parent. Blocks without a timed parent keep their
+    # original relative position at the end.
+    blocks = []
+    i = start
+    while i < end:
+        j = i + 1
+        while j < end and lines[j][:1].isspace():
+            j += 1
+        blocks.append(lines[i:j])
+        i = j
     decorated = [
-        ((0, t, i) if (t := time_key(line)) is not None else (1, 0, i), line)
-        for i, line in enumerate(block)
+        ((0, t, i) if not b[0][:1].isspace()
+         and (t := time_key(b[0])) is not None else (1, 0, i), b)
+        for i, b in enumerate(blocks)
     ]
     decorated.sort(key=lambda x: x[0])
-    lines[start:end] = [line for _, line in decorated]
+    lines[start:end] = [line for _, b in decorated for line in b]
 
 
 def legacy_insert(lines, block_lines):

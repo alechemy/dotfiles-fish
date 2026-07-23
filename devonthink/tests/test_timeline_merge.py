@@ -237,6 +237,45 @@ class Merge(unittest.TestCase):
         self.assertFalse(out["changed"])
         self.assertTrue(out["legacy"])
 
+    def test_hybrid_note_with_only_todays_notes_is_refused(self):
+        body = ["# Day", "", "- ", "", "## Today's Notes", "", "- old"]
+        out = self.merge(body, BLOCKS)
+        self.assertFalse(out["changed"])
+        self.assertTrue(out["legacy"])
+
+    def test_unparseable_blocks_are_skipped_not_looped(self):
+        """A block whose rendered line can't be re-parsed would read back as
+        a manual anchor — never matched, re-inserted on every run — so the
+        merge must drop it and say so."""
+        bad = [
+            {"minutes": 600, "title": "", "subLines": [],
+             "line": "- 10:00am: 📅 "},
+            {"minutes": 600, "title": "Planning\nsession", "subLines": [],
+             "line": "- 10:00am: 📅 [Planning\nsession](dtnote://x)"},
+            {"minutes": 600, "title": "Review [draft](v2) with team",
+             "subLines": [],
+             "line": "- 10:00am: 📅 [Review [draft](v2) with team](dtnote://x)"},
+        ]
+        out = self.merge(BODY, BLOCKS + bad)
+        self.assertEqual(out["skipped"], 3)
+        self.assertFalse(out["changed"])
+        out2 = self.merge(BODY, bad)
+        self.assertNotIn("10:00am", out2["text"] or "")
+
+    def test_blank_separated_manual_sublines_travel_on_reschedule(self):
+        body = BODY[:8] + ["  ", "  - manual two after spacer"] + BODY[8:]
+        blocks = [BLOCKS[0],
+                  dict(BLOCKS[1], minutes=540,
+                       line="- 9:00am: 📅 [Roundtable](x-devonthink-item://BBB)"),
+                  BLOCKS[2]]
+        out = self.merge(body, blocks)
+        lines = out["text"].splitlines()
+        at = next(i for i, l in enumerate(lines) if "9:00am" in l)
+        block = lines[at:at + 5]
+        self.assertIn("  - manual subnote", block)
+        self.assertIn("  - manual two after spacer", block)
+        self.assertEqual(out["text"].count("Roundtable"), 1)
+
     def test_a_trailing_user_heading_ends_machine_territory(self):
         body = BODY[:10] + ["", "# My Own Heading", "- kept forever"]
         out = self.merge(body, BLOCKS + [block(1380, "11:00pm", "Nightcap")])
@@ -297,6 +336,7 @@ class ClassifierParity(unittest.TestCase):
         "  - [✏️ scan](x-devonthink-item://B)",
         "  - ⚠️ identity unresolved",
         "    - 2026-07-13 — moved.",
+        "  - 2026-01-01 — remember: anniversary planning",
         "  - ask about the demo",
         "- 2026-07-13 — top level",
     ]

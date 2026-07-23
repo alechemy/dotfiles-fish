@@ -3,9 +3,9 @@
 `do shell script` coerces a helper's LF output to CR, and AppleScript's `return`
 constant IS a CR. Either one, written back into a record, stores the whole body
 as one CR-delimited line. Consumers that split on '\\n' — entity-dt-bridge's
-upsert_section, sync-markdown-h1 — then see a body with no lines and no
-headers, and respectively duplicate every generated section or emit an H1 in
-place of the document.
+merge_timeline, sync-markdown-h1 — then see a body with no lines and no
+bullets, and respectively re-insert every event block as a duplicate or emit
+an H1 in place of the document.
 
 The scan follows a tainted value to a record sink, so it catches the
 indirections a flat grep misses: a shell result assigned through an

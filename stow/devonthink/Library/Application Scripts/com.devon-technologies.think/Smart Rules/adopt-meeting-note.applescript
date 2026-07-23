@@ -7,8 +7,8 @@
 -- finishes the job: it derives EventDate and the LinkedEvent key from the
 -- name (brief_events.py adopt-key), stamps DocumentType "Meeting Notes" so
 -- the entity layer sweeps the note as a source, pre-sets DailyNoteLinked so
--- it never double-lists under ## Today's Notes, and swaps that day's
--- briefing create-link for the note's item link in place — clicking the
+-- it never double-lists as its own timeline bullet, and swaps that day's
+-- event-title create-link for the note's item link in place — clicking the
 -- title twice then opens the note instead of minting a duplicate.
 -- dt-morning-brief re-derives the same link from LinkedEvent on every
 -- regeneration, so the splice here only covers the gap until the next run.

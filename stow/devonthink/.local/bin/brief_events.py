@@ -85,8 +85,11 @@ TIMELINE_EVENT_RE = re.compile(
     rf"^- (\d{{1,2}}:\d{{2}}(?:am|pm)): {EVENT_EMOJI}\ufe0f? (.+)$")
 MACHINE_BULLET_RE = re.compile(
     rf"^- (?:\d{{1,2}}:\d{{2}}(?:am|pm): )?[{MACHINE_EMOJI}]\ufe0f? ")
+# The date form needs the deeper indent news lines render at: a dated bullet
+# at sub-bullet depth is something a person plausibly types, and a manual
+# line must never classify machine (the merge would delete it).
 MACHINE_SUBLINE_RE = re.compile(
-    rf"^\s+- (?:\[?[{SUBLINE_EMOJI}]\ufe0f? |\d{{4}}-\d{{2}}-\d{{2}} — )")
+    rf"^\s+- \[?[{SUBLINE_EMOJI}]\ufe0f? |^\s{{4,}}- \d{{4}}-\d{{2}}-\d{{2}} — ")
 LINKED_TITLE_RE = re.compile(r"^\[(.+?)\]\(([^)\s]*)\)(.*)$")
 TENTATIVE_RE = re.compile(r"\s*\(tentative\)\s*$")
 HEADING_RE = re.compile(r"^#{1,2}\s")
@@ -176,7 +179,7 @@ def is_machine_bullet(line):
 def is_machine_subline(line):
     """True for an indented line the pipeline owns under an event bullet:
     a note-link, person, or warning token (legacy inside-link ✏️/📝 forms
-    included), or a news fact's date prefix."""
+    included), or a news fact's date prefix at news depth (4+ spaces)."""
     return bool(MACHINE_SUBLINE_RE.match(line))
 
 

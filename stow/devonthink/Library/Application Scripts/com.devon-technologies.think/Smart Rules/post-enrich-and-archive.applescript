@@ -345,12 +345,12 @@ on performSmartRule(theRecords)
 								set targetNote to my getOrCreateDailyNote(targetDB, destGroup, groupPath, targetDate)
 
 								if targetNote is not missing value then
-									-- Determine emoji by document type
+									-- Determine emoji by document type. Never 📅: that is the
+									-- calendar-event grammar merge_timeline owns, and a document
+									-- bullet wearing it would be removed as a stale event.
 									set docType to type of theRecord
 									if my flagIsSet(isHandwritten) then
 										set emoji to "✏️"
-									else if hasValidEventDate then
-										set emoji to "📅"
 									else if docType is bookmark then
 										set emoji to "🔗"
 									else if docType is PDF document then

@@ -50,7 +50,7 @@
 //   mark_filed         {uuid}                           -> {uuid}
 //   create_record      {name,path,text,fields?,tags?}   -> {uuid}
 //   get_or_create_daily {date,heading}                  -> {uuid,text,created}
-//   merge_timeline     {uuid,blocks}                    -> {uuid,changed,legacy?}
+//   merge_timeline     {uuid,blocks}                    -> {uuid,changed,skipped,legacy?}
 //   append_pinned      {uuid,line}                      -> {uuid,changed}
 //   relink_entities    {}                               -> {records,changed}
 //   sort_logs          {dry_run?}                       -> {records,changed,
@@ -254,8 +254,11 @@ const TIMED_BULLET_RE = /^- (\d{1,2}):(\d{2})(am|pm)\b/
 const MACHINE_BULLET_RE =
   /^- (?:\d{1,2}:\d{2}(?:am|pm): )?[\u{1F4C5}\u{1F517}\u{1F4C4}✏\u{1F4DD}\u{1F4D4}]\uFE0F? /u
 const EVENT_BULLET_RE = /^- (\d{1,2}:\d{2}(?:am|pm)): \u{1F4C5}\uFE0F? (.+)$/u
+// The date form needs the deeper indent news lines render at: a dated
+// bullet at sub-bullet depth is something a person plausibly types, and a
+// manual line must never classify machine (the merge would delete it).
 const MACHINE_SUBLINE_RE =
-  /^\s+- (?:\[?[✏\u{1F4DD}\u{1F464}⚠]️? |\d{4}-\d{2}-\d{2} — )/u
+  /^\s+- (?:\[?[✏\u{1F4DD}\u{1F464}⚠]\uFE0F? )|^\s{4,}- \d{4}-\d{2}-\d{2} — /u
 const LINKED_TITLE_RE = /^\[(.+?)\]\(([^)\s]*)\)(.*)$/
 const EMPTY_BULLET_RE = /^\s*[-*]\s*$/
 const REDACTED_TITLE = 'Private event'
@@ -310,17 +313,38 @@ function parseEventBullet(line) {
 // it. Identity is (title, minutes) with a title-only second pass so a
 // rescheduled event relocates (manual sub-lines in tow) instead of being
 // dropped and re-inserted bare; redacted events match by (minutes) alone,
-// count-aware. Returns {text|null, changed, legacy?} — legacy notes (a
-// `## Briefing` header anywhere) are refused outright, since their events
-// live in the section, not the root span, and merging would duplicate them.
+// count-aware. A desired block whose line doesn't round-trip through
+// parseEventBullet is dropped and counted in `skipped`: its note-side copy
+// would parse as a manual anchor, never match, and be re-inserted on every
+// run. Returns {text|null, changed, skipped, legacy?} — legacy notes (a
+// `## Briefing` or `## Today's Notes` header anywhere) are refused outright,
+// since their events live in a section, not the root span, and merging
+// would duplicate them.
 function timelineMerge(body, blocks) {
-  if (body.some(l => l.trim() === '## Briefing')) {
-    return { text: null, changed: false, legacy: true }
+  const legacyHeader = l =>
+    l.trim() === '## Briefing' || l.trim() === "## Today's Notes"
+  if (body.some(legacyHeader)) {
+    return { text: null, changed: false, skipped: 0, legacy: true }
   }
   const span = rootSpan(body)
 
-  // Units: each machine event block (bullet + contiguous indented lines) is
-  // one unit; every other line is its own single-line unit.
+  // Units: each machine event block is one unit — the bullet plus its
+  // indented lines, riding over blank lines that more indented lines follow
+  // (so a spaced-out run of manual sub-bullets travels whole on a
+  // relocation); every other line is its own single-line unit.
+  const blockEnd = i => {
+    let end = i + 1
+    while (end < span.end) {
+      if (/^\s+\S/.test(body[end])) { end++; continue }
+      if (body[end].trim() === '') {
+        let k = end + 1
+        while (k < span.end && body[k].trim() === '') k++
+        if (k < span.end && /^\s+\S/.test(body[k])) { end = k; continue }
+      }
+      break
+    }
+    return end
+  }
   const units = []
   for (let i = span.start; i < span.end;) {
     const ev = parseEventBullet(body[i])
@@ -329,13 +353,19 @@ function timelineMerge(body, blocks) {
       i++
       continue
     }
-    let end = i + 1
-    while (end < span.end && /^\s+\S/.test(body[end])) end++
+    const end = blockEnd(i)
     units.push({ lines: body.slice(i, end), ev: ev, claimed: false })
     i = end
   }
 
-  const desired = blocks.map(b => ({
+  const roundTrips = b => {
+    if (/[\r\n]/.test(String(b.line))) return false
+    const ev = parseEventBullet(String(b.line))
+    return ev !== null && ev.minutes === b.minutes &&
+      (b.redacted ? ev.redacted : ev.title === b.title)
+  }
+  const skipped = blocks.filter(b => !roundTrips(b)).length
+  const desired = blocks.filter(roundTrips).map(b => ({
     minutes: b.minutes,
     line: b.line,
     subLines: b.subLines || [],
@@ -419,8 +449,10 @@ function timelineMerge(body, blocks) {
   const out = body.slice(0, span.start)
     .concat(units.flatMap(u => u.lines), body.slice(span.end))
   const text = out.join('\n')
-  if (text === body.join('\n')) return { text: null, changed: false }
-  return { text: text, changed: true }
+  if (text === body.join('\n')) {
+    return { text: null, changed: false, skipped: skipped }
+  }
+  return { text: text, changed: true, skipped: skipped }
 }
 
 // Pure core of the append_pinned op: one untimed machine line at the end of
@@ -1419,7 +1451,7 @@ function run(argv) {
       const rec = byUuid(op.uuid)
       const r = timelineMerge(bodyLines(rec), op.blocks || [])
       if (r.text !== null) rec.plainText = r.text
-      const out = { uuid: op.uuid, changed: r.changed }
+      const out = { uuid: op.uuid, changed: r.changed, skipped: r.skipped }
       if (r.legacy) out.legacy = true
       return out
     },

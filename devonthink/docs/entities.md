@@ -576,13 +576,14 @@ other digests) counting proposals that
 need attention: those awaiting review in `_Review`, and separately any left
 sitting in `_Review/Approved`, which means filing refused to apply them (bad
 ops JSON, a failing op, or the stale-`ensure_person` guard below). It also
-lists sources parked after `MAX_ATTEMPTS` failed extractions (see below), so a
-note that never became entity knowledge stays visible. Nothing else surfaces
+counts sources parked after `MAX_ATTEMPTS` failed extractions (see below), so
+a note that never became entity knowledge stays visible; the parked names and
+errors themselves live in the pipeline log and `--status`. Nothing else surfaces
 the Approved group in the daily workflow — it is normally emptied by the next
 run. `dt-watchdog` *does* notify on those refusal `WARNING`s (its scan pattern
 ` WARN(ING)? ` matches Python's ` WARNING ` levelname), but that is a
-transient, per-signature-deduplicated alert; this digest keeps a standing
-count in front of you each morning.
+transient, per-signature-deduplicated alert; the snapshot keeps the standing
+counts (the TRMNL layout currently renders the pending and parked ones).
 
 Note: only calendars in macOS Calendar are visible. Work meetings appear in
 the brief because your company email account is

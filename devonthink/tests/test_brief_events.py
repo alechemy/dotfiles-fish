@@ -166,6 +166,13 @@ class MachineClassifiers(unittest.TestCase):
         self.assertFalse(be.is_machine_subline("  - ask about the demo"))
         self.assertFalse(be.is_machine_subline("- 2026-07-13 — top level"))
 
+    def test_a_dated_bullet_at_sub_bullet_depth_is_manual(self):
+        """News lines render at 4-space depth; a 2-space dated bullet is the
+        kind of thing a person types under a meeting, and classifying it
+        machine would let the merge delete it."""
+        self.assertFalse(
+            be.is_machine_subline("  - 2026-01-01 — remember: anniversary"))
+
 
 class TimelineInsert(unittest.TestCase):
     def test_slots_between_bullets_by_time(self):

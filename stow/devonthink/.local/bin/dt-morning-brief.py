@@ -1240,6 +1240,12 @@ def brief_blocks(events, people, skip_re, excluded=(),
     told = set()
     blocks = []
     for ev in events:
+        # The title becomes a single physical bullet line and its (title,
+        # minutes) merge identity: embedded newlines would split the line so
+        # its note-side copy can never be re-matched, and an empty title
+        # renders a bullet the event grammar can't parse at all.
+        ev = dict(ev, title=" ".join((ev["title"] or "").split())
+                  or "(untitled)")
         context = event_context(ev, contexts) if contexts else "neutral"
         if ev["all_day"] or not attending(ev):
             continue
@@ -2239,10 +2245,14 @@ def main():
         {"op": "merge_timeline", "uuid": daily["uuid"], "blocks": timeline}
     ])[0]
     if result.get("legacy"):
-        log.warning("daily note %s still has a ## Briefing section — merge "
+        log.warning("daily note %s still has generated sections — merge "
                     "refused; flatten the note (or wait for tomorrow's)",
                     today)
         return
+    if result.get("skipped"):
+        log.warning("merge skipped %d event block(s) whose rendered line "
+                    "does not round-trip the event grammar",
+                    result["skipped"])
     if not result.get("changed"):
         log.info("timeline already current, nothing to do")
         return

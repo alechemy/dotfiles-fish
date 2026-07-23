@@ -74,6 +74,20 @@ class LegacyHeaderPath(unittest.TestCase):
         self.assertEqual(
             out, "## Today's Notes\n\n- 7:00am: b\n- 8:00am: c\n- 9:00am: a")
 
+    def test_sort_moves_whole_blocks_never_bare_sublines(self):
+        note = ("## Today's Notes\n\n"
+                "- 3:00pm: 🔗 [Later clip](x-devonthink-item://L)\n"
+                "- 9:24am: ✏️ [doc](x-devonthink-item://D)\n"
+                "  - 4:30pm dentist reminder\n"
+                "  - call the plumber\n")
+        out = run(note, "- 1:00pm: 🔗 [mid](x-devonthink-item://M)")
+        lines = out.splitlines()
+        at = lines.index("- 9:24am: ✏️ [doc](x-devonthink-item://D)")
+        self.assertEqual(lines[at + 1], "  - 4:30pm dentist reminder")
+        self.assertEqual(lines[at + 2], "  - call the plumber")
+        self.assertLess(at, lines.index(
+            "- 1:00pm: 🔗 [mid](x-devonthink-item://M)"))
+
 
 class TimeKey(unittest.TestCase):
     def test_meridiem_boundaries(self):
