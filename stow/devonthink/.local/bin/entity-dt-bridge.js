@@ -798,11 +798,19 @@ function run(argv) {
     open_record(op) {
       const r = byUuid(op.uuid)
       dt.activate()
-      // Untargeted, open tab for spawns a separate document window; a tab in
-      // the frontmost main (viewer) window only happens by asking for it.
-      const vws = dt.viewerWindows()
-      if (vws.length) {
-        dt.openTabFor({ record: r, in: vws[0] })
+      // Shown in the frontmost main window's own view/edit pane — navigate
+      // it to the record's group and select it, exactly like clicking the
+      // record in the item list. DT4's class is main window (viewer window
+      // no longer exists and answers -1708). 'open tab for' always spawns
+      // something new, so it is only the no-main-window fallback.
+      const mws = dt.mainWindows()
+      if (mws.length) {
+        const mw = mws[0]
+        mw.root = r.parents()[0]
+        // Scalar on purpose: selection is a list AppleScript-side, but a JS
+        // array fails to marshal ("Can't convert types"); DT coerces the
+        // bare specifier.
+        mw.selection = r
       } else {
         dt.openTabFor({ record: r })
       }
