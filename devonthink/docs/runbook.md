@@ -56,21 +56,22 @@ Check the flag ladder in DT's Info inspector; the rules advance it in order
 
 ## Missing or stale morning brief
 
-The daily note has no `## Briefing` (or a section looks out of date).
+The daily note has no `📅` event bullets (or one looks out of date).
 
-The brief writes `## Briefing`, `## Reconnect`, `## Birthdays`,
-`## Entity Review`, `## Journal`, and `## On This Day` as **marker-bounded
-upserts** — each scheduled run replaces its own section against the latest
-note body (jots are never clobbered) and a section removes itself when
-empty. Scheduled at ~05:15 with retries at 05:45 / 06:30 / 08:00.
+The brief writes the day's events into the note's flat timeline as timed
+`📅` bullets through the bridge's `merge_timeline` — each scheduled run
+reconciles the machine event bullets against the latest calendar in one
+read-modify-write (manual bullets and manual sub-lines are never clobbered;
+a stale event bullet is removed only when it carries no manual sub-lines,
+and a calendar-fetch failure skips the merge rather than emptying the day).
+Reconnect, birthdays, entity review, journal status, and On This Day never
+render into the note — they ride the TRMNL snapshot. Scheduled at ~05:15
+with retries at 05:45 / 06:30 / 08:00.
 
 ```bash
 # Preview without writing, then run for real.
 ~/.local/bin/dt-morning-brief.py --dry-run
 ~/.local/bin/dt-morning-brief.py
-
-# Force the Monday Reconnect section any day.
-~/.local/bin/dt-morning-brief.py --dry-run --weekly
 ```
 
 If it's still empty: confirm this Mac is the driver; confirm the Calendars
@@ -202,8 +203,8 @@ rather than retried forever. See the README "SingleFile Ingestion Pipeline."
 ## Parked entity source
 
 A note stopped producing proposals. After `MAX_ATTEMPTS` (5) failed extractions
-a source is **parked**; the morning brief's `## Entity Review` section lists
-parked sources so they stay visible.
+a source is **parked**; the morning brief's entity-review digest (on the
+TRMNL snapshot) lists parked sources so they stay visible.
 
 A parked source retries automatically when its content changes, or on demand:
 

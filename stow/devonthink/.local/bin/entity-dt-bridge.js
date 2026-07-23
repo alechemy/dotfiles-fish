@@ -50,8 +50,8 @@
 //   mark_filed         {uuid}                           -> {uuid}
 //   create_record      {name,path,text,fields?,tags?}   -> {uuid}
 //   get_or_create_daily {date,heading}                  -> {uuid,text,created}
-//   upsert_section     {uuid,header,content}            -> {uuid,changed,replaced}
-//   insert_under_section {uuid,header,line}             -> {uuid,changed}
+//   merge_timeline     {uuid,blocks}                    -> {uuid,changed,legacy?}
+//   append_pinned      {uuid,line}                      -> {uuid,changed}
 //   relink_entities    {}                               -> {records,changed}
 //   sort_logs          {dry_run?}                       -> {records,changed,
 //                                                           records_changed}
@@ -154,9 +154,9 @@ function classify(v) {
 // A body can come back CR-delimited: AppleScript's `do shell script` coerces
 // LF to CR, so a smart rule that pipes a body through a helper and writes the
 // result back stores CRs. Splitting on \n alone would then see the whole note
-// as one line, no `##` header would match, and upsert_section would append a
-// duplicate section instead of replacing it. Writes always emit \n, so a body
-// self-heals on the next edit.
+// as one line — no bullet or header would match, and merge_timeline would
+// re-insert every event block as a duplicate. Writes always emit \n, so a
+// body self-heals on the next edit.
 function bodyLines(rec) {
   return rec.plainText().split(/\r\n|\r|\n/)
 }
@@ -235,7 +235,7 @@ function insertUnderSection(body, header, lines) {
 }
 
 // Idempotent single-line form: a retry of the record's latest body must not
-// duplicate the line, the same guarantee upsert_section gives a full section.
+// duplicate the line.
 function insertUnderSectionOnce(body, header, line) {
   const b = sectionBounds(body, header)
   if (b !== null) {
@@ -245,42 +245,202 @@ function insertUnderSectionOnce(body, header, line) {
   return insertUnderSection(body, header, [line])
 }
 
-// Pure core of the upsert_section op: the new full body text to write (or
-// null when nothing changed) for replacing/creating/removing one section.
-function sectionUpsert(lines, header, content) {
-  let start = -1
-  for (let i = 0; i < lines.length; i++) {
-    if (lines[i].trim() === header) { start = i; break }
+// Timeline grammar, mirrored from brief_events.py: a machine bullet opens
+// with a type emoji straight after its time prefix (or with no time at all —
+// the pinned journal form); everything else at top level is manual and never
+// rewritten. Every emoji pattern tolerates an optional U+FE0F because ✏️/⚠️
+// are written with the variation selector and the rest without.
+const TIMED_BULLET_RE = /^- (\d{1,2}):(\d{2})(am|pm)\b/
+const MACHINE_BULLET_RE =
+  /^- (?:\d{1,2}:\d{2}(?:am|pm): )?[\u{1F4C5}\u{1F517}\u{1F4C4}✏\u{1F4DD}\u{1F4D4}]\uFE0F? /u
+const EVENT_BULLET_RE = /^- (\d{1,2}:\d{2}(?:am|pm)): \u{1F4C5}\uFE0F? (.+)$/u
+const MACHINE_SUBLINE_RE =
+  /^\s+- (?:\[?[✏\u{1F4DD}\u{1F464}⚠]️? |\d{4}-\d{2}-\d{2} — )/u
+const LINKED_TITLE_RE = /^\[(.+?)\]\(([^)\s]*)\)(.*)$/
+const EMPTY_BULLET_RE = /^\s*[-*]\s*$/
+const REDACTED_TITLE = 'Private event'
+
+function timedBulletMinutes(line) {
+  const m = TIMED_BULLET_RE.exec(line)
+  if (!m) return null
+  let hour = Number(m[1]) % 12
+  if (m[3] === 'pm') hour += 12
+  return hour * 60 + Number(m[2])
+}
+
+function isMachineBullet(line) {
+  return MACHINE_BULLET_RE.test(line)
+}
+
+function isMachineSubline(line) {
+  return MACHINE_SUBLINE_RE.test(line)
+}
+
+// The span the timeline owns: the lines after the leading H1, up to the next
+// level-1-or-2 heading (a flat note has none, so the span runs to the end).
+function rootSpan(body) {
+  let start = 0
+  for (let i = 0; i < body.length; i++) {
+    if (/^#{1,2}\s/.test(body[i])) { start = i + 1; break }
   }
-  if (start === -1) {
-    if (!content.trim()) return { text: null, changed: false, replaced: false }
-    let out = lines.slice()
-    // Jots are inserted relative to the last bullet BEFORE this header
-    // (see insert-jot-into-daily-note.py); generated sections must sit
-    // after it, so guarantee it exists.
-    if (out.map(l => l.trim()).indexOf(NOTES_SECTION) === -1) {
-      while (out.length && out[out.length - 1].trim() === '') out.pop()
-      out = out.concat(['', NOTES_SECTION])
+  let end = body.length
+  for (let i = start; i < body.length; i++) {
+    if (/^#{1,2}\s/.test(body[i])) { end = i; break }
+  }
+  return { start: start, end: end }
+}
+
+// A machine-owned event bullet's identity, or null. Only a linked title or
+// the exact redacted text is machine: a hand-typed plain `📅 lunch` bullet
+// must stay a manual anchor, never a removal candidate.
+function parseEventBullet(line) {
+  const m = EVENT_BULLET_RE.exec(line)
+  if (!m) return null
+  const minutes = timedBulletMinutes(line)
+  const rest = m[2]
+  const lm = LINKED_TITLE_RE.exec(rest)
+  if (lm) return { minutes: minutes, title: lm[1], redacted: false }
+  if (rest === REDACTED_TITLE) return { minutes: minutes, title: null, redacted: true }
+  return null
+}
+
+// Pure core of the merge_timeline op: reconcile the machine event blocks of a
+// flat daily note against the desired blocks, leaving every manual line —
+// jots, prose, sub-bullets typed under an event — exactly where the user put
+// it. Identity is (title, minutes) with a title-only second pass so a
+// rescheduled event relocates (manual sub-lines in tow) instead of being
+// dropped and re-inserted bare; redacted events match by (minutes) alone,
+// count-aware. Returns {text|null, changed, legacy?} — legacy notes (a
+// `## Briefing` header anywhere) are refused outright, since their events
+// live in the section, not the root span, and merging would duplicate them.
+function timelineMerge(body, blocks) {
+  if (body.some(l => l.trim() === '## Briefing')) {
+    return { text: null, changed: false, legacy: true }
+  }
+  const span = rootSpan(body)
+
+  // Units: each machine event block (bullet + contiguous indented lines) is
+  // one unit; every other line is its own single-line unit.
+  const units = []
+  for (let i = span.start; i < span.end;) {
+    const ev = parseEventBullet(body[i])
+    if (!ev) {
+      units.push({ lines: [body[i]], ev: null, claimed: false })
+      i++
+      continue
     }
-    while (out.length && out[out.length - 1].trim() === '') out.pop()
-    const text =
-      out.concat(['', header, ''], content.split('\n')).join('\n') + '\n'
-    return { text: text, changed: true, replaced: false }
+    let end = i + 1
+    while (end < span.end && /^\s+\S/.test(body[end])) end++
+    units.push({ lines: body.slice(i, end), ev: ev, claimed: false })
+    i = end
   }
-  const end = sectionSpan(lines, start)
-  if (!content.trim()) {
-    const out = lines.slice(0, start).concat(lines.slice(end))
-    while (out.length && out[out.length - 1].trim() === '') out.pop()
-    return { text: out.join('\n') + '\n', changed: true, replaced: true, removed: true }
+
+  const desired = blocks.map(b => ({
+    minutes: b.minutes,
+    line: b.line,
+    subLines: b.subLines || [],
+    title: b.redacted ? null : b.title,
+    redacted: !!b.redacted,
+    matched: null,
+  }))
+  const matches = (n, d) => d.redacted
+    ? n.ev.redacted && n.ev.minutes === d.minutes
+    : !n.ev.redacted && n.ev.title === d.title
+  for (const d of desired) {
+    const hit = units.find(n => n.ev && !n.claimed && matches(n, d) &&
+      (d.redacted || n.ev.minutes === d.minutes))
+    if (hit) { hit.claimed = true; d.matched = hit; d.relocate = false }
   }
-  let spanEnd = end
-  while (spanEnd > start && lines[spanEnd - 1].trim() === '') spanEnd--
-  const section = [header, ''].concat(content.split('\n'))
-  if (lines.slice(start, spanEnd).join('\n') === section.join('\n')) {
-    return { text: null, changed: false, replaced: true }
+  for (const d of desired) {
+    if (d.matched || d.redacted) continue
+    const hit = units.find(n => n.ev && !n.claimed && matches(n, d))
+    if (hit) { hit.claimed = true; d.matched = hit; d.relocate = true }
   }
-  const out = lines.slice(0, start).concat(section, [''], lines.slice(end))
-  return { text: out.join('\n'), changed: true, replaced: true }
+
+  const freshLines = d => {
+    const manual = d.matched
+      ? d.matched.lines.slice(1).filter(l => !isMachineSubline(l))
+      : []
+    return [d.line].concat(d.subLines, manual)
+  }
+
+  // In-place updates, then removals (stale machine blocks; a relocating
+  // block's old position; and, when anything is inserted into an otherwise
+  // untouched skeleton, its empty placeholder bullet), merging the blank
+  // lines a removal would leave doubled.
+  for (const d of desired) {
+    if (d.matched && !d.relocate) d.matched.lines = freshLines(d)
+  }
+  const isBlankUnit = u => u.lines.every(l => l.trim() === '')
+  const inserting = desired.some(d => !d.matched || d.relocate)
+  const virgin = units.every(u =>
+    isBlankUnit(u) || (u.lines.length === 1 && EMPTY_BULLET_RE.test(u.lines[0])))
+  const removable = u =>
+    (u.ev && !u.claimed && !u.lines.slice(1).some(l => !isMachineSubline(l))) ||
+    (u.ev && u.claimed && desired.some(d => d.matched === u && d.relocate)) ||
+    (inserting && virgin && !isBlankUnit(u))
+  for (let i = units.length - 1; i >= 0; i--) {
+    if (!removable(units[i])) continue
+    const prevBlank = i > 0 && isBlankUnit(units[i - 1])
+    const nextBlank = i + 1 < units.length && isBlankUnit(units[i + 1])
+    units.splice(i, prevBlank && nextBlank ? 2 : 1)
+  }
+
+  // Insertions, ascending so same-minute arrivals stay in start order: before
+  // the first strictly-later timed bullet or the first pinned (untimed
+  // machine) bullet, else after the last non-blank unit — or after the
+  // leading blank run when nothing else exists yet, so the H1's separating
+  // blank line survives the first insert. Untimed manual lines are anchors —
+  // they are stepped over, never displaced.
+  const insertAt = minutes => {
+    let last = -1
+    let seen = false
+    for (let i = 0; i < units.length; i++) {
+      const u = units[i]
+      if (isBlankUnit(u)) {
+        if (!seen) last = i
+        continue
+      }
+      seen = true
+      const line = u.lines[0]
+      const t = timedBulletMinutes(line)
+      if (t !== null && t > minutes) return i
+      if (t === null && isMachineBullet(line)) return i
+      last = i
+    }
+    return last + 1
+  }
+  const inserts = desired.filter(d => !d.matched || d.relocate)
+    .sort((a, b) => a.minutes - b.minutes)
+  for (const d of inserts) {
+    units.splice(insertAt(d.minutes), 0, { lines: freshLines(d), ev: null, claimed: true })
+  }
+
+  const out = body.slice(0, span.start)
+    .concat(units.flatMap(u => u.lines), body.slice(span.end))
+  const text = out.join('\n')
+  if (text === body.join('\n')) return { text: null, changed: false }
+  return { text: text, changed: true }
+}
+
+// Pure core of the append_pinned op: one untimed machine line at the end of
+// the timeline (before trailing blanks), idempotent by item-link UUID — or
+// the whole trimmed line — anywhere in the body. A pre-flatten note routes to
+// its `## Today's Notes` section instead, so a backfilled journal still lands
+// where that note's readers expect it.
+function appendPinned(body, line) {
+  const m = /x-devonthink-item:\/\/([A-Za-z0-9-]+)/.exec(line)
+  const marker = m ? m[1] : String(line).trim()
+  if (body.join('\n').indexOf(marker) !== -1) return body
+  if (body.some(l => l.trim() === NOTES_SECTION)) {
+    return insertUnderSectionOnce(body, NOTES_SECTION, line)
+  }
+  const span = rootSpan(body)
+  let at = span.end
+  while (at > span.start && body[at - 1].trim() === '') at--
+  const out = body.slice()
+  out.splice(at, 0, line)
+  return out
 }
 
 const LOG_ENTRY_RE = /^-\s+(\d{4}-\d{2}-\d{2})(?![\d-])/
@@ -1250,32 +1410,27 @@ function run(argv) {
       return { records: records, changed: changedRecords }
     },
 
-    // Replace (or append, or remove on empty content) one generated `##`
-    // section — the header line through the next `##` header — against the
-    // record's LATEST body, read and written inside this single bridge
-    // invocation. The old flow read the whole body, edited it in Python,
-    // and wrote it back seconds later; a jot inserted in between was lost.
-    // The write is skipped when the section is already byte-identical, so
-    // refresh retries don't churn sync.
-    upsert_section(op) {
+    // Reconcile the daily note's machine event blocks against the desired
+    // set, against the record's LATEST body, read and written inside this
+    // single bridge invocation — a jot typed between the Python render and
+    // the write can never be lost. The write is skipped when nothing
+    // changed, so refresh retries don't churn sync.
+    merge_timeline(op) {
       const rec = byUuid(op.uuid)
-      const lines = bodyLines(rec)
-      const r = sectionUpsert(lines, op.header, String(op.content || ''))
+      const r = timelineMerge(bodyLines(rec), op.blocks || [])
       if (r.text !== null) rec.plainText = r.text
-      const out = { uuid: op.uuid, changed: r.changed, replaced: r.replaced }
-      if (r.removed) out.removed = true
+      const out = { uuid: op.uuid, changed: r.changed }
+      if (r.legacy) out.legacy = true
       return out
     },
 
-    // Insert one line under a `##` section header against the record's
-    // LATEST body, read and written inside this single bridge invocation —
-    // the read-modify-write upsert_section closes for a full section,
-    // scoped to a single line. A line already present under the section is
-    // a no-op.
-    insert_under_section(op) {
+    // Append one untimed pinned machine line to a daily note's timeline,
+    // idempotently, against the record's LATEST body in this single bridge
+    // invocation.
+    append_pinned(op) {
       const rec = byUuid(op.uuid)
       const body = bodyLines(rec)
-      const next = insertUnderSectionOnce(body, op.header, op.line)
+      const next = appendPinned(body, op.line)
       if (next === body) return { uuid: op.uuid, changed: false }
       rec.plainText = next.join('\n')
       return { uuid: op.uuid, changed: true }

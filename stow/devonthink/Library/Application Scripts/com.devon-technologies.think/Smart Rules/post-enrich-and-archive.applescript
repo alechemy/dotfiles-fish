@@ -3,10 +3,10 @@
 -- Runs after AI enrichment completes. Performs four steps in a single pass:
 --   1. Extracts action items and sends them to Things 3 (handwritten docs only)
 --   2. Processes daily notes: extracts journal sections from handwritten docs,
---      then links each document into its daily note — under the matching
---      ## Briefing event (name-matched via brief_events.py, which stamps
---      LinkedEvent so dt-morning-brief keeps the link across regens) or,
---      unmatched, under ## Today's Notes (skipped for web clips)
+--      then links each document into its daily note — as a sub-bullet under
+--      the matching 📅 event bullet (name-matched via brief_events.py, which
+--      stamps LinkedEvent so dt-morning-brief keeps the link across regens)
+--      or, unmatched, as its own timed timeline bullet (skipped for web clips)
 --   3. Syncs H1 heading to record name for markdown documents
 --   4. Archives the record to 99_ARCHIVE
 --
@@ -39,7 +39,6 @@ on performSmartRule(theRecords)
 
 		-- Daily notes setup
 		set groupPath to "/10_DAILY"
-		set sectionHeader to "## Today's Notes"
 		set targetDB to database "Lorebook"
 		set destGroup to get record at groupPath in targetDB
 		if destGroup is missing value then
@@ -220,12 +219,13 @@ on performSmartRule(theRecords)
 
 								if extractTargetNote is not missing value then
 									set docUUID to uuid of theRecord
-									set contentBlock to "### From [✏️ " & docBaseName & "](x-devonthink-item://" & docUUID & "):" & linefeed & linefeed
+									set timeStr to my timeOfDay(creation date of theRecord)
+									set contentBlock to "- " & timeStr & ": ✏️ [" & docBaseName & "](x-devonthink-item://" & docUUID & ")" & linefeed
 									repeat with aLine in newLinesToAppend
-										set contentBlock to contentBlock & aLine & linefeed
+										set contentBlock to contentBlock & "  " & aLine & linefeed
 									end repeat
 
-									my appendToSection(extractTargetNote, sectionHeader, contentBlock)
+									my appendToSection(extractTargetNote, contentBlock)
 
 									-- Save updated state
 									set updatedLinesRaw to ""
@@ -251,9 +251,9 @@ on performSmartRule(theRecords)
 				end if
 
 				-- 2b. Link into the daily note: as a sub-bullet under the matching
-				-- briefing event when the record's name finds one (brief_events.py,
+				-- 📅 event bullet when the record's name finds one (brief_events.py,
 				-- which also stamps the LinkedEvent key dt-morning-brief re-renders
-				-- from), otherwise under ## Today's Notes.
+				-- from), otherwise as its own timed timeline bullet.
 				if destGroup is not missing value then
 					set isLinked to (get custom meta data for "DailyNoteLinked" from theRecord)
 					if not my flagIsSet(isLinked) then
@@ -288,7 +288,9 @@ on performSmartRule(theRecords)
 									end try
 									if candNote is not missing value then
 										set candText to plain text of candNote
-										if candText contains "## Briefing" then
+										-- Either grammar: a flat note's 📅 event bullets, or a
+										-- pre-flatten note's ## Briefing section.
+										if candText contains "📅" or candText contains "## Briefing" then
 											set tmpBrief to do shell script "mktemp /tmp/dt-brief.XXXXXX"
 											set end of tmpFiles to tmpBrief
 											set fileRef to open for access (POSIX file tmpBrief) with write permission
@@ -331,7 +333,7 @@ on performSmartRule(theRecords)
 								set fileRef to open for access (POSIX file tmpNote) with write permission
 								write briefText to fileRef as «class utf8»
 								close access fileRef
-								set bulletLine to "- [" & subEmoji & " " & docBaseName & "](x-devonthink-item://" & docUUID & ")"
+								set bulletLine to "- " & subEmoji & " [" & docBaseName & "](x-devonthink-item://" & docUUID & ")"
 								set newBrief to do shell script "/usr/bin/python3 $HOME/.local/bin/brief_events.py insert-subbullet " & quoted form of matchedDate & " " & quoted form of matchedKey & " " & quoted form of bulletLine & " < " & quoted form of tmpNote without altering line endings
 								do shell script "rm -f " & quoted form of tmpNote
 								if newBrief is not briefText then
@@ -357,27 +359,14 @@ on performSmartRule(theRecords)
 										set emoji to "📝"
 									end if
 
-									-- Format creation time as h:mmam/pm
-									set recDate to creation date of theRecord
-									set secSinceMidnight to time of recDate
-									set cHour to secSinceMidnight div 3600
-									set cMin to (secSinceMidnight mod 3600) div 60
-									if cHour ≥ 12 then
-										set ampm to "pm"
-										if cHour > 12 then set cHour to cHour - 12
-									else
-										set ampm to "am"
-										if cHour is 0 then set cHour to 12
-									end if
-									set timeStr to (cHour as text) & ":" & text -2 thru -1 of ("0" & (cMin as text)) & ampm
-
+									set timeStr to my timeOfDay(creation date of theRecord)
 									set docUUID to uuid of theRecord
 									set itemLink to "x-devonthink-item://" & docUUID
-									set linkText to "- " & timeStr & ": [" & emoji & " " & docBaseName & "](" & itemLink & ")"
+									set linkText to "- " & timeStr & ": " & emoji & " [" & docBaseName & "](" & itemLink & ")"
 
 									-- Only append if this document isn't already linked (by UUID)
 									if (plain text of targetNote) does not contain docUUID then
-										my appendToSection(targetNote, sectionHeader, linkText & linefeed)
+										my appendToSection(targetNote, linkText & linefeed)
 									end if
 
 									add custom meta data 1 for "DailyNoteLinked" to theRecord
@@ -481,21 +470,11 @@ on performSmartRule(theRecords)
 
 								if targetNote is not missing value then
 									set bmName to name of bmRecord
-									set secSinceMidnight to time of bmCreated
-									set cHour to secSinceMidnight div 3600
-									set cMin to (secSinceMidnight mod 3600) div 60
-									if cHour ≥ 12 then
-										set ampm to "pm"
-										if cHour > 12 then set cHour to cHour - 12
-									else
-										set ampm to "am"
-										if cHour is 0 then set cHour to 12
-									end if
-									set timeStr to (cHour as text) & ":" & text -2 thru -1 of ("0" & (cMin as text)) & ampm
-									set linkText to "- " & timeStr & ": [🔗 " & bmName & "](x-devonthink-item://" & bmUUID & ")"
+									set timeStr to my timeOfDay(bmCreated)
+									set linkText to "- " & timeStr & ": 🔗 [" & bmName & "](x-devonthink-item://" & bmUUID & ")"
 
 									if (plain text of targetNote) does not contain bmUUID then
-										my appendToSection(targetNote, sectionHeader, linkText & linefeed)
+										my appendToSection(targetNote, linkText & linefeed)
 									end if
 									add custom meta data 1 for "DailyNoteLinked" to bmRecord
 								else
@@ -583,9 +562,10 @@ on replaceIfPlaceholder(theRecord, newName)
 	end tell
 end replaceIfPlaceholder
 
--- Appends contentBlock under the given section header in a daily note.
--- Creates the section at the end of the note if it doesn't exist yet.
-on appendToSection(theNote, sectionHeader, contentBlock)
+-- Inserts contentBlock (a bullet plus any indented sub-lines) into a daily
+-- note at its chronological timeline position (insert-daily-note-section.py,
+-- which also handles a pre-flatten note's ## Today's Notes section).
+on appendToSection(theNote, contentBlock)
 	tell application id "DNtp"
 		set noteText to plain text of theNote
 
@@ -595,11 +575,10 @@ on appendToSection(theNote, sectionHeader, contentBlock)
 		close access fileRef
 		-- `without altering line endings`: otherwise the helper's LFs come back
 		-- as CRs and the whole note is stored as one CR-delimited line, which
-		-- every \n-splitting consumer (entity-dt-bridge's upsert_section) then
-		-- reads as a note with no headers.
+		-- every \n-splitting consumer (entity-dt-bridge's merge_timeline) then
+		-- reads as a note with no bullets.
 		set newText to do shell script ¬
 			"/usr/bin/python3 ~/.local/bin/insert-daily-note-section.py" & ¬
-			" --header " & quoted form of sectionHeader & ¬
 			" --content " & quoted form of contentBlock & ¬
 			" < " & quoted form of tmpPath without altering line endings
 		do shell script "rm -f " & quoted form of tmpPath
@@ -607,6 +586,21 @@ on appendToSection(theNote, sectionHeader, contentBlock)
 		set plain text of theNote to newText
 	end tell
 end appendToSection
+
+-- A record timestamp as the timeline's h:mmam/pm form.
+on timeOfDay(recDate)
+	set secSinceMidnight to time of recDate
+	set cHour to secSinceMidnight div 3600
+	set cMin to (secSinceMidnight mod 3600) div 60
+	if cHour ≥ 12 then
+		set ampm to "pm"
+		if cHour > 12 then set cHour to cHour - 12
+	else
+		set ampm to "am"
+		if cHour is 0 then set cHour to 12
+	end if
+	return (cHour as text) & ":" & text -2 thru -1 of ("0" & (cMin as text)) & ampm
+end timeOfDay
 
 -- Returns the daily note for dateStr (YYYY-MM-DD), creating it in destGroup
 -- if it doesn't exist yet. The 5:00 AM launchd job (create-daily-note.sh)

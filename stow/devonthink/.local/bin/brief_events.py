@@ -4,27 +4,42 @@ brief_events.py — ties briefing calendar events to DEVONthink notes.
 
 An event's identity is its key: "YYYY-MM-DD-<slug of title>", stored in the
 LinkedEvent custom-metadata field of every note attached to that event. The
-metadata is the durable record; briefing text is a rendering of it.
-dt-morning-brief re-derives each event's note links from LinkedEvent on every
-regeneration (its scheduled runs replace the whole ## Briefing span, so
-anything spliced into the text alone would not survive a RunAtLoad rerun),
+metadata is the durable record; the daily note's event bullets are a rendering
+of it. dt-morning-brief re-derives each event's note links from LinkedEvent on
+every regeneration (its scheduled runs rebuild each event's machine sub-lines,
+so anything spliced into the text alone would not survive a RunAtLoad rerun),
 while the writers stamp the metadata:
 
   - dtnote-open.py: the dtnote:// handler behind a note-less event title —
     opens the owning note, creating it fully stamped only when missing.
   - adopt-meeting-note: backstop for meeting notes that arrive by hand (tag
     "Meeting Note", name "YYYY-MM-DD <event title>") — stamps them and swaps
-    the day's briefing title link for the note's item link in place.
+    the day's event-title link for the note's item link in place.
   - post-enrich-and-archive: handwritten notes matched to an event by name —
     adds the note as an indented sub-bullet under the event line.
 
-All writers also pre-set DailyNoteLinked so a briefing-linked note never
-double-lists under ## Today's Notes.
+All writers also pre-set DailyNoteLinked so an event-linked note never
+double-lists as its own timeline bullet.
+
+Two event-line grammars coexist. Current daily notes are a single flat
+timeline whose event bullets read "- <h:mmam>: 📅 <title>"; notes from before
+the flatten carry a "## Briefing" section whose bullets read
+"- <h:mmam> — <title>". Parsing accepts both (a note is one or the other, and
+matching may run against yesterday's note across the cutover); edits emit in
+the grammar of the line they touch.
+
+The timeline grammar's machine/manual discriminator is a type emoji directly
+after the time separator (📅 calendar, 🔗 web, 📄 PDF, ✏️ handwritten,
+📝 note, 📔 journal — the untimed pinned form); machine sub-lines under an
+event open with ✏️/📝 (note links), 👤 (people), ⚠️ (warnings), or a
+"YYYY-MM-DD — " news-date prefix. Manual bullets carry no leading emoji and
+are never rewritten; is_machine_bullet/is_machine_subline are the shared
+classifiers (entity-filing strips machine lines before fact extraction).
 
 Matching is deliberately conservative: stopword-filtered token overlap with a
 unique winner required, so "Call with Priya" finds "Call Priya" but a note
 titled just "Roundtable" refuses to choose between two roundtable events and
-falls back to the Today's Notes path.
+falls back to the plain timeline-bullet path.
 
 dt-morning-brief imports this as a module; the smart rules call the CLI:
 
@@ -57,12 +72,27 @@ STOPWORDS = frozenset("""
     edition
 """.split())
 
+EVENT_EMOJI = "\U0001F4C5"
+JOURNAL_EMOJI = "\U0001F4D4"
+# Bare forms; every pattern below allows an optional trailing U+FE0F, since
+# ✏️/⚠️ are written with the variation selector and the rest without.
+MACHINE_EMOJI = "\U0001F4C5\U0001F517\U0001F4C4✏\U0001F4DD\U0001F4D4"
+SUBLINE_EMOJI = "✏\U0001F4DD\U0001F464⚠"
+
 ISO_DATE_RE = re.compile(r"^(\d{4}-\d{2}-\d{2})\s+(.+)$")
 EVENT_LINE_RE = re.compile(r"^- (\d{1,2}:\d{2}(?:am|pm)) — (.+)$")
+TIMELINE_EVENT_RE = re.compile(
+    rf"^- (\d{{1,2}}:\d{{2}}(?:am|pm)): {EVENT_EMOJI}\ufe0f? (.+)$")
+MACHINE_BULLET_RE = re.compile(
+    rf"^- (?:\d{{1,2}}:\d{{2}}(?:am|pm): )?[{MACHINE_EMOJI}]\ufe0f? ")
+MACHINE_SUBLINE_RE = re.compile(
+    rf"^\s+- (?:\[?[{SUBLINE_EMOJI}]\ufe0f? |\d{{4}}-\d{{2}}-\d{{2}} — )")
 LINKED_TITLE_RE = re.compile(r"^\[(.+?)\]\(([^)\s]*)\)(.*)$")
 TENTATIVE_RE = re.compile(r"\s*\(tentative\)\s*$")
 HEADING_RE = re.compile(r"^#{1,2}\s")
 ITEM_LINK_RE = re.compile(r"x-devonthink-item://([A-Za-z0-9-]+)")
+TIMED_BULLET_RE = re.compile(r"^- (\d{1,2}):(\d{2})(am|pm)\b")
+EMPTY_BULLET_RE = re.compile(r"^\s*[-*]\s*$")
 
 
 def norm(s):
@@ -120,35 +150,133 @@ def brief_span(lines):
     return start, end
 
 
+def root_span(lines):
+    """(start, end) line indexes of the root timeline: the lines after the
+    leading H1, up to the next level-1-or-2 heading (a flat note has none, so
+    the span runs to the end of the body)."""
+    start = 0
+    for i, line in enumerate(lines):
+        if HEADING_RE.match(line):
+            start = i + 1
+            break
+    end = len(lines)
+    for i in range(start, len(lines)):
+        if HEADING_RE.match(lines[i]):
+            end = i
+            break
+    return start, end
+
+
+def is_machine_bullet(line):
+    """True for a top-level timeline bullet the pipeline owns: an optional
+    time prefix followed directly by a type emoji."""
+    return bool(MACHINE_BULLET_RE.match(line))
+
+
+def is_machine_subline(line):
+    """True for an indented line the pipeline owns under an event bullet:
+    a note-link, person, or warning token (legacy inside-link ✏️/📝 forms
+    included), or a news fact's date prefix."""
+    return bool(MACHINE_SUBLINE_RE.match(line))
+
+
+def bullet_minutes(line):
+    """Minutes since midnight of a top-level timed bullet, else None."""
+    m = TIMED_BULLET_RE.match(line)
+    if not m:
+        return None
+    hour = int(m.group(1)) % 12
+    if m.group(3) == "pm":
+        hour += 12
+    return hour * 60 + int(m.group(2))
+
+
+def timeline_insert(lines, block):
+    """A new line list with `block` (a bullet plus any indented sub-lines)
+    inserted into the root timeline at its chronological position — parity
+    with the bridge's timelineMerge insertion rule: before the first
+    strictly-later timed bullet or the first pinned (untimed machine) bullet,
+    else after the last non-blank line; untimed manual lines are anchors and
+    are stepped over. A virgin skeleton's empty placeholder bullet is
+    replaced instead. An untimed block sorts as later than every timed one,
+    which lands it just before the pinned run (or at the end)."""
+    start, end = root_span(lines)
+    minutes = bullet_minutes(block[0])
+
+    span = lines[start:end]
+    if all(not l.strip() or EMPTY_BULLET_RE.match(l) for l in span):
+        for i in range(start, end):
+            if EMPTY_BULLET_RE.match(lines[i]):
+                return lines[:i] + list(block) + lines[i + 1:]
+
+    last = None
+    seen = False
+    i = start
+    while i < end:
+        line = lines[i]
+        if not line.strip():
+            if not seen:
+                last = i + 1
+            i += 1
+            continue
+        group_end = i + 1
+        if line.startswith("- "):
+            while group_end < end and lines[group_end][:1].isspace() \
+                    and lines[group_end].strip():
+                group_end += 1
+        seen = True
+        t = bullet_minutes(line)
+        if t is not None and minutes is not None and t > minutes:
+            return lines[:i] + list(block) + lines[i:]
+        if t is None and MACHINE_BULLET_RE.match(line):
+            return lines[:i] + list(block) + lines[i:]
+        last = group_end
+        i = group_end
+    at = last if last is not None else start
+    return lines[:at] + list(block) + lines[at:]
+
+
+def _parse_event_rest(rest):
+    """(title, url, suffix) from the text after an event line's prefix."""
+    url = None
+    suffix = ""
+    lm = LINKED_TITLE_RE.match(rest)
+    if lm:
+        title, url, suffix = lm.groups()
+    else:
+        title = rest
+        tm = TENTATIVE_RE.search(title)
+        if tm:
+            title, suffix = title[:tm.start()], title[tm.start():]
+    return title, url, suffix
+
+
 def parse_events(text):
-    """Event lines in the ## Briefing section, however they are rendered:
-    plain, item-linked, or carrying a createMarkdown URL, with or without a
-    trailing "(tentative)". Redacted events are withheld — a private event's
-    title is not in the text, so nothing can (or should) match it."""
+    """Event lines in either grammar — the root timeline's "- <time>: 📅 …"
+    bullets and a legacy ## Briefing section's "- <time> — …" bullets —
+    however the title is rendered: plain, item-linked, or carrying a dtnote://
+    URL, with or without a trailing "(tentative)". Each entry carries its
+    grammar as "style" ("timeline" or "legacy") so edits can emit in kind.
+    Redacted events are withheld — a private event's title is not in the
+    text, so nothing can (or should) match it."""
     lines = text.splitlines()
-    span = brief_span(lines)
-    if span is None:
-        return []
     out = []
-    for i in range(*span):
-        m = EVENT_LINE_RE.match(lines[i])
-        if not m:
-            continue
-        time_str, rest = m.groups()
-        url = None
-        suffix = ""
-        lm = LINKED_TITLE_RE.match(rest)
-        if lm:
-            title, url, suffix = lm.groups()
-        else:
-            title = rest
-            tm = TENTATIVE_RE.search(title)
-            if tm:
-                title, suffix = title[:tm.start()], title[tm.start():]
-        if title == REDACTED_TITLE:
-            continue
-        out.append({"line": i, "time": time_str, "title": title,
-                    "url": url, "suffix": suffix})
+    spans = [(root_span(lines), TIMELINE_EVENT_RE, "timeline")]
+    legacy = brief_span(lines)
+    if legacy is not None:
+        spans.append((legacy, EVENT_LINE_RE, "legacy"))
+    for (start, end), line_re, style in spans:
+        for i in range(start, end):
+            m = line_re.match(lines[i])
+            if not m:
+                continue
+            time_str, rest = m.groups()
+            title, url, suffix = _parse_event_rest(rest)
+            if title == REDACTED_TITLE:
+                continue
+            out.append({"line": i, "time": time_str, "title": title,
+                        "url": url, "suffix": suffix, "style": style})
+    out.sort(key=lambda ev: ev["line"])
     return out
 
 
@@ -188,10 +316,18 @@ def best_match(note_name, titles):
     return best_title, "match"
 
 
+def event_line(ev, uuid):
+    """The event's bullet line, item-linked, rendered in its own grammar."""
+    linked = f"[{ev['title']}](x-devonthink-item://{uuid}){ev['suffix']}"
+    if ev["style"] == "legacy":
+        return f"- {ev['time']} — {linked}"
+    return f"- {ev['time']}: {EVENT_EMOJI} {linked}"
+
+
 def link_title(text, date, key, uuid):
     """Point the key's event-title link at the note's item link, replacing a
-    createMarkdown URL or wrapping a plain title. Already-item-linked lines
-    are left alone, so the first note to claim an event keeps it."""
+    dtnote:// URL or wrapping a plain title. Already-item-linked lines are
+    left alone, so the first note to claim an event keeps it."""
     lines = text.splitlines()
     trailing = "\n" if text.endswith("\n") else ""
     for ev in parse_events(text):
@@ -199,8 +335,7 @@ def link_title(text, date, key, uuid):
             continue
         if ev["url"] and ev["url"].startswith("x-devonthink-item://"):
             return text
-        lines[ev["line"]] = (f"- {ev['time']} — [{ev['title']}]"
-                             f"(x-devonthink-item://{uuid}){ev['suffix']}")
+        lines[ev["line"]] = event_line(ev, uuid)
         return "\n".join(lines) + trailing
     return text
 
@@ -208,20 +343,18 @@ def link_title(text, date, key, uuid):
 def insert_subbullet(text, date, key, bullet):
     """Add `bullet` as the first sub-line under the key's event line,
     two-space indented to match the renderer. No-ops when the note's item
-    link is already anywhere in the briefing section."""
+    link is already anywhere in the event's own span (the root timeline, or
+    a legacy note's briefing section)."""
     lines = text.splitlines()
     trailing = "\n" if text.endswith("\n") else ""
-    span = brief_span(lines)
-    if span is None:
-        return text
-    section = "\n".join(lines[span[0]:span[1]])
     m = ITEM_LINK_RE.search(bullet)
     marker = m.group(1) if m else bullet.strip()
-    if marker in section:
-        return text
     for ev in parse_events(text):
         if event_key(date, ev["title"]) != key:
             continue
+        span = brief_span(lines) if ev["style"] == "legacy" else root_span(lines)
+        if marker in "\n".join(lines[span[0]:span[1]]):
+            return text
         pos = ev["line"] + 1
         return "\n".join(lines[:pos] + ["  " + bullet.strip()] + lines[pos:]) + trailing
     return text

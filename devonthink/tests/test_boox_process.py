@@ -144,7 +144,7 @@ class LinkDailyNote(unittest.TestCase):
     bridge op — no Python-side read of the daily note's body, no
     insert-daily-note-section.py subprocess in between."""
 
-    def test_routes_through_insert_under_section_with_no_body_surgery(self):
+    def test_routes_through_append_pinned_with_no_body_surgery(self):
         calls = []
 
         def fake_run_bridge(ops, timeout=300):
@@ -161,10 +161,9 @@ class LinkDailyNote(unittest.TestCase):
         self.assertEqual(bridge.call_count, 2)
         self.assertEqual(calls[0][0]["op"], "get_or_create_daily")
         self.assertEqual(calls[1], [{
-            "op": "insert_under_section",
+            "op": "append_pinned",
             "uuid": "DAILY-1",
-            "header": jp.DAILY_SECTION,
-            "line": "- [\U0001F4D4 Journal](x-devonthink-item://JOURNAL-UUID)",
+            "line": "- \U0001F4D4 [Journal](x-devonthink-item://JOURNAL-UUID)",
         }])
 
 

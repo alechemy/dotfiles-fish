@@ -117,15 +117,17 @@ stay stdlib-only (tier-1 `/usr/bin/python3`, stable TCC identity):
 | `entity-dt-bridge.js` | Executes a JSON ops batch against DT (dump people, search sources, append log lines, set fields, create proposals/records, DT-chat call). Run via `/usr/bin/osascript -l JavaScript` |
 | `calendar-events-json.js` | Dumps one day of calendar events (EventKit via osascript, so the Calendars TCC grant sticks to an Apple-signed binary). One interactive run to approve the prompt |
 | `contacts-json.js` | Dumps macOS Contacts (Contacts framework via osascript, same TCC pattern — one interactive run): name, nickname, emails, phones, birthday. Identifiers only, never facts |
-| `dt-morning-brief.py` | Daily ~05:15 — retried 05:45/06:30/08:00 for standby-missed triggers, idempotent (`com.user.dt-morning-brief`): calendar + Person records → `## Briefing` section in today's daily note; Mondays also `## Reconnect`; Contacts birthdays → `## Birthdays`; LastContact bumps from yesterday's calendar and from Messages |
+| `dt-morning-brief.py` | Daily ~05:15 — retried 05:45/06:30/08:00 for standby-missed triggers, idempotent (`com.user.dt-morning-brief`): calendar + Person records → timed `📅` event bullets merged into today's daily-note timeline; Reconnect, birthdays, review backlog, journal status, On This Day → the TRMNL snapshot only; LastContact bumps from yesterday's calendar and from Messages |
 | `entity-filing.py` | Every 30 min (`com.user.entity-filing`): applies approved proposals, then extracts facts from unprocessed sources and files them (suggest mode by default) |
 
 ### Morning brief (resurfacing + contact tracking)
 
-The `## Briefing` section is **the day you agreed to**, in start order: every
-timed event you accepted, on a calendar not in `SKIP_CALENDARS`, including the
-ones with nobody attached. A day reads as a day, so a solo dentist appointment
-lists as a bare heading rather than vanishing.
+The briefed events are **the day you agreed to**, in start order: every timed
+event you accepted, on a calendar not in `SKIP_CALENDARS`, including the ones
+with nobody attached — each a timed `📅` bullet
+(`- 8:00am: 📅 [Title](…)`) in the daily note's flat timeline. A day reads as
+a day, so a solo dentist appointment lists as a bare bullet rather than
+vanishing.
 
 What does *not* list is an invitation you never answered, and the distinction
 is subtler than it looks. Declining an Exchange invite **removes the event from
@@ -162,13 +164,13 @@ iCloud events carry none — which is why title matching exists at all.
 Each briefed event ties into the note layer through its **event key** —
 `YYYY-MM-DD-<slug of title>`, computed by `brief_events.py` and stored in the
 `LinkedEvent` custom-metadata field of every note attached to the event. The
-metadata is the durable record; the briefing text is only a rendering of it,
-re-derived on every run. That derivation is load-bearing: each run replaces
-the whole `## Briefing` span, so a link living only in the text would be
-wiped by the next regeneration (including the `RunAtLoad` rerun a mid-day
-reboot triggers).
+metadata is the durable record; the event bullet is only a rendering of it,
+re-derived on every run. That derivation is load-bearing: each run's merge
+replaces a matched event's line and rebuilds its machine sub-lines, so a link
+living only in the text would be wiped by the next merge (including the
+`RunAtLoad` rerun a mid-day reboot triggers).
 
-Rendering, per event (`event_note_index` → `render_brief`):
+Rendering, per event (`event_note_index` → `brief_timeline_blocks`):
 
 - The note whose `DocumentType` contains "Meeting" owns the event: the title
   renders as that note's item link.
@@ -201,24 +203,30 @@ Two smart rules cover the paths the handler doesn't own:
   hand-tagged, named `"YYYY-MM-DD <event title>"`. It derives `EventDate` +
   `LinkedEvent` from the record name, stamps `DocumentType="Meeting Notes"`
   (entity filing already sweeps `mddocumenttype:~Meeting`, so the note
-  becomes a fact source for free) and `DailyNoteLinked=1` (no
-  double-listing under `## Today's Notes`), then swaps the day's briefing
-  title link for the item link in place. Handler-created notes arrive fully
+  becomes a fact source for free) and `DailyNoteLinked=1` (no second
+  timeline bullet of its own), then swaps the title link in the day's `📅`
+  event bullet for the item link in place (through the dual-grammar
+  `brief_events.py` CLI). Handler-created notes arrive fully
   stamped, so the rule's `LinkedEvent` guard skips them.
-- **Post-Enrich & Archive step 2b** tries the event match before its
-  `## Today's Notes` fallback (`brief_events.py match`): stopword-filtered
+- **Post-Enrich & Archive step 2b** tries the event match before falling
+  back to a timed timeline bullet of the document's own
+  (`brief_events.py match`): stopword-filtered
   token overlap ≥ 2/3 with a **unique winner** required, so "Call with
   Priya" finds the event "Call Priya", but a note named "Roundtable" on a
-  day with two roundtable events refuses to choose and falls back to
-  `## Today's Notes`. Candidate days are the document's `EventDate` when
+  day with two roundtable events refuses to choose and takes the fallback.
+  Candidate days are the document's `EventDate` when
   set, else its creation day plus the day before (an upload can trail the
   meeting); event titles are parsed from the daily notes' own rendered
-  briefings, so the matcher sees exactly the day you were briefed on, with
-  redacted events withheld.
+  bullets — `brief_events.py` speaks both grammars, the flat timeline's
+  `- <time>: 📅 …` bullets and a pre-flatten note's `## Briefing` section
+  with `- <time> — …` bullets, because matching can run against
+  yesterday's pre-flatten note and old notes are never migrated; edits
+  emit in the grammar of the line they touch — so the matcher sees exactly
+  the day you were briefed on, with redacted events withheld.
 
 A wrong link is repaired by editing metadata, not text: set or clear
-`LinkedEvent` on the note and the next regeneration redraws today's briefing
-to match (past briefings never regenerate — fix those lines by hand).
+`LinkedEvent` on the note and the next merge redraws today's event bullet
+to match (past days never merge — fix those lines by hand).
 
 #### The roster ages; the news does not
 
@@ -481,10 +489,32 @@ Person record is the Ignored candidates group's job (see Candidates under
 Filing) — the two are the same idea applied on either side of the roster
 boundary.
 
-Sections are appended *after* `## Today's Notes` (created if missing) because
-`insert-jot-into-daily-note.py` targets the last bullet *before* that header —
-a briefing above it would swallow incoming jots. Each section carries an
-HTML-comment marker (`<!-- brief:YYYY-MM-DD -->`) making re-runs no-ops.
+Event bullets are reconciled, not appended: the brief computes per-event
+blocks (`brief_timeline_blocks`: title, minutes, line, sub-lines) and hands
+them to the bridge's `merge_timeline`, whose pure `timelineMerge` reconciles
+the note's existing machine `📅` bullets against the desired set in one
+read-modify-write. Identity is (title, minutes), with a title-only second
+pass so a rescheduled event *relocates* — carrying its manual sub-lines —
+instead of duplicating; redacted events match by minute, count-aware. A
+matched event gets its line replaced and its machine sub-lines rebuilt
+(manual sub-lines survive, after the machine ones); a new event inserts
+chronologically — before the first strictly-later timed bullet or the first
+pinned untimed machine bullet, stepping over untimed manual lines, which are
+anchors; a stale machine event bullet (event gone from the calendar) is
+removed only if it carries no manual sub-lines. A byte-identical result
+writes nothing. On a calendar-fetch failure the merge is skipped entirely —
+an empty desired set is indistinguishable from an honestly empty day, and
+would remove event bullets — and a note still carrying a `## Briefing`
+header is refused (`legacy: true`), so a pre-flatten note can never be
+double-populated.
+
+Event bullets are the only thing the brief writes into the note. The digest
+surfaces — Reconnect, birthdays, entity review, journal status, On This Day —
+are computed on every run and carried solely by the TRMNL snapshot
+(`~/.local/state/devonthink/morning-brief.json` → `trmnl-push-brief.py`; see
+[trmnl-brief.md](trmnl-brief.md)). The note carries no journal-status text in
+any state: the pinned `📔` journal bullet (written by `boox-process.py` via
+the bridge's `append_pinned` op) simply appears when the entry lands.
 
 The brief also bumps `LastContact` for everyone matched in **yesterday's**
 calendar (attendees or title). This keeps the Reconnect digest honest for
@@ -493,7 +523,8 @@ social plans — without waiting for a filed fact. Yesterday, not today,
 because a completed day can't have its meetings cancelled out from under the
 bump; and bumps only ever raise the date, so re-runs are harmless.
 
-A `## Birthdays` section lists people whose macOS Contacts card carries a
+The birthdays digest — computed every run and carried solely by the TRMNL
+snapshot — lists people whose macOS Contacts card carries a
 birthday falling within the next 14 days. Cards are matched against the
 roster the same way attendees are (email first, then name, then the card's
 nickname against record aliases); only roster-matched people surface, which
@@ -540,7 +571,8 @@ person's most recent date — one calendar dump, a few seconds, idempotent.
 Run it once after a seeding session. The calendar and Messages are the only
 historical sources of contact dates.
 
-The brief also writes an `## Entity Review` section counting proposals that
+The brief also computes an entity-review digest (TRMNL snapshot, like the
+other digests) counting proposals that
 need attention: those awaiting review in `_Review`, and separately any left
 sitting in `_Review/Approved`, which means filing refused to apply them (bad
 ops JSON, a failing op, or the stale-`ensure_person` guard below). It also
@@ -549,8 +581,8 @@ note that never became entity knowledge stays visible. Nothing else surfaces
 the Approved group in the daily workflow — it is normally emptied by the next
 run. `dt-watchdog` *does* notify on those refusal `WARNING`s (its scan pattern
 ` WARN(ING)? ` matches Python's ` WARNING ` levelname), but that is a
-transient, per-signature-deduplicated alert; this line keeps a standing count
-in front of you each morning.
+transient, per-signature-deduplicated alert; this digest keeps a standing
+count in front of you each morning.
 
 Note: only calendars in macOS Calendar are visible. Work meetings appear in
 the brief because your company email account is
@@ -565,10 +597,14 @@ Sources: records with `DocumentType` containing "Meeting", records with
 still being written), and Person-fact captures in `/20_ENTITIES/_Facts` (kind
 `fact`, see below), each gated on its upstream pipeline being finished
 (`NeedsProcessing` clear — a Boox record mid-OCR has no text yet).
-Daily-note text is stripped of the brief's machine-generated sections
+Daily-note text is stripped of the machine-generated content
+(`strip_generated_sections`) before hashing and extraction, so the model
+only sees the human-authored remainder: on a flat note, machine bullets and
+their machine sub-lines are dropped — manual sub-lines under an event
+survive as extraction input — and on a pre-flatten note the legacy sections
 (`## Briefing`, `## Reconnect`, `## Birthdays`, `## Entity Review`,
-`## Journal`, `## On This Day`) before hashing and extraction, so the model
-only sees the human-authored remainder. Without the strip, briefing
+`## Journal`, `## On This Day`) are stripped forever, because old notes are
+never migrated. Without the strip, briefing
 scaffolding round-trips into pseudo-facts: attendee lists become "X attended
 the 9:00am meeting" log entries (complete with "no entity record yet" echoed
 from the brief's own annotation), attendee emails become email/employer
@@ -585,7 +621,7 @@ modification date, not a bare UUID: a late OCR pass, notebook re-export, or
 hand edit re-enters filing automatically, while a metadata-only touch is
 recognized by hash and re-baselined without spending an extraction. Newest
 sources first, `MAX_PER_RUN` extractions per run; a source that fails
-`MAX_ATTEMPTS` times is parked — surfaced in the brief's `## Entity Review`
+`MAX_ATTEMPTS` times is parked — surfaced in the brief's entity-review digest
 — and retries when its content changes or via `--force`.
 `entity-filing.py --rebuild-state` re-derives the processed set from the
 `EntityFiled` audit flag (and runs automatically when the state file is
@@ -762,7 +798,7 @@ bundled with everything else you wrote, and never same-day. Filing treats the
   capture whose only person is Ignored — does filing write a *"Review
   capture: …"* stub to `_Review` (empty `[]` ops fence, so approving it is a
   harmless clear) rather than marking the source filed with no trace —
-  surfaced in the brief's `## Entity Review` count.
+  surfaced in the brief's entity-review count.
 - The capture record persists in `_Facts` (`EntityFiled=1`) as the clickable
   `([source](…))` provenance anchor. **Don't label a `_Facts` record** — the
   global "After Labelling, Move to 99_ARCHIVE" rule would archive it out of
@@ -839,7 +875,7 @@ Mechanics worth knowing (mostly in `things_bridge.py`):
 - Closing/re-opening tasks needs `THINGS_AUTH_TOKEN` (read from the managed
   block in `~/.zshenv`; launchd sources no shell profile). Without it the
   loop degrades: proposals still apply, but bounced tasks stay completed and
-  the brief's `## Entity Review` section remains the backstop.
+  the brief's entity-review digest remains the backstop.
 - Reading the Things DB needs Full Disk Access on `/usr/bin/python3` — the
   same grant the Messages→LastContact pass established. The local DB only
   receives cloud pushes while Things.app runs, so the poller pre-warms it
@@ -1013,9 +1049,6 @@ review-gated proposal, never an auto-apply.
 ```bash
 # preview today's brief without writing
 ~/.local/bin/dt-morning-brief.py --dry-run
-
-# force the weekly reconnect section
-~/.local/bin/dt-morning-brief.py --dry-run --weekly
 
 # see what filing would do, without writing
 ~/.local/bin/entity-filing.py --dry-run

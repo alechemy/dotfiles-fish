@@ -8,9 +8,9 @@ dotfiles repo.
 
 Every person who matters gets a Markdown record in `20_ENTITIES/People` that
 accumulates dated facts with links back to the note each fact came from. A
-morning agent writes a briefing into today's daily note — who you're meeting,
-what you know about them — and a Monday digest lists people you've lost touch
-with. A filing agent reads your meeting notes, handwritten notes, and daily
+morning agent writes each of the day's meetings into today's daily note as a
+timed bullet — who you're meeting, what you know about them — and a Reconnect
+digest on the TRMNL dashboard lists people you've lost touch with. A filing agent reads your meeting notes, handwritten notes, and daily
 jots through a local LLM and *proposes* new facts — and, when a note
 documents a trip, celebration, or gathering, an Event record with its
 attendees. The morning agent can also propose a new Person from strong calendar
@@ -58,7 +58,7 @@ calendar titles, EventKit calendar identifiers, or source identifiers.
 
 ## Your daily rhythm
 
-- **Morning:** the daily note has a `## Briefing` section by ~5:15 (or moments after the Mac wakes). Read it.
+- **Morning:** the daily note has a timed `📅` bullet for each of the day's meetings by ~5:15 (or moments after the Mac wakes). Read them.
   That's the whole habit.
 - **During the day:** jot like you always have. The one adjustment: name
   names. "Bob's new role is X, Alice expecting in March" files itself;
@@ -68,8 +68,8 @@ calendar titles, EventKit calendar identifiers, or source identifiers.
   e.g. "Dana Parker's daughter started at Reed College" and run it. See
   "Capturing a fact" below.
 - **Every day or two (2 minutes):** open `20_ENTITIES/_Review` and process
-  proposals — see the walkthrough below. The briefing's `## Entity Review`
-  line counts what's waiting, and separately flags anything still sitting in
+  proposals — see the walkthrough below. The TRMNL brief's entity-review
+  count shows what's waiting, and separately flags anything still sitting in
   `_Review/Approved`, which means the run refused to apply it.
 - **Whenever you feel like it:** open `20_ENTITIES/_Candidates` — one record
   per unknown person seen in your notes or meetings, holding everything
@@ -78,10 +78,10 @@ calendar titles, EventKit calendar identifiers, or source identifiers.
   about them again, or just leave it — undecided candidates sit silently and
   are never re-proposed. The brief only nags about a candidate when a fact
   you deliberately captured is waiting on one.
-- **Monday:** the `## Reconnect` section lists active people past their
-  contact threshold (family/close friends 30 days, friends 60, colleagues
-  90). Text someone, or set their `entitystatus` to `dormant` to silence
-  them.
+- **Reconnect:** the TRMNL brief's Reconnect list shows active people past
+  their contact threshold (family/close friends 30 days, friends 60,
+  colleagues 90). Text someone, or set their `entitystatus` to `dormant` to
+  silence them.
 
 Contact tracking is mostly automatic: yesterday's calendar events (matched by
 attendee or by a name in the event title, like "Call with Jake") bump
@@ -323,7 +323,7 @@ never rewrites what's there.
 
 | When | What |
 | --- | --- |
-| ~05:15 daily (retries 05:45/06:30/08:00 if asleep) | Briefing into the daily note, calendar identity provenance, calendar Person candidates, yesterday's LastContact bumps, and Reconnect on Mondays |
+| ~05:15 daily (retries 05:45/06:30/08:00 if asleep) | The day's events merged into the daily-note timeline, calendar identity provenance, calendar Person candidates, yesterday's LastContact bumps, and the TRMNL digests (Reconnect, birthdays, entity review, journal status, On This Day) |
 | Every 30 min | Apply anything in `_Review/Approved`, then extract up to 3 unprocessed notes — local model, on AC power, and only after ~10 min of user inactivity, so it never competes with active work |
 
 **Draining the backlog by hand.** The scheduled runs only extract while

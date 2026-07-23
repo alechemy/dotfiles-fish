@@ -1,8 +1,8 @@
 -- Process Jots
 --
 -- Handles jot documents created from the Drafts Quick Jot action.
--- Inserts each jot into the matching daily note body (before "## Today's
--- Notes") and trashes the jot document.
+-- Inserts each jot into the matching daily note's timeline at its
+-- timestamp's position and trashes the jot document.
 --
 -- macOS fallback creates records with IsJot=1. iOS (DTTG) can't set
 -- custom metadata via x-callback-url, so those arrive with a "Jot "
@@ -31,7 +31,6 @@ on performSmartRule(theRecords)
 	tell application id "DNtp"
 		set dbName to "Lorebook"
 		set groupPath to "/10_DAILY"
-		set sectionHeader to "## Today's Notes"
 
 		try
 			set targetDB to database dbName
@@ -81,10 +80,8 @@ on performSmartRule(theRecords)
 						-- ~40 lines of Python encoded one-string-per-line
 						-- with no syntax highlighting and no way to test
 						-- outside of triggering an actual smart rule. The
-						-- helper takes the note body on stdin, JOT_LINE and
-						-- SECTION_HEADER via env, and prints the modified
-						-- body on stdout. Wire format matches the prior
-						-- inlined version verbatim.
+						-- helper takes the note body on stdin and JOT_LINE
+						-- via env, and prints the modified body on stdout.
 						set pyHelper to (POSIX path of (path to home folder)) & ".local/bin/insert-jot-into-daily-note.py"
 
 						set noteBody to plain text of targetNote
@@ -105,10 +102,9 @@ on performSmartRule(theRecords)
 							-- `without altering line endings`: otherwise the helper's
 							-- LFs come back as CRs and the note is stored as one
 							-- CR-delimited line, which every \n-splitting consumer
-							-- (entity-dt-bridge's upsert_section) reads as headerless.
+							-- (entity-dt-bridge's merge_timeline) reads as bulletless.
 							set newBody to do shell script ¬
 								"export JOT_LINE=" & quoted form of jotLine & ¬
-								" && export SECTION_HEADER=" & quoted form of sectionHeader & ¬
 								" && /usr/bin/python3 " & quoted form of pyHelper & ¬
 								" < " & quoted form of tmpPath without altering line endings
 						on error errMsg number errNum

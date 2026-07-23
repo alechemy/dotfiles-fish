@@ -136,6 +136,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path.home() / ".local" / "bin"))
 from pipeline_log import setup as setup_log
 
+import brief_events as be
 import entity_candidates as ec
 import things_bridge
 
@@ -2308,23 +2309,39 @@ MACHINE_LINK_BULLET_RE = re.compile(
 
 
 def strip_generated_sections(text):
-    """Daily-note text minus the brief's machine-written sections (each
-    spans its header through the next heading of level 1 or 2, matching the
-    bridge's section-span rule) and any bullet that is nothing but a
-    machine-written link or marker. Extraction must only see human-authored
-    content: the briefing's attendee scaffolding otherwise round-trips into
-    attendance pseudo-facts, On This Day re-surfaces old entries as if they
-    were dated today, and a late journal/post-enrich link line would
-    otherwise re-trigger extraction on a note nothing new was written into."""
-    out, skipping = [], False
+    """Daily-note text minus the pipeline's machine-written lines.
+    Extraction must only see human-authored content: event scaffolding
+    otherwise round-trips into attendance pseudo-facts, a person's news
+    sub-lines re-surface old entries as if they were dated today, and a late
+    journal/post-enrich link line would otherwise re-trigger extraction on a
+    note nothing new was written into.
+
+    Three layers, covering both daily-note formats forever (old notes are
+    never migrated): the legacy generated `##` sections (each spans its
+    header through the next heading of level 1 or 2, matching the bridge's
+    section-span rule); any bullet that is nothing but a machine-written
+    link or marker; and the flat timeline's machine bullets — emoji-typed
+    top-level lines plus their machine sub-lines, where a manual sub-line
+    typed under an event survives as extraction input."""
+    out, skipping, machine_block = [], False, False
     for line in text.splitlines():
         stripped = line.strip()
         if HEADING_RE.match(stripped):
             skipping = stripped in GENERATED_SECTIONS
+            machine_block = False
             if skipping:
                 continue
         if skipping or MACHINE_LINK_BULLET_RE.match(stripped):
             continue
+        if be.is_machine_bullet(line):
+            machine_block = True
+            continue
+        if machine_block and stripped and line[:1].isspace():
+            if be.is_machine_subline(line):
+                continue
+            out.append(line)
+            continue
+        machine_block = False
         out.append(line)
     return "\n".join(out)
 

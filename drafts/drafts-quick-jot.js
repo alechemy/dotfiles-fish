@@ -1,7 +1,8 @@
 // Quick Jot → DEVONthink Daily Note
 //
 // Inserts the draft content into today's daily note as a timestamped
-// bullet in the note body (before "## Today's Notes").
+// bullet at its chronological position in the note's timeline (or, on a
+// pre-flatten note, before "## Today's Notes").
 //
 // macOS: modifies the daily note directly via AppleScript (instant)
 // iOS:   creates a jot document (IsJot=1) → processed by smart rule on Mac
@@ -89,7 +90,7 @@ function macInsert(dateStr, line) {
   const uuid = raw.substring(0, sep);
   const body = raw.substring(sep + 11).replace(/\r\n?/g, "\n");
 
-  const newBody = insertBeforeTodaysNotes(body, line);
+  const newBody = insertIntoTimeline(body, line);
 
   if (!script.execute("updateDailyNote", [uuid, newBody])) {
     alert("WRITE ERROR:\n" + script.lastError);
@@ -126,6 +127,80 @@ function iosCreateJot(dateStr, line, rawText) {
 }
 
 // ── Text insertion ─────────────────────────────────────────────────
+// Kept textually parallel with stow/bin/.local/bin/dt-jot; the Python twin
+// of the timeline rule is brief_events.timeline_insert.
+
+function insertIntoTimeline(body, jotLine) {
+  const lines = body.split("\n");
+  if (lines.some((l) => l.trim() === "## Today's Notes")) {
+    return insertBeforeTodaysNotes(body, jotLine);
+  }
+  const timed = /^- (\d{1,2}):(\d{2})(am|pm)\b/;
+  const machine =
+    /^- (?:\d{1,2}:\d{2}(?:am|pm): )?[\u{1F4C5}\u{1F517}\u{1F4C4}✏\u{1F4DD}\u{1F4D4}]\uFE0F? /u;
+  const emptyBullet = /^\s*[-*]\s*$/;
+  const minutesOf = (line) => {
+    const m = timed.exec(line);
+    if (!m) return null;
+    let h = Number(m[1]) % 12;
+    if (m[3] === "pm") h += 12;
+    return h * 60 + Number(m[2]);
+  };
+  let start = 0;
+  for (let i = 0; i < lines.length; i++) {
+    if (/^#{1,2}\s/.test(lines[i])) {
+      start = i + 1;
+      break;
+    }
+  }
+  let end = lines.length;
+  for (let i = start; i < lines.length; i++) {
+    if (/^#{1,2}\s/.test(lines[i])) {
+      end = i;
+      break;
+    }
+  }
+  const span = lines.slice(start, end);
+  if (span.every((l) => l.trim() === "" || emptyBullet.test(l))) {
+    for (let i = start; i < end; i++) {
+      if (emptyBullet.test(lines[i])) {
+        lines[i] = jotLine;
+        return lines.join("\n");
+      }
+    }
+  }
+  const minutes = minutesOf(jotLine);
+  let last = null;
+  let seen = false;
+  let i = start;
+  while (i < end) {
+    const line = lines[i];
+    if (line.trim() === "") {
+      if (!seen) last = i + 1;
+      i++;
+      continue;
+    }
+    let groupEnd = i + 1;
+    if (line.startsWith("- ")) {
+      while (groupEnd < end && /^\s+\S/.test(lines[groupEnd])) groupEnd++;
+    }
+    seen = true;
+    const t = minutesOf(line);
+    if (t !== null && minutes !== null && t > minutes) {
+      lines.splice(i, 0, jotLine);
+      return lines.join("\n");
+    }
+    if (t === null && machine.test(line)) {
+      lines.splice(i, 0, jotLine);
+      return lines.join("\n");
+    }
+    last = groupEnd;
+    i = groupEnd;
+  }
+  const at = last === null ? start : last;
+  lines.splice(at, 0, jotLine);
+  return lines.join("\n");
+}
 
 function insertBeforeTodaysNotes(body, jotLine) {
   const lines = body.split("\n");

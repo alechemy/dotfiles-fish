@@ -1,6 +1,6 @@
 #!/usr/bin/python3
 """
-insert-jot-into-daily-note.py — Insert a single bullet line into the correct
+insert-jot-into-daily-note.py — Insert a single jot bullet into the correct
 position of a daily note's markdown body.
 
 Invoked from the "Process Jots" smart rule
@@ -12,25 +12,19 @@ file, invokes this script on stdin, and writes the modified body back via
 `set plain text of targetNote to ...`.
 
 Wire format:
-    JOT_LINE       env var — the bullet to insert (already includes any
-                   `<!-- jot:UUID -->` idempotency marker built in
-                   AppleScript)
-    SECTION_HEADER env var — H2 line that marks the "Today's Notes" section,
-                   exact-match including the "## " prefix
-    stdin          full note body
-    stdout         modified body (no trailing newline)
+    JOT_LINE  env var — the bullet to insert (a "- <h:mmam>: <text>" line from
+              the Drafts action, already carrying its `<!-- jot:UUID -->`
+              idempotency marker built in AppleScript)
+    stdin     full note body
+    stdout    modified body (no trailing newline)
 
-Insertion rules (matches the prior in-AppleScript Python heredoc verbatim):
-
-  1. If SECTION_HEADER is not present in the body, append `'', JOT_LINE`.
-  2. Otherwise, look for the LAST content bullet (`- text` or `* text`)
-     before the section header:
-       a. If one exists, insert JOT_LINE immediately after it, skipping past
-          any indented continuation lines belonging to that bullet.
-       b. If none exists but there is an EMPTY bullet (`-` or `*` with no
-          text) before the header, replace it with JOT_LINE.
-       c. If neither, insert `'', JOT_LINE, ''` immediately before the
-          header, collapsing any blank lines just above the header first.
+The jot lands at its timestamp's chronological position in the root timeline
+(brief_events.timeline_insert — the same placement rule the bridge's
+timelineMerge uses), so a jot processed after the morning brief has populated
+future event times slots in among them rather than appending below tonight's
+meetings. A pre-flatten note that still has a "## Today's Notes" section takes
+the legacy path: after the last content bullet before that header, replacing
+the skeleton's empty placeholder bullet when the root list is empty.
 
 Shebang is `/usr/bin/python3` (the Apple-signed system interpreter) to match
 the AppleScript caller's `do shell script "/usr/bin/python3 <path>"`. The
@@ -44,21 +38,15 @@ import os
 import re
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import brief_events as be
 
-def insert(note: str, jot: str, marker: str) -> str:
-    lines = note.splitlines()
+LEGACY_HEADER = "## Today's Notes"
+
+
+def legacy_insert(lines, jot, h2):
     empty_bullet = re.compile(r"^\s*[-*]\s*$")
     content_bullet = re.compile(r"^\s*[-*]\s+\S")
-
-    h2 = None
-    for i, line in enumerate(lines):
-        if line.strip() == marker:
-            h2 = i
-            break
-
-    if h2 is None:
-        lines += ["", jot]
-        return "\n".join(lines)
 
     last_content = None
     for i in range(h2 - 1, -1, -1):
@@ -71,7 +59,7 @@ def insert(note: str, jot: str, marker: str) -> str:
         while insert_at < h2 and re.match(r"^[ \t]", lines[insert_at]):
             insert_at += 1
         lines.insert(insert_at, jot)
-        return "\n".join(lines)
+        return lines
 
     placeholder = None
     for i in range(h2 - 1, -1, -1):
@@ -81,25 +69,36 @@ def insert(note: str, jot: str, marker: str) -> str:
 
     if placeholder is not None:
         lines[placeholder] = jot
-        return "\n".join(lines)
+        return lines
 
     ins = h2
     while ins > 0 and lines[ins - 1].strip() == "":
         ins -= 1
     lines[ins:h2] = ["", jot, ""]
-    return "\n".join(lines)
+    return lines
+
+
+def insert(note: str, jot: str) -> str:
+    lines = note.splitlines()
+    h2 = None
+    for i, line in enumerate(lines):
+        if line.strip() == LEGACY_HEADER:
+            h2 = i
+            break
+    if h2 is not None:
+        return "\n".join(legacy_insert(lines, jot, h2))
+    return "\n".join(be.timeline_insert(lines, [jot]))
 
 
 def main() -> int:
     try:
         jot = os.environ["JOT_LINE"]
-        marker = os.environ["SECTION_HEADER"]
     except KeyError as exc:
         print(f"missing required env var: {exc.args[0]}", file=sys.stderr)
         return 2
 
     note = sys.stdin.read()
-    sys.stdout.write(insert(note, jot, marker))
+    sys.stdout.write(insert(note, jot))
     return 0
 
 

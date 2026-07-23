@@ -22,6 +22,17 @@ def backlog(pending=0, approved=0, parked=None,
             "review_uuid": review_uuid, "approved_uuid": approved_uuid}
 
 
+def rendered_timeline(tblocks):
+    """The daily-note text a set of brief_timeline_blocks produces — each
+    block's event line followed by its machine sub-lines, the way the
+    bridge's merge lays them down on a note with no manual content."""
+    lines = []
+    for b in tblocks:
+        lines.append(b["line"])
+        lines.extend(b["subLines"])
+    return "\n".join(lines)
+
+
 class MdEnum(unittest.TestCase):
     def test_folds_case_space_and_underscore(self):
         for raw in ("family", "Family", " FAMILY "):
@@ -447,80 +458,85 @@ class CalendarPersonCandidates(unittest.TestCase):
         self.assertEqual(got[0]["sid"], again[0]["sid"])
 
 
-class BuildReconnect(unittest.TestCase):
+class ReconnectOverdue(unittest.TestCase):
     TODAY = "2026-07-09"
 
     def reconnect(self, people):
         with capture_logs(mb) as cap:
-            out = mb.build_reconnect(people, self.TODAY)
-        return out or "", cap.messages()
+            out = mb.reconnect_overdue(people, self.TODAY)
+        return [(days, p["name"]) for _, days, p in out], cap.messages()
+
+    def names(self, rows):
+        return [name for _, name in rows]
 
     def test_silent_statuses_never_surface(self):
         for status in ("dormant", "archived", "deceased", "Deceased"):
             people = [person("X", relationship="family", entitystatus=status)]
-            out, warnings = self.reconnect(people)
-            self.assertNotIn("X", out, status)
+            rows, warnings = self.reconnect(people)
+            self.assertEqual(rows, [], status)
             self.assertEqual(warnings, [], status)
 
     def test_acquaintance_is_silent_without_warning(self):
-        out, warnings = self.reconnect([person("X", relationship="acquaintance")])
-        self.assertNotIn("X", out)
+        rows, warnings = self.reconnect([person("X", relationship="acquaintance")])
+        self.assertEqual(rows, [])
         self.assertEqual(warnings, [])
 
     def test_blank_relationship_is_silent_without_warning(self):
-        out, warnings = self.reconnect([person("X")])
-        self.assertNotIn("X", out)
+        rows, warnings = self.reconnect([person("X")])
+        self.assertEqual(rows, [])
         self.assertEqual(warnings, [])
 
     def test_unknown_relationship_warns_and_skips(self):
-        out, warnings = self.reconnect([person("X", relationship="brother")])
-        self.assertNotIn("X", out)
+        rows, warnings = self.reconnect([person("X", relationship="brother")])
+        self.assertEqual(rows, [])
         self.assertEqual(len(warnings), 1)
         self.assertIn("unknown Relationship", warnings[0])
 
     def test_unknown_status_warns_and_fails_open(self):
-        out, warnings = self.reconnect(
+        rows, warnings = self.reconnect(
             [person("X", relationship="family", entitystatus="activ")])
-        self.assertIn("X", out)
+        self.assertIn("X", self.names(rows))
         self.assertEqual(len(warnings), 1)
         self.assertIn("unknown EntityStatus", warnings[0])
 
     def test_folded_values_resolve(self):
-        out, warnings = self.reconnect(
+        rows, warnings = self.reconnect(
             [person("X", relationship="Close Friend", entitystatus="Active")])
-        self.assertIn("X", out)
+        self.assertIn("X", self.names(rows))
         self.assertEqual(warnings, [])
 
     def test_no_lastcontact_is_maximally_overdue(self):
         people = [person("Never", relationship="family"),
                   person("Stale", relationship="family", lastcontact="2026-01-01")]
-        out, _ = self.reconnect(people)
-        self.assertIn("no recorded contact", out)
-        self.assertLess(out.index("Never"), out.index("Stale"))
+        rows, _ = self.reconnect(people)
+        self.assertEqual(self.names(rows), ["Never", "Stale"])
+        self.assertIsNone(rows[0][0])
 
     def test_threshold_boundary(self):
         # colleague = 90 days; strictly greater than the threshold surfaces.
-        out, _ = self.reconnect(
+        rows, _ = self.reconnect(
             [person("Edge", relationship="colleague", lastcontact="2026-04-10")])
-        self.assertNotIn("Edge", out)
-        out, _ = self.reconnect(
+        self.assertEqual(rows, [])
+        rows, _ = self.reconnect(
             [person("Over", relationship="colleague", lastcontact="2026-04-09")])
-        self.assertIn("Over", out)
+        self.assertIn("Over", self.names(rows))
 
     def test_malformed_lastcontact_warns_and_surfaces(self):
         # The field is free text; a hand-typed date must not hide the person.
         for raw in ("July 8, 2025", "2025-7-8", "not-a-date"):
-            out, warnings = self.reconnect(
+            rows, warnings = self.reconnect(
                 [person("Bad", relationship="family", lastcontact=raw)])
-            self.assertIn("Bad", out, raw)
-            self.assertIn("no recorded contact", out, raw)
+            self.assertIn("Bad", self.names(rows), raw)
+            self.assertIsNone(rows[0][0], raw)
             self.assertEqual(len(warnings), 1, raw)
             self.assertIn("unparseable LastContact", warnings[0])
 
-    def test_limit(self):
+    def test_limit_is_applied_at_the_snapshot(self):
         people = [person(f"P{i}", relationship="family") for i in range(15)]
-        out, _ = self.reconnect(people)
-        self.assertEqual(out.count("\n- "), mb.RECONNECT_LIMIT)
+        overdue = mb.reconnect_overdue(people, self.TODAY)
+        self.assertEqual(len(overdue), 15)
+        snap = mb.build_snapshot(self.TODAY, [], overdue, [], None, None, None)
+        self.assertEqual(len(snap["reconnect"]), mb.RECONNECT_LIMIT)
 
 
 class MatchContact(unittest.TestCase):
@@ -573,80 +589,79 @@ class BirthdayOccurrence(unittest.TestCase):
         self.assertEqual(str(self.occ(2, 28, "2028-02-20")), "2028-02-28")
 
 
-class BuildBirthdays(unittest.TestCase):
+class BirthdayRows(unittest.TestCase):
     TODAY = "2026-07-11"
 
-    def build(self, contacts, people, today=TODAY):
-        return mb.build_birthdays(contacts, people, today) or ""
+    def rows(self, contacts, people, today=TODAY):
+        return mb.birthday_rows(contacts, people, today)
 
-    def test_roster_matched_birthday_renders_with_link_and_marker(self):
+    def test_roster_matched_birthday_yields_a_row(self):
         p = person("Jake Pendry")
-        out = self.build([contact("Jake Pendry",
+        rows = self.rows([contact("Jake Pendry",
                                   birthday={"month": 7, "day": 15})], [p])
-        self.assertIn(f"<!-- birthdays:{self.TODAY} -->", out)
-        self.assertIn(f"- 2026-07-15 — [Jake Pendry](x-devonthink-item://"
-                      f"{p['uuid']}) — birthday", out)
+        self.assertEqual(rows, [(mb.date(2026, 7, 15), None, p)])
 
     def test_unmatched_contact_never_surfaces(self):
-        out = self.build([contact("Stranger", birthday={"month": 7, "day": 12})],
+        rows = self.rows([contact("Stranger", birthday={"month": 7, "day": 12})],
                          [person("Jake Pendry")])
-        self.assertEqual(out, "")
+        self.assertEqual(rows, [])
 
     def test_age_from_year(self):
-        out = self.build([contact("Jake Pendry",
+        rows = self.rows([contact("Jake Pendry",
                                   birthday={"month": 7, "day": 15, "year": 1986})],
                          [person("Jake Pendry")])
-        self.assertIn("turns 40", out)
+        self.assertEqual(rows[0][1], 40)
 
     def test_sentinel_year_gets_no_age(self):
         for year in (1604, 5, 2100):
-            out = self.build([contact("Jake Pendry",
+            rows = self.rows([contact("Jake Pendry",
                                       birthday={"month": 7, "day": 15, "year": year})],
                              [person("Jake Pendry")])
-            self.assertIn("— birthday", out, year)
-            self.assertNotIn("turns", out, year)
+            self.assertIsNone(rows[0][1], year)
 
     def test_age_uses_occurrence_year_across_new_year(self):
-        out = self.build([contact("Jake Pendry",
+        rows = self.rows([contact("Jake Pendry",
                                   birthday={"month": 1, "day": 3, "year": 1990})],
                          [person("Jake Pendry")], today="2026-12-28")
-        self.assertIn("- 2027-01-03", out)
-        self.assertIn("turns 37", out)
+        self.assertEqual(rows[0][0], mb.date(2027, 1, 3))
+        self.assertEqual(rows[0][1], 37)
 
-    def test_today_is_flagged(self):
-        out = self.build([contact("Jake Pendry",
+    def test_today_is_flagged_in_the_snapshot(self):
+        rows = self.rows([contact("Jake Pendry",
                                   birthday={"month": 7, "day": 11})],
                          [person("Jake Pendry")])
-        self.assertIn("(today!)", out)
+        snap = mb.build_snapshot(self.TODAY, [], [], rows, None, None, None)
+        self.assertTrue(snap["birthdays"][0]["today"])
 
     def test_outside_window_is_silent(self):
-        out = self.build([contact("Jake Pendry",
+        rows = self.rows([contact("Jake Pendry",
                                   birthday={"month": 7, "day": 26})],
                          [person("Jake Pendry")])
-        self.assertEqual(out, "")
+        self.assertEqual(rows, [])
 
     def test_sorted_by_date(self):
         people = [person("Aaron Brooks"), person("Jake Pendry")]
-        out = self.build(
+        rows = self.rows(
             [contact("Jake Pendry", birthday={"month": 7, "day": 13}),
              contact("Aaron Brooks", birthday={"month": 7, "day": 20})], people)
-        self.assertLess(out.index("Jake Pendry"), out.index("Aaron Brooks"))
+        self.assertEqual([p["name"] for _, _, p in rows],
+                         ["Jake Pendry", "Aaron Brooks"])
 
-    def test_two_cards_for_one_person_yield_one_line(self):
+    def test_two_cards_for_one_person_yield_one_row(self):
         p = person("Jake Pendry", email="jake@x.com")
-        out = self.build(
+        rows = self.rows(
             [contact("Jake Pendry", birthday={"month": 7, "day": 15}),
              contact("Jakey", emails=["jake@x.com"],
                      birthday={"month": 7, "day": 15})], [p])
-        self.assertEqual(out.count("Jake Pendry"), 1)
+        self.assertEqual(len(rows), 1)
 
     def test_birthdayless_and_partial_cards_are_ignored(self):
-        out = self.build(
+        rows = self.rows(
             [contact("Jake Pendry"),
              contact("Jake Pendry", birthday={"month": 7}),
              contact("Jake Pendry", birthday={"day": 15})],
             [person("Jake Pendry")])
-        self.assertEqual(out, "")
+        self.assertEqual(rows, [])
 
 
 class AppleTimestamps(unittest.TestCase):
@@ -923,32 +938,6 @@ class MessageBumpRetryComposition(unittest.TestCase):
             "yesterday, or the next retry loses a fact this run already showed")
 
 
-class RenderReview(unittest.TestCase):
-    TODAY = "2026-07-09"
-
-    def test_pending_links_to_the_review_group(self):
-        got = mb.render_review(backlog(pending=2), self.TODAY)
-        self.assertIn(
-            "- 2 filing proposals awaiting review in "
-            "[20_ENTITIES/_Review](x-devonthink-item://REV)", got)
-
-    def test_approved_links_to_the_approved_group(self):
-        got = mb.render_review(backlog(approved=1), self.TODAY)
-        self.assertIn(
-            "- 1 approved proposal in "
-            "[20_ENTITIES/_Review/Approved](x-devonthink-item://APR) "
-            "did not apply", got)
-
-    def test_missing_uuid_degrades_to_the_bare_path(self):
-        got = mb.render_review(backlog(pending=1, review_uuid=None), self.TODAY)
-        self.assertIn("awaiting review in `20_ENTITIES/_Review`", got)
-        self.assertNotIn("x-devonthink-item://None", got)
-
-    def test_empty_backlog_renders_nothing(self):
-        self.assertIsNone(mb.render_review(backlog(), self.TODAY))
-        self.assertIsNone(mb.render_review(None, self.TODAY))
-
-
 class BuildSnapshot(unittest.TestCase):
     TODAY = "2026-07-09"
 
@@ -1030,7 +1019,12 @@ class BuildSnapshot(unittest.TestCase):
         json.dumps(snap)
 
 
-class JournalStatusLines(unittest.TestCase):
+class JournalStatusInfo(unittest.TestCase):
+    """journal_status_info feeds only the TRMNL snapshot now — the daily note
+    says nothing about journal status — but its silence rules are unchanged:
+    quiet before the habit exists, quiet once it has lapsed, loud only when
+    yesterday's entry is genuinely missing."""
+
     TODAY = "2026-07-11"
 
     def state(self, entry_dates, pages=()):
@@ -1040,52 +1034,51 @@ class JournalStatusLines(unittest.TestCase):
         }}}
 
     def test_silent_before_first_entry(self):
-        self.assertIsNone(mb.journal_status_lines(self.TODAY, {}, 0))
+        self.assertIsNone(mb.journal_status_info(self.TODAY, {}, 0))
         self.assertIsNone(
-            mb.journal_status_lines(self.TODAY, self.state([]), 0))
+            mb.journal_status_info(self.TODAY, self.state([]), 0))
 
     def test_silent_when_yesterday_filed(self):
-        got = mb.journal_status_lines(
+        got = mb.journal_status_info(
             self.TODAY, self.state(["2026-07-10"]), 0)
         self.assertIsNone(got)
 
-    def test_missing_yesterday_warns(self):
-        got = mb.journal_status_lines(
+    def test_missing_yesterday_reports(self):
+        got = mb.journal_status_info(
             self.TODAY, self.state(["2026-07-09"]), 0)
-        self.assertIn("No journal entry arrived", got)
+        self.assertEqual(got, {"pending": 0, "parked": 0, "staged": 0})
 
     def test_silent_after_habit_lapses(self):
-        got = mb.journal_status_lines(
+        got = mb.journal_status_info(
             self.TODAY, self.state(["2026-07-01"]), 0)
         self.assertIsNone(got)
 
-    def test_pending_pages_soften_the_warning(self):
-        got = mb.journal_status_lines(
+    def test_pending_pages_are_counted(self):
+        got = mb.journal_status_info(
             self.TODAY,
             self.state(["2026-07-09"],
                        pages=[{"date": "", "parked": ""}]), 0)
-        self.assertIn("pending OCR", got)
-        self.assertNotIn("No journal entry arrived", got)
+        self.assertEqual(got["pending"], 1)
 
-    def test_staged_export_softens_the_warning(self):
-        got = mb.journal_status_lines(
+    def test_staged_exports_are_counted(self):
+        got = mb.journal_status_info(
             self.TODAY, self.state(["2026-07-09"]), 1)
-        self.assertIn("staged", got)
+        self.assertEqual(got["staged"], 1)
 
-    def test_parked_pages_surface(self):
-        got = mb.journal_status_lines(
+    def test_parked_pages_are_counted(self):
+        got = mb.journal_status_info(
             self.TODAY,
             self.state(["2026-07-09"],
                        pages=[{"date": "", "parked": "weekday mismatch"}]), 0)
-        self.assertIn("parked", got)
-        self.assertIn("--status", got)
+        self.assertEqual(got["parked"], 1)
+        self.assertEqual(got["pending"], 0)
 
     def test_regular_notebooks_ignored(self):
         state = self.state(["2026-07-09"])
         state["notebooks"]["Kitchen Ideas"] = {
             "entries": {}, "pages": [{"date": "", "text": "", "parked": ""}]}
-        got = mb.journal_status_lines(self.TODAY, state, 0)
-        self.assertIn("No journal entry arrived", got)
+        got = mb.journal_status_info(self.TODAY, state, 0)
+        self.assertEqual(got, {"pending": 0, "parked": 0, "staged": 0})
 
 
 class BriefingSuppressed(unittest.TestCase):
@@ -1186,7 +1179,8 @@ class ExcludedPersonNeverReachesOutput(unittest.TestCase):
 
     def render(self, events, people=()):
         blocks = mb.brief_blocks(events, list(people), ROOM_RE, self.KEYS)
-        return mb.render_brief(blocks, "2026-07-13") or ""
+        return rendered_timeline(
+            mb.brief_timeline_blocks(blocks, "2026-07-13"))
 
     def test_a_title_naming_them_keeps_its_slot_but_loses_its_content(self):
         """Deleting the event outright would leave a silent hole in a timeline
@@ -1513,12 +1507,11 @@ class TitleMatchAmbiguity(unittest.TestCase):
 
 class ParkedSourceRedaction(unittest.TestCase):
     def test_an_excluded_name_in_last_error_is_suppressed(self):
-        """parked_lines renders last_error, and an extraction error quotes the
-        text it choked on."""
+        """A parked entry carries last_error, and an extraction error quotes
+        the text it choked on — review_backlog filters those entries with
+        the same exclusion check before anything downstream sees them."""
         parked = {"u1": {"name": "Generic Note",
                          "last_error": "ambiguous person: Tamsin Quill"}}
-        got = mb.render_review(backlog(parked=parked), "2026-07-13") or ""
-        self.assertIn("Tamsin", got)
         ex_re = mb.excluded_re({"tamsin quill"})
         kept = {u: i for u, i in parked.items()
                 if not mb.names_excluded(f"{i['name']} {i['last_error']}", ex_re)}
@@ -1597,7 +1590,7 @@ class BriefEventLinks(unittest.TestCase):
     """Every event title links into the note layer: to the note that owns
     the event, or to a dtnote:// URL whose handler opens-or-creates one on
     click. The links re-derive from LinkedEvent metadata each run, so the
-    wholesale section replace can never lose an attachment."""
+    per-event rebuild can never lose an attachment."""
 
     TODAY = "2026-07-14"
 
@@ -1607,72 +1600,81 @@ class BriefEventLinks(unittest.TestCase):
     def key(self, title):
         return mb.be.event_key(self.TODAY, title)
 
+    def timeline(self, events, notes=None):
+        return mb.brief_timeline_blocks(self.blocks(events), self.TODAY,
+                                        notes)
+
     def test_a_noteless_event_gets_a_create_link(self):
-        got = mb.render_brief(self.blocks([event("Call Priya")]), self.TODAY,
-                              {})
-        self.assertIn("- 9:00am — [Call Priya](dtnote://open"
-                      "?date=2026-07-14&title=Call%20Priya)", got)
+        got = self.timeline([event("Call Priya")], {})
+        self.assertEqual(got[0]["line"],
+                         "- 9:00am: 📅 [Call Priya](dtnote://open"
+                         "?date=2026-07-14&title=Call%20Priya)")
 
     def test_the_owning_meeting_note_takes_the_title_link(self):
         notes = {self.key("Call Priya"): [
             {"uuid": "N1", "name": "2026-07-14 Call Priya",
              "handwritten": False, "documenttype": "Meeting Notes"}]}
-        got = mb.render_brief(self.blocks([event("Call Priya")]), self.TODAY,
-                              notes)
-        self.assertIn("- 9:00am — [Call Priya](x-devonthink-item://N1)", got)
-        self.assertNotIn("dtnote://", got)
+        got = self.timeline([event("Call Priya")], notes)
+        self.assertEqual(got[0]["line"],
+                         "- 9:00am: 📅 [Call Priya](x-devonthink-item://N1)")
 
-    def test_a_handwritten_match_renders_as_a_sub_bullet(self):
+    def test_a_handwritten_match_renders_as_a_sub_line(self):
         """A handwritten attachment doesn't claim the title: clicking it must
         still create the typed note, whatever else got attached."""
         notes = {self.key("Call Priya"): [
             {"uuid": "HW", "name": "Call with Priya",
              "handwritten": True, "documenttype": ""}]}
-        got = mb.render_brief(self.blocks([event("Call Priya")]), self.TODAY,
-                              notes)
-        self.assertIn("  - [✏️ Call with Priya](x-devonthink-item://HW)", got)
-        self.assertIn("dtnote://", got)
+        got = self.timeline([event("Call Priya")], notes)
+        self.assertIn("  - ✏️ [Call with Priya](x-devonthink-item://HW)",
+                      got[0]["subLines"])
+        self.assertIn("dtnote://", got[0]["line"])
 
-    def test_owning_note_links_the_title_while_others_stay_bullets(self):
+    def test_owning_note_links_the_title_while_others_stay_sub_lines(self):
         notes = {self.key("Call Priya"): [
             {"uuid": "HW", "name": "Call with Priya",
              "handwritten": True, "documenttype": ""},
             {"uuid": "N1", "name": "2026-07-14 Call Priya",
              "handwritten": False, "documenttype": "Meeting Notes"}]}
-        got = mb.render_brief(self.blocks([event("Call Priya")]), self.TODAY,
-                              notes)
-        self.assertIn("- 9:00am — [Call Priya](x-devonthink-item://N1)", got)
-        self.assertIn("  - [✏️ Call with Priya](x-devonthink-item://HW)", got)
-        self.assertEqual(got.count("x-devonthink-item://N1"), 1)
+        got = self.timeline([event("Call Priya")], notes)
+        self.assertIn("x-devonthink-item://N1", got[0]["line"])
+        self.assertIn("  - ✏️ [Call with Priya](x-devonthink-item://HW)",
+                      got[0]["subLines"])
+        self.assertEqual(
+            rendered_timeline(got).count("x-devonthink-item://N1"), 1)
 
     def test_a_tentative_suffix_stays_outside_the_link(self):
         notes = {self.key("Call Priya"): [
             {"uuid": "N1", "name": "2026-07-14 Call Priya",
              "handwritten": False, "documenttype": "Meeting Notes"}]}
-        got = mb.render_brief(
-            self.blocks([event("Call Priya", rsvp="tentative")]), self.TODAY,
-            notes)
-        self.assertIn(
-            "- 9:00am — [Call Priya](x-devonthink-item://N1) (tentative)",
-            got)
+        got = self.timeline([event("Call Priya", rsvp="tentative")], notes)
+        self.assertEqual(
+            got[0]["line"],
+            "- 9:00am: 📅 [Call Priya](x-devonthink-item://N1) (tentative)")
 
     def test_a_redacted_title_never_becomes_a_link(self):
         """A dtnote URL embeds the title — a private event's real title must
         not leak into it, and the placeholder must not be clickable either."""
-        got = mb.render_brief(
+        got = mb.brief_timeline_blocks(
             mb.brief_blocks([event("Lunch with Priya Raman")], [], ROOM_RE,
                             {"priya raman"}),
             self.TODAY, {})
-        self.assertIn(f"- 9:00am — {mb.REDACTED_TITLE}", got)
-        self.assertNotIn("dtnote://", got)
-        self.assertNotIn("Lunch", got)
+        self.assertEqual(got[0]["line"], f"- 9:00am: 📅 {mb.REDACTED_TITLE}")
+        self.assertTrue(got[0]["redacted"])
+        self.assertIsNone(got[0]["title"])
+        self.assertNotIn("Lunch", rendered_timeline(got))
 
     def test_the_create_link_needs_no_note_index(self):
         """A dtnote URL derives from the event alone, so a render with no
         LinkedEvent lookups at all still makes every title clickable."""
-        got = mb.render_brief(self.blocks([event("Call Priya")]), self.TODAY)
-        self.assertIn("- 9:00am — [Call Priya](dtnote://open"
-                      "?date=2026-07-14&title=Call%20Priya)", got)
+        got = self.timeline([event("Call Priya")])
+        self.assertIn("dtnote://open?date=2026-07-14&title=Call%20Priya",
+                      got[0]["line"])
+
+    def test_blocks_carry_their_merge_identity(self):
+        got = self.timeline([event("Call Priya")])
+        self.assertEqual(got[0]["title"], "Call Priya")
+        self.assertEqual(got[0]["minutes"], 9 * 60)
+        self.assertFalse(got[0]["redacted"])
 
 
 class BriefNews(unittest.TestCase):
@@ -1692,7 +1694,8 @@ class BriefNews(unittest.TestCase):
         return mb.brief_blocks(events, self.people, ROOM_RE, set(), **kw)
 
     def rendered(self, events, **kw):
-        return mb.render_brief(self.blocks(events, **kw), "2026-07-14") or ""
+        return rendered_timeline(
+            mb.brief_timeline_blocks(self.blocks(events, **kw), "2026-07-14"))
 
     def test_a_repeat_occurrence_still_carries_the_news(self):
         ev = event("Weekly Sync", [attendee("Priya Raman", "p@x.com")])
@@ -1705,7 +1708,7 @@ class BriefNews(unittest.TestCase):
         about — but not re-state their role, city and last contact."""
         ev = event("Weekly Sync", [attendee("Priya Raman", "p@x.com")])
         got = self.rendered([ev], repeats={mb.series_key(ev)})
-        self.assertIn("- [Priya Raman](x-devonthink-item://uuid-priya-raman)",
+        self.assertIn("- 👤 [Priya Raman](x-devonthink-item://uuid-priya-raman)",
                       got)
         self.assertNotIn("last contact", got)
 
@@ -1728,7 +1731,7 @@ class BriefNews(unittest.TestCase):
         ev = event("Weekly Sync", [attendee("Priya Raman", "p@x.com")])
         got = self.rendered([ev], repeats={mb.series_key(ev)})
         self.assertEqual(got.strip().splitlines()[-1],
-                         "- 9:00am — [Weekly Sync](dtnote://open"
+                         "- 9:00am: 📅 [Weekly Sync](dtnote://open"
                          "?date=2026-07-14&title=Weekly%20Sync)")
 
     def test_a_redacted_event_never_carries_news(self):
@@ -1740,17 +1743,21 @@ class BriefNews(unittest.TestCase):
     def test_the_day_is_one_tight_list_nested_under_each_slot(self):
         """The slot is a bullet, not a heading, so everything it carries has to
         hang off it — a blank line or a lost indent would end the list and
-        promote the roster to the day's top level."""
+        promote the roster to the day's top level. Every machine sub-line
+        opens with a type token (👤, ✏️/📝, ⚠️, or a news date), which is
+        what lets the merge rebuild them without touching a manual line."""
         got = self.rendered([event("Kickoff",
                                    [attendee("Priya Raman", "p@x.com")])])
-        body = got.split("-->\n\n", 1)[1]
-        self.assertEqual(body.splitlines(), [
-            "- 9:00am — [Kickoff](dtnote://open?date=2026-07-14"
+        self.assertEqual(got.splitlines(), [
+            "- 9:00am: 📅 [Kickoff](dtnote://open?date=2026-07-14"
             "&title=Kickoff)",
-            "  - [Priya Raman](x-devonthink-item://uuid-priya-raman)"
+            "  - 👤 [Priya Raman](x-devonthink-item://uuid-priya-raman)"
             " — last contact 2026-07-10",
             "    - 2026-07-13 — moved to Denver.",
         ])
+        be = load("brief_events.py", "brief_events_check")
+        for sub in got.splitlines()[1:]:
+            self.assertTrue(be.is_machine_subline(sub), sub)
 
 
 class BriefBlocksTimeline(unittest.TestCase):
@@ -1851,48 +1858,13 @@ class BriefBlocksTimeline(unittest.TestCase):
         got = self.blocks([ev], repeats={mb.series_key(ev)})
         self.assertEqual(got[0]["title"], "Team Social (tentative)")
 
-    def test_person_less_event_renders_without_a_trailing_blank(self):
-        got = mb.render_brief(self.blocks([event("Perio cleaning")]), "2026-07-13")
-        self.assertTrue(
-            got.endswith("- 9:00am — [Perio cleaning](dtnote://open"
-                         "?date=2026-07-13&title=Perio%20cleaning)"),
-            repr(got))
-
-
-class SectionsForUpsert(unittest.TestCase):
-    """C42: a calendar or contacts fetch failure must not upsert its
-    dependent section as empty — that would erase whatever an earlier run
-    wrote correctly. The failed section is dropped from the batch entirely."""
-
-    def test_calendar_failure_excludes_only_the_briefing(self):
-        sections = [(mb.BRIEF_HEADER, "brief content"),
-                    (mb.BIRTHDAYS_HEADER, "bday content"),
-                    (mb.REVIEW_HEADER, "review content")]
-        got = mb.sections_for_upsert(sections, {"calendar"})
-        self.assertEqual([h for h, _ in got],
-                         [mb.BIRTHDAYS_HEADER, mb.REVIEW_HEADER])
-
-    def test_contacts_failure_excludes_only_birthdays(self):
-        sections = [(mb.BRIEF_HEADER, "brief content"),
-                    (mb.BIRTHDAYS_HEADER, "bday content")]
-        got = mb.sections_for_upsert(sections, {"contacts"})
-        self.assertEqual([h for h, _ in got], [mb.BRIEF_HEADER])
-
-    def test_no_failure_keeps_every_section_including_empty_ones(self):
-        sections = [(mb.BRIEF_HEADER, None), (mb.REVIEW_HEADER, "x")]
-        self.assertEqual(mb.sections_for_upsert(sections, set()), sections)
-
-    def test_unaffected_sections_survive_either_failure(self):
-        sections = [(mb.REVIEW_HEADER, "x"), (mb.JOURNAL_HEADER, "y"),
-                    (mb.ON_THIS_DAY_HEADER, "z"), (mb.RECONNECT_HEADER, "w")]
-        got = mb.sections_for_upsert(sections, {"calendar", "contacts"})
-        self.assertEqual(got, sections)
-
-    def test_both_failures_exclude_both_dependent_sections(self):
-        sections = [(mb.BRIEF_HEADER, "a"), (mb.BIRTHDAYS_HEADER, "b"),
-                    (mb.REVIEW_HEADER, "c")]
-        got = mb.sections_for_upsert(sections, {"calendar", "contacts"})
-        self.assertEqual([h for h, _ in got], [mb.REVIEW_HEADER])
+    def test_person_less_event_renders_without_sub_lines(self):
+        got = mb.brief_timeline_blocks(
+            self.blocks([event("Perio cleaning")]), "2026-07-13")
+        self.assertEqual(got[0]["line"],
+                         "- 9:00am: 📅 [Perio cleaning](dtnote://open"
+                         "?date=2026-07-13&title=Perio%20cleaning)")
+        self.assertEqual(got[0]["subLines"], [])
 
 
 class RequestedDateValidation(unittest.TestCase):

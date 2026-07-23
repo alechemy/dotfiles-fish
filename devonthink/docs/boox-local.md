@@ -82,23 +82,26 @@ One page per day, each page starting with a handwritten date line.
   keyed by **date**, not page index, so an inserted page shifting later
   signatures only causes re-OCR, never duplicate records) with
   `EventDate`, `SourceFile`, `JournalEntry`, `PageIndex`,
-  `PageSignature`, and an idempotent `📔 Journal` link on that day's
-  daily note (created on demand for past dates, so backfill lands on the
-  right historical notes).
+  `PageSignature`, and an idempotent pinned untimed `📔 Journal` bullet
+  at the end of that day's daily-note timeline (the bridge's
+  `append_pinned` op; the note is created on demand for past dates, so
+  backfill lands on the right historical notes).
 - `/15_JOURNAL` is excluded from DT chat, same as `/10_DAILY`, which
   also hides it from the DEVONthink MCP server. Start a new notebook
   each year (`2027 Journal`).
 
 ## Downstream surfaces
 
-- **Morning brief `## Journal` line** (`dt-morning-brief.py`): warns when
-  yesterday's journal entry never arrived, distinguishing "staged/pending
-  OCR" and "parked" from "nothing synced — check the Boox's Dropbox
-  sync". Dormant until the first entry files, quiet again when the
+- **Morning brief journal status** (`dt-morning-brief.py`): the TRMNL
+  snapshot warns when yesterday's journal entry never arrived,
+  distinguishing "staged/pending OCR" and "parked" from "nothing synced —
+  check the Boox's Dropbox sync". The daily note itself carries no
+  journal-status text — just the pinned `📔` bullet once the entry lands.
+  Dormant until the first entry files, quiet again when the
   newest entry is older than a week, and scoped to `<year> Journal`
   notebooks only.
-- **`## On This Day`** picks up journal entries automatically — they
-  carry `EventDate`, which is exactly what that section queries (bridge
+- **On This Day** (TRMNL snapshot) picks up journal entries automatically —
+  they carry `EventDate`, which is exactly what that digest queries (bridge
   search is not filtered by chat exclusion; verified).
 - **Things**: regular notebooks get task extraction from Post-Enrich &
   Archive as always. For the journal it is opt-in (`THINGS_TASKS=on`):

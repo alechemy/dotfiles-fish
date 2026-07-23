@@ -248,7 +248,7 @@ This is not enforced by a linter; it is a design rule to apply whenever a new pi
 
 AppleScript coerces a shell helper's LF output to CR (classic Mac line endings). Several smart rules pipe a record's body through a Python helper and write the result back — `set newText to do shell script "…helper < tmp"` then `set plain text of theRecord to newText` — and without a modifier that round-trip silently rewrites the **entire body** as one CR-delimited line.
 
-Nothing looks wrong in DEVONthink (it renders CR fine), but every downstream consumer that splits on `\n` then sees a note with **no lines and no headers**. That is how a duplicated daily note happens: `entity-dt-bridge.js`'s `upsert_section` fails to find `## Briefing`, takes its append path, and adds a second copy of every generated section instead of replacing the first. The same input wipes a body in `sync-markdown-h1.py`, which then emits only its H1.
+Nothing looks wrong in DEVONthink (it renders CR fine), but every downstream consumer that splits on `\n` then sees a note with **no lines and no headers**. That is how a duplicated daily note happens: `entity-dt-bridge.js`'s `merge_timeline` sees no machine event bullets to match against, treats every desired event block as new, and re-inserts each one as a duplicate. The same input wipes a body in `sync-markdown-h1.py`, which then emits only its H1.
 
 Three rules:
 

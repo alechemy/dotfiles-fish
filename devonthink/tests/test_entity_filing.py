@@ -686,6 +686,62 @@ class StripGeneratedSections(unittest.TestCase):
         self.assertNotIn("Some Bookmark", out)
         self.assertIn("- real note", out)
 
+
+class StripFlatTimeline(unittest.TestCase):
+    """A flat daily note has no generated sections to strip — the machine
+    content is the emoji-typed bullets and their machine sub-lines, and the
+    person/news/warning prose under an event is exactly the attendance
+    pseudo-fact hazard the section strip used to catch."""
+
+    DAILY = "\n".join([
+        "# Thursday, March 16, 2026",
+        "",
+        "- 8:15am: Coffee with Alison Vance, she starts at Delphi Labs Monday",
+        "- 9:00am: 📅 [Planning Roundtable](dtnote://open?date=x&title=y)",
+        "  - 👤 [Miles Archer](x-devonthink-item://MA) — last contact 2026-03-01",
+        "    - 2026-03-10 — moved to Denver.",
+        "  - 👤 Ghost Person (g@x.com) — no entity record yet",
+        "  - ⚠️ identity unresolved",
+        "  - ask Miles about the offsite budget",
+        "- 10:30am: 🔗 [Some Bookmark](x-devonthink-item://BM)",
+        "- 11:00am: ✏️ [Boox page](x-devonthink-item://HW)",
+        "  - handwritten line worth extracting",
+        "- 12:00pm: 📅 Private event",
+        "- 📔 [Journal](x-devonthink-item://JRNL)",
+    ])
+
+    def test_machine_bullets_and_their_sublines_are_stripped(self):
+        out = ef.strip_generated_sections(self.DAILY)
+        for leaked in ("Planning Roundtable", "Miles Archer",
+                       "moved to Denver", "no entity record yet",
+                       "identity unresolved", "Some Bookmark",
+                       "Private event", "Journal](x-devonthink-item"):
+            self.assertNotIn(leaked, out)
+
+    def test_manual_lines_survive_at_every_level(self):
+        out = ef.strip_generated_sections(self.DAILY)
+        self.assertIn("Coffee with Alison Vance", out)
+        self.assertIn("- ask Miles about the offsite budget", out)
+        self.assertIn("handwritten line worth extracting", out)
+
+    def test_a_plain_calendar_emoji_jot_is_kept(self):
+        out = ef.strip_generated_sections(
+            "# Day\n\n- 1:00pm: lunch planning 📅 with the twins\n")
+        self.assertIn("lunch planning", out)
+
+    def test_legacy_inside_link_emoji_subline_is_stripped(self):
+        out = ef.strip_generated_sections(
+            "# Day\n\n- 9:00am: 📅 [X](dtnote://a)\n"
+            "  - [✏️ old splice](x-devonthink-item://S)\n")
+        self.assertNotIn("old splice", out)
+
+    def test_indent_ends_the_machine_block(self):
+        out = ef.strip_generated_sections(
+            "# Day\n\n- 9:00am: 📅 [X](dtnote://a)\n"
+            "  - 👤 [P](x-devonthink-item://P)\n"
+            "- 9:12am: my own thought\n")
+        self.assertIn("my own thought", out)
+
     def test_bullet_with_free_prose_beyond_a_link_survives(self):
         text = ("## Today's Notes\n\n"
                 "- Talked to Alison Vance about the trip "

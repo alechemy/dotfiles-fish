@@ -14,15 +14,16 @@ dt-morning-brief.py                 (existing launchd schedule, 4x each morning)
 
 ## Data flow
 
-`dt-morning-brief.py` computes each section once as structured data
+`dt-morning-brief.py` computes each digest once as structured data
 (`brief_blocks`, `reconnect_overdue`, `birthday_rows`, `review_backlog`,
-`journal_status_info`, `on_this_day_rows`) and renders the daily-note
-markdown from it, so note and TRMNL can never drift. `build_snapshot`
+`journal_status_info`, `on_this_day_rows`). The event blocks also feed the
+daily note's timeline merge (`brief_timeline_blocks` → `merge_timeline`), so
+note and TRMNL can never drift; the other digests are carried by the
+snapshot alone — the note renders none of them. `build_snapshot`
 serializes those intermediates; the snapshot is written atomically on every
 non-dry-run for the real today (a `--date` replay never touches it) even
 when there is nothing to write to the note — "no meetings" is a displayable
-state. Two deliberate divergences from the note: Reconnect is included
-daily (the note carries it only on Mondays), and the snapshot carries no
+state. One deliberate divergence from the note: the snapshot carries no
 `x-devonthink-item://` links (nothing to click on e-ink).
 
 ## Pusher

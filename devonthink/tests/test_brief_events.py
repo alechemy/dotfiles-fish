@@ -1,9 +1,9 @@
-"""brief_events: event keys, briefing parsing, note↔event matching, and the
-in-place briefing splices the smart rules perform.
+"""brief_events: event keys, event-line parsing in both grammars, note↔event
+matching, and the in-place timeline splices the smart rules perform.
 
 The matcher's failure mode must be silence, never a wrong link: an ambiguous
-or weak match falls back to the Today's Notes path, so every "returns None"
-case here is load-bearing.
+or weak match falls back to the plain timeline-bullet path, so every
+"returns None" case here is load-bearing.
 """
 
 import unittest
@@ -15,6 +15,7 @@ mb = load("dt-morning-brief.py", "dt_morning_brief")
 
 TODAY = "2026-07-14"
 
+# A pre-flatten note: events live in a ## Briefing section, " — " separator.
 BRIEF = """# Tuesday, July 14, 2026
 
 -
@@ -38,6 +39,21 @@ BRIEF = """# Tuesday, July 14, 2026
 ## On This Day
 
 - something old
+"""
+
+# A flat note: events are 📅 bullets in the root timeline, ": " separator.
+TIMELINE = """# Tuesday, July 14, 2026
+
+- 7:20am: slow start, skipped the run
+- 8:00am: 📅 SE / Prod Engineering Sync (tentative)
+- 9:01am: 📄 [Some scan](x-devonthink-item://SCAN)
+- 11:00am: 📅 [Vendor Roundtable](dtnote://open?date=2026-07-14&title=Vendor%20Roundtable)
+  - 👤 [Priya Raman](x-devonthink-item://uuid-priya-raman)
+- 12:00pm: 📅 Call Priya
+- 12:00pm: 📅 Weekly PCD CAB 2026 edition
+- 1:30pm: 📅 Roundtable: Round 2
+- 3:00pm: 📅 Private event
+- 📔 [Journal](x-devonthink-item://JRNL)
 """
 
 
@@ -98,12 +114,100 @@ class ParseEvents(unittest.TestCase):
         ev = be.parse_events(BRIEF)[0]
         self.assertEqual(ev["suffix"], " (tentative)")
 
-    def test_no_briefing_section_means_no_events(self):
+    def test_no_event_lines_means_no_events(self):
         self.assertEqual(be.parse_events("# A day\n\n- nothing\n"), [])
 
-    def test_header_constants_stay_in_sync_with_the_renderer(self):
-        self.assertEqual(be.BRIEF_HEADER, mb.BRIEF_HEADER)
+    def test_constants_stay_in_sync_with_the_renderer(self):
         self.assertEqual(be.REDACTED_TITLE, mb.REDACTED_TITLE)
+
+
+class ParseTimelineEvents(unittest.TestCase):
+    def test_reads_plain_linked_and_tentative_lines(self):
+        evs = be.parse_events(TIMELINE)
+        self.assertEqual(
+            [e["title"] for e in evs],
+            ["SE / Prod Engineering Sync", "Vendor Roundtable", "Call Priya",
+             "Weekly PCD CAB 2026 edition", "Roundtable: Round 2"])
+        self.assertTrue(all(e["style"] == "timeline" for e in evs))
+
+    def test_redacted_events_and_non_event_bullets_are_withheld(self):
+        titles = [e["title"] for e in be.parse_events(TIMELINE)]
+        self.assertNotIn(mb.REDACTED_TITLE, titles)
+        self.assertNotIn("Some scan", titles)
+        self.assertNotIn("Priya Raman", titles)
+        self.assertNotIn("slow start, skipped the run", titles)
+
+    def test_legacy_events_carry_their_own_style(self):
+        self.assertTrue(
+            all(e["style"] == "legacy" for e in be.parse_events(BRIEF)))
+
+
+class MachineClassifiers(unittest.TestCase):
+    def test_machine_bullets_are_the_emoji_typed_lines(self):
+        machine = [l for l in TIMELINE.splitlines()
+                   if be.is_machine_bullet(l)]
+        self.assertEqual(len(machine), 8)
+        self.assertNotIn("- 7:20am: slow start, skipped the run", machine)
+        self.assertIn("- 📔 [Journal](x-devonthink-item://JRNL)", machine)
+
+    def test_an_emoji_later_in_the_line_stays_manual(self):
+        self.assertFalse(
+            be.is_machine_bullet("- 2:10pm: see 🔗 [x](x-devonthink-item://A)"))
+
+    def test_sublines_by_token_and_news_date(self):
+        self.assertTrue(be.is_machine_subline(
+            "  - 👤 [Priya Raman](x-devonthink-item://P) — last contact"))
+        self.assertTrue(be.is_machine_subline(
+            "  - ✏️ [scan](x-devonthink-item://B)"))
+        self.assertTrue(be.is_machine_subline(
+            "  - [✏️ scan](x-devonthink-item://B)"))
+        self.assertTrue(be.is_machine_subline("  - ⚠️ identity unresolved"))
+        self.assertTrue(be.is_machine_subline("    - 2026-07-13 — moved."))
+        self.assertFalse(be.is_machine_subline("  - ask about the demo"))
+        self.assertFalse(be.is_machine_subline("- 2026-07-13 — top level"))
+
+
+class TimelineInsert(unittest.TestCase):
+    def test_slots_between_bullets_by_time(self):
+        lines = TIMELINE.splitlines()
+        got = be.timeline_insert(
+            lines, ["- 10:15am: 🔗 [late import](x-devonthink-item://L)"])
+        at = got.index("- 10:15am: 🔗 [late import](x-devonthink-item://L)")
+        self.assertEqual(got[at - 1],
+                         "- 9:01am: 📄 [Some scan](x-devonthink-item://SCAN)")
+        self.assertIn("Vendor Roundtable", got[at + 1])
+
+    def test_same_minute_appends_after_the_existing_bullet(self):
+        lines = TIMELINE.splitlines()
+        got = be.timeline_insert(lines, ["- 12:00pm: second noon jot"])
+        at = got.index("- 12:00pm: second noon jot")
+        self.assertIn("Weekly PCD CAB", got[at - 1])
+
+    def test_untimed_block_lands_before_the_pinned_journal(self):
+        lines = TIMELINE.splitlines()
+        got = be.timeline_insert(lines, ["- an untimed note"])
+        at = got.index("- an untimed note")
+        self.assertIn("📔", got[at + 1])
+
+    def test_block_sublines_travel_with_the_bullet(self):
+        lines = TIMELINE.splitlines()
+        got = be.timeline_insert(
+            lines, ["- 10:15am: ✏️ [page](x-devonthink-item://H)",
+                    "  - extracted line"])
+        at = got.index("- 10:15am: ✏️ [page](x-devonthink-item://H)")
+        self.assertEqual(got[at + 1], "  - extracted line")
+
+    def test_virgin_skeleton_placeholder_is_replaced(self):
+        lines = ["# Tuesday, July 14, 2026", "", "- ", ""]
+        got = be.timeline_insert(lines, ["- 8:00am: first thing"])
+        self.assertEqual(
+            got, ["# Tuesday, July 14, 2026", "", "- 8:00am: first thing", ""])
+
+    def test_untimed_manual_bullets_are_anchors(self):
+        lines = ["# Day", "", "- 9:00am: 📅 Standup", "- follow-up thought", ""]
+        got = be.timeline_insert(lines, ["- 10:00am: later"])
+        self.assertEqual(got.index("- 10:00am: later"),
+                         got.index("- follow-up thought") + 1)
 
 
 class Matching(unittest.TestCase):
@@ -180,6 +284,19 @@ class LinkTitle(unittest.TestCase):
         self.assertEqual(
             be.link_title(BRIEF, TODAY, f"{TODAY}-nope", "NOTE-UUID"), BRIEF)
 
+    def test_timeline_lines_are_relinked_in_their_own_grammar(self):
+        key = be.event_key(TODAY, "Vendor Roundtable")
+        got = be.link_title(TIMELINE, TODAY, key, "NOTE-UUID")
+        self.assertIn("- 11:00am: 📅 [Vendor Roundtable]"
+                      "(x-devonthink-item://NOTE-UUID)", got)
+        self.assertNotIn("dtnote://", got)
+
+    def test_timeline_plain_title_keeps_the_tentative_suffix(self):
+        key = be.event_key(TODAY, "SE / Prod Engineering Sync")
+        got = be.link_title(TIMELINE, TODAY, key, "NOTE-UUID")
+        self.assertIn("- 8:00am: 📅 [SE / Prod Engineering Sync]"
+                      "(x-devonthink-item://NOTE-UUID) (tentative)", got)
+
 
 class InsertSubbullet(unittest.TestCase):
     BULLET = "- [✏️ Priya prep](x-devonthink-item://HW-UUID)"
@@ -205,6 +322,15 @@ class InsertSubbullet(unittest.TestCase):
         key = be.event_key(TODAY, "Call Priya")
         got = be.insert_subbullet(BRIEF, TODAY, key, self.BULLET)
         self.assertTrue(got.endswith("\n"))
+
+    def test_splices_under_a_timeline_event_line(self):
+        key = be.event_key(TODAY, "Call Priya")
+        got = be.insert_subbullet(TIMELINE, TODAY, key, self.BULLET)
+        lines = got.splitlines()
+        at = lines.index("- 12:00pm: 📅 Call Priya")
+        self.assertEqual(lines[at + 1], "  " + self.BULLET)
+        self.assertEqual(
+            be.insert_subbullet(got, TODAY, key, self.BULLET), got)
 
 
 if __name__ == "__main__":

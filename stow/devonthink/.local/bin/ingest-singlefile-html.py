@@ -327,7 +327,7 @@ on run argv
                         end if
                         set timeStr to (cHour as text) & ":" & text -2 thru -1 of ("0" & (cMin as text)) & ampm
 
-                        set linkText to "- " & timeStr & ": [🔗 " & safeTitle & "](x-devonthink-item://" & bmUUID & ")"
+                        set linkText to "- " & timeStr & ": 🔗 [" & safeTitle & "](x-devonthink-item://" & bmUUID & ")"
 
                         set tmpPath to do shell script "mktemp /tmp/sf-ingest-daily.XXXXXX"
                         set fileRef to open for access (POSIX file tmpPath) with write permission
@@ -337,7 +337,6 @@ on run argv
 
                         set newText to do shell script ¬
                             "/usr/bin/python3 $HOME/.local/bin/insert-daily-note-section.py" & ¬
-                            " --header " & quoted form of "## Today's Notes" & ¬
                             " --content " & quoted form of (linkText & linefeed) & ¬
                             " < " & quoted form of tmpPath without altering line endings
                         do shell script "rm -f " & quoted form of tmpPath

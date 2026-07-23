@@ -3,11 +3,13 @@
 dt-morning-brief.py — contextual resurfacing for the entity layer.
 
 Builds a briefing of today's calendar from every calendar EventKit exposes,
-enriched with the Person records in Lorebook/20_ENTITIES/People, and appends
-it to today's daily note as a `## Briefing` section. The section is the day
-you agreed to: every event you accepted lists, an event with nobody attached
-still lists (because a day reads as a day), and an invitation you never
-answered does not — see `attending`.
+enriched with the Person records in Lorebook/20_ENTITIES/People, and merges
+it into today's daily note — a single flat timeline where each event is a
+top-level `- <h:mmam>: 📅 <title>` bullet at its chronological position,
+interleaved with the day's manual jots and imported-record bullets. The
+merged set is the day you agreed to: every event you accepted lists, an
+event with nobody attached still lists (because a day reads as a day), and
+an invitation you never answered does not — see `attending`.
 
 Roster people are attached to an event two ways: from its Exchange attendees,
 and from their name or alias appearing in the title. iCloud events carry no
@@ -18,26 +20,24 @@ heard of already says so on its own face.
 Every event title is also a link into the note layer (see brief_events.py).
 Notes carrying the event's LinkedEvent key render under it — the owning
 meeting note as the title's item link, everything else (handwritten matches)
-as sub-bullets — and an event with no owning note gets a dtnote:// URL
+as machine sub-lines — and an event with no owning note gets a dtnote:// URL
 (DTNote.app → dtnote-open.py) that opens the note, creating "<date> <title>"
 in /99_ARCHIVE, tagged Meeting Note, only when it doesn't exist. No click,
 no record; repeat clicks reopen the same one. Because the links are
-re-derived from metadata each run, the wholesale section replace never loses
-an attachment. Redacted events render as plain text: a private title must
-not leak into a URL.
+re-derived from metadata each run, the per-event rebuild the bridge's
+merge_timeline performs never loses an attachment — and it never touches a
+manual line: the type emoji after the time is the machine/manual
+discriminator (see brief_events.py), so jots and hand-typed sub-bullets are
+anchors the merge steps around. Redacted events render as plain text: a
+private title must not leak into a URL.
 
-On Mondays (or with --weekly) it
-also appends a `## Reconnect` section listing people whose LastContact
-has drifted past their relationship tier's threshold. A `## Birthdays`
-section lists roster-matched macOS Contacts whose birthday falls within
-the next two weeks — matched, not all of Contacts, which is why the
-all-of-Contacts Birthdays calendar stays in SKIP_CALENDARS. Whenever
-filing proposals sit unreviewed in `/20_ENTITIES/_Review`, an
-`## Entity Review` line reports the backlog count.
+Reconnect, birthdays, the review backlog, journal status, and On This Day
+are computed every run for the TRMNL snapshot but no longer render into the
+daily note — the note carries only the timeline.
 
 The brief reads live from the records, so it is never stale. Mutations are the
-daily-note section insert (idempotent via an HTML comment marker per section per
-day), candidate sightings for unmatched attendees (recorded in the shared
+daily-note timeline merge (idempotent per event bullet — a rerun that changes
+nothing writes nothing), candidate sightings for unmatched attendees (recorded in the shared
 /20_ENTITIES/_Candidates store — see entity_candidates.py — where each
 stranger holds one record until tracked, ignored, or forgotten), and
 LastContact bumps from two sources: every
@@ -57,29 +57,21 @@ stored in DEVONthink). Received messages attribute to their sender in
 any chat; sent messages count only in 1:1 chats, so a group broadcast
 never marks every member as contacted.
 
-Section placement: jots are inserted relative to the `## Today's Notes`
-header (see insert-jot-into-daily-note.py), targeting the last content
-bullet BEFORE it. The briefing must therefore sit AFTER that header, so
-this script guarantees `## Today's Notes` exists before appending its own
-sections at the end of the note.
-
 Calendar access goes through calendar-events-json.js (EventKit via
 osascript, Apple-signed TCC identity), Contacts access through
 contacts-json.js (same pattern), and DEVONthink access through
 entity-dt-bridge.js. All are invoked via /usr/bin/osascript.
 
-Besides the daily note, each run writes the sections' structured data to
-~/.local/state/devonthink/morning-brief.json and hands it to
+Besides the daily note, each run writes the full structured data —
+meetings, reconnect, birthdays, review backlog, journal status, On This Day
+— to ~/.local/state/devonthink/morning-brief.json and hands it to
 trmnl-push-brief.py, which mirrors the brief onto a TRMNL e-ink dashboard
-(silent no-op until its webhook is configured). The snapshot carries
-Reconnect every day, not just Mondays — a glance surface benefits from it
-daily and the data is computed on every run anyway.
+(silent no-op until its webhook is configured).
 
 Usage:
     dt-morning-brief.py              # normal launchd-driven run
-    dt-morning-brief.py --dry-run    # print the sections, write nothing
+    dt-morning-brief.py --dry-run    # print the event blocks, write nothing
     dt-morning-brief.py --force      # bypass the driver gate
-    dt-morning-brief.py --weekly     # include the Reconnect section today
     dt-morning-brief.py --date YYYY-MM-DD
                                      # read-only replay of a past day, no
                                      # durable writes; a future date refuses
@@ -168,15 +160,9 @@ WHERE m.date >= ? AND m.is_from_me = 1 AND m.item_type = 0
        WHERE c2.chat_id = cmj.chat_id) = 1
 GROUP BY h.id
 """
-BRIEF_HEADER = "## Briefing"
-RECONNECT_HEADER = "## Reconnect"
-BIRTHDAYS_HEADER = "## Birthdays"
 BIRTHDAY_LOOKAHEAD = 14
-REVIEW_HEADER = "## Entity Review"
-ON_THIS_DAY_HEADER = "## On This Day"
 ON_THIS_DAY_YEARS = 5
 ON_THIS_DAY_PER_YEAR = 5
-JOURNAL_HEADER = "## Journal"
 JOURNAL_STATE = os.path.expanduser(
     "~/.local/state/devonthink/boox/state.json")
 JOURNAL_STAGING = os.path.expanduser(
@@ -252,7 +238,6 @@ SUCCESS_FILE = os.path.expanduser(
 TRMNL_PUSH = os.path.expanduser("~/.local/bin/trmnl-push-brief.py")
 DEFAULT_SKIP_ATTENDEE = r"\bVC\b|\bConference\b|\bRoom\b|\d+\s?ppl"
 BACKFILL_DAYS = 365
-PARKED_LIST_MAX = 5
 IDENTITY_PROVENANCE_VERSION = 1
 CONTEXT_CONFLICT_MIN_OBSERVATIONS = 2
 
@@ -826,6 +811,11 @@ def fmt_time(iso):
     return t.strftime("%-I:%M%p").lower()
 
 
+def start_minutes(iso):
+    t = datetime.strptime(iso, "%Y-%m-%dT%H:%M:%S")
+    return t.hour * 60 + t.minute
+
+
 def person_summary_line(p):
     md = p.get("md", {})
     bits = []
@@ -840,7 +830,7 @@ def person_summary_line(p):
     if md.get("mdlastcontact"):
         bits.append(f"last contact {md['mdlastcontact']}")
     link = f"[{p['name']}](x-devonthink-item://{p['uuid']})"
-    return f"- {link} — {' · '.join(bits)}" if bits else f"- {link}"
+    return f"- 👤 {link} — {' · '.join(bits)}" if bits else f"- 👤 {link}"
 
 
 def log_bullets(p):
@@ -1260,6 +1250,7 @@ def brief_blocks(events, people, skip_re, excluded=(),
             # would leave a silent hole in a timeline that promises the day,
             # and a redacted event must not leak its title, people or location.
             blocks.append({"time": fmt_time(ev["start"]),
+                           "minutes": start_minutes(ev["start"]),
                            "title": REDACTED_TITLE, "raw_title": None,
                            "people": [], "unmatched": [], "news": [],
                            "warnings": []})
@@ -1304,7 +1295,9 @@ def brief_blocks(events, people, skip_re, excluded=(),
                 for p, bullets in ((p, news_bullets(p, told)) for p in matched)
                 if bullets]
         repeat = series_key(ev) in repeats
-        blocks.append({"time": fmt_time(ev["start"]), "title": event_title(ev),
+        blocks.append({"time": fmt_time(ev["start"]),
+                       "minutes": start_minutes(ev["start"]),
+                       "title": event_title(ev),
                        "raw_title": ev["title"],
                        "people": [] if repeat else matched,
                        "unmatched": [] if repeat else unmatched,
@@ -1347,9 +1340,11 @@ def event_title_md(b, notes, today):
     return f"[{raw}]({be.dtnote_url(today, raw)}){suffix}", None
 
 
-def render_brief(blocks, today, event_notes=None):
-    if not blocks:
-        return None
+def brief_timeline_blocks(blocks, today, event_notes=None):
+    """The day's desired machine event blocks for the bridge's merge_timeline
+    op: each is the rendered `- <time>: 📅 <title>` line plus its machine
+    sub-lines, with the identity fields the merge matches note-side bullets
+    by — (title, minutes), or minutes alone for a redacted event."""
     out = []
     for b in blocks:
         body = []
@@ -1361,7 +1356,7 @@ def render_brief(blocks, today, event_notes=None):
             if primary is not None and n["uuid"] == primary["uuid"]:
                 continue
             emoji = "✏️" if n.get("handwritten") else "📝"
-            body.append(f"- [{emoji} {n['name']}](x-devonthink-item://{n['uuid']})")
+            body.append(f"- {emoji} [{n['name']}](x-devonthink-item://{n['uuid']})")
         news = {n["uuid"]: n for n in b["news"]}
         for p in b["people"]:
             body.append(person_summary_line(p))
@@ -1370,17 +1365,23 @@ def render_brief(blocks, today, event_notes=None):
         # meeting — so their own line carries the attribution.
         for n in b["news"]:
             if n["uuid"] in news:
-                body.append(f"- [{n['name']}](x-devonthink-item://{n['uuid']})")
+                body.append(f"- 👤 [{n['name']}](x-devonthink-item://{n['uuid']})")
                 body.extend(n["bullets"])
         if len(b["unmatched"]) <= UNMATCHED_LIST_MAX:
-            body.extend(f"- {u} — no entity record yet" for u in b["unmatched"])
+            body.extend(f"- 👤 {u} — no entity record yet"
+                        for u in b["unmatched"])
         else:
-            body.append(f"- {len(b['unmatched'])} people without entity records")
-        body.extend(f"- {warning}" for warning in b.get("warnings", []))
-        lines = [f"- {b['time']} — {title_md}"]
-        lines.extend("  " + ln for ln in body)
-        out.append("\n".join(lines))
-    return f"<!-- brief:{today} -->\n\n" + "\n".join(out)
+            body.append(
+                f"- 👤 {len(b['unmatched'])} people without entity records")
+        body.extend(f"- ⚠️ {warning}" for warning in b.get("warnings", []))
+        out.append({
+            "title": b.get("raw_title"),
+            "redacted": b.get("raw_title") is None,
+            "minutes": b["minutes"],
+            "line": f"- {b['time']}: 📅 {title_md}",
+            "subLines": ["  " + ln for ln in body],
+        })
+    return out
 
 
 def load_people(include_bodies=True, contacts=()):
@@ -1494,28 +1495,6 @@ def reconnect_overdue(people, today):
     return overdue
 
 
-def render_reconnect(overdue, today):
-    if not overdue:
-        return None
-    lines = [f"<!-- reconnect:{today} -->", ""]
-    for _, days, p in overdue[:RECONNECT_LIMIT]:
-        md = p.get("md", {})
-        rel = md.get("mdrelationship", "")
-        link = f"[{p['name']}](x-devonthink-item://{p['uuid']})"
-        if days is None:
-            lines.append(f"- {link} — {rel} · no recorded contact")
-        else:
-            lines.append(
-                f"- {link} — {rel} · last contact"
-                f" {md.get('mdlastcontact')} ({days} days)"
-            )
-    return "\n".join(lines)
-
-
-def build_reconnect(people, today):
-    return render_reconnect(reconnect_overdue(people, today), today)
-
-
 def match_contact(index, contact):
     """Resolve a Contacts card to a roster person: emails first (the precise
     key), then full name, then nickname — the first key with any roster hit
@@ -1573,24 +1552,6 @@ def birthday_rows(contacts, people, today, lookahead=BIRTHDAY_LOOKAHEAD):
         rows.append((when, age, p))
     rows.sort(key=lambda r: (r[0], norm(r[2]["name"])))
     return rows
-
-
-def render_birthdays(rows, today):
-    if not rows:
-        return None
-    start = date.fromisoformat(today)
-    lines = [f"<!-- birthdays:{today} -->", ""]
-    for when, age, p in rows:
-        link = f"[{p['name']}](x-devonthink-item://{p['uuid']})"
-        what = f"turns {age}" if age is not None else "birthday"
-        suffix = " (today!)" if when == start else ""
-        lines.append(f"- {when.isoformat()} — {link} — {what}{suffix}")
-    return "\n".join(lines)
-
-
-def build_birthdays(contacts, people, today, lookahead=BIRTHDAY_LOOKAHEAD):
-    return render_birthdays(
-        birthday_rows(contacts, people, today, lookahead), today)
 
 
 def apple_ns(day):
@@ -1704,25 +1665,6 @@ def parked_sources():
     return parked if isinstance(parked, dict) else {}
 
 
-def parked_lines(parked):
-    if not parked:
-        return []
-    noun = "source" if len(parked) == 1 else "sources"
-    lines = [f"- {len(parked)} {noun} parked after repeated extraction "
-             f"failures — fix and retry with `entity-filing.py --force "
-             f"<uuid>`, or edit the source (any change retries it):"]
-    ordered = sorted(parked.items(),
-                     key=lambda kv: kv[1].get("parked_at", ""), reverse=True)
-    for uuid, info in ordered[:PARKED_LIST_MAX]:
-        name = info.get("name") or uuid
-        err = str(info.get("last_error") or "").strip()
-        suffix = f" — {err[:100]}" if err else ""
-        lines.append(f"  - [{name}](x-devonthink-item://{uuid}){suffix}")
-    if len(parked) > PARKED_LIST_MAX:
-        lines.append(f"  - … and {len(parked) - PARKED_LIST_MAX} more")
-    return lines
-
-
 def review_backlog(today, excluded=()):
     """Filing review backlog: pending/approved counts, the parked state-file
     dict, candidate attention counts, and each review group's UUID so the
@@ -1756,8 +1698,8 @@ def review_backlog(today, excluded=()):
         1 for e in cindex.entries
         if e["group"] == "approved"
         and not text_excluded(e["data"]["name"], ex_re, excluded))
-    # parked_lines renders last_error too, and an extraction error quotes the
-    # text it choked on ("ambiguous person: <name>").
+    # A parked entry carries last_error too, and an extraction error quotes
+    # the text it choked on ("ambiguous person: <name>").
     pending = [c for c in children if c["name"] != "Approved"]
     parked = {
         u: i for u, i in parked_sources().items()
@@ -1773,55 +1715,6 @@ def review_backlog(today, excluded=()):
         "review_uuid": (review_group or {}).get("uuid"),
         "approved_uuid": (approved_group or {}).get("uuid"),
     }
-
-
-def group_link(label, uuid):
-    """Markdown item link to a DEVONthink group, degrading to the bare path
-    when the UUID lookup came back empty — a dead link is worse than text."""
-    if not uuid:
-        return f"`{label}`"
-    return f"[{label}](x-devonthink-item://{uuid})"
-
-
-def render_review(backlog, today):
-    """Surface the filing review backlog so proposals don't sit unseen — the
-    Approved subgroup is the apply drop-zone, so it isn't a backlog, but a
-    proposal filing refused to apply stays there and would otherwise be
-    invisible: nothing counts it and its log line is only a WARNING. Parked
-    sources are included for the same reason: a note that repeatedly failed
-    extraction would otherwise vanish from every review surface."""
-    if backlog is None:
-        return None
-    pending = backlog["pending"]
-    approved = backlog["approved"]
-    parked = backlog["parked"]
-    urgent = backlog.get("urgent_candidates", 0)
-    stuck = backlog.get("stuck_candidates", 0)
-    if not pending and not approved and not parked and not urgent \
-            and not stuck:
-        return None
-    lines = [f"<!-- review-nudge:{today} -->", ""]
-    if pending:
-        noun = "proposal" if pending == 1 else "proposals"
-        link = group_link("20_ENTITIES/_Review", backlog["review_uuid"])
-        lines.append(f"- {pending} filing {noun} awaiting review in {link}")
-    if approved:
-        noun = "proposal" if approved == 1 else "proposals"
-        link = group_link("20_ENTITIES/_Review/Approved",
-                          backlog["approved_uuid"])
-        lines.append(f"- {approved} approved {noun} in {link} did not apply "
-                     f"— see `entity-filing` in the pipeline log")
-    if urgent:
-        noun = "candidate carries" if urgent == 1 else "candidates carry"
-        lines.append(f"- {urgent} pending {noun} a deliberately captured "
-                     f"fact in `20_ENTITIES/_Candidates`")
-    if stuck:
-        noun = "candidate" if stuck == 1 else "candidates"
-        lines.append(f"- {stuck} approved {noun} in "
-                     f"`20_ENTITIES/_Candidates/Approved` did not promote "
-                     f"— see `entity-filing` in the pipeline log")
-    lines.extend(parked_lines(parked))
-    return "\n".join(lines)
 
 
 def journal_status_info(today, state, staged_count):
@@ -1849,33 +1742,6 @@ def journal_status_info(today, state, staged_count):
     return {"pending": pending, "parked": parked, "staged": staged_count}
 
 
-def render_journal(info, today):
-    if info is None:
-        return None
-    pending, parked, staged = info["pending"], info["parked"], info["staged"]
-    lines = [f"<!-- journal-status:{today} -->", ""]
-    if pending or staged:
-        detail = f"{pending} page(s) pending OCR" if pending else \
-            "an export is staged"
-        if parked:
-            detail += f", {parked} parked"
-        lines.append(f"- Yesterday's journal entry hasn't been processed "
-                     f"yet ({detail}) — boox-process catches up on "
-                     f"AC/idle")
-    elif parked:
-        lines.append(f"- {parked} journal page(s) are parked — "
-                     f"`boox-process.py --status` has the reasons")
-    else:
-        lines.append("- No journal entry arrived for yesterday — if you "
-                     "wrote one, check the Boox's Dropbox sync")
-    return "\n".join(lines)
-
-
-def journal_status_lines(today, state, staged_count):
-    return render_journal(journal_status_info(today, state, staged_count),
-                          today)
-
-
 def load_journal_state():
     """(state, staged_export_count) from the Boox pipeline's files, or None
     when there is no readable state — the brief then stays silent rather
@@ -1891,13 +1757,6 @@ def load_journal_state():
     except OSError:
         staged = 0
     return state, staged
-
-
-def build_journal_status(today):
-    loaded = load_journal_state()
-    if loaded is None:
-        return None
-    return journal_status_lines(today, *loaded)
 
 
 def on_this_day_rows(today, excluded=()):
@@ -1939,22 +1798,6 @@ def on_this_day_rows(today, excluded=()):
     return rows, results[-1]
 
 
-def render_on_this_day(got, today):
-    if got is None:
-        return None
-    rows, daily = got
-    lines = [f"<!-- on-this-day:{today} -->", ""]
-    for r in rows:
-        noun = "year" if r["years"] == 1 else "years"
-        kind = f" ({r['kind']})" if r["kind"] else ""
-        lines.append(f"- {r['years']} {noun} ago: "
-                     f"[{r['name']}](x-devonthink-item://{r['uuid']}){kind}")
-    if daily:
-        lines.append(f"- One year ago today: "
-                     f"[{daily['name']}](x-devonthink-item://{daily['uuid']})")
-    return "\n".join(lines) if rows or daily else None
-
-
 def person_snapshot(p):
     md = p.get("md", {})
     out = {"name": p["name"]}
@@ -1967,9 +1810,9 @@ def person_snapshot(p):
 
 def build_snapshot(today, blocks, overdue, bdays, backlog, journal_info, otd):
     """Everything the TRMNL screen renders, unabridged — trmnl-push-brief.py
-    owns fitting it to the webhook byte budget. Reconnect is included every
-    day even though the daily note carries it only on Mondays: the e-ink
-    dashboard is a glance surface and the data is computed anyway."""
+    owns fitting it to the webhook byte budget. This is the only surface
+    that carries reconnect, birthdays, the review backlog, journal status,
+    and On This Day; the daily note carries only the timeline."""
     start = date.fromisoformat(today)
     snap = {
         "date": today,
@@ -2149,27 +1992,6 @@ def effective_dry_run(dry_run, requested, real_today):
     return dry_run or requested != real_today
 
 
-SECTION_SOURCES = {
-    BRIEF_HEADER: "calendar",
-    BIRTHDAYS_HEADER: "contacts",
-}
-
-
-def sections_for_upsert(sections, failed_sources):
-    """Sections safe to hand to upsert_section this run.
-
-    upsert_section treats empty content as a removal, and a failed calendar
-    or contacts fetch makes render_brief / render_birthdays return None the
-    same way a verified-empty day does — so a transient fetch failure is
-    indistinguishable from an honestly empty day by the time it reaches here.
-    A section fed by a fetch that failed is dropped from the batch entirely
-    rather than upserted empty, leaving it exactly as the last successful run
-    wrote it.
-    """
-    return [(header, content) for header, content in sections
-            if SECTION_SOURCES.get(header) not in failed_sources]
-
-
 def should_record_success(dry_run):
     return not dry_run
 
@@ -2183,7 +2005,6 @@ def main():
     args = sys.argv[1:]
     dry_run = "--dry-run" in args
     force = "--force" in args
-    weekly = "--weekly" in args
     backfill = "--backfill-contacts" in args
     backfill_msgs = "--backfill-messages" in args
     days = BACKFILL_DAYS
@@ -2193,7 +2014,7 @@ def main():
     today = real_today
     if "--date" in args:
         today = args[args.index("--date") + 1]
-    user_invoked = (dry_run or force or "--date" in args or weekly
+    user_invoked = (dry_run or force or "--date" in args
                     or backfill or backfill_msgs)
 
     if not backfill and not backfill_msgs:
@@ -2359,9 +2180,9 @@ def main():
 
     apply_bumps(people, bumps + mops, today)
 
-    # Every section is upserted (not append-once): the 05:45/06:30/08:00
+    # The timeline is merged (not append-once): the 05:45/06:30/08:00
     # retries refresh a 05:15 brief built from incomplete calendar sync, and
-    # a cleared review backlog removes its stale nudge (empty content).
+    # a cancelled event's stale bullet is removed.
     blocks = brief_blocks(
         events, people, skip_re, excluded, skip_cals, repeats, contexts,
         provenance)
@@ -2378,26 +2199,13 @@ def main():
     otd = on_this_day_rows(today, excluded)
 
     event_notes = event_note_index(blocks, today)
-    sections = [(BRIEF_HEADER, render_brief(blocks, today, event_notes))]
-    if weekly or date.fromisoformat(today).weekday() == 0:
-        sections.append((RECONNECT_HEADER, render_reconnect(overdue, today)))
-    sections.append((BIRTHDAYS_HEADER, render_birthdays(bdays, today)))
-    sections.append((REVIEW_HEADER, render_review(backlog, today)))
-    sections.append((JOURNAL_HEADER, render_journal(journal_info, today)))
-    sections.append((ON_THIS_DAY_HEADER, render_on_this_day(otd, today)))
+    timeline = brief_timeline_blocks(blocks, today, event_notes)
 
     failed_sources = set()
     if calendar_failed:
         failed_sources.add("calendar")
     if not contacts_ok:
         failed_sources.add("contacts")
-    upsert_sections = sections_for_upsert(sections, failed_sources)
-    if len(upsert_sections) != len(sections):
-        kept = {header for header, _ in upsert_sections}
-        log.warning(
-            "leaving %s untouched (their fetch failed this run) instead of "
-            "upserting empty content over an earlier run's section",
-            ", ".join(h for h, _ in sections if h not in kept))
 
     # The TRMNL screen updates even on an empty day — "no meetings" is a
     # displayable state — but never for a --date replay or a failed fetch,
@@ -2407,32 +2215,39 @@ def main():
                                       backlog, journal_info, otd))
         push_snapshot()
 
-    if not any(content for _, content in upsert_sections):
-        log.info("nothing to write (no briefable meetings, no reconnects)")
+    if calendar_failed:
+        # An empty desired set removes every machine event bullet, and a
+        # failed fetch is indistinguishable from an honestly empty day by the
+        # time it reaches the merge — so the note is left exactly as the last
+        # successful run wrote it.
+        log.warning("leaving the daily note untouched: the calendar fetch "
+                    "failed this run")
         return
 
     if dry_run:
-        for header, content in upsert_sections:
-            if content:
-                print(f"\n{header}\n\n{content}")
+        for b in timeline:
+            print(b["line"])
+            for ln in b["subLines"]:
+                print(ln)
         return
 
     heading = datetime.strptime(today, "%Y-%m-%d").strftime("%A, %B %-d, %Y")
     daily = run_bridge(
         [{"op": "get_or_create_daily", "date": today, "heading": heading}]
     )[0]
-    results = run_bridge([
-        {"op": "upsert_section", "uuid": daily["uuid"], "header": header,
-         "content": content or ""}
-        for header, content in upsert_sections
-    ])
-    wrote = [header for (header, _), res in zip(upsert_sections, results)
-             if res.get("changed")]
-    if not wrote:
-        log.info("sections already current, nothing to do")
+    result = run_bridge([
+        {"op": "merge_timeline", "uuid": daily["uuid"], "blocks": timeline}
+    ])[0]
+    if result.get("legacy"):
+        log.warning("daily note %s still has a ## Briefing section — merge "
+                    "refused; flatten the note (or wait for tomorrow's)",
+                    today)
+        return
+    if not result.get("changed"):
+        log.info("timeline already current, nothing to do")
         return
     log.info(
-        "wrote %s to daily note %s", ", ".join(wrote), today,
+        "merged %d event blocks into daily note %s", len(timeline), today,
         extra={"record_name": today, "record_uuid": daily["uuid"]},
     )
 

@@ -130,7 +130,7 @@ on findArchivedDuplicate(recURL, recUUID)
 	end tell
 end findArchivedDuplicate
 
--- Append a wikilink to today's daily note under "## Today's Notes".
+-- Insert a wikilink bullet into today's daily note at its timeline position.
 -- Idempotent via DailyNoteLinked and a UUID-in-note check. Non-fatal —
 -- if the append fails, the record is still archived normally. The note is
 -- created on demand: bookmarks processed between midnight and the 05:00
@@ -173,7 +173,7 @@ on logBookmarkToDailyNote(theRecord)
 			set timeStr to (cHour as text) & ":" & text -2 thru -1 of ("0" & (cMin as text)) & ampm
 
 			set recName to name of theRecord as string
-			set linkText to "- " & timeStr & ": [🔗 " & recName & "](x-devonthink-item://" & docUUID & ")"
+			set linkText to "- " & timeStr & ": 🔗 [" & recName & "](x-devonthink-item://" & docUUID & ")"
 
 			set tmpPath to do shell script "mktemp /tmp/dt-extract-web.XXXXXX"
 			set fileRef to open for access (POSIX file tmpPath) with write permission
@@ -183,7 +183,6 @@ on logBookmarkToDailyNote(theRecord)
 
 			set newText to do shell script ¬
 				"/usr/bin/python3 $HOME/.local/bin/insert-daily-note-section.py" & ¬
-				" --header " & quoted form of "## Today's Notes" & ¬
 				" --content " & quoted form of (linkText & linefeed) & ¬
 				" < " & quoted form of tmpPath without altering line endings
 			do shell script "rm -f " & quoted form of tmpPath

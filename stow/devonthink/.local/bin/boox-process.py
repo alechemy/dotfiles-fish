@@ -102,7 +102,6 @@ STATE_SCHEMA_VERSION = 1
 
 JOURNAL_GROUP = "/15_JOURNAL"
 INBOX_GROUP = "/00_INBOX"
-DAILY_SECTION = "## Today's Notes"
 JOURNAL_RE = re.compile(r"^(\d{4}) Journal$")
 MAGICK = "/opt/homebrew/bin/magick"
 MARKDOWNLINT = "/opt/homebrew/bin/markdownlint"
@@ -743,9 +742,9 @@ def link_daily_note(entry_date, uuid):
     daily = run_bridge([{"op": "get_or_create_daily",
                          "date": entry_date.isoformat(),
                          "heading": heading}])[0]
-    line = f"- [\U0001F4D4 Journal](x-devonthink-item://{uuid})"
-    run_bridge([{"op": "insert_under_section", "uuid": daily["uuid"],
-                 "header": DAILY_SECTION, "line": line}])
+    line = f"- \U0001F4D4 [Journal](x-devonthink-item://{uuid})"
+    run_bridge([{"op": "append_pinned", "uuid": daily["uuid"],
+                 "line": line}])
 
 
 def file_regular_note(stem, tiff_path, markdown, meta):

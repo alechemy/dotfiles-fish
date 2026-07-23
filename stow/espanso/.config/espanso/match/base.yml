@@ -17,6 +17,15 @@ matches:
         params:
           format: "%H:%M"
 
+  # Daily-note timeline jot prefix: "10:04am: " (type after "- ")
+  - trigger: ":now"
+    replace: "{{jottime}}: "
+    vars:
+      - name: jottime
+        type: date
+        params:
+          format: "%-I:%M%P"
+
   # console.log(<cursor>);
   - trigger: :log
     replace: console.log($|$);

@@ -1,9 +1,11 @@
 """Section-span parity across the bridge's pure section machinery.
 
-sectionBounds, sectionUpsert, and insertUnderSectionOnce are pure functions
-over body-line arrays, so this drives them through the same osascript eval
-harness as test_entity_log_sort.py rather than reimplementing them in
-Python — a Python copy would only prove the copy agrees with itself.
+sectionBounds and insertUnderSectionOnce (both still load-bearing for entity
+records' log sections) are pure functions over body-line arrays, so this
+drives them through the same osascript eval harness as
+test_entity_log_sort.py rather than reimplementing them in Python — a Python
+copy would only prove the copy agrees with itself. The daily-note timeline
+machinery is covered by test_timeline_merge.py.
 """
 
 import json
@@ -31,7 +33,6 @@ HARNESS = textwrap.dedent("""
       const registry = {
         sectionBounds: sectionBounds,
         insertUnderSectionOnce: insertUnderSectionOnce,
-        sectionUpsert: sectionUpsert,
       }
       return JSON.stringify(cases.map(function (c) {
         return registry[c.fn].apply(null, c.args)
@@ -86,42 +87,6 @@ class SectionBoundsSpanRule(unittest.TestCase):
 
     def test_missing_header_returns_null(self):
         self.assertIsNone(self.bounds(["# Note", "- a"], "## Briefing"))
-
-
-class UpsertSectionSurvivesUserH1(unittest.TestCase):
-    HEADER = "## Briefing"
-
-    @classmethod
-    def setUpClass(cls):
-        cls.tmp = make_tmp("dt-section-upsert-test")
-
-    def upsert(self, lines, content):
-        return call("sectionUpsert", [lines, self.HEADER, content], self.tmp)
-
-    def body_with_trailing_user_h1(self, brief):
-        return ["# Day", "", self.HEADER, "", brief, "",
-                "# My Own Heading", "", "- kept forever"]
-
-    def test_replace_keeps_the_user_h1_block(self):
-        out = self.upsert(self.body_with_trailing_user_h1("old brief"),
-                           "new brief")
-        self.assertIn("# My Own Heading", out["text"])
-        self.assertIn("- kept forever", out["text"])
-        self.assertIn("new brief", out["text"])
-        self.assertTrue(out["changed"])
-
-    def test_remove_keeps_the_user_h1_block(self):
-        out = self.upsert(self.body_with_trailing_user_h1("old brief"), "")
-        self.assertIn("# My Own Heading", out["text"])
-        self.assertIn("- kept forever", out["text"])
-        self.assertNotIn(self.HEADER, out["text"])
-        self.assertTrue(out["removed"])
-
-    def test_unchanged_section_with_trailing_user_h1_is_a_no_op(self):
-        out = self.upsert(self.body_with_trailing_user_h1("same brief"),
-                           "same brief")
-        self.assertFalse(out["changed"])
-        self.assertIsNone(out["text"])
 
 
 class InsertUnderSectionOnceCore(unittest.TestCase):

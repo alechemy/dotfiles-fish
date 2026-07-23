@@ -36,7 +36,7 @@ SingleFile ingestion is OUT of smart rules — it's Python scripts + an fswatch 
   Scenario 2 (queued bookmark): capture-bookmarks-batch.py (manual/hotkey) → finds NeedsSingleFile=1 bookmarks → per-URL: capture-with-singlefile → ingest-singlefile-html.py --bookmark <UUID> (reuses existing bookmark, clears the flag)
   → Extract: Native Text Bypass (text-native docs — markdown/RTF/HTML and born-digital PDFs with a text layer, i.e. Word Count > 0 — skip OCR; bookmarks excluded, they go through Extract: Web Content) → sets Recognized=1, Commented=1
   → Enrich: AI Metadata (single LLM call → title, eventDate, type, tags, summary, lowConfidence) → sets AIEnriched=1
-  → Post-Enrich & Archive (action items → Things 3, daily notes extraction, briefing-event match via brief_events.py — LinkedEvent + sub-bullet under the event — or Today's Notes wikilink fallback, archive to 99_ARCHIVE) → move only on success
+  → Post-Enrich & Archive (action items → Things 3, daily notes extraction, briefing-event match via brief_events.py — LinkedEvent + sub-bullet under the matched 📅 event bullet — or its own timed bullet at its chronological position in the daily-note timeline, archive to 99_ARCHIVE) → move only on success
 ```
 
 Smart rule scripts live in `../stow/devonthink/Library/Application Scripts/com.devon-technologies.think/Smart Rules/`. Standalone Python helpers called by those scripts live in `../stow/devonthink/.local/bin/`. Standalone AppleScript utilities live in `utils/`. Integration docs (GitHub Stars, Summarize, Boox/Journal) live in `docs/`. The canonical reference for rule criteria, triggers, and actions is `README.md`.
@@ -69,7 +69,7 @@ being a person), a JS `null` where ObjC nil `$()` is expected silently returns
 zero contact containers, and a year-less birthday carries NSIntegerMax as its
 year. They skip rather than fail when there is no TCC grant or no data in the
 window, so a fresh machine or a follower Mac stays green. If one ever fails,
-contact tracking or the birthday section is silently dead — see
+contact tracking or the birthdays digest (TRMNL snapshot) is silently dead — see
 `docs/entities.md`.
 
 When adding a pipeline function, ask whether its failure mode is `continue`
