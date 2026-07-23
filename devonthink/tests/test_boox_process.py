@@ -1,4 +1,5 @@
 import io
+import json
 import os
 import tempfile
 import unittest
@@ -423,6 +424,20 @@ class ChatTransportClassification(unittest.TestCase):
                                      io.BytesIO(b""))
         with self.assertRaises(urllib.error.HTTPError):
             self.call_with(err)
+
+    def test_payload_disables_thinking(self):
+        captured = {}
+
+        def fake_urlopen(req, timeout=None):
+            captured["payload"] = json.loads(req.data.decode())
+            raise urllib.error.URLError("stop")
+
+        with mock.patch.object(jp.urllib.request, "urlopen",
+                               side_effect=fake_urlopen):
+            with self.assertRaises(jp.LLMUnavailable):
+                jp._chat(self.CONFIG, "role", "content")
+        self.assertEqual(captured["payload"]["chat_template_kwargs"],
+                         {"enable_thinking": False})
 
 
 class LLMUnavailableDoesNotChargePages(unittest.TestCase):

@@ -387,6 +387,9 @@ def _chat(config, role, content, timeout=900):
         ],
         "temperature": 0,
         "max_tokens": 4096,
+        # Qwen3.5 thinks by default; transcription neither needs nor wants
+        # a reasoning phase. Unused by templates without the variable.
+        "chat_template_kwargs": {"enable_thinking": False},
     }).encode()
     headers = {"Content-Type": "application/json"}
     if config["OMLX_API_KEY"]:
