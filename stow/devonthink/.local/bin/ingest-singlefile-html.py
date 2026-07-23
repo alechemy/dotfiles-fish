@@ -34,6 +34,7 @@ import tempfile
 import unicodedata
 import urllib.error
 import urllib.request
+from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -108,6 +109,8 @@ on run argv
     set isGenericTitle to ((item 7 of argv) is "1")
     set overrideExistingName to ((item 8 of argv) is "1")
     set allowAdopt to ((item 9 of argv) is "1")
+    set captureDate to item 10 of argv
+    set captureTime to item 11 of argv
 
     tell application id "DNtp"
         set archiveGroup to get record at "/99_ARCHIVE" in database "Lorebook"
@@ -290,7 +293,9 @@ on run argv
             add custom meta data 0 for "NeedsSingleFile" to bmRecord
         end if
 
-        -- Scenario 1 only: log the new bookmark to today's daily note.
+        -- Scenario 1 only: log the new bookmark to the daily note for its
+        -- capture time (captureDate/captureTime — the staging file's mtime,
+        -- so a backlog swept later still lands at the save moment).
         -- Scenario 2 bookmarks were already logged by Post-Enrich & Archive
         -- when they first arrived via Extract: Web Content, so re-logging
         -- here would duplicate the entry. When the page had no usable
@@ -300,34 +305,17 @@ on run argv
         -- "No title — host/path".
         if createdNew and not isGenericTitle then
             try
-                set cDate to current date
-                set cYear to year of cDate as text
-                set cMonth to text -2 thru -1 of ("0" & ((month of cDate) as integer))
-                set cDay to text -2 thru -1 of ("0" & (day of cDate))
-                set todayStr to cYear & "-" & cMonth & "-" & cDay
                 set dailyGroup to get record at "/10_DAILY" in database "Lorebook"
                 set targetNote to missing value
                 if dailyGroup is not missing value then
-                    set targetNote to my getOrCreateDailyNote(database "Lorebook", dailyGroup, "/10_DAILY", todayStr)
+                    set targetNote to my getOrCreateDailyNote(database "Lorebook", dailyGroup, "/10_DAILY", captureDate)
                 end if
 
                 if targetNote is not missing value then
                     set bmUUID to uuid of bmRecord
                     set noteText to plain text of targetNote
                     if noteText does not contain bmUUID then
-                        set secSinceMidnight to time of cDate
-                        set cHour to secSinceMidnight div 3600
-                        set cMin to (secSinceMidnight mod 3600) div 60
-                        if cHour ≥ 12 then
-                            set ampm to "pm"
-                            if cHour > 12 then set cHour to cHour - 12
-                        else
-                            set ampm to "am"
-                            if cHour is 0 then set cHour to 12
-                        end if
-                        set timeStr to (cHour as text) & ":" & text -2 thru -1 of ("0" & (cMin as text)) & ampm
-
-                        set linkText to "- " & timeStr & ": 🔗 [" & safeTitle & "](x-devonthink-item://" & bmUUID & ")"
+                        set linkText to "- " & captureTime & ": 🔗 [" & safeTitle & "](x-devonthink-item://" & bmUUID & ")"
 
                         set tmpPath to do shell script "mktemp /tmp/sf-ingest-daily.XXXXXX"
                         set fileRef to open for access (POSIX file tmpPath) with write permission
@@ -378,6 +366,17 @@ on getOrCreateDailyNote(targetDB, destGroup, groupPath, dateStr)
     end tell
 end getOrCreateDailyNote
 """
+
+
+def capture_timestamp(mtime: float) -> tuple[str, str]:
+    """The staging file's save moment as (YYYY-MM-DD, h:mmam) — the daily-note
+    bullet's target day and timeline stamp. mtime is the capture time, so a
+    backlog swept hours (or days) after the save still lands at the moment the
+    page was actually captured."""
+    dt = datetime.fromtimestamp(mtime)
+    hour = dt.hour % 12 or 12
+    ampm = "am" if dt.hour < 12 else "pm"
+    return dt.strftime("%Y-%m-%d"), f"{hour}:{dt.minute:02d}{ampm}"
 
 
 def parse_source_url(html_path: Path) -> str | None:
@@ -957,6 +956,8 @@ def import_to_devonthink(
     is_generic_title: bool = False,
     override_existing_name: bool = False,
     allow_adopt: bool = True,
+    capture_date: str = "",
+    capture_time: str = "",
 ) -> str:
     """Run the single-pass AppleScript. Returns the pipe-joined UUIDs.
 
@@ -981,6 +982,10 @@ def import_to_devonthink(
     identity, repairing a partial triad from an earlier failed pass instead
     of duplicating its members. False under --force, which means "make a
     fresh capture".
+
+    `capture_date` (YYYY-MM-DD) and `capture_time` (h:mmam) are the staging
+    file's save moment from capture_timestamp(); the AppleScript uses them as
+    the daily-note bullet's target day and timeline stamp.
     """
     argv = [
         str(html_path),
@@ -992,6 +997,8 @@ def import_to_devonthink(
         "1" if is_generic_title else "0",
         "1" if override_existing_name else "0",
         "1" if allow_adopt else "0",
+        capture_date,
+        capture_time,
     ]
     result = subprocess.run(
         ["osascript", "-", *argv],
@@ -1049,6 +1056,9 @@ def main() -> int:
     safe_title, is_generic_title, override_existing_name = derive_title(
         html_path, source_url
     )
+
+    # Before compress_images, which rewrites the staging file and resets mtime.
+    capture_date, capture_time = capture_timestamp(html_path.stat().st_mtime)
 
     compress_images(html_path)
 
@@ -1131,6 +1141,8 @@ def main() -> int:
                 is_generic_title=is_generic_title,
                 override_existing_name=override_existing_name,
                 allow_adopt=not args.force,
+                capture_date=capture_date,
+                capture_time=capture_time,
             )
         except subprocess.CalledProcessError as e:
             log.error("AppleScript import failed: %s", e.stderr)

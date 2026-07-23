@@ -1,5 +1,6 @@
 import tempfile
 import unittest
+from datetime import datetime
 from pathlib import Path
 
 from helpers import load
@@ -138,6 +139,60 @@ class DeriveTitle(unittest.TestCase):
         self.assertEqual(title, "The Verbatim Post Title")
         self.assertFalse(is_generic)
         self.assertTrue(override)
+
+
+class CaptureTimestamp(unittest.TestCase):
+    def _stamp(self, *args):
+        return sf.capture_timestamp(datetime(*args).timestamp())
+
+    def test_afternoon(self):
+        self.assertEqual(self._stamp(2026, 7, 23, 15, 7), ("2026-07-23", "3:07pm"))
+
+    def test_morning_hour_has_no_leading_zero(self):
+        self.assertEqual(self._stamp(2026, 7, 23, 9, 5), ("2026-07-23", "9:05am"))
+
+    def test_midnight_hour_is_12am(self):
+        self.assertEqual(self._stamp(2026, 7, 23, 0, 42), ("2026-07-23", "12:42am"))
+
+    def test_noon_hour_is_12pm(self):
+        self.assertEqual(self._stamp(2026, 7, 23, 12, 0), ("2026-07-23", "12:00pm"))
+
+    def test_past_day_keeps_its_date(self):
+        self.assertEqual(self._stamp(2026, 7, 21, 23, 59), ("2026-07-21", "11:59pm"))
+
+
+class ImportArgv(unittest.TestCase):
+    """The capture stamps must ride the osascript argv into the AppleScript,
+    which reads them as items 10/11 — a drifted position silently stamps
+    bullets with the wrong field."""
+
+    def test_capture_stamps_reach_the_applescript(self):
+        calls = []
+
+        def fake_run(cmd, **kwargs):
+            calls.append(cmd)
+            return _Echo("a|b|c\n")
+
+        orig = sf.subprocess.run
+        sf.subprocess.run = fake_run
+        try:
+            sf.import_to_devonthink(
+                html_path=Path("/tmp/x.html"),
+                md_path=None,
+                bookmark_uuid="",
+                source_url="https://ex.com",
+                safe_title="Example",
+                capture_date="2026-07-21",
+                capture_time="11:59pm",
+            )
+        finally:
+            sf.subprocess.run = orig
+
+        argv = calls[0][2:]
+        self.assertEqual(argv[9], "2026-07-21")
+        self.assertEqual(argv[10], "11:59pm")
+        self.assertIn("set captureDate to item 10 of argv", sf.APPLESCRIPT)
+        self.assertIn("set captureTime to item 11 of argv", sf.APPLESCRIPT)
 
 
 if __name__ == "__main__":

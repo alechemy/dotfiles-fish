@@ -2,7 +2,7 @@
 --
 -- Handles Bookmark records arriving in 00_INBOX in one pass: cleans the
 -- title, flags the record for later SingleFile capture (if URL present),
--- appends a wikilink to today's daily note, and archives to 99_ARCHIVE.
+-- appends a wikilink to the daily note, and archives to 99_ARCHIVE.
 --
 -- Bookmarks don't need AI enrichment, action-item extraction, or H1 sync,
 -- so routing them through Post-Enrich & Archive just to archive them
@@ -87,7 +87,7 @@ on performSmartRule(theRecords)
 					end if
 				end if
 
-				-- Append wikilink to today's daily note.
+				-- Append wikilink to the daily note.
 				my logBookmarkToDailyNote(theRecord)
 
 				-- Archive last, and only clear NeedsProcessing on success so
@@ -130,7 +130,10 @@ on findArchivedDuplicate(recURL, recUUID)
 	end tell
 end findArchivedDuplicate
 
--- Insert a wikilink bullet into today's daily note at its timeline position.
+-- Insert a wikilink bullet into the daily note at its timeline position,
+-- stamped from the bookmark's addition date — the moment it was saved to
+-- the database (a phone-synced bookmark can reach this rule hours later),
+-- which also picks the note's day for saves that predate midnight.
 -- Idempotent via DailyNoteLinked and a UUID-in-note check. Non-fatal —
 -- if the append fails, the record is still archived normally. The note is
 -- created on demand: bookmarks processed between midnight and the 05:00
@@ -142,15 +145,15 @@ on logBookmarkToDailyNote(theRecord)
 			set isLinked to (get custom meta data for "DailyNoteLinked" from theRecord)
 			if my flagIsSet(isLinked) then return
 
-			set cDate to current date
+			set cDate to addition date of theRecord
 			set cYear to year of cDate as text
 			set cMonth to text -2 thru -1 of ("0" & ((month of cDate) as integer))
 			set cDay to text -2 thru -1 of ("0" & (day of cDate))
-			set todayStr to cYear & "-" & cMonth & "-" & cDay
+			set targetDate to cYear & "-" & cMonth & "-" & cDay
 			set targetDB to database "Lorebook"
 			set dailyGroup to get record at "/10_DAILY" in targetDB
 			if dailyGroup is missing value then return
-			set targetNote to my getOrCreateDailyNote(targetDB, dailyGroup, "/10_DAILY", todayStr)
+			set targetNote to my getOrCreateDailyNote(targetDB, dailyGroup, "/10_DAILY", targetDate)
 			if targetNote is missing value then return
 
 			set docUUID to uuid of theRecord
