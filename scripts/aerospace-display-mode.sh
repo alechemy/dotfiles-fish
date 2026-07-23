@@ -11,7 +11,10 @@
 # tiles laid out for the ultrawide are unusable at 14". On re-dock roots return
 # to h_tiles and auto-gaps recomputes the constant-width columns. Only the root
 # layout is touched: nested containers (join-with groups) survive the round
-# trip, so a docked column pairing is intact after undock + re-dock.
+# trip, so a docked column pairing is intact after undock + re-dock. A
+# workspace empty at flip time has no tree to flip — its next window births a
+# fresh root from default-root-container-layout, which auto-gaps bakes per
+# mode into the runtime config so late-arriving workspaces still match.
 #
 # JankyBorders width is mode-dependent via bordersrc, which reads the mode file
 # this script writes; re-running bordersrc against a live instance applies the

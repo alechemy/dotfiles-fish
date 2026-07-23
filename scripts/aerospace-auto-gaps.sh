@@ -95,6 +95,11 @@ read_padding() {
     sed -nE 's/^accordion-padding = ([0-9]+).*/\1/p' "$1" 2>/dev/null | head -n1 || true
 }
 
+read_root_layout() {
+    # Same contract as read_gap, for the default-root-container-layout line.
+    sed -nE "s/^default-root-container-layout = '([a-z]+)'.*/\1/p" "$1" 2>/dev/null | head -n1 || true
+}
+
 mons_json=$(aerospace list-monitors --json 2>/dev/null || echo '[]')
 
 # Auto-gaps only rewrites the DELL's outer gaps; every other display uses the
@@ -105,24 +110,29 @@ mons_json=$(aerospace list-monitors --json 2>/dev/null || echo '[]')
 # portable session. This branch must precede the multi-monitor gate below, which
 # would otherwise swallow the sync for the entire time a secondary is attached.
 # Sync (under the shared lock, so a concurrent cycle-gaps rebuild can't race the
-# copy) and exit. The rebuild bakes the portable accordion-padding; the DELL gap
-# values it copies are inert undocked, and the first docked event recomputes
-# them. The padding check makes the bake self-healing: a runtime built docked
-# carries the source padding and triggers a rebuild here without relying on the
-# transition hook having fired.
+# copy) and exit. The rebuild bakes the portable accordion-padding and an
+# accordion default root layout (display-mode.sh only flips workspaces that
+# have a tree at flip time — a window landing in an empty workspace births a
+# fresh root from this default); the DELL gap values it copies are inert
+# undocked, and the first docked event recomputes them. The padding and layout
+# checks make the bake self-healing: a runtime built docked carries the source
+# values and triggers a rebuild here without relying on the transition hook
+# having fired.
 if ! jq -e --arg m 'DELL U4025QW' 'any(.[]; ."monitor-name" | contains($m))' \
         <<<"$mons_json" >/dev/null 2>&1; then
     if [ "$(cat "$STATE_DIR/display-mode" 2>/dev/null)" != "portable" ]; then
         "$HOME/.dotfiles/scripts/aerospace-display-mode.sh" portable || true
     fi
     if [ ! -f "$RUNTIME_FILE" ] || [ -L "$RUNTIME_FILE" ] || [ "$SOURCE_FILE" -nt "$RUNTIME_FILE" ] \
-            || [ "$(read_padding "$RUNTIME_FILE")" != "$PORTABLE_ACCORDION_PADDING" ]; then
+            || [ "$(read_padding "$RUNTIME_FILE")" != "$PORTABLE_ACCORDION_PADDING" ] \
+            || [ "$(read_root_layout "$RUNTIME_FILE")" != "accordion" ]; then
         exec 9>"$STATE_DIR/lock"
         flock 9
         TMP=$(mktemp "$RUNTIME_FILE.XXXXXX")
         trap 'rm -f "$TMP"' EXIT
         cp "$SOURCE_FILE" "$TMP"
         sed -i '' "s/^accordion-padding = [0-9]*/accordion-padding = $PORTABLE_ACCORDION_PADDING/" "$TMP"
+        sed -i '' "s/^default-root-container-layout = '[a-z]*'/default-root-container-layout = 'accordion'/" "$TMP"
         chmod 0644 "$TMP"
         mv "$TMP" "$RUNTIME_FILE"
         aerospace reload-config
@@ -242,12 +252,13 @@ for pass in 1 2 3 4 5; do
         *)   target=$gap_full ;;
     esac
 
-    # Decide whether the runtime needs rebuilding from source. The padding
-    # check restores the source accordion-padding after a portable session
-    # baked the smaller value.
+    # Decide whether the runtime needs rebuilding from source. The padding and
+    # layout checks restore the source accordion-padding and default root
+    # layout after a portable session baked the portable values.
     needs_rebuild=false
     if [ ! -f "$RUNTIME_FILE" ] || [ -L "$RUNTIME_FILE" ] || [ "$SOURCE_FILE" -nt "$RUNTIME_FILE" ] \
-            || [ "$(read_padding "$RUNTIME_FILE")" != "$(read_padding "$SOURCE_FILE")" ]; then
+            || [ "$(read_padding "$RUNTIME_FILE")" != "$(read_padding "$SOURCE_FILE")" ] \
+            || [ "$(read_root_layout "$RUNTIME_FILE")" != "$(read_root_layout "$SOURCE_FILE")" ]; then
         needs_rebuild=true
     fi
 
