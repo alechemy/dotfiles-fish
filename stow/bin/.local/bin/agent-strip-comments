@@ -6,14 +6,17 @@
 # per-repo opt-in marker. Always exits 0 so it never blocks or fails the agent's turn.
 #
 # Scoping is two-dimensional, because `uncomment` itself is whole-file:
-#   files — git's changed files intersected with the files the agent touched, read
-#     from the transcript (exact edit targets for Claude Code, referenced paths for
-#     Copilot). With no transcript it falls back to all changed files.
+#   files — the exact edit targets from the just-ended turn, read from the transcript
+#     (everything after the last real user prompt). Dirtiness vs HEAD is not required,
+#     so work the agent commits mid-turn is still processed; earlier turns are out of
+#     scope, so a comment the user reviewed or re-added is never re-stripped. Copilot
+#     transcripts yield referenced paths instead, intersected with git's changed
+#     files; with no transcript it falls back to all changed files.
 #   lines — each file is diffed against a baseline and only comments on lines the
 #     agent added get stripped, by `uncomment-scoped`. The baseline is the pre-edit
-#     content the transcript recorded for that file (`originalFile`), so uncommitted
-#     work that predates the session is protected too; failing that, its HEAD blob;
-#     failing that (new file), empty.
+#     content the transcript recorded for that file in the turn (`originalFile`), so
+#     uncommitted work that predates the turn is protected too; failing that, its
+#     HEAD blob; failing that (new file), empty.
 #
 # Enable a repo with `comment-gate-init` (drops the marker + the commit-gate recipe).
 
@@ -30,52 +33,66 @@ command -v git >/dev/null 2>&1 || exit 0
 root=$(git -C "$cwd" rev-parse --show-toplevel 2>/dev/null) || exit 0
 [ -f "$root/.uncommentrc.toml" ] || exit 0
 
-# Changed files in the working tree (absolute): tracked vs HEAD + untracked, minus the marker.
-candidates=()
-while IFS= read -r -d '' f; do
-  [ -n "$f" ] || continue
-  [ "$f" = ".uncommentrc.toml" ] && continue
-  [ -f "$root/$f" ] && candidates+=("$root/$f")
-done < <(
-  { git -C "$root" diff --name-only -z HEAD 2>/dev/null || true
-    git -C "$root" ls-files --others --exclude-standard -z 2>/dev/null || true; }
-)
-[ "${#candidates[@]}" -gt 0 ] || exit 0
-
-# Exact edit targets from a Claude Code transcript (absolute paths).
+# Turn start = timestamp of the last real user prompt (string content, or an array
+# with no tool_result items; isMeta entries are hook/system injections, not prompts).
+turn_start=""
 edited=""
 if [ -n "$transcript" ] && [ -f "$transcript" ]; then
-  edited=$(jq -r '
-    select(.type=="assistant") | .message.content[]?
+  turn_start=$(jq -r '
+    select(.type=="user" and ((.isMeta // false) | not))
+    | select(.message.content
+        | (type=="string") or (type=="array" and ([.[]?.type] | index("tool_result") | not)))
+    | .timestamp // empty
+  ' "$transcript" 2>/dev/null | tail -n 1)
+  edited=$(jq -r --arg ts "$turn_start" '
+    select(.type=="assistant" and ($ts=="" or .timestamp >= $ts))
+    | .message.content[]?
     | select(.type=="tool_use" and (.name|test("^(Edit|Write|MultiEdit|NotebookEdit)$")))
     | (.input.file_path // .input.notebook_path // empty)
   ' "$transcript" 2>/dev/null | sort -u)
 fi
 
-# Restrict to files the agent touched this session: exact edit targets if the transcript
-# yielded them, else any candidate whose path is referenced in the transcript (Copilot),
-# else — with no transcript — every changed file.
 files=()
 if [ -n "$edited" ]; then
-  for c in "${candidates[@]}"; do
-    printf '%s\n' "$edited" | grep -qxF -- "$c" && files+=("$c")
-  done
-elif [ -n "$transcript" ] && [ -f "$transcript" ]; then
-  for c in "${candidates[@]}"; do
-    rel="${c#"$root"/}"
-    { grep -qF -- "$c" "$transcript" 2>/dev/null || grep -qF -- "$rel" "$transcript" 2>/dev/null; } && files+=("$c")
-  done
+  while IFS= read -r f; do
+    case $f in
+      "$root/.uncommentrc.toml") continue ;;
+      "$root"/*) ;;
+      *) continue ;;
+    esac
+    [ -f "$f" ] && files+=("$f")
+  done <<<"$edited"
 else
-  files=("${candidates[@]}")
+  # No exact edit targets: fall back to git's changed files (tracked vs HEAD +
+  # untracked, minus the marker), intersected with paths the transcript references
+  # (Copilot); with no transcript at all, every changed file.
+  candidates=()
+  while IFS= read -r -d '' f; do
+    [ -n "$f" ] || continue
+    [ "$f" = ".uncommentrc.toml" ] && continue
+    [ -f "$root/$f" ] && candidates+=("$root/$f")
+  done < <(
+    { git -C "$root" diff --name-only -z HEAD 2>/dev/null || true
+      git -C "$root" ls-files --others --exclude-standard -z 2>/dev/null || true; }
+  )
+  if [ -n "$transcript" ] && [ -f "$transcript" ]; then
+    for c in ${candidates[@]+"${candidates[@]}"}; do
+      rel="${c#"$root"/}"
+      { grep -qF -- "$c" "$transcript" 2>/dev/null || grep -qF -- "$rel" "$transcript" 2>/dev/null; } && files+=("$c")
+    done
+  else
+    files=(${candidates[@]+"${candidates[@]}"})
+  fi
 fi
 [ "${#files[@]}" -gt 0 ] || exit 0
 
-# Pre-edit content per file, first write wins: Claude Code records it on every Edit/Write
-# tool result. Base64 keeps the embedded newlines on one line.
+# Pre-edit content per file, first write in the turn wins: Claude Code records it on
+# every Edit/Write tool result. Base64 keeps the embedded newlines on one line.
 baselines=""
 if [ -n "$edited" ]; then
-  baselines=$(jq -r '
+  baselines=$(jq -r --arg ts "$turn_start" '
     select(.toolUseResult | type=="object")
+    | select($ts=="" or .timestamp >= $ts)
     | select(.toolUseResult.structuredPatch != null and .toolUseResult.filePath != null)
     | [.toolUseResult.filePath, (.toolUseResult.originalFile // "" | @base64)] | @tsv
   ' "$transcript" 2>/dev/null | awk -F'\t' '!seen[$1]++')
