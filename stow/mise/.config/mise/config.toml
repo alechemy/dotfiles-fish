@@ -6,6 +6,9 @@ java = "latest"
 
 # Global npm CLIs — mise reinstalls these against the active node version,
 # so they survive node upgrades and get reproduced on fresh machines.
+# mise resolves `latest` only at install time, so a daily launchd agent
+# (com.user.defuddle-update) runs `mise upgrade npm:defuddle` to keep the
+# DT bookmark pipeline's readability extractor current.
 "npm:defuddle" = "latest"
 "npm:eas-cli" = "latest"
 # uncomment (goldziher/uncomment): AST/tree-sitter comment stripper, distributed

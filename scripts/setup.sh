@@ -692,7 +692,8 @@ EOF
                               com.user.github-stars-import \
                               com.user.dt-morning-brief \
                               com.user.entity-filing \
-                              com.user.dt-database-archive)
+                              com.user.dt-database-archive \
+                              com.user.defuddle-update)
             dt_agents=(com.user.dt-watchdog)
             if [ "$DT_ROLE" = driver ]; then
                 dt_agents+=("${dt_driver_agents[@]}")
