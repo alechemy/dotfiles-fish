@@ -80,11 +80,18 @@ on performSmartRule(theRecords)
 					set eventDate to (get custom meta data for "EventDate" from theRecord) as text
 					if eventDate is "missing value" then set eventDate to ""
 				end try
+				set cDate to creation date of theRecord
+				set creationDay to (year of cDate as text) & "-" & (text -2 thru -1 of ("0" & ((month of cDate) as integer))) & "-" & (text -2 thru -1 of ("0" & (day of cDate)))
+				-- An EventDate may trail the creation date (a note filed after its
+				-- meeting) but never lead it: a future date is extraction noise (e.g.
+				-- UTC date stamps inside a document captured late evening local time)
+				-- and would pin a creation-timed bullet to a day that hasn't happened.
 				set hasValidEventDate to false
 				if eventDate is not "" ¬
 					and (count of eventDate) is 10 ¬
 					and character 5 of eventDate is "-" ¬
-					and character 8 of eventDate is "-" then
+					and character 8 of eventDate is "-" ¬
+					and eventDate ≤ creationDay then
 					set hasValidEventDate to true
 				end if
 
@@ -264,11 +271,7 @@ on performSmartRule(theRecords)
 							if hasValidEventDate then
 								set targetDate to eventDate
 							else
-								set cDate to creation date of theRecord
-								set cYear to year of cDate as text
-								set cMonth to text -2 thru -1 of ("0" & ((month of cDate) as integer))
-								set cDay to text -2 thru -1 of ("0" & (day of cDate))
-								set targetDate to cYear & "-" & cMonth & "-" & cDay
+								set targetDate to creationDay
 							end if
 
 							-- An EventDate pins the note to its day; without one the
@@ -612,7 +615,7 @@ end timeOfDay
 
 -- Returns the daily note for dateStr (YYYY-MM-DD), creating it in destGroup
 -- if it doesn't exist yet. The 5:00 AM launchd job (create-daily-note.sh)
--- normally seeds these, but an EventDate in the past or future, or a missed
+-- normally seeds these, but an EventDate in the past, or a missed
 -- run, can leave the target note absent; creating on demand keeps the
 -- wikilink from being dropped. Mirrors create-daily-note.sh's content and
 -- "Daily Note" tag so an on-demand note is indistinguishable from a seeded one.
