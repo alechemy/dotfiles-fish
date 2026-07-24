@@ -73,7 +73,10 @@ on performSmartRule(theRecords)
 				-- printf, not echo: `without altering line endings` also disables the
 				-- trailing-newline trim, and a newline inside docBaseName splits every
 				-- bullet it is spliced into across two physical lines.
-				set docBaseName to do shell script "printf '%s' " & quoted form of recName & " | sed 's/\\.[^.]*$//'" without altering line endings
+				-- Strip only a real trailing extension (alpha, 2–5 chars); a bare
+				-- `\.[^.]*$` eats a mid-title period like "at Dr. Smith" because
+				-- recName carries no extension of its own.
+				set docBaseName to do shell script "printf '%s' " & quoted form of recName & " | sed -E 's/\\.[A-Za-z]{2,5}$//'" without altering line endings
 
 				set eventDate to ""
 				try
@@ -399,7 +402,10 @@ on performSmartRule(theRecords)
 				try
 					set mdText to plain text of theRecord
 					if mdText is not "" then
-						set titleForH1 to do shell script "echo " & quoted form of recName & " | sed 's/\\.[^.]*$//'" without altering line endings
+						-- printf + guarded extension strip (see docBaseName above): echo would
+						-- append a newline that `without altering line endings` keeps, and a
+						-- bare `\.[^.]*$` would truncate a title at its first period.
+						set titleForH1 to do shell script "printf '%s' " & quoted form of recName & " | sed -E 's/\\.[A-Za-z]{2,5}$//'" without altering line endings
 						set tmpPath to do shell script "mktemp /tmp/dt-h1.XXXXXX"
 						set fileRef to open for access (POSIX file tmpPath) with write permission
 						write mdText to fileRef as «class utf8»
