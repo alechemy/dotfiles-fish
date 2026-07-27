@@ -8,13 +8,12 @@ still applies) and merges back only the removals that land on added lines. A lin
 whose exact trimmed text already appears in BASELINE is never touched, so a comment
 that merely moved or was reindented survives too.
 
-The merge leans on uncomment rewriting each line in place: a comment-only line is
-blanked rather than deleted, nothing is reordered, and no line is ever added. Only a
-multi-line block comment collapses, so equal line counts prove a strict 1:1 mapping
-and every line can be judged on its own index. When the counts differ, the collapse
-has to be located by diff, which blank lines make ambiguous — so those hunks are taken
-only when every line under them is agent-authored, and any merge that grows the file
-is discarded rather than trusted.
+uncomment deletes a comment-only line outright and rewrites inline-comment lines in
+place, never reordering or adding lines. When line counts happen to match, that is a
+strict 1:1 mapping and every line is judged on its own index. Otherwise the removals
+are located by diff, which blank lines make ambiguous — a deleted line is dropped only
+when agent-authored, an ambiguous hunk keeps the original text, and any merge that
+grows the file is discarded rather than trusted.
 
 Usage: uncomment-scoped BASELINE TARGET [uncomment args...]
 BASELINE may be /dev/null or an empty file, meaning the whole of TARGET is new.

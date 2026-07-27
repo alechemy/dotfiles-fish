@@ -11,7 +11,10 @@ java = "latest"
 # DT bookmark pipeline's readability extractor current.
 "npm:defuddle" = "latest"
 "npm:eas-cli" = "latest"
-# uncomment (goldziher/uncomment): AST/tree-sitter comment stripper, distributed
-# on npm as uncomment-cli. The deterministic half of the agent comment-noise
-# stack — invoked by the opt-in Stop/agentStop hooks and per-repo commit gates.
-"npm:uncomment-cli" = "3.0.3"
+# uncomment (goldziher/uncomment): AST/tree-sitter comment stripper. The
+# deterministic half of the agent comment-noise stack — invoked by the opt-in
+# Stop/agentStop hooks and per-repo commit gates. Installed from GitHub releases
+# because the npm package (uncomment-cli) ships a stale committed 2.0.0 binary
+# on every version — its publish workflow never builds, so an npm pin can't
+# deliver the pinned version's behavior.
+"github:Goldziher/uncomment" = "3.5.1"

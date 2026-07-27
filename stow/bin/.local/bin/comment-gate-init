@@ -26,10 +26,11 @@ else
 # the commit/CI gate has no such baseline and strips every staged file whole.
 #
 # uncomment preserves TODO, FIXME, docstrings, and lint pragmas by default; the hook
-# also keeps IMPORTANT / NOTE / WARNING / SAFETY / SECURITY / keep. Newer uncomment
-# CLIs read these keys natively; the hook honors remove_docs and its keep-set
-# regardless of CLI version. remove_docs is a no-op on uncomment 2.0.0, whose default
-# ignore set re-preserves doc comments unless --no-default-ignores is also passed.
+# also keeps IMPORTANT / NOTE / WARNING / SAFETY / SECURITY / keep. remove_docs = true
+# makes the hook pass --remove-doc, which strips docstrings for real — opt in only if
+# that is what you want. The CLI parses this file natively but reads its own settings
+# from a [global] table; these bare top-level keys are the hook's alone, so keep them
+# top-level.
 
 # remove_docs = false
 TOML
@@ -71,9 +72,10 @@ pre-commit:
 
 -- CI mirror (GitHub Actions) — the non-bypassable half ---------------
 # git commit --no-verify can skip the local hook but not CI.
+# GitHub release, not npm — the uncomment-cli npm package ships a stale 2.0.0 binary on every version.
 - run: |
-    npm i -g uncomment-cli
-    uncomment -i IMPORTANT -i NOTE -i WARNING -i SAFETY -i SECURITY -i keep .
+    curl -fsSL https://github.com/Goldziher/uncomment/releases/latest/download/uncomment-x86_64-unknown-linux-gnu.tar.gz | tar xz uncomment
+    ./uncomment -i IMPORTANT -i NOTE -i WARNING -i SAFETY -i SECURITY -i keep .
     git ls-files -mz | while IFS= read -r -d '' f; do case "$f" in *.md|*.markdown|*.mdx) ;; *) perl -e 'exit(-T $ARGV[0] ? 0 : 1)' "$f" 2>/dev/null && perl -i -pe 's/[ \t]+$//' "$f" ;; esac; done
     git diff --exit-code   # fails the build if comment noise reached the branch
 EOF
