@@ -358,9 +358,9 @@ function candidateActions(cv) {
     html += candBtn("into", cv, "track", "File into " + d.target.name,
       {target: d.target.uuid, msg: "Filed into " + d.target.name});
   } else if (d.kind === "new_ok") {
+    html += candBtn("create", cv, "track", "Add as new person", {msg: "Added"});
     html += '<button class="btn" data-act="picker" data-uuid="' + esc(cv.uuid) +
       '">Existing person…</button>';
-    html += candBtn("create", cv, "track", "Add as new person", {msg: "Added"});
   } else if (d.kind === "needs_choice") {
     let nearShown = 0;
     for (const n of (d.near || []).slice(0, 2)) {
@@ -369,10 +369,10 @@ function candidateActions(cv) {
       html += candBtn("into", cv, "track", "This is " + n.name,
         {target: n.uuid, msg: "Filed into " + n.name});
     }
-    html += '<button class="btn" data-act="picker" data-uuid="' + esc(cv.uuid) +
-      '">' + (nearShown ? "Someone else…" : "Existing person…") + "</button>";
     html += candBtn("create", cv, "track", "Add as new person",
       {distinct: true, msg: "Added"});
+    html += '<button class="btn" data-act="picker" data-uuid="' + esc(cv.uuid) +
+      '">' + (nearShown ? "Someone else…" : "Existing person…") + "</button>";
   } else if (d.kind === "ambiguous") {
     if ((d.choices || []).length) {
       for (const c of d.choices) {
