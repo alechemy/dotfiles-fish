@@ -45,5 +45,5 @@ genres_allow = [
   "Rock",
   "Soundtrack",
 ]
-duration_min = 120
+duration_min = 90
 duration_max = 600
