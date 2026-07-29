@@ -343,6 +343,7 @@ function candBtn(cls, cv, action, label, opts) {
     (opts.target ? ' data-target="' + esc(opts.target) + '"' : "") +
     (opts.distinct ? ' data-distinct="1"' : "") +
     (opts.noundo ? ' data-noundo="1"' : "") +
+    (opts.tip ? ' title="' + esc(opts.tip) + '"' : "") +
     ' data-msg="' + esc(opts.msg || label) + '">' + esc(label) + "</button>";
 }
 
@@ -353,9 +354,9 @@ function candidateActions(cv) {
     html += candBtn("primary", cv, "track", "File into " + d.target.name,
       {target: d.target.uuid, msg: "Filed into " + d.target.name});
   } else if (d.kind === "new_ok") {
-    html += candBtn("primary", cv, "track", "Add as new person", {msg: "Added"});
     html += '<button class="btn" data-act="picker" data-uuid="' + esc(cv.uuid) +
       '">Existing person…</button>';
+    html += candBtn("primary", cv, "track", "Add as new person", {msg: "Added"});
   } else if (d.kind === "needs_choice") {
     let nearShown = 0;
     for (const n of (d.near || []).slice(0, 2)) {
@@ -381,9 +382,12 @@ function candidateActions(cv) {
         '<div class="chips">' + dtLink(cv.uuid, "Open in DEVONthink") + "</div>";
     }
   }
-  html += candBtn("quiet", cv, "ignore", "Ignore", {msg: "Won’t be suggested again"});
+  html += candBtn("quiet", cv, "ignore", "Ignore",
+    {msg: "Won’t be suggested again",
+     tip: "Never suggest this person again"});
   html += candBtn("danger", cv, "forget", "Dismiss",
-    {msg: "Dismissed — may come back later", noundo: true});
+    {msg: "Dismissed — may come back later", noundo: true,
+     tip: "Forget for now — they come back if they’re seen again"});
   return html + "</div>";
 }
 
