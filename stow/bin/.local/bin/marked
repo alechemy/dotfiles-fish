@@ -1,12 +1,28 @@
 #!/bin/sh
-# Open files in Marked 2
+# Open files in Marked 2. With no file args and piped stdin, or a "-" arg,
+# preview the stdin text instead.
+
+open_stdin() {
+    td=$(mktemp -d)
+    tf="$td/pasted.md"
+    cat > "$tf"
+    open -a "Marked 2" "$tf"
+}
 
 if [ $# -eq 0 ]; then
-    open -a "Marked 2"
+    if [ -t 0 ]; then
+        open -a "Marked 2"
+    else
+        open_stdin
+    fi
     exit
 fi
 
 for file in "$@"; do
+    if [ "$file" = "-" ]; then
+        open_stdin
+        continue
+    fi
     path=$(cd "$(dirname "$file")" 2>/dev/null && printf '%s/%s' "$(pwd)" "$(basename "$file")") || {
         echo "marked: $file: No such file" >&2
         continue
