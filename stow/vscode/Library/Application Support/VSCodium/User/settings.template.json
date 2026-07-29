@@ -19,8 +19,6 @@
   "editor.fontSize": 14,
   "editor.formatOnSave": true,
   "editor.codeActionsOnSave": {
-    "source.addMissingImports": "explicit",
-    "source.removeUnusedImports": "explicit",
     "source.fixAll.eslint": "explicit"
   },
   "editor.guides.bracketPairs": "active",
@@ -277,7 +275,7 @@
 
   // JAVASCRIPT / TYPESCRIPT
   // ----------------------------------------
-  "js/ts.preferences.importModuleSpecifier": "relative",
+  "js/ts.preferences.importModuleSpecifier": "shortest",
   "js/ts.updateImportsOnFileMove.enabled": "never",
 
   // XML
