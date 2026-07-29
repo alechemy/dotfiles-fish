@@ -130,6 +130,53 @@ def read_tags(path):
     return t
 
 
+# ----------------------------------------------------------------- tag writing
+def write_artist_case(path, canonical):
+    """Recase artist/albumartist fields that differ from `canonical` by case alone.
+
+    Returns the list of field names rewritten. A field is only touched when it
+    casefolds equal to `canonical`, so a name that sanitize() altered on its way
+    to a folder ("AC/DC" -> "AC_DC") never has the illegal character written back
+    into its tag.
+    """
+    ext = os.path.splitext(path)[1].lower()
+    target = canonical.casefold()
+    written = []
+
+    if ext == ".m4a":
+        a = MP4(path)
+        for key, label in (("aART", "albumartist"), ("\xa9ART", "artist")):
+            cur = _first(a.get(key))
+            if cur and str(cur) != canonical and str(cur).casefold() == target:
+                a[key] = canonical
+                written.append(label)
+        if written:
+            a.save()
+
+    elif ext == ".flac":
+        a = FLAC(path)
+        for key in ("albumartist", "artist"):
+            cur = _first(a.get(key))
+            if cur and str(cur) != canonical and str(cur).casefold() == target:
+                a[key] = canonical
+                written.append(key)
+        if written:
+            a.save()
+
+    elif ext == ".mp3":
+        a = MP3(path)
+        for key, label in (("TPE2", "albumartist"), ("TPE1", "artist")):
+            fr = a.tags.get(key) if a.tags else None
+            cur = str(fr.text[0]) if fr and getattr(fr, "text", None) else None
+            if cur and cur != canonical and cur.casefold() == target:
+                fr.text[0] = canonical
+                written.append(label)
+        if written:
+            a.save()
+
+    return written
+
+
 # ----------------------------------------------------------------- path building
 def sanitize(component, fallback):
     """Make a tag value safe for one path component (Music.app-compatible)."""
@@ -147,6 +194,51 @@ def artist_folder(tags):
 
 def album_folder(tags):
     return sanitize(tags["album"], "Unknown Album")
+
+
+def album_subfolder_count(path):
+    try:
+        return sum(1 for e in os.listdir(path)
+                   if not e.startswith(".") and os.path.isdir(os.path.join(path, e)))
+    except OSError:
+        return 0
+
+
+def artist_case_index(library_root):
+    """{casefolded artist folder: canonical spelling} over the library's artists.
+
+    Source metadata is inconsistent about case ("Charli xcx" vs "Charli XCX"), and
+    a verbatim folder name forks the artist in two on disk and in any tag-driven
+    consumer. Filing resolves through this index so the library's existing
+    spelling wins. Where the library already holds several spellings, the one
+    carrying the most albums wins so repeated imports converge rather than
+    alternate.
+    """
+    variants = {}
+    try:
+        entries = os.listdir(library_root)
+    except OSError:
+        return {}
+    for e in entries:
+        if e.startswith(".") or not os.path.isdir(os.path.join(library_root, e)):
+            continue
+        variants.setdefault(e.casefold(), []).append(e)
+
+    index = {}
+    for key, names in variants.items():
+        if len(names) > 1:
+            names.sort(key=lambda n: (-album_subfolder_count(os.path.join(library_root, n)), n))
+            print(f"  -> WARNING: artist folders differing only by case: "
+                  f"{', '.join(sorted(names))} — filing under {names[0]!r}",
+                  file=sys.stderr)
+        else:
+            names.sort()
+        index[key] = names[0]
+    return index
+
+
+def canonical_artist(name, case_index):
+    return case_index.get(name.casefold(), name)
 
 
 def dest_filename(tags, ext):
@@ -312,7 +404,10 @@ def organize_source(source, library_root, policy, dry_run, manifest, stats,
         stats["failed"].append(source)
         return
 
+    case_index = artist_case_index(library_root)
+
     plan, failures = [], []  # plan: (src, album_dir, filename)
+    recase = {}  # src -> canonical artist spelling
     for f in audio:
         try:
             tags = read_tags(f)
@@ -320,12 +415,32 @@ def organize_source(source, library_root, policy, dry_run, manifest, stats,
             print(f"  -> ERROR reading tags from {f}: {e}", file=sys.stderr)
             failures.append(f)
             continue
-        album_dir = os.path.join(library_root, artist_folder(tags), album_folder(tags))
+        incoming = artist_folder(tags)
+        artist = canonical_artist(incoming, case_index)
+        if artist != incoming:
+            recase[f] = artist
+        album_dir = os.path.join(library_root, artist, album_folder(tags))
         plan.append((f, album_dir, dest_filename(tags, os.path.splitext(f)[1].lower())))
 
     if not plan:
         stats["failed"].append(source)
         return
+
+    if recase:
+        spellings = sorted(set(recase.values()))
+        print(f"  -> artist case aligned with the library: {', '.join(repr(s) for s in spellings)}")
+        for f, artist in sorted(recase.items()):
+            if dry_run:
+                print(f"  -> [dry-run] recase artist tags in {os.path.basename(f)} -> {artist!r}")
+                continue
+            try:
+                fields = write_artist_case(f, artist)
+            except Exception as e:
+                print(f"  -> WARNING: could not recase artist tags in {f}: {e}",
+                      file=sys.stderr)
+                continue
+            if fields:
+                print(f"     {os.path.basename(f)}: {', '.join(fields)} -> {artist!r}")
 
     album_dirs = sorted({d for _, d, _ in plan})
 

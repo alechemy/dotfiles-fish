@@ -282,6 +282,19 @@ Never run `tmux kill-server` (or `kill-session`) on the default socket for verif
 
 When writing MP4/m4a boolean atoms (`cpil`, `pgap`) with mutagen, assign a **bare bool** — `audio["cpil"] = True` — never a list. mutagen renders a list by truthiness, so `audio["cpil"] = [False]` silently writes `True`. `tagger.py` sets the compilation flag this way.
 
+### Music library: artist identity comes from tags, not folders
+
+Navidrome (and Music.app) build the artist and album from **tag values**; the folder tree is only where the bytes live. A library path is therefore never evidence of what a client displays — `Breakfast_ Unscrambled` on disk renders as `Breakfast: Unscrambled` because `sanitize()` mapped the `:` on the way out. When diagnosing a wrong artist or album name, read the tag.
+
+Source metadata is inconsistent about artist case (Qobuz has shipped both `Charli xcx` and `Charli XCX`), and case is the one difference that forks an artist without looking like a change: on the NAS's case-sensitive ext4 a verbatim folder name creates a *second* artist folder, while Navidrome merges the two case-insensitively and then displays whichever spelling it scanned last — so the whole back catalog silently adopts a new import's casing. `music-organize.py` closes this at the single chokepoint every entry path shares (`riptag` in both modes and `import-album.py` all delegate filing to it): `artist_case_index()` resolves the incoming artist against existing artist folders case-insensitively, and `write_artist_case()` writes the library's spelling back into the `albumartist`/`artist` tags.
+
+Two invariants there:
+
+- **Recase only, never rename.** A field is rewritten only when it casefolds equal to the canonical spelling. That is what keeps `sanitize()`'s lossy path mapping out of the tags — `AC/DC` files into the existing `AC_DC` folder, but `"ac/dc" != "ac_dc"` so the tag keeps its slash. Any change that widens this comparison (normalizing punctuation, diacritics, `feat.` suffixes) starts writing folder names into tags.
+- **The organizer files, it does not migrate.** When the library already holds several spellings it warns, picks the one with the most albums so repeated imports converge instead of alternating, and leaves the other folders alone. Consolidating pre-existing drift is `music-doctor`'s `artist_name_variant` finding, not a side effect of an import.
+
+That `artist_name_variant` check groups artist *folders*, so it cannot see drift that exists only in tags. Nothing in the pipeline produces that state, but `tagger.py --album-artist` run by hand can.
+
 ### AeroSpace scripting: identify apps by PID, not name
 
 When a script bridges AeroSpace and System Events (e.g. to hide or focus a specific app), key off the **PID**, not the app name. AeroSpace's `%{app-name}` and the System Events process name disagree for some apps — notably case (`Ghostty` vs `ghostty`) — so a name comparison silently mismatches: it fails to exclude the target when picking a sibling, and `set visible of (process whose name is …)` can no-op against the wrong identity. Use AeroSpace's `%{app-pid}` and hide/match via System Events `unix id` (`first application process whose unix id is <pid>`), which is namespace-safe. Reference: `scripts/aerospace-hide.sh`.
