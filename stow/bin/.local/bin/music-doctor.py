@@ -81,6 +81,11 @@ ALLOWED_GENRES = (
 QUALITY_LOW_KBPS = 320
 QUALITY_UPGRADE_KBPS = 320
 
+# Track-gap severity. Owning most of an album but missing a few tracks reads as
+# a failed rip; owning a few tracks out of many is a deliberate partial collection.
+GAP_CONCERN_MAX = 3
+GAP_CONCERN_COVERAGE = 0.8
+
 # Filenames produced by music-organize.py: `NN Title.ext` or `D-NN Title.ext`.
 # Track number is zero-padded to 2 digits but not truncated, so 100-track
 # playlists like Disney100 naturally produce 3-digit prefixes; allow ≥2 digits.
@@ -686,10 +691,20 @@ def check_files(albums: list[AlbumInfo], files: dict[str, FileInfo],
             missing = [n for n in expected if n not in nums]
             duplicates = [n for n in nums if nums.count(n) > 1]
             if missing:
-                add(findings, kind="track_gap", severity=WARNING, target_kind="album",
+                # A few holes in an otherwise-complete album is a failed rip; a
+                # handful of tracks out of many is deliberate curation, so the
+                # severity keys off completeness rather than the gap's size.
+                coverage = len(set(nums)) / len(expected)
+                pocked = (len(missing) <= GAP_CONCERN_MAX
+                          or coverage >= GAP_CONCERN_COVERAGE)
+                add(findings, kind="track_gap",
+                    severity=WARNING if pocked else INFO, target_kind="album",
                     targets=[alb.path],
-                    message=f"disc {disc_num}: track numbers missing {missing}",
-                    details={"salient": f"disc{disc_num}_missing_{missing}"})
+                    message=f"disc {disc_num}: track numbers missing {missing} "
+                            f"({len(set(nums))}/{len(expected)} present)",
+                    details={"salient": f"disc{disc_num}_missing_{missing}",
+                             "missing_count": len(missing),
+                             "coverage": round(coverage, 2)})
             if duplicates:
                 # Set up: list contains a duplicated value; we want it once.
                 dupe_unique = sorted(set(duplicates))
@@ -697,6 +712,33 @@ def check_files(albums: list[AlbumInfo], files: dict[str, FileInfo],
                     target_kind="album", targets=[alb.path],
                     message=f"disc {disc_num}: duplicate track numbers {dupe_unique}",
                     details={"salient": f"disc{disc_num}_dup_{dupe_unique}"})
+
+        # Track numbers running continuously across discs instead of restarting
+        # per disc. Every disc after the first then reads as missing 1..N, and
+        # dest_filename() drops the disc prefix, so it is a distinct defect from
+        # a gap even though it presents as one.
+        disc_spans = {}
+        for disc_num, group in per_disc.items():
+            nums = [fi.tags.get("track") or 0 for fi in group]
+            if nums and 0 not in nums:
+                disc_spans[disc_num] = (min(nums), max(nums))
+        if len(disc_spans) > 1:
+            prev_max = 0
+            continuous = True
+            for disc_num in sorted(disc_spans):
+                lo, hi = disc_spans[disc_num]
+                if lo != prev_max + 1:
+                    continuous = False
+                    break
+                prev_max = hi
+            if continuous:
+                spans = ", ".join(f"d{d}:{lo}-{hi}"
+                                  for d, (lo, hi) in sorted(disc_spans.items()))
+                add(findings, kind="global_track_numbering", severity=WARNING,
+                    target_kind="album", targets=[alb.path],
+                    message=f"track numbers run continuously across discs ({spans}); "
+                            f"expected each disc to restart at 1",
+                    details={"salient": "global_numbering", "spans": spans})
 
         # Duplicate track titles within the same album.
         title_to_paths = defaultdict(list)
