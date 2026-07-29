@@ -1,6 +1,7 @@
 function riptag -d "download, tag, and organize an album into the music library"
     # --- Configuration ---
     set -l NAS admin@192.168.50.54
+    set -l NAS_TS admin@100.89.43.9
     set -l NAS_RIP /share/CACHEDEV1_DATA/python-apps/streamrip_env/bin/rip
     set -l NAS_RIP_CONFIG /share/CACHEDEV1_DATA/streamrip/config.toml
     set -l LOCAL_PYTHON $HOME/Developer/streamrip/.venv/bin/python3
@@ -101,6 +102,19 @@ function riptag -d "download, tag, and organize an album into the music library"
         return 1
     end
 
+    # --- NAS mode: prefer the LAN address, fall back to Tailscale ---
+    if test $local_mode -eq 0
+        if not ssh -n -o ConnectTimeout=3 -o BatchMode=yes "$NAS" true 2>/dev/null
+            if ssh -n -o ConnectTimeout=5 -o BatchMode=yes "$NAS_TS" true 2>/dev/null
+                echo "ℹ️  NAS not reachable on LAN — using Tailscale ($NAS_TS)"
+                set NAS $NAS_TS
+            else
+                echo "ERROR: NAS unreachable on both LAN ($NAS) and Tailscale ($NAS_TS)."
+                return 1
+            end
+        end
+    end
+
     # --- Genre prompt (if omitted) ---
     if test -z "$genre"
         echo ""
@@ -112,6 +126,10 @@ function riptag -d "download, tag, and organize an album into the music library"
         while true
             echo ""
             read -P "Enter selection (1-"(count $ALLOWED_GENRES)") or 0 to cancel: " choice
+            or begin
+                echo "Cancelled."
+                return 1
+            end
             if test "$choice" = 0
                 echo "Cancelled."
                 return 1
@@ -252,7 +270,7 @@ with open(sys.argv[1]) as f:
             rm -f "$tmpfile"
         else
             set -l escaped_query (string replace -a "'" "'\\''" "$url_or_query")
-            set results (ssh "$NAS" "$NAS_RIP --config-path $NAS_RIP_CONFIG search -o /tmp/rip-search.json -n 5 qobuz album '$escaped_query' >/dev/null 2>&1 && cat /tmp/rip-search.json && rm -f /tmp/rip-search.json" | python3 -c '
+            set results (ssh -n "$NAS" "$NAS_RIP --config-path $NAS_RIP_CONFIG search -o /tmp/rip-search.json -n 5 qobuz album '$escaped_query' >/dev/null 2>&1 && cat /tmp/rip-search.json && rm -f /tmp/rip-search.json" | python3 -c '
 import json, sys
 for r in json.load(sys.stdin):
     print(str(r.get("id", "")) + "\t" + r.get("desc", "Unknown"))
@@ -280,6 +298,10 @@ for r in json.load(sys.stdin):
         while true
             echo ""
             read -P "Enter selection (1-"(count $results)") or 0 to cancel: " choice
+            or begin
+                echo "Cancelled."
+                return 1
+            end
             if test "$choice" = 0
                 echo "Cancelled."
                 return 1

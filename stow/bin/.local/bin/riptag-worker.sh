@@ -47,6 +47,7 @@ RIP_LOG_FILE="/tmp/rip-download.log"
 RIP_EXIT_FILE="/tmp/rip-exit-status.txt"
 RESUME_FILE="/tmp/riptag-resume-id"
 NAS_HOST="admin@192.168.50.54"
+NAS_TS_HOST="admin@100.89.43.9"
 
 PYTHON_CMD="/share/CACHEDEV1_DATA/python-apps/streamrip_env/bin/python"
 RIP_CMD="/share/CACHEDEV1_DATA/python-apps/streamrip_env/bin/rip"
@@ -260,6 +261,11 @@ PERM_FAILED=0
 FAILED_CMDS=""
 if [ $LOCAL_MODE -eq 1 ] && [ -f "$MANIFEST_FILE" ]; then
   printf "%s\n" "--> Step 5: Setting permissions on the NAS..."
+  if ! ssh -o ConnectTimeout=5 -o BatchMode=yes "$NAS_HOST" true 2>/dev/null \
+      && ssh -o ConnectTimeout=5 -o BatchMode=yes "$NAS_TS_HOST" true 2>/dev/null; then
+    printf "%s\n" "    LAN unreachable — using Tailscale ($NAS_TS_HOST)."
+    NAS_HOST="$NAS_TS_HOST"
+  fi
   while IFS= read -r album_dir; do
     [ -z "$album_dir" ] && continue
     nas_dir=$(printf "%s" "$album_dir" | sed 's#^/Volumes/Media#/share/Media#')
