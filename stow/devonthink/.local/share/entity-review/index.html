@@ -357,14 +357,17 @@ function candidateActions(cv) {
     html += '<button class="btn" data-act="picker" data-uuid="' + esc(cv.uuid) +
       '">Existing person…</button>';
   } else if (d.kind === "needs_choice") {
+    let nearShown = 0;
     for (const n of (d.near || []).slice(0, 2)) {
       if (!n.uuid) continue;
+      nearShown++;
       html += candBtn("primary", cv, "track", "This is " + n.name,
         {target: n.uuid, msg: "Filed into " + n.name});
     }
     html += '<button class="btn" data-act="picker" data-uuid="' + esc(cv.uuid) +
-      '">Someone else…</button>';
-    html += candBtn("", cv, "track", "New person", {distinct: true, msg: "Added"});
+      '">' + (nearShown ? "Someone else…" : "Existing person…") + "</button>";
+    html += candBtn("", cv, "track", "Add as new person",
+      {distinct: true, msg: "Added"});
   } else if (d.kind === "ambiguous") {
     if ((d.choices || []).length) {
       for (const c of d.choices) {
