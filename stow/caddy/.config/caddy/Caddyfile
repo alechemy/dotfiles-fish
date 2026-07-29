@@ -7,6 +7,16 @@
 # bind keeps the listener itself loopback-only. Phone: tailscale serve --bg 8080.
 http://:8080 {
 	bind 127.0.0.1
-	reverse_proxy 127.0.0.1:8000
-	header Content-Security-Policy "default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob:; connect-src 'self'; form-action 'self'; base-uri 'self'"
+	redir /entities /entities/ 308
+	handle_path /entities/* {
+		reverse_proxy 127.0.0.1:7819 {
+			# The review server admits non-loopback Host values only when
+			# this marker vouches the request came through the proxy.
+			header_up X-Entity-Review 1
+		}
+	}
+	handle {
+		reverse_proxy 127.0.0.1:8000
+		header Content-Security-Policy "default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob:; connect-src 'self'; form-action 'self'; base-uri 'self'"
+	}
 }

@@ -59,6 +59,8 @@
 //   add_aliases        {uuid,aliases}                   -> {uuid,aliases}
 //   list_candidates    {}                               -> {pending:[{uuid,name,md,text}],
 //                                                           approved:[...],ignored:[...]}
+//   list_review        {}                               -> {pending:[{uuid,name,md,text}],
+//                                                           approved:[...]}
 
 ObjC.import('Foundation')
 
@@ -73,6 +75,8 @@ const FACTS_PATH = ENTITIES_PATH + '/_Facts'
 const CANDIDATES_PATH = ENTITIES_PATH + '/_Candidates'
 const CANDIDATES_APPROVED_PATH = CANDIDATES_PATH + '/Approved'
 const CANDIDATES_IGNORED_PATH = CANDIDATES_PATH + '/Ignored'
+const REVIEW_PATH = ENTITIES_PATH + '/_Review'
+const REVIEW_APPROVED_PATH = REVIEW_PATH + '/Approved'
 const NOTES_SECTION = "## Today's Notes"
 const LOG_SECTION = '## Biographical Log'
 const EVENT_LOG_SECTION = '## Log'
@@ -790,6 +794,26 @@ function run(argv) {
     return lines.join('\n')
   }
 
+  // Missing groups (bootstrap not yet run) read as empty, not an error,
+  // so filing degrades to today's behavior instead of failing the batch.
+  function listMarkdownAt(path) {
+    const g = dt.getRecordAt(path, { in: db })
+    if (!g) return []
+    const c = g.children
+    const types = c.recordType()
+    const uuids = c.uuid()
+    const names = c.name()
+    const mds = c.customMetaData()
+    const bodies = c.plainText()
+    const out = []
+    for (let i = 0; i < uuids.length; i++) {
+      if (types[i] !== 'markdown') continue
+      out.push({ uuid: uuids[i], name: names[i],
+                 md: mds[i] || {}, text: String(bodies[i] || '') })
+    }
+    return out
+  }
+
   const handlers = {
     dump_people(op) {
       const includeBodies = op.include_bodies !== false
@@ -945,29 +969,17 @@ function run(argv) {
     },
 
     list_candidates() {
-      // Missing groups (bootstrap not yet run) read as empty, not an error,
-      // so filing degrades to today's behavior instead of failing the batch.
-      const listOne = (path) => {
-        const g = dt.getRecordAt(path, { in: db })
-        if (!g) return []
-        const c = g.children
-        const types = c.recordType()
-        const uuids = c.uuid()
-        const names = c.name()
-        const mds = c.customMetaData()
-        const bodies = c.plainText()
-        const out = []
-        for (let i = 0; i < uuids.length; i++) {
-          if (types[i] !== 'markdown') continue
-          out.push({ uuid: uuids[i], name: names[i],
-                     md: mds[i] || {}, text: String(bodies[i] || '') })
-        }
-        return out
-      }
       return {
-        pending: listOne(CANDIDATES_PATH),
-        approved: listOne(CANDIDATES_APPROVED_PATH),
-        ignored: listOne(CANDIDATES_IGNORED_PATH),
+        pending: listMarkdownAt(CANDIDATES_PATH),
+        approved: listMarkdownAt(CANDIDATES_APPROVED_PATH),
+        ignored: listMarkdownAt(CANDIDATES_IGNORED_PATH),
+      }
+    },
+
+    list_review() {
+      return {
+        pending: listMarkdownAt(REVIEW_PATH),
+        approved: listMarkdownAt(REVIEW_APPROVED_PATH),
       }
     },
 

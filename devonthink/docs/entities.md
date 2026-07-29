@@ -119,6 +119,7 @@ stay stdlib-only (tier-1 `/usr/bin/python3`, stable TCC identity):
 | `contacts-json.js` | Dumps macOS Contacts (Contacts framework via osascript, same TCC pattern — one interactive run): name, nickname, emails, phones, birthday. Identifiers only, never facts |
 | `dt-morning-brief.py` | Daily ~05:15 — retried 05:45/06:30/08:00 for standby-missed triggers, idempotent (`com.user.dt-morning-brief`): calendar + Person records → timed `📅` event bullets merged into today's daily-note timeline; Reconnect, birthdays, review backlog, journal status, On This Day → the TRMNL snapshot only; LastContact bumps from yesterday's calendar and from Messages |
 | `entity-filing.py` | Every 30 min (`com.user.entity-filing`): applies approved proposals, then extracts facts from unprocessed sources and files them (suggest mode by default) |
+| `entity-review-server.py` | Always-on loopback HTTP server (`com.user.entity-review`, port 7819): the review web UI over the candidate + proposal backlog. See "Review web UI" below |
 
 ### Morning brief (resurfacing + contact tracking)
 
@@ -888,6 +889,45 @@ Mechanics worth knowing (mostly in `things_bridge.py`):
 and facts, and they sync through Things Cloud. The entity layer is otherwise
 deliberately local-only; `THINGS_SYNC=on` is an explicit, documented
 exception scoped to proposal content (never the roster, never source bodies).
+
+### Review web UI
+
+`entity-review-server.py` (`com.user.entity-review`, KeepAlive, driver-only)
+serves the whole backlog — pending candidates *and* pending proposals — as a
+single-page app with plain-language actions, so working the queue never
+requires remembering group paths or metadata field names. It is a pure
+frontend to the primitives above: every decision it records is exactly the
+gesture the tick already consumes (candidates: `set_fields` of
+TrackTarget/CreateDistinct + a group move, held under the candidates lock;
+proposals: `move_to Approved`, `trash`, or — for structured edits — the same
+`build_person_plans`/`ops_for_plan`/`stale_person_ops` regeneration path the
+Things note-edit flow uses, minus the text grammar). Each candidate card runs
+`promotion_target()` as a read-only preflight and renders the one primary
+action promotion would actually take ("File into X", "Add as new person", or
+a pick-person/new-person choice when bare approval would bounce); a
+multi-hit candidate gets no pick button at all, since `promotion_target`
+refuses a TrackTarget while other identifiers still resolve elsewhere.
+After a decision the server debounces a `--apply-only` run (~20 s,
+`PIPELINE_MANUAL=1`, retreating to the 30-minute tick if the run lock stays
+busy), so the queue clears in seconds. The Things mirror needs no new
+convergence logic: DT decided first, so the next tick closes the mirrored
+to-do to match.
+
+Reachability and trust: the server binds 127.0.0.1:7819 only. On the Mac it
+is reached through Caddy at `http://localhost:8080/entities/`; from the
+phone through the existing `tailscale serve` → Caddy chain at the same
+`/entities/` path (tailnet-only, WireGuard-authenticated devices). Caddy
+stamps proxied requests with `X-Entity-Review`; the server refuses
+non-loopback `Host` values without that marker (DNS rebinding) and refuses
+POSTs bearing a foreign or `null` `Origin` (CSRF from a browser tab). One
+osascript batch (`list_candidates` + `list_review` + `dump_people`) loads
+the whole queue; the server holds no timers while idle. Records whose body
+fails to parse render as "needs a look in DEVONthink" cards — never
+mutated, matching the quarantine rule. Optional deep links: set
+`REVIEW_URL` in `~/.config/dt-pipeline/entities.conf` (machine-local — the
+tailnet hostname stays out of the repo) and mirrored Things to-dos gain a
+`Review: <url>#<record-uuid>` line above the spec sentinel that opens the
+web queue scrolled to that card.
 
 ### Transports and privacy
 

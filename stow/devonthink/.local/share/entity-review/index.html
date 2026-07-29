@@ -1,0 +1,719 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="color-scheme" content="light dark">
+<title>Entities</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🗂️</text></svg>">
+<style>
+:root {
+  --bg: #f4f4f6; --card: #ffffff; --ink: #1c1c1f; --muted: #6e6e76;
+  --line: #e3e3e8; --accent: #2f6fed; --accent-ink: #ffffff;
+  --warn: #b45309; --warn-bg: #fef3e2;
+  --danger: #b3372f; --chip: #f0f0f3; --shadow: 0 1px 3px rgba(0,0,0,.07);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #101014; --card: #1b1b21; --ink: #ececf1; --muted: #9a9aa5;
+    --line: #2c2c34; --accent: #5b8ff5; --accent-ink: #0e1420;
+    --warn: #e8a24c; --warn-bg: #33270f;
+    --danger: #e07a70; --chip: #26262e; --shadow: none;
+  }
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0; background: var(--bg); color: var(--ink);
+  font: 16px/1.45 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+main { max-width: 640px; margin: 0 auto; padding: 0 14px 96px; }
+header.app {
+  position: sticky; top: 0; z-index: 5; background: var(--bg);
+  padding: 14px 2px 10px; display: flex; align-items: baseline; gap: 10px;
+}
+header.app h1 { font-size: 22px; margin: 0; letter-spacing: -.02em; }
+header.app .sub { color: var(--muted); font-size: 14px; flex: 1; }
+button { font: inherit; border: 0; cursor: pointer; -webkit-tap-highlight-color: transparent; background: none; color: inherit; padding: 0; }
+.iconbtn { color: var(--muted); font-size: 14px; padding: 6px 8px; border-radius: 8px; }
+.iconbtn:active { background: var(--chip); }
+h2.sec { font-size: 13px; text-transform: uppercase; letter-spacing: .06em;
+  color: var(--muted); margin: 22px 4px 8px; font-weight: 600; }
+.card {
+  background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+  padding: 14px 14px 12px; margin-bottom: 12px; box-shadow: var(--shadow);
+}
+.card.flash { animation: flash 1.6s ease-out; }
+@keyframes flash { 0% { outline: 2px solid var(--accent); outline-offset: 2px; }
+  100% { outline: 2px solid transparent; outline-offset: 2px; } }
+.card.leaving { opacity: 0; transform: translateX(24px); transition: all .18s ease-in; }
+.cardtop { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.cardtop .who { font-size: 18px; font-weight: 650; letter-spacing: -.01em; }
+.cardtop .meta { color: var(--muted); font-size: 13px; }
+.badge {
+  font-size: 11px; font-weight: 600; padding: 2px 7px; border-radius: 99px;
+  background: var(--warn-bg); color: var(--warn); white-space: nowrap;
+}
+.notice {
+  margin: 8px 0 2px; padding: 8px 10px; border-radius: 9px;
+  background: var(--warn-bg); color: var(--warn); font-size: 13.5px;
+}
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.chip {
+  font-size: 12.5px; background: var(--chip); color: var(--muted);
+  padding: 3px 9px; border-radius: 99px; text-decoration: none; border: 0;
+}
+a.chip:active, button.chip:active { opacity: .7; }
+.evidence { margin: 10px 0 4px; padding: 0; list-style: none; }
+.evidence li { padding: 5px 0; border-top: 1px solid var(--line); font-size: 14.5px; }
+.evidence li:first-child { border-top: 0; }
+.evidence .d { color: var(--muted); font-size: 12.5px; margin-right: 7px; font-variant-numeric: tabular-nums; }
+.evidence .src { color: var(--muted); font-size: 12.5px; }
+.evidence .src a { color: inherit; }
+.evidence .fact { display: block; margin-top: 1px; }
+.evidence .upd { display: block; color: var(--muted); font-size: 13.5px; }
+.actions { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; align-items: center; }
+.btn {
+  border-radius: 10px; padding: 10px 14px; font-size: 15px; font-weight: 600;
+  background: var(--chip); color: var(--ink); flex: none;
+}
+.btn.primary { background: var(--accent); color: var(--accent-ink); }
+.btn.quiet { background: none; color: var(--muted); font-weight: 500; }
+.btn.danger { background: none; color: var(--danger); font-weight: 500; }
+.btn:active { filter: brightness(.92); }
+.btn:disabled { opacity: .5; }
+.plan { margin-top: 8px; }
+.planhead { font-weight: 650; font-size: 15.5px; display: flex; align-items: center; gap: 8px; }
+.plan .rows { margin: 2px 0 0 0; padding: 0; list-style: none; }
+.plan .rows li { display: flex; gap: 8px; align-items: flex-start; padding: 4px 0; font-size: 14.5px; }
+.plan input[type=checkbox] {
+  width: 18px; height: 18px; margin: 2px 0 0; accent-color: var(--accent); flex: none;
+}
+.plan .rows .rowtext { flex: 1; }
+.plan .rows input[type=text] {
+  width: 100%; font: inherit; color: inherit; background: var(--chip);
+  border: 1px solid var(--line); border-radius: 7px; padding: 5px 8px;
+}
+li.off .rowtext { opacity: .4; text-decoration: line-through; }
+.fieldkey { color: var(--muted); }
+.captured { background: var(--chip); border-radius: 9px; padding: 10px 12px;
+  font-size: 14px; white-space: pre-wrap; margin-top: 8px; max-height: 180px; overflow-y: auto; }
+.state { text-align: center; color: var(--muted); padding: 48px 20px; }
+.state .big { font-size: 40px; margin-bottom: 10px; }
+.state .btn { margin-top: 14px; }
+#toast {
+  position: fixed; left: 50%; transform: translateX(-50%);
+  bottom: calc(20px + env(safe-area-inset-bottom)); z-index: 20;
+  background: var(--ink); color: var(--bg); border-radius: 12px;
+  padding: 11px 16px; font-size: 14.5px; display: flex; gap: 14px; align-items: center;
+  box-shadow: 0 4px 16px rgba(0,0,0,.25); max-width: min(92vw, 480px);
+}
+#toast button { color: var(--accent); font-weight: 700; font-size: 14.5px; }
+#toast.hidden, .hidden { display: none !important; }
+#banner {
+  position: sticky; top: 52px; z-index: 4; margin: 0 0 10px;
+  background: var(--warn-bg); color: var(--warn); border-radius: 10px;
+  padding: 9px 12px; font-size: 14px;
+}
+#picker {
+  position: fixed; inset: 0; z-index: 30; background: rgba(0,0,0,.4);
+  display: flex; align-items: flex-end; justify-content: center;
+}
+@media (min-width: 600px) { #picker { align-items: center; } }
+#picker .sheet {
+  background: var(--card); width: 100%; max-width: 480px;
+  border-radius: 16px 16px 0 0; max-height: 78vh; display: flex; flex-direction: column;
+  padding-bottom: env(safe-area-inset-bottom);
+}
+@media (min-width: 600px) { #picker .sheet { border-radius: 16px; } }
+#picker header { padding: 14px 16px 8px; font-weight: 650; display: flex; justify-content: space-between; align-items: center; }
+#picker input[type=search] {
+  margin: 0 16px 10px; padding: 10px 12px; font: inherit; color: inherit;
+  background: var(--chip); border: 1px solid var(--line); border-radius: 10px;
+}
+#picker ul { list-style: none; margin: 0; padding: 0 8px 12px; overflow-y: auto; }
+#picker li button {
+  width: 100%; text-align: left; color: var(--ink);
+  padding: 11px 10px; border-radius: 10px; font-size: 15.5px;
+  display: flex; align-items: baseline; gap: 8px;
+}
+#picker li button:active { background: var(--chip); }
+#picker .alias { color: var(--muted); font-size: 13px; }
+#picker .tag { margin-left: auto; font-size: 11.5px; color: var(--accent); font-weight: 600; }
+.applying { color: var(--muted); font-size: 13px; }
+.applying .dot { display: inline-block; width: 7px; height: 7px; border-radius: 99px;
+  background: var(--accent); margin-right: 5px; animation: pulse 1.2s infinite; }
+@keyframes pulse { 50% { opacity: .3; } }
+</style>
+</head>
+<body>
+<main>
+  <header class="app">
+    <h1>Entities</h1>
+    <span class="sub" id="counts"></span>
+    <button class="iconbtn" id="applyBtn" data-act="apply"></button>
+    <button class="iconbtn" data-act="refresh" aria-label="Refresh">↻</button>
+  </header>
+  <div id="banner" class="hidden"></div>
+  <div id="content"><div class="state">Loading…</div></div>
+</main>
+<div id="toast" class="hidden"></div>
+<div id="picker" class="hidden"></div>
+
+<script>
+"use strict";
+let queue = null;
+let toastTimer = null;
+let pollTimer = null;
+
+const $ = (sel, el) => (el || document).querySelector(sel);
+const esc = s => String(s ?? "").replace(/[&<>"']/g,
+  c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
+
+async function api(path, body) {
+  const opts = body === undefined ? {} : {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify(body),
+  };
+  const res = await fetch(path, opts);
+  let data = {};
+  try { data = await res.json(); } catch (e) { /* non-JSON error page */ }
+  if (!res.ok) throw Object.assign(new Error(data.error || res.statusText), {data});
+  return data;
+}
+
+function banner(msg) {
+  const el = $("#banner");
+  el.textContent = msg || "";
+  el.classList.toggle("hidden", !msg);
+}
+
+async function refresh(manual) {
+  try {
+    queue = await api("api/queue");
+    banner("");
+    render();
+  } catch (e) {
+    if (manual || !queue) {
+      queue = null;
+      $("#content").innerHTML =
+        '<div class="state"><div class="big">⚠️</div>Can’t reach the review server.' +
+        '<div><button class="btn" data-act="refresh">Try again</button></div></div>';
+    } else {
+      banner("Couldn’t refresh — " + e.message);
+    }
+  }
+}
+
+function render() {
+  clearTimeout(pollTimer);
+  const c = $("#content");
+  if (!queue) return;
+  if (queue.dt === "closed") {
+    c.innerHTML =
+      '<div class="state"><div class="big">💤</div>DEVONthink isn’t open on the Mac.' +
+      '<div><button class="btn primary" data-act="open-dt">Open it</button></div></div>';
+    updateHeader();
+    return;
+  }
+  if (queue.dt === "error") {
+    c.innerHTML =
+      '<div class="state"><div class="big">⚠️</div>Something went wrong reading the queue.' +
+      '<div><button class="btn" data-act="refresh">Try again</button></div></div>';
+    updateHeader();
+    return;
+  }
+  const cands = queue.candidates || [];
+  const props = queue.proposals || [];
+  let html = "";
+  if (cands.length) {
+    html += '<h2 class="sec">People to review</h2>' + cands.map(candidateCard).join("");
+  }
+  if (props.length) {
+    html += '<h2 class="sec">Filings to approve</h2>' + props.map(proposalCard).join("");
+  }
+  if (!html) {
+    const queued = (queue.queued.candidates || 0) + (queue.queued.proposals || 0);
+    html = '<div class="state"><div class="big">✅</div>All clear.' +
+      (queued ? "<div>" + queued + " decision" + (queued > 1 ? "s" : "") +
+        " finishing up.</div>" : "") + "</div>";
+  }
+  c.innerHTML = html;
+  updateHeader();
+  jumpToHash();
+}
+
+function updateHeader() {
+  const n = queue ? (queue.candidates || []).length + (queue.proposals || []).length : 0;
+  $("#counts").textContent = n ? n + " to review" : "";
+  const a = (queue && queue.apply) || {};
+  const queued = queue ? (queue.queued.candidates || 0) + (queue.queued.proposals || 0) : 0;
+  const btn = $("#applyBtn");
+  if (a.state === "running") {
+    btn.innerHTML = '<span class="applying"><span class="dot"></span>applying…</span>';
+    btn.disabled = true;
+    schedulePoll(4000);
+  } else if (a.state === "scheduled") {
+    btn.innerHTML = '<span class="applying"><span class="dot"></span>queued</span>';
+    btn.disabled = true;
+    schedulePoll(8000);
+  } else if (queued) {
+    btn.textContent = "Finish " + queued + " now";
+    btn.disabled = false;
+  } else {
+    btn.textContent = "";
+    btn.disabled = true;
+  }
+}
+
+function schedulePoll(ms) {
+  clearTimeout(pollTimer);
+  pollTimer = setTimeout(() => refresh(false), ms);
+}
+
+function dtLink(uuid, label) {
+  return '<a class="chip" href="x-devonthink-item://' + esc(uuid) + '">' +
+    esc(label) + "</a>";
+}
+
+/* ---------- candidates ---------- */
+
+function candidateCard(cv) {
+  if (cv.broken) {
+    return '<div class="card" id="c-' + esc(cv.uuid) + '"><div class="cardtop">' +
+      '<span class="who">' + esc(cv.name) + '</span>' +
+      '<span class="badge">unreadable</span></div>' +
+      '<div class="notice">This record can’t be read here — it needs a look in DEVONthink.</div>' +
+      '<div class="chips">' + dtLink(cv.uuid, "Open in DEVONthink") + "</div></div>";
+  }
+  const seen = cv.seen.count + (cv.seen.count === 1 ? " sighting" : " sightings") +
+    (cv.seen.last ? " · last " + cv.seen.last : "");
+  let html = '<div class="card" id="c-' + esc(cv.uuid) + '"><div class="cardtop">' +
+    '<span class="who">' + esc(cv.name) + '</span>' +
+    '<span class="meta">' + esc(seen) + "</span>" +
+    (cv.urgent ? '<span class="badge">has a saved fact</span>' : "") +
+    (cv.detached ? '<span class="badge">decide promptly</span>' : "") +
+    "</div>";
+  if (cv.notice) html += '<div class="notice">' + esc(cv.notice) + "</div>";
+  const chips = [];
+  for (const e of cv.emails) chips.push('<span class="chip">' + esc(e) + "</span>");
+  for (const v of cv.variants) chips.push('<span class="chip">also “' + esc(v) + "”</span>");
+  for (const p of cv.peers) chips.push(dtLink(p.uuid, "same name: " + p.name));
+  if (chips.length) html += '<div class="chips">' + chips.join("") + "</div>";
+  html += evidenceList(cv.sightings);
+  html += candidateActions(cv);
+  return html + "</div>";
+}
+
+function evidenceList(sightings) {
+  if (!sightings.length) return "";
+  let html = '<ul class="evidence">';
+  for (const s of sightings) {
+    html += '<li><span class="d">' + esc(s.date || "") + "</span>";
+    const where = s.title || (s.kind === "fact" ? "saved fact" : "note");
+    html += '<span class="src">' +
+      (s.source_uuid
+        ? '<a href="x-devonthink-item://' + esc(s.source_uuid) + '">' + esc(where) + "</a>"
+        : esc(where)) + "</span>";
+    for (const f of s.facts || []) html += '<span class="fact">' + esc(f[1]) + "</span>";
+    for (const [k, v] of Object.entries(s.updates || {}))
+      html += '<span class="upd">' + esc(k) + " → " + esc(v) + "</span>";
+    html += "</li>";
+  }
+  return html + "</ul>";
+}
+
+function candBtn(cls, cv, action, label, opts) {
+  opts = opts || {};
+  return '<button class="btn ' + cls + '" data-act="cand" data-uuid="' + esc(cv.uuid) +
+    '" data-action="' + action + '"' +
+    (opts.target ? ' data-target="' + esc(opts.target) + '"' : "") +
+    (opts.distinct ? ' data-distinct="1"' : "") +
+    (opts.noundo ? ' data-noundo="1"' : "") +
+    ' data-msg="' + esc(opts.msg || label) + '">' + esc(label) + "</button>";
+}
+
+function candidateActions(cv) {
+  const d = cv.disposition || {};
+  let html = '<div class="actions">';
+  if (d.kind === "file_into") {
+    html += candBtn("primary", cv, "track", "File into " + d.target.name,
+      {target: d.target.uuid, msg: "Filed into " + d.target.name});
+  } else if (d.kind === "new_ok") {
+    html += candBtn("primary", cv, "track", "Add as new person", {msg: "Added"});
+    html += '<button class="btn" data-act="picker" data-uuid="' + esc(cv.uuid) +
+      '">Existing person…</button>';
+  } else if (d.kind === "needs_choice") {
+    for (const n of (d.near || []).slice(0, 2)) {
+      if (!n.uuid) continue;
+      html += candBtn("primary", cv, "track", "This is " + n.name,
+        {target: n.uuid, msg: "Filed into " + n.name});
+    }
+    html += '<button class="btn" data-act="picker" data-uuid="' + esc(cv.uuid) +
+      '">Someone else…</button>';
+    html += candBtn("", cv, "track", "New person", {distinct: true, msg: "Added"});
+  } else if (d.kind === "ambiguous") {
+    html += '<div class="notice">Could be ' +
+      esc((d.hits || []).map(h => h.name).join(" or ")) +
+      " — this one needs untangling in DEVONthink.</div>" +
+      '<div class="chips">' + dtLink(cv.uuid, "Open in DEVONthink") + "</div>";
+  }
+  html += candBtn("quiet", cv, "ignore", "Ignore", {msg: "Won’t be suggested again"});
+  html += candBtn("danger", cv, "forget", "Dismiss",
+    {msg: "Dismissed — may come back later", noundo: true});
+  return html + "</div>";
+}
+
+async function decideCandidate(uuid, action, extra, doneMsg, noUndo) {
+  const body = Object.assign({action}, extra || {});
+  await postDecision("api/candidate/" + uuid, body, "c-" + uuid, doneMsg,
+    noUndo ? null : () => api("api/candidate/" + uuid, {action: "undo"}));
+  queue.candidates = queue.candidates.filter(c => c.uuid !== uuid);
+  updateHeader();
+}
+
+/* ---------- roster picker ---------- */
+
+function openPicker(uuid) {
+  const cv = queue.candidates.find(c => c.uuid === uuid);
+  const near = ((cv && cv.disposition && cv.disposition.near) || []).filter(n => n.uuid);
+  const nearIds = new Set(near.map(n => n.uuid));
+  const rows = near.map(n => ({uuid: n.uuid, name: n.name, aliases: [], tag: "likely match"}));
+  for (const p of queue.roster || []) {
+    if (!nearIds.has(p.uuid)) rows.push({uuid: p.uuid, name: p.name, aliases: p.aliases, tag: ""});
+  }
+  const picker = $("#picker");
+  picker.innerHTML = '<div class="sheet"><header>Who is this?' +
+    '<button class="iconbtn" data-act="close-picker">✕</button></header>' +
+    '<input type="search" name="person-search" placeholder="Search people" autocomplete="off">' +
+    "<ul>" + rows.map(r =>
+      '<li data-search="' + esc((r.name + " " + r.aliases.join(" ")).toLowerCase()) +
+      '"><button data-act="pick" data-uuid="' + esc(uuid) + '" data-target="' + esc(r.uuid) +
+      '" data-name="' + esc(r.name) + '">' + esc(r.name) +
+      (r.aliases.length ? ' <span class="alias">' + esc(r.aliases.join(", ")) + "</span>" : "") +
+      (r.tag ? '<span class="tag">' + esc(r.tag) + "</span>" : "") +
+      "</button></li>").join("") + "</ul></div>";
+  picker.classList.remove("hidden");
+  $("input", picker).addEventListener("input", e => filterPicker(e.target.value));
+  if (matchMedia("(min-width: 600px)").matches) $("input", picker).focus();
+}
+
+function filterPicker(q) {
+  q = q.trim().toLowerCase();
+  for (const li of document.querySelectorAll("#picker li"))
+    li.classList.toggle("hidden", !!q && !li.dataset.search.includes(q));
+}
+
+function closePicker() { $("#picker").classList.add("hidden"); }
+
+/* ---------- proposals ---------- */
+
+function proposalCard(pv) {
+  const u = esc(pv.uuid);
+  if (pv.broken) {
+    return '<div class="card" id="c-' + u + '"><div class="cardtop">' +
+      '<span class="who">' + esc(pv.title) + '</span>' +
+      '<span class="badge">unreadable</span></div>' +
+      '<div class="notice">This proposal can’t be read here — it needs a look in DEVONthink.</div>' +
+      '<div class="chips">' + dtLink(pv.uuid, "Open in DEVONthink") + "</div></div>";
+  }
+  let html = '<div class="card" id="c-' + u + '"><div class="cardtop">' +
+    '<span class="who">' + esc(pv.source.name || pv.title) + "</span>" +
+    (pv.source.date ? '<span class="meta">' + esc(pv.source.date) + "</span>" : "") +
+    "</div>";
+  if (pv.source.uuid)
+    html += '<div class="chips">' + dtLink(pv.source.uuid, "Open source note") + "</div>";
+  if (pv.empty) {
+    html += '<div class="notice">Nothing filable was found in this capture — file it by hand or let it go.</div>';
+    if (pv.captured) html += '<div class="captured">' + esc(pv.captured) + "</div>";
+    html += '<div class="actions">' +
+      propBtn("", pv, "approve", "Clear it", {msg: "Cleared"}) +
+      propBtn("danger", pv, "reject", "Delete", {msg: "Deleted", noundo: true}) +
+      "</div>";
+    return html + "</div>";
+  }
+  pv.plans.forEach((plan, pi) => { html += planBlock(plan, pi, pv.editable); });
+  if (!pv.editable)
+    html += '<div class="chips"><span class="chip">applies exactly as written</span></div>';
+  html += '<div class="actions">' +
+    '<button class="btn primary" data-act="approve" data-uuid="' + u + '">Approve</button>' +
+    propBtn("danger", pv, "reject", "Reject", {msg: "Rejected", noundo: true}) +
+    "</div>";
+  return html + "</div>";
+}
+
+function propBtn(cls, pv, action, label, opts) {
+  opts = opts || {};
+  return '<button class="btn ' + cls + '" data-act="prop" data-uuid="' + esc(pv.uuid) +
+    '" data-action="' + action + '"' + (opts.noundo ? ' data-noundo="1"' : "") +
+    ' data-msg="' + esc(opts.msg || label) + '">' + esc(label) + "</button>";
+}
+
+function planBlock(plan, pi, editable) {
+  const cb = editable
+    ? '<input type="checkbox" checked data-role="plan" data-plan="' + pi + '">'
+    : "";
+  if (plan.kind === "event") {
+    let html = '<div class="plan" data-pi="' + pi + '"><div class="planhead">' + cb +
+      "📅 " + esc(plan.name) + ' <span class="meta">' + esc(plan.date) +
+      (plan.location ? " · " + esc(plan.location) : "") + "</span></div><ul class='rows'>";
+    if (plan.attendees.length)
+      html += '<li><span class="rowtext">with ' + esc(plan.attendees.join(", ")) + "</span></li>";
+    if (plan.summary)
+      html += '<li><span class="rowtext">' + esc(plan.summary) + "</span></li>";
+    return html + "</ul></div>";
+  }
+  const tag = plan.kind === "new" ? ' <span class="badge">new person</span>' : "";
+  let html = '<div class="plan" data-pi="' + pi + '"><div class="planhead">' + cb +
+    esc(plan.name) + tag + "</div><ul class='rows'>";
+  plan.facts.forEach((f, fi) => {
+    html += "<li>" + (editable
+      ? '<input type="checkbox" checked data-role="row" data-fact="' + fi + '">'
+      : "") +
+      '<span class="rowtext" data-role="fact" data-fact="' + fi +
+      '" data-date="' + esc(f[0]) + '" data-text="' + esc(f[1]) + '">' +
+      '<span class="d">' + esc(f[0]) + "</span><span class=\"txt\">" + esc(f[1]) +
+      "</span></span></li>";
+  });
+  for (const [k, v] of Object.entries(plan.updates)) {
+    html += "<li>" + (editable
+      ? '<input type="checkbox" checked data-role="row" data-field="' + esc(k) + '">'
+      : "") +
+      '<span class="rowtext" data-role="field" data-field="' + esc(k) +
+      '" data-value="' + esc(v) + '">' +
+      '<span class="fieldkey">' + esc(k) + ' → </span><span class="txt">' + esc(v) +
+      "</span></span></li>";
+  }
+  return html + "</ul></div>";
+}
+
+function togglePlan(cb) {
+  const plan = cb.closest(".plan");
+  for (const row of plan.querySelectorAll('input[data-role="row"]')) {
+    row.checked = cb.checked;
+    row.closest("li").classList.toggle("off", !cb.checked);
+  }
+}
+
+function startEdit(span) {
+  if (span.querySelector("input")) return;
+  const txt = $(".txt", span);
+  const current = span.dataset.role === "fact" ? span.dataset.text : span.dataset.value;
+  txt.innerHTML = '<input type="text" maxlength="400">';
+  const input = $("input", txt);
+  input.value = current;
+  input.addEventListener("blur", () => {
+    const value = input.value.trim();
+    if (span.dataset.role === "fact") span.dataset.text = value || span.dataset.text;
+    else span.dataset.value = value || span.dataset.value;
+    txt.textContent = span.dataset.role === "fact" ? span.dataset.text : span.dataset.value;
+  });
+  input.addEventListener("keydown", e => { if (e.key === "Enter") input.blur(); });
+  input.focus();
+}
+
+function collectSpec(card, pv) {
+  const people = [], events = [];
+  let changed = false;
+  pv.plans.forEach((plan, pi) => {
+    const block = card.querySelector('.plan[data-pi="' + pi + '"]');
+    const planCb = block.querySelector('input[data-role="plan"]');
+    if (planCb && !planCb.checked) { changed = true; return; }
+    if (plan.kind === "event") {
+      events.push({name: plan.name, date: plan.date, location: plan.location,
+                   attendees: plan.attendees, summary: plan.summary});
+      return;
+    }
+    const facts = [];
+    plan.facts.forEach((f, fi) => {
+      const cb = block.querySelector('input[data-fact="' + fi + '"]');
+      if (cb && !cb.checked) { changed = true; return; }
+      const span = block.querySelector('span[data-fact="' + fi + '"]');
+      const text = span ? span.dataset.text : f[1];
+      if (text !== f[1]) changed = true;
+      if (text) facts.push({date: f[0], fact: text});
+    });
+    const updates = {};
+    for (const [k, v] of Object.entries(plan.updates)) {
+      const cb = block.querySelector('input[data-field="' + CSS.escape(k) + '"]');
+      if (cb && !cb.checked) { changed = true; continue; }
+      const span = block.querySelector('span[data-field="' + CSS.escape(k) + '"]');
+      const value = span ? span.dataset.value : v;
+      if (value !== v) changed = true;
+      if (value) updates[k] = value;
+    }
+    if (!facts.length && !Object.keys(updates).length) return;
+    people.push({name: plan.name, interacted: !!plan.interacted, facts, updates});
+  });
+  return {people, events, changed};
+}
+
+async function approveProposal(uuid, confirm) {
+  const pv = queue.proposals.find(p => p.uuid === uuid);
+  const card = document.getElementById("c-" + uuid);
+  let body = {action: "approve"};
+  if (pv.editable) {
+    const spec = collectSpec(card, pv);
+    if (spec.changed || confirm) {
+      if (!spec.people.length && !spec.events.length) {
+        banner("Nothing left to file — use Reject instead.");
+        return;
+      }
+      body = {action: "approve", people: spec.people, events: spec.events,
+              confirm: !!confirm};
+    }
+  }
+  let res;
+  try {
+    res = await api("api/proposal/" + uuid, body);
+  } catch (e) {
+    banner(e.message);
+    return;
+  }
+  if (res.confirm) {
+    const names = res.confirm.map(c => c.name + " (resembles " +
+      c.near.join(", ") + ")").join("; ");
+    if (window.confirm("Create as a separate new person? " + names)) {
+      return approveProposal(uuid, true);
+    }
+    return;
+  }
+  removeCard("c-" + uuid, "Approved",
+    () => api("api/proposal/" + uuid, {action: "undo"}));
+  queue.proposals = queue.proposals.filter(p => p.uuid !== uuid);
+  updateHeader();
+}
+
+async function decideProposal(uuid, action, doneMsg, noUndo) {
+  await postDecision("api/proposal/" + uuid, {action}, "c-" + uuid, doneMsg,
+    noUndo ? null : () => api("api/proposal/" + uuid, {action: "undo"}));
+  queue.proposals = queue.proposals.filter(p => p.uuid !== uuid);
+  updateHeader();
+}
+
+/* ---------- shared decision plumbing ---------- */
+
+async function postDecision(path, body, cardId, doneMsg, undoFn) {
+  try {
+    await api(path, body);
+  } catch (e) {
+    banner(e.message);
+    if (e.data && e.data.error === "devonthink-closed") refresh(false);
+    throw e;
+  }
+  removeCard(cardId, doneMsg, undoFn);
+}
+
+function removeCard(cardId, msg, undoFn) {
+  const card = document.getElementById(cardId);
+  if (card) {
+    card.classList.add("leaving");
+    setTimeout(() => card.remove(), 180);
+  }
+  toast(msg, undoFn);
+}
+
+function toast(msg, undoFn) {
+  const t = $("#toast");
+  clearTimeout(toastTimer);
+  t.innerHTML = esc(msg) + (undoFn ? ' <button id="undoBtn">Undo</button>' : "");
+  t.classList.remove("hidden");
+  if (undoFn) {
+    $("#undoBtn").onclick = async () => {
+      t.classList.add("hidden");
+      try { await undoFn(); } catch (e) { banner("Undo failed — " + e.message); }
+      refresh(false);
+    };
+  }
+  toastTimer = setTimeout(() => {
+    t.classList.add("hidden");
+    refresh(false);
+  }, 8000);
+}
+
+/* ---------- misc ---------- */
+
+async function applyNow() {
+  try { await api("api/apply", {}); } catch (e) { banner(e.message); return; }
+  refresh(false);
+}
+
+async function openDT() {
+  try { await api("api/open-dt", {}); } catch (e) { banner(e.message); return; }
+  $("#content").innerHTML = '<div class="state"><div class="big">💤</div>Opening DEVONthink…</div>';
+  let tries = 0;
+  const wait = async () => {
+    await refresh(false);
+    if (queue && queue.dt === "ok") return;
+    if (++tries < 10) setTimeout(wait, 3000);
+  };
+  setTimeout(wait, 3000);
+}
+
+function jumpToHash() {
+  const id = location.hash.replace("#", "");
+  if (!id) return;
+  const card = document.getElementById("c-" + id);
+  if (card) {
+    card.scrollIntoView({block: "center"});
+    card.classList.add("flash");
+  }
+  history.replaceState(null, "", location.pathname);
+}
+
+document.addEventListener("click", e => {
+  const el = e.target.closest("[data-act]");
+  if (!el) {
+    const span = e.target.closest('span[data-role="fact"], span[data-role="field"]');
+    if (span && span.closest(".card")) {
+      const cardEl = span.closest(".card");
+      const pv = queue && queue.proposals.find(p => "c-" + p.uuid === cardEl.id);
+      if (pv && pv.editable) startEdit(span);
+    }
+    if (e.target === $("#picker")) closePicker();
+    return;
+  }
+  const d = el.dataset;
+  switch (d.act) {
+    case "refresh": refresh(true); break;
+    case "apply": applyNow(); break;
+    case "open-dt": openDT(); break;
+    case "picker": openPicker(d.uuid); break;
+    case "close-picker": closePicker(); break;
+    case "pick":
+      closePicker();
+      decideCandidate(d.uuid, "track", {target: d.target}, "Filed into " + d.name);
+      break;
+    case "cand":
+      decideCandidate(d.uuid, d.action,
+        {target: d.target || undefined, distinct: d.distinct ? true : undefined},
+        d.msg, !!d.noundo);
+      break;
+    case "prop": decideProposal(d.uuid, d.action, d.msg, !!d.noundo); break;
+    case "approve": approveProposal(d.uuid); break;
+  }
+});
+
+document.addEventListener("change", e => {
+  if (e.target.matches('input[data-role="plan"]')) togglePlan(e.target);
+  else if (e.target.matches('input[data-role="row"]'))
+    e.target.closest("li").classList.toggle("off", !e.target.checked);
+});
+
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden && queue) refresh(false);
+});
+
+window.addEventListener("hashchange", () => {
+  if (queue) jumpToHash();
+});
+
+refresh(true);
+</script>
+</body>
+</html>

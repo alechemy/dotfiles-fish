@@ -245,6 +245,7 @@ def load_config():
         "IDLE_MINUTES": "0",
         "THINGS_SYNC": "off",
         "THINGS_PROJECT": "Entity Filing",
+        "REVIEW_URL": "",
     }
     if os.path.exists(CONFIG_FILE):
         with open(CONFIG_FILE) as f:
@@ -1462,12 +1463,24 @@ SPEC_FIELD_RE = re.compile(r"^([A-Za-z]+)\s*=\s*(.+)$")
 TASK_MARKER_RE = re.compile(re.escape(PROPOSAL_MARKER) + r"([A-Za-z0-9-]+)")
 
 
-def things_note_body(source_uuid, proposal_uuid, plans):
+def review_link(config, uuid):
+    """One tappable line into the review web UI, or nothing when the
+    machine-local REVIEW_URL isn't configured. Lives above the spec
+    sentinel, so the strict note parser never sees it."""
+    url = (config.get("REVIEW_URL") or "").strip()
+    return f"Review: {url}#{uuid}" if url else ""
+
+
+def things_note_body(source_uuid, proposal_uuid, plans, review_line=""):
     lines = [
         "Review, edit if needed, then complete this to-do to file it.",
         "Delete a line to drop it. Cancel or delete the to-do to reject.",
         f"Source: x-devonthink-item://{source_uuid}",
         f"{PROPOSAL_MARKER}{proposal_uuid}",
+    ]
+    if review_line:
+        lines.append(review_line)
+    lines += [
         "",
         SPEC_SENTINEL,
     ]
@@ -1490,7 +1503,7 @@ def things_note_body(source_uuid, proposal_uuid, plans):
     return "\n".join(lines)
 
 
-def things_note_stub(source_uuid, proposal_uuid):
+def things_note_stub(source_uuid, proposal_uuid, review_line=""):
     lines = [
         "This proposal can't be edited here — review it in DEVONthink, then",
         "complete this to-do to apply it as written, or cancel to reject.",
@@ -1498,6 +1511,8 @@ def things_note_stub(source_uuid, proposal_uuid):
     if source_uuid:
         lines.append(f"Source: x-devonthink-item://{source_uuid}")
     lines.append(f"{PROPOSAL_MARKER}{proposal_uuid}")
+    if review_line:
+        lines.append(review_line)
     return "\n".join(lines)
 
 
@@ -2213,13 +2228,14 @@ def _things_reconcile(config, dry_run):
             plans, editable, source_uuid = plans_from_ops(ops, people)
             if not source_uuid:
                 editable = False
-            note = things_note_body(source_uuid, puuid, plans) if editable \
-                else things_note_stub(source_uuid, puuid)
+            rline = review_link(config, puuid)
+            note = things_note_body(source_uuid, puuid, plans, rline) if editable \
+                else things_note_stub(source_uuid, puuid, rline)
             add_url = things_bridge.build_url("add", things_bridge.add_todo_params(
                 project, rec["name"], note, THINGS_WHEN))
             if len(add_url) > THINGS_URL_LIMIT:
                 if editable:
-                    note = things_note_stub(source_uuid, puuid)
+                    note = things_note_stub(source_uuid, puuid, rline)
                     editable = False
                     add_url = things_bridge.build_url(
                         "add", things_bridge.add_todo_params(
@@ -2766,7 +2782,7 @@ def candidate_uuid_from_notes(notes):
     return m.group(1) if m else None
 
 
-def candidate_task_summary(uuid, data, near):
+def candidate_task_summary(uuid, data, near, review_line=""):
     """Compact title/notes for a candidate's to-do: counts, hints, and the
     DT link — never the accumulated evidence, which lives on the record (the
     URL transport degrades past THINGS_URL_LIMIT)."""
@@ -2776,9 +2792,12 @@ def candidate_task_summary(uuid, data, near):
         "Complete this to-do to track this person; cancel or delete it to "
         "ignore them permanently. Evidence:",
         f"{CANDIDATE_MARKER}{uuid}",
-        f"Sightings: {len(data['sightings'])}"
-        + (f" (last {dates[-1]})" if dates else ""),
     ]
+    if review_line:
+        lines.append(review_line)
+    lines.append(
+        f"Sightings: {len(data['sightings'])}"
+        + (f" (last {dates[-1]})" if dates else ""))
     if ec.needs_confirmation(data, near):
         hint = f" (possible existing: {', '.join(near)})" if near else \
             " (single-word name)"
@@ -3007,7 +3026,8 @@ def _mirror_candidates(config, dry_run):
         except ValueError:
             continue
         near = ec.near_matches(data["name"], people)
-        title, notes = candidate_task_summary(cuuid, data, near)
+        title, notes = candidate_task_summary(cuuid, data, near,
+                                              review_link(config, cuuid))
         digest = summary_hash(title, notes)
         entry = tasks.get(cuuid)
         if entry is None and cuuid in live_by_cuuid:

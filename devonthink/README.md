@@ -30,6 +30,7 @@ The Lorebook database syncs across every Mac over CloudKit, but exactly **one** 
 | `com.user.github-stars-import` | ✅ | — |
 | `com.user.dt-morning-brief` | ✅ | — |
 | `com.user.entity-filing` | ✅ | — |
+| `com.user.entity-review` | ✅ | — |
 | `com.user.dt-database-archive` | ✅ | — |
 
 On a follower, `setup.sh` loads only `dt-watchdog` and **boots out** any of the driver-only labels that an earlier bootstrap left loaded, so a demotion is a single re-run.

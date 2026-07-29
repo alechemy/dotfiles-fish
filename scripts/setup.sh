@@ -692,6 +692,7 @@ EOF
                               com.user.github-stars-import \
                               com.user.dt-morning-brief \
                               com.user.entity-filing \
+                              com.user.entity-review \
                               com.user.dt-database-archive \
                               com.user.defuddle-update)
             dt_agents=(com.user.dt-watchdog)
