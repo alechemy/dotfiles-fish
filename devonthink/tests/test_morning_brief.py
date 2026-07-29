@@ -898,6 +898,45 @@ class NewsBullets(unittest.TestCase):
         self.assertEqual(len(self.news(a, told)), 1)
         self.assertEqual(self.news(b, told), [])
 
+    def test_grouped_facts_render_like_their_flat_form(self):
+        """Same-date facts stored grouped under a bare-date bullet come back
+        as one flat dated line each — the brief's rendering must not depend
+        on which shape the record is in."""
+        flat = self.body_person(
+            "- 2026-07-13 — moved to Denver.",
+            "- 2026-07-13 — started at Globex.",
+        )
+        grouped = self.body_person(
+            "- 2026-07-13",
+            "  - moved to Denver.",
+            "  - started at Globex.",
+        )
+        self.assertEqual(self.news(grouped), self.news(flat))
+
+    def test_grouped_and_flat_copies_of_a_fact_share_identity(self):
+        marker = " <!-- fact:ab12cd34 -->"
+        told = set()
+        a = self.body_person("- 2026-07-13 — closed the Acme deal." + marker)
+        b = self.body_person("- 2026-07-13",
+                             "  - closed the Acme deal." + marker,
+                             "  - another fact. <!-- fact:beef0042 -->")
+        self.assertEqual(len(self.news(a, told)), 1)
+        self.assertEqual(len(self.news(b, told)), 1)
+
+    def test_grouped_facts_date_from_their_parent_bullet(self):
+        """A grouped fact filed before you last met is not news, even though
+        its own line carries no date."""
+        p = self.body_person("- 2026-04-16",
+                             "  - took a sick day.",
+                             "  - left early.",
+                             lastcontact="2026-07-10")
+        self.assertEqual(self.news(p), [])
+
+    def test_an_indented_bullet_without_a_date_parent_is_not_a_fact(self):
+        p = self.body_person("- 2026-06-01 — real fact.",
+                             "  - hand-typed detail under it")
+        self.assertEqual(len(self.news(p)), 1)
+
 
 class MessageBumpRetryComposition(unittest.TestCase):
     """C01: a same-day text falls inside "since yesterday"'s query window,

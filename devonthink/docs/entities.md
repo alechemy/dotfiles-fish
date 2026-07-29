@@ -66,7 +66,9 @@ README's table without adding it here silences or resurfaces people.
 
 ## Biographical Log
 
-- 2026-06-20 — Moved from Acme to Globex. ([source](x-devonthink-item://…))
+- 2026-06-20
+  - Moved from Acme to Globex. ([source](x-devonthink-item://…))
+  - Met for coffee downtown. ([source](x-devonthink-item://…))
 - 2026-03-02 — Alice got a promotion. ([source](x-devonthink-item://…))
 ```
 
@@ -87,10 +89,21 @@ Rules the automation enforces:
   so it inherits newest-first too. `## Log` on Place and Event records sorts
   the same way. Records the filer never touches are repaired on demand with
   the bridge's `sort_logs` op (see [Operations](#operations)).
+- **One date, one bullet.** After the sort, same-date machine facts merge
+  under a single bare-date bullet with one sub-bullet per fact, so a note
+  that files ten facts doesn't repeat its date ten times; a date with a
+  single fact stays inline (`- date — fact`). Only machine entries group —
+  a fact is machine iff it carries a `([source](…))` link — and grouping
+  never reaches across a hand-typed line or rewrites one, so manual entries
+  and hand-added detail under a fact keep their shape. Both stored shapes
+  are equivalent everywhere: dedup and the brief reconstruct a sub-bullet's
+  flat form from its parent's date. `sort_logs` regroups existing records
+  the filer has no reason to touch.
 - **Idempotent by fact.** A log line already in the body — same source, date,
-  and text, ignoring auto-link decoration — is skipped, so re-running filing
-  never duplicates facts, while re-extracting a corrected note (`--force`)
-  still files the genuinely new facts it surfaces.
+  and text, ignoring auto-link decoration and which shape (flat or grouped)
+  it is stored in — is skipped, so re-running filing never duplicates facts,
+  while re-extracting a corrected note (`--force`) still files the genuinely
+  new facts it surfaces.
 - **Known entities are auto-linked.** When a log line is filed, the bridge
   wraps the first mention of any *existing* Person/Place/Event name or alias
   in an item link (longest name wins, never inside an existing link, never
@@ -1161,9 +1174,10 @@ review-gated proposal, never an auto-apply.
 # repeat (or loop) until the log stops saying "extracting"
 ~/.local/bin/entity-filing.py --scan-only
 
-# re-sort every entity log newest-first (`dry_run: true` to preview). The
-# filer sorts what it writes; this is for records it has no reason to touch,
-# and for logs hand-edited out of order
+# re-sort every entity log newest-first and regroup same-date facts under
+# one bullet (`dry_run: true` to preview). The filer keeps what it writes in
+# shape; this is for records it has no reason to touch, and for logs
+# hand-edited out of order
 echo '{"ops":[{"op":"sort_logs"}]}' > /tmp/ops.json
 osascript -l JavaScript ~/.local/bin/entity-dt-bridge.js /tmp/ops.json | jq .
 

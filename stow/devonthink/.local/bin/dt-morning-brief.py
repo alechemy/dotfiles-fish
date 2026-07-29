@@ -172,6 +172,10 @@ JOURNAL_LAPSE_DAYS = 7
 REVIEW_PATH = "/20_ENTITIES/_Review"
 APPROVED_PATH = REVIEW_PATH + "/Approved"
 LOG_BULLET_RE = re.compile(r"^- \d{4}-\d{2}-\d{2} — ")
+# The grouped log shape: a bare-date parent bullet whose indented sub-bullets
+# are the facts filed on that date (see groupLogSection in the bridge).
+LOG_GROUP_DATE_RE = re.compile(r"^- (\d{4}-\d{2}-\d{2})\s*$")
+LOG_SUB_FACT_RE = re.compile(r"^\s+- (.+)$")
 ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 # Word-shaped runs in an event title: letters, no digits, kept together across
 # the punctuation a name carries ("O'Neill", "Alec/Priya" splits, "Tamsin:" does).
@@ -836,12 +840,28 @@ def person_summary_line(p):
 def log_bullets(p):
     """Every fact filed on a Person record, as (date, identity, rendered line).
 
+    Facts come in two stored shapes — flat dated bullets, and sub-bullets
+    grouped under a bare-date parent — and both yield the same flat rendering,
+    so the brief's output doesn't depend on which shape a record is in.
+
     Identity is the filer's provenance hash where there is one and the bullet's
     own text otherwise, so one fact filed to each of the two people it mentions
     is still recognized as one fact, and told once.
     """
     out = []
-    for ln in (p.get("body") or "").splitlines():
+    group_date = None
+    for raw in (p.get("body") or "").splitlines():
+        gm = LOG_GROUP_DATE_RE.match(raw)
+        if gm:
+            group_date = gm.group(1)
+            continue
+        ln = raw
+        if group_date is not None:
+            sub = LOG_SUB_FACT_RE.match(raw)
+            if sub:
+                ln = f"- {group_date} — {sub.group(1)}"
+            else:
+                group_date = None
         if not LOG_BULLET_RE.match(ln) or ln.rstrip().endswith("— Created."):
             continue
         marker = FACT_MARKER_RE.search(ln)

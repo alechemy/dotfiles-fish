@@ -523,6 +523,67 @@ function sortLogSection(body, header) {
   return out.concat(body.slice(b.end))
 }
 
+// The two shapes a machine-filed fact can be stored in: flat
+// (`- YYYY-MM-DD — fact ([source](…))`) or grouped under a bare date bullet
+// (`- YYYY-MM-DD` with one `  - fact ([source](…))` sub-bullet per fact).
+const FLAT_FACT_RE = /^- (\d{4}-\d{2}-\d{2}) — (.+)$/
+const GROUP_DATE_RE = /^- (\d{4}-\d{2}-\d{2})\s*$/
+const SUB_FACT_RE = /^\s+- (.+)$/
+const SOURCE_LINK_RE = /\(\[source\]\(x-devonthink-item:\/\/[0-9A-Fa-f-]+\)\)/
+
+// One date, one bullet: consecutive same-date machine entries merge into a
+// single bare-date bullet with a sub-bullet per fact, so a day that filed ten
+// facts doesn't repeat its date ten times. A date left with one fact renders
+// flat, byte-identical to how the filer wrote it.
+//
+// Only machine entries group — a single-line flat fact carrying a source
+// link, or an existing group whose children are all sub-bullets. Everything
+// else (hand-typed dated bullets, entries with manual detail lines under
+// them, prose, blanks) is never rewritten, and merging never reaches across
+// an ungroupable line, so hand-shaped layouts keep their shape. Runs after
+// sortLogSection, which is what makes same-date entries adjacent.
+function groupLogSection(body, header) {
+  const b = sectionBounds(body, header)
+  if (b === null) return body
+  const items = []
+  for (let i = b.start; i < b.end; i++) {
+    const line = body[i]
+    if (!LOG_ENTRY_RE.test(line)) { items.push({ lines: [line] }); continue }
+    const block = [line]
+    while (i + 1 < b.end && body[i + 1].trim() !== '' &&
+           !LOG_ENTRY_RE.test(body[i + 1])) {
+      block.push(body[++i])
+    }
+    const item = { lines: block }
+    const flat = block.length === 1 && line.match(FLAT_FACT_RE)
+    if (flat && SOURCE_LINK_RE.test(flat[2])) {
+      item.date = flat[1]
+      item.facts = [flat[2]]
+    } else if (block.length > 1 && GROUP_DATE_RE.test(line) &&
+               block.slice(1).every(l => SUB_FACT_RE.test(l))) {
+      item.date = line.match(GROUP_DATE_RE)[1]
+      item.facts = block.slice(1).map(l => l.match(SUB_FACT_RE)[1])
+    }
+    items.push(item)
+  }
+  const merged = []
+  for (const it of items) {
+    const prev = merged[merged.length - 1]
+    if (it.facts && prev && prev.facts && prev.date === it.date) {
+      prev.facts = prev.facts.concat(it.facts)
+    } else {
+      merged.push(it)
+    }
+  }
+  const out = body.slice(0, b.start)
+  for (const it of merged) {
+    if (!it.facts) out.push(...it.lines)
+    else if (it.facts.length === 1) out.push('- ' + it.date + ' — ' + it.facts[0])
+    else out.push('- ' + it.date, ...it.facts.map(f => '  - ' + f))
+  }
+  return out.concat(body.slice(b.end))
+}
+
 // A candidate event record's body Date value, or '' when missing/bare — the
 // fallback ensure_event scores against when mdeventdate is unset.
 function bodyDateValue(lines) {
@@ -661,16 +722,42 @@ function factSignature(line) {
   return src + '|' + text
 }
 
+// Signatures for every line of a body, with each grouped sub-bullet
+// reconstructed to its flat form first, so a fact has one identity whichever
+// shape it is stored in — an incoming flat line dedups against the grouped
+// copy groupLogSection left behind.
+function bodyFactSignatures(body) {
+  const sigs = []
+  let groupDate = null
+  for (const line of body) {
+    const parent = line.match(GROUP_DATE_RE)
+    if (parent) {
+      groupDate = parent[1]
+      sigs.push(factSignature(line))
+      continue
+    }
+    const sub = groupDate === null ? null : line.match(SUB_FACT_RE)
+    if (sub) {
+      sigs.push(factSignature('- ' + groupDate + ' — ' + sub[1]))
+      continue
+    }
+    groupDate = null
+    sigs.push(factSignature(line))
+  }
+  return sigs
+}
+
 // Skip lines already filed (by fact signature), link known entities in the
-// remainder, insert under the given section header, and re-sort the section
-// newest-first. The sort runs even when nothing was appended, so a record the
-// filer touches at all leaves in order.
+// remainder, insert under the given section header, then re-sort the section
+// newest-first and regroup same-date facts under one bullet. Sort and group
+// run even when nothing was appended, so a record the filer touches at all
+// leaves in order and grouped.
 function appendLogLines(rec, lines, section) {
   const header = section || LOG_SECTION
   const body = bodyLines(rec)
   const uuid = rec.uuid()
   const seen = Object.create(null)
-  for (const bl of body) seen[factSignature(bl)] = true
+  for (const sig of bodyFactSignatures(body)) seen[sig] = true
   const fresh = []
   let skipped = 0
   for (const line of lines || []) {
@@ -679,8 +766,9 @@ function appendLogLines(rec, lines, section) {
     seen[sig] = true
     fresh.push(linkEntities(line, uuid))
   }
-  const next = sortLogSection(
-    fresh.length ? insertUnderSection(body, header, fresh) : body, header)
+  const next = groupLogSection(sortLogSection(
+    fresh.length ? insertUnderSection(body, header, fresh) : body, header),
+    header)
   const text = next.join('\n')
   if (text !== body.join('\n')) rec.plainText = text
   return { appended: fresh.length, skipped: skipped }
@@ -1390,9 +1478,10 @@ function run(argv) {
       return { uuid: rec.uuid(), text: text, created: true }
     },
 
-    // Repair pass for logs that predate the sort (or were hand-edited out of
-    // order): re-sorts every entity record's log section newest-first. The
-    // filer keeps records it touches in order on its own, so this is only for
+    // Repair pass for logs that predate the sort or the same-date grouping
+    // (or were hand-edited out of order): re-sorts every entity record's log
+    // section newest-first and regroups same-date facts under one bullet. The
+    // filer keeps records it touches in shape on its own, so this is only for
     // the ones it has no reason to touch. Invoke manually:
     //   echo '{"ops":[{"op":"sort_logs"}]}' > /tmp/ops.json &&
     //   osascript -l JavaScript entity-dt-bridge.js /tmp/ops.json
@@ -1409,7 +1498,7 @@ function run(argv) {
           const body = bodyLines(rec)
           let next = body
           for (const header of [LOG_SECTION, EVENT_LOG_SECTION]) {
-            next = sortLogSection(next, header)
+            next = groupLogSection(sortLogSection(next, header), header)
           }
           const text = next.join('\n')
           if (text === body.join('\n')) continue
@@ -1440,7 +1529,7 @@ function run(argv) {
           const lines = bodyLines(rec)
           let changed = false
           for (let i = 0; i < lines.length; i++) {
-            if (!/^- /.test(lines[i])) continue
+            if (!/^\s*- /.test(lines[i])) continue
             const linked = linkEntities(lines[i], uuid)
             if (linked !== lines[i]) {
               lines[i] = linked
