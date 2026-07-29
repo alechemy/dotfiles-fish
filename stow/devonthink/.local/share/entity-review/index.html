@@ -549,6 +549,11 @@ function startEditName(span) {
     const value = input.value.replace(/\s+/g, " ").trim();
     if (value) span.dataset.name = value;
     span.innerHTML = esc(span.dataset.name) + ' <span class="pencil">✎</span>';
+    const edited = span.dataset.name !== span.dataset.orig;
+    for (const b of span.closest(".card").querySelectorAll(
+        'button[data-target], button[data-act="picker"]')) {
+      b.disabled = edited;
+    }
   });
   input.addEventListener("keydown", e => { if (e.key === "Enter") input.blur(); });
   input.focus();
