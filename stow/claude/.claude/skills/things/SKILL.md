@@ -30,7 +30,13 @@ drop or wedge writes. Follow these rules; for any bulk add, **use the bundled he
    token**. Most reliable: create the *project itself* via a `json` `project` create whose
    `attributes.items[]` lists the headings (`{"type":"heading","attributes":{"title":…}}`).
    (Appending headings to an existing project via `json` `update`+`items` is unreliable on
-   some builds — prefer create-with-items, or the helper's per-heading fallback.)
+   some builds — prefer create-with-items, or the helper's per-heading fallback. Confirmed
+   silent no-op on Things 3.21 (2026-07) with a valid token and no error sheet. Working
+   fallback for an *existing* project: UI-script it — `open things:///show?id=<project>`,
+   click File ▸ New Heading via System Events, keystroke the title + Return. The keystroke
+   may not commit (empty-titled heading in the DB); headings aren't an AppleScript class,
+   but `set name of to do id "<heading-uuid>" to "…"` renames one anyway — use that to fix
+   the title, then re-run the helper for the to-dos.)
 3. **Big `json` imports truncate — batch under a size guard.** A json URL over ~4 KB gets
    **truncated** into a modal *"There is a problem with the provided JSON"* sheet, and **a
    stuck sheet blocks ALL further URL processing** until dismissed. So bulk writes go either
