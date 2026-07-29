@@ -918,6 +918,34 @@ candidate's name (or a person's name on an editable proposal card) opens an
 inline edit, and a corrected name rides the track gesture — the candidate is
 re-rendered under the candidates lock with the old name kept as a variant,
 so promotion aliases it and later sightings still resolve.
+
+Edits are held in a per-card overlay (`local[cardKey]`: edited slot values
+plus deselected rows), never read back out of the DOM, and every card's
+markup is generated from server data merged with that overlay — so a redraw
+reproduces an in-progress edit instead of discarding it, and the approve
+payload (`buildSpec`) is computed from the overlay rather than scraped from
+inputs. `#content` is reconciled per card, keyed by `data-key` with a
+fingerprint of the card's markup in `data-fp`: an unchanged card keeps its
+existing node. That matters because the page redraws on its own — the 4–8 s
+poll while an apply run is scheduled or running, the 8 s toast dismissal, and
+`visibilitychange` — and a wholesale `innerHTML` rebuild destroys the focused
+`<input>` mid-keystroke, which on a phone reads as the keyboard closing and
+the typing vanishing. The card holding the focused editor is therefore
+**pinned**: it is never replaced, moved, or removed while focus is inside it
+(reparenting a focused node blurs it, and iOS will not reopen the keyboard
+outside a user gesture), so a server-side change to it is deferred to the
+editor closing. A pinned card that has disappeared from the queue meanwhile —
+handled on the Mac — survives until blur and then reports that the edit
+wasn't applied, rather than silently evaporating. Overlays are pruned to the
+live queue on each render, except while the queue is unreadable
+(`dt != "ok"`), when pending edits must outlive the outage.
+
+The DOM-free half of the page (reconcile planner, spec collection, overlay
+helpers) is fenced between `BEGIN PURE CORE`/`END PURE CORE` markers in
+`index.html`; `tests/test_entity_review_ui.py` extracts that fence and drives
+it through the osascript JXA harness, since the asset is served whole and
+can't be imported as a module.
+
 After a decision the server debounces a `--apply-only` run (~20 s,
 `PIPELINE_MANUAL=1`, retreating to the 30-minute tick if the run lock stays
 busy), so the queue clears in seconds. The Things mirror needs no new

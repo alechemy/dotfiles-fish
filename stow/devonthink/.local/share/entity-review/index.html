@@ -105,6 +105,7 @@ a.chip:active, button.chip:active { opacity: .7; }
 li.off .rowtext { opacity: .4; text-decoration: line-through; }
 .fieldkey { color: var(--muted); }
 .pencil { opacity: .35; font-size: 12px; }
+.editing .pencil { display: none; }
 .who input[type=text], .planhead input[type=text] {
   font: inherit; color: inherit; background: var(--chip);
   border: 1px solid var(--line); border-radius: 7px; padding: 2px 8px;
@@ -179,6 +180,8 @@ li.off .rowtext { opacity: .4; text-decoration: line-through; }
 let queue = null;
 let toastTimer = null;
 let pollTimer = null;
+let local = {};
+let staleEdit = false;
 
 const $ = (sel, el) => (el || document).querySelector(sel);
 const esc = s => String(s ?? "").replace(/[&<>"']/g,
@@ -203,6 +206,133 @@ function banner(msg) {
   el.classList.toggle("hidden", !msg);
 }
 
+/* ---------- pure core ----------
+   Everything between the markers is DOM-free and state-free so
+   devonthink/tests/test_entity_review_ui.py can drive it directly.
+   BEGIN PURE CORE */
+
+function fpOf(s) {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = (h * 0x01000193) >>> 0;
+  }
+  return h.toString(36);
+}
+
+function emptyOverlay() { return {edits: {}, off: {}}; }
+
+function overlayOf(store, key) { return store[key] || emptyOverlay(); }
+
+function editedValue(ov, slot, fallback) {
+  const v = ov.edits[slot];
+  return v === undefined ? fallback : v;
+}
+
+function isOff(ov, slot) { return !!ov.off[slot]; }
+
+function pruneOverlay(store, liveKeys, pinned) {
+  const live = {};
+  for (const k of liveKeys) live[k] = true;
+  const out = {};
+  for (const k of Object.keys(store)) {
+    if (live[k] || k === pinned) out[k] = store[k];
+  }
+  return out;
+}
+
+/* Unchanged markup means the node is reused, so a background refresh never
+   rebuilds a card the user is typing into; the pinned card is deferred, not
+   replaced, when its data did change. */
+function planRender(current, desired, pinned) {
+  const cur = {};
+  current.forEach(it => { cur[it.key] = it.fp; });
+  const want = {};
+  desired.forEach(it => { want[it.key] = it.fp; });
+  const remove = [], replace = [], insert = [], defer = [];
+  for (const it of current) {
+    if (!(it.key in want) && it.key !== pinned) remove.push(it.key);
+  }
+  for (const it of desired) {
+    if (!(it.key in cur)) insert.push(it.key);
+    else if (cur[it.key] === it.fp) continue;
+    else if (it.key === pinned) defer.push(it.key);
+    else replace.push(it.key);
+  }
+  const order = desired.map(it => it.key);
+  let stale = false;
+  if (pinned && pinned in cur && !(pinned in want)) {
+    stale = true;
+    let at = 0;
+    for (let i = 0; i < current.length && current[i].key !== pinned; i++) {
+      if (current[i].key in want) at++;
+    }
+    order.splice(at, 0, pinned);
+  }
+  return {remove, replace, insert, defer, order, stale};
+}
+
+function buildSpec(pv, ov) {
+  const people = [], events = [];
+  let changed = false;
+  pv.plans.forEach((plan, pi) => {
+    if (isOff(ov, "plan:" + pi)) { changed = true; return; }
+    if (plan.kind === "event") {
+      events.push({name: plan.name, date: plan.date, location: plan.location,
+                   attendees: plan.attendees, summary: plan.summary});
+      return;
+    }
+    const name = editedValue(ov, "pname:" + pi, plan.name);
+    if (name !== plan.name) changed = true;
+    const facts = [];
+    plan.facts.forEach((f, fi) => {
+      const slot = "fact:" + pi + ":" + fi;
+      if (isOff(ov, slot)) { changed = true; return; }
+      const text = editedValue(ov, slot, f[1]);
+      if (text !== f[1]) changed = true;
+      if (text) facts.push({date: f[0], fact: text});
+    });
+    const updates = {};
+    for (const [k, v] of Object.entries(plan.updates)) {
+      const slot = "field:" + pi + ":" + k;
+      if (isOff(ov, slot)) { changed = true; continue; }
+      const value = editedValue(ov, slot, v);
+      if (value !== v) changed = true;
+      if (value) updates[k] = value;
+    }
+    if (!facts.length && !Object.keys(updates).length) return;
+    people.push({name, interacted: !!plan.interacted, facts, updates});
+  });
+  return {people, events, changed};
+}
+
+/* END PURE CORE */
+
+function ov(key) {
+  if (!local[key]) local[key] = emptyOverlay();
+  return local[key];
+}
+
+function setEdit(key, slot, value) { ov(key).edits[slot] = value; }
+
+function setOff(key, slot, off) {
+  const o = ov(key);
+  if (off) o.off[slot] = true;
+  else delete o.off[slot];
+}
+
+function cardKeyOf(el) {
+  const card = el.closest("[data-key]");
+  return card ? card.dataset.key : null;
+}
+
+function pinnedKey() {
+  const el = document.activeElement;
+  if (!el || !el.matches || !el.matches("input, textarea")) return null;
+  if (!el.closest("#content")) return null;
+  return cardKeyOf(el);
+}
+
 async function refresh(manual) {
   try {
     queue = await api("api/queue");
@@ -211,51 +341,121 @@ async function refresh(manual) {
   } catch (e) {
     if (manual || !queue) {
       queue = null;
-      $("#content").innerHTML =
+      showState("offline",
         '<div class="state"><div class="big">⚠️</div>Can’t reach the review server.' +
-        '<div><button class="btn" data-act="refresh">Try again</button></div></div>';
+        '<div><button class="btn" data-act="refresh">Try again</button></div></div>');
     } else {
       banner("Couldn’t refresh — " + e.message);
     }
   }
 }
 
-function render() {
-  clearTimeout(pollTimer);
-  const c = $("#content");
-  if (!queue) return;
+function item(key, html) { return {key, fp: fpOf(html), html}; }
+
+function showState(key, html) {
+  applyItems($("#content"), [item("state:" + key, html)], pinnedKey());
+}
+
+function viewItems() {
   if (queue.dt === "closed") {
-    c.innerHTML =
+    return [item("state:dt-closed",
       '<div class="state"><div class="big">💤</div>DEVONthink isn’t open on the Mac.' +
-      '<div><button class="btn primary" data-act="open-dt">Open it</button></div></div>';
-    updateHeader();
-    return;
+      '<div><button class="btn primary" data-act="open-dt">Open it</button></div></div>')];
   }
   if (queue.dt === "error") {
-    c.innerHTML =
+    return [item("state:dt-error",
       '<div class="state"><div class="big">⚠️</div>Something went wrong reading the queue.' +
-      '<div><button class="btn" data-act="refresh">Try again</button></div></div>';
-    updateHeader();
-    return;
+      '<div><button class="btn" data-act="refresh">Try again</button></div></div>')];
   }
   const cands = queue.candidates || [];
   const props = queue.proposals || [];
-  let html = "";
+  const items = [];
   if (cands.length) {
-    html += '<h2 class="sec">People to review</h2>' + cands.map(candidateCard).join("");
+    items.push(item("h:cands", '<h2 class="sec">People to review</h2>'));
+    for (const cv of cands) {
+      const key = "c-" + cv.uuid;
+      items.push(item(key, candidateCard(cv, overlayOf(local, key))));
+    }
   }
   if (props.length) {
-    html += '<h2 class="sec">Filings to approve</h2>' + props.map(proposalCard).join("");
+    items.push(item("h:props", '<h2 class="sec">Filings to approve</h2>'));
+    for (const pv of props) {
+      const key = "c-" + pv.uuid;
+      items.push(item(key, proposalCard(pv, overlayOf(local, key))));
+    }
   }
-  if (!html) {
+  if (!items.length) {
     const queued = (queue.queued.candidates || 0) + (queue.queued.proposals || 0);
-    html = '<div class="state"><div class="big">✅</div>All clear.' +
+    items.push(item("state:clear",
+      '<div class="state"><div class="big">✅</div>All clear.' +
       (queued ? "<div>" + queued + " decision" + (queued > 1 ? "s" : "") +
-        " finishing up.</div>" : "") + "</div>";
+        " finishing up.</div>" : "") + "</div>"));
   }
-  c.innerHTML = html;
+  return items;
+}
+
+function childByKey(c, key) {
+  for (const el of c.children) if ((el.dataset.key || "") === key) return el;
+  return null;
+}
+
+function buildNode(it) {
+  const t = document.createElement("template");
+  t.innerHTML = it.html.trim();
+  const el = t.content.firstElementChild;
+  el.dataset.key = it.key;
+  el.dataset.fp = it.fp;
+  return el;
+}
+
+function applyItems(c, items, pinned) {
+  const current = [];
+  for (const el of c.children) {
+    current.push({key: el.dataset.key || "", fp: el.dataset.fp || ""});
+  }
+  const byKey = {};
+  for (const it of items) byKey[it.key] = it;
+  const plan = planRender(current, items, pinned);
+  for (const key of plan.remove) {
+    const el = childByKey(c, key);
+    if (el) el.remove();
+  }
+  for (const key of plan.replace) {
+    const el = childByKey(c, key);
+    if (el) el.replaceWith(buildNode(byKey[key]));
+  }
+  for (const key of plan.insert) c.appendChild(buildNode(byKey[key]));
+  let prev = null;
+  for (const key of plan.order) {
+    const el = childByKey(c, key);
+    if (!el) continue;
+    const want = prev ? prev.nextSibling : c.firstChild;
+    // Reparenting a focused node blurs it, and iOS won't reopen the
+    // keyboard outside a gesture — so the pinned card never moves.
+    if (el !== want && key !== pinned) c.insertBefore(el, want);
+    prev = el;
+  }
+  return plan;
+}
+
+function render() {
+  clearTimeout(pollTimer);
+  if (!queue) return;
+  const pinned = pinnedKey();
+  const items = viewItems();
+  // A closed/errored queue renders no cards; pruning against it would throw
+  // away edits that are still pending once DEVONthink answers again.
+  if (queue.dt === "ok") {
+    local = pruneOverlay(local, items.map(it => it.key), pinned);
+  }
+  const plan = applyItems($("#content"), items, pinned);
+  if (plan.stale) staleEdit = true;
+  if (staleEdit && !pinned) {
+    staleEdit = false;
+    banner("That card was handled on the Mac — your edit wasn’t applied.");
+  }
   updateHeader();
-  jumpToHash();
+  if (!pinned) jumpToHash();
 }
 
 function updateHeader() {
@@ -293,7 +493,7 @@ function dtLink(uuid, label) {
 
 /* ---------- candidates ---------- */
 
-function candidateCard(cv) {
+function candidateCard(cv, o) {
   if (cv.broken) {
     return '<div class="card" id="c-' + esc(cv.uuid) + '"><div class="cardtop">' +
       '<span class="who">' + esc(cv.name) + '</span>' +
@@ -301,12 +501,12 @@ function candidateCard(cv) {
       '<div class="notice">This record can’t be read here — it needs a look in DEVONthink.</div>' +
       '<div class="chips">' + dtLink(cv.uuid, "Open in DEVONthink") + "</div></div>";
   }
+  const name = editedValue(o, "cname", cv.name);
   const seen = cv.seen.count + (cv.seen.count === 1 ? " sighting" : " sightings") +
     (cv.seen.last ? " · last " + cv.seen.last : "");
   let html = '<div class="card" id="c-' + esc(cv.uuid) + '"><div class="cardtop">' +
-    '<span class="who" data-role="cname" data-name="' + esc(cv.name) +
-    '" data-orig="' + esc(cv.name) + '">' + esc(cv.name) +
-    ' <span class="pencil">✎</span></span>' +
+    '<span class="who" data-role="cname" data-slot="cname" data-max="120">' +
+    '<span class="txt">' + esc(name) + '</span> <span class="pencil">✎</span></span>' +
     '<span class="meta">' + esc(seen) + "</span>" +
     (cv.urgent ? '<span class="badge">has a saved fact</span>' : "") +
     (cv.detached ? '<span class="badge">decide promptly</span>' : "") +
@@ -318,7 +518,7 @@ function candidateCard(cv) {
   for (const p of cv.peers) chips.push(dtLink(p.uuid, "same name: " + p.name));
   if (chips.length) html += '<div class="chips">' + chips.join("") + "</div>";
   html += evidenceList(cv.sightings);
-  html += candidateActions(cv);
+  html += candidateActions(cv, name !== cv.name);
   return html + "</div>";
 }
 
@@ -348,36 +548,38 @@ function candBtn(cls, cv, action, label, opts) {
     (opts.distinct ? ' data-distinct="1"' : "") +
     (opts.noundo ? ' data-noundo="1"' : "") +
     (opts.tip ? ' title="' + esc(opts.tip) + '"' : "") +
+    (opts.disabled ? " disabled" : "") +
     ' data-msg="' + esc(opts.msg || label) + '">' + esc(label) + "</button>";
 }
 
-function candidateActions(cv) {
+function candidateActions(cv, edited) {
   const d = cv.disposition || {};
+  const pickerBtn = label => '<button class="btn" data-act="picker" data-uuid="' +
+    esc(cv.uuid) + '"' + (edited ? " disabled" : "") + ">" + label + "</button>";
   let html = '<div class="actions">';
   if (d.kind === "file_into") {
     html += candBtn("into", cv, "track", "File into " + d.target.name,
-      {target: d.target.uuid, msg: "Filed into " + d.target.name});
+      {target: d.target.uuid, msg: "Filed into " + d.target.name,
+       disabled: edited});
   } else if (d.kind === "new_ok") {
     html += candBtn("create", cv, "track", "Add as new person", {msg: "Added"});
-    html += '<button class="btn" data-act="picker" data-uuid="' + esc(cv.uuid) +
-      '">Existing person…</button>';
+    html += pickerBtn("Existing person…");
   } else if (d.kind === "needs_choice") {
     let nearShown = 0;
     for (const n of (d.near || []).slice(0, 2)) {
       if (!n.uuid) continue;
       nearShown++;
       html += candBtn("into", cv, "track", "This is " + n.name,
-        {target: n.uuid, msg: "Filed into " + n.name});
+        {target: n.uuid, msg: "Filed into " + n.name, disabled: edited});
     }
     html += candBtn("create", cv, "track", "Add as new person",
       {distinct: true, msg: "Added"});
-    html += '<button class="btn" data-act="picker" data-uuid="' + esc(cv.uuid) +
-      '">' + (nearShown ? "Someone else…" : "Existing person…") + "</button>";
+    html += pickerBtn(nearShown ? "Someone else…" : "Existing person…");
   } else if (d.kind === "ambiguous") {
     if ((d.choices || []).length) {
       for (const c of d.choices) {
         html += candBtn("into", cv, "track", "This is " + c.name,
-          {target: c.uuid, msg: "Filed into " + c.name});
+          {target: c.uuid, msg: "Filed into " + c.name, disabled: edited});
       }
     } else {
       html += '<div class="notice">Could be ' +
@@ -439,7 +641,7 @@ function closePicker() { $("#picker").classList.add("hidden"); }
 
 /* ---------- proposals ---------- */
 
-function proposalCard(pv) {
+function proposalCard(pv, o) {
   const u = esc(pv.uuid);
   if (pv.broken) {
     return '<div class="card" id="c-' + u + '"><div class="cardtop">' +
@@ -463,7 +665,7 @@ function proposalCard(pv) {
       "</div>";
     return html + "</div>";
   }
-  pv.plans.forEach((plan, pi) => { html += planBlock(plan, pi, pv.editable); });
+  pv.plans.forEach((plan, pi) => { html += planBlock(plan, pi, pv.editable, o); });
   if (!pv.editable)
     html += '<div class="chips"><span class="chip">applies exactly as written</span></div>';
   html += '<div class="actions">' +
@@ -480,138 +682,87 @@ function propBtn(cls, pv, action, label, opts) {
     ' data-msg="' + esc(opts.msg || label) + '">' + esc(label) + "</button>";
 }
 
-function planBlock(plan, pi, editable) {
+function rowCheckbox(slot, off, planOff) {
+  return '<input type="checkbox" data-role="row" data-slot="' + slot + '"' +
+    (off ? "" : " checked") + (planOff ? " disabled" : "") + ">";
+}
+
+function planBlock(plan, pi, editable, o) {
+  const planOff = isOff(o, "plan:" + pi);
   const cb = editable
-    ? '<input type="checkbox" checked data-role="plan" data-plan="' + pi + '">'
+    ? '<input type="checkbox" data-role="plan" data-slot="plan:' + pi + '"' +
+      (planOff ? "" : " checked") + ">"
     : "";
   if (plan.kind === "event") {
     let html = '<div class="plan" data-pi="' + pi + '"><div class="planhead">' + cb +
       "📅 " + esc(plan.name) + ' <span class="meta">' + esc(plan.date) +
       (plan.location ? " · " + esc(plan.location) : "") + "</span></div><ul class='rows'>";
+    const off = planOff ? ' class="off"' : "";
     if (plan.attendees.length)
-      html += '<li><span class="rowtext">with ' + esc(plan.attendees.join(", ")) + "</span></li>";
+      html += "<li" + off + '><span class="rowtext">with ' +
+        esc(plan.attendees.join(", ")) + "</span></li>";
     if (plan.summary)
-      html += '<li><span class="rowtext">' + esc(plan.summary) + "</span></li>";
+      html += "<li" + off + '><span class="rowtext">' + esc(plan.summary) + "</span></li>";
     return html + "</ul></div>";
   }
   const tag = plan.kind === "new" ? ' <span class="badge">new person</span>' : "";
   const nameHtml = editable
-    ? '<span data-role="pname" data-name="' + esc(plan.name) +
-      '"><span class="txt">' + esc(plan.name) + '</span> <span class="pencil">✎</span></span>'
+    ? '<span data-role="pname" data-slot="pname:' + pi + '" data-max="120">' +
+      '<span class="txt">' + esc(editedValue(o, "pname:" + pi, plan.name)) +
+      '</span> <span class="pencil">✎</span></span>'
     : esc(plan.name);
   let html = '<div class="plan" data-pi="' + pi + '"><div class="planhead">' + cb +
     nameHtml + tag + "</div><ul class='rows'>";
   plan.facts.forEach((f, fi) => {
-    html += "<li>" + (editable
-      ? '<input type="checkbox" checked data-role="row" data-fact="' + fi + '">'
-      : "") +
-      '<span class="rowtext" data-role="fact" data-fact="' + fi +
-      '" data-date="' + esc(f[0]) + '" data-text="' + esc(f[1]) + '">' +
-      '<span class="d">' + esc(f[0]) + "</span><span class=\"txt\">" + esc(f[1]) +
-      "</span></span></li>";
+    const slot = "fact:" + pi + ":" + fi;
+    const off = planOff || isOff(o, slot);
+    html += "<li" + (off ? ' class="off"' : "") + ">" +
+      (editable ? rowCheckbox(slot, off, planOff) : "") +
+      '<span class="rowtext" data-role="fact" data-slot="' + slot + '" data-max="400">' +
+      '<span class="d">' + esc(f[0]) + "</span><span class=\"txt\">" +
+      esc(editedValue(o, slot, f[1])) + "</span></span></li>";
   });
   for (const [k, v] of Object.entries(plan.updates)) {
-    html += "<li>" + (editable
-      ? '<input type="checkbox" checked data-role="row" data-field="' + esc(k) + '">'
-      : "") +
-      '<span class="rowtext" data-role="field" data-field="' + esc(k) +
-      '" data-value="' + esc(v) + '">' +
-      '<span class="fieldkey">' + esc(k) + ' → </span><span class="txt">' + esc(v) +
-      "</span></span></li>";
+    const slot = "field:" + pi + ":" + k;
+    const off = planOff || isOff(o, slot);
+    html += "<li" + (off ? ' class="off"' : "") + ">" +
+      (editable ? rowCheckbox(esc(slot), off, planOff) : "") +
+      '<span class="rowtext" data-role="field" data-slot="' + esc(slot) +
+      '" data-max="400">' +
+      '<span class="fieldkey">' + esc(k) + ' → </span><span class="txt">' +
+      esc(editedValue(o, slot, v)) + "</span></span></li>";
   }
   return html + "</ul></div>";
 }
 
-function togglePlan(cb) {
-  const plan = cb.closest(".plan");
-  for (const row of plan.querySelectorAll('input[data-role="row"]')) {
-    row.checked = cb.checked;
-    row.closest("li").classList.toggle("off", !cb.checked);
-  }
-}
-
-const EDIT_KEY = {fact: "text", field: "value", pname: "name"};
-
 function startEdit(span) {
   if (span.querySelector("input")) return;
-  const key = EDIT_KEY[span.dataset.role];
+  const key = cardKeyOf(span);
+  const slot = span.dataset.slot;
+  if (!key || !slot) return;
   const txt = $(".txt", span);
-  txt.innerHTML = '<input type="text" maxlength="400">';
+  const before = txt.textContent;
+  span.classList.add("editing");
+  txt.innerHTML = '<input type="text" maxlength="' +
+    (Number(span.dataset.max) || 400) + '">';
   const input = $("input", txt);
-  input.value = span.dataset[key];
+  input.value = before;
   input.addEventListener("blur", () => {
     const value = input.value.replace(/\s+/g, " ").trim();
-    if (value) span.dataset[key] = value;
-    txt.textContent = span.dataset[key];
+    span.classList.remove("editing");
+    txt.textContent = value || before;
+    if (value) setEdit(key, slot, value);
+    render();
   });
   input.addEventListener("keydown", e => { if (e.key === "Enter") input.blur(); });
   input.focus();
-}
-
-function startEditName(span) {
-  if (span.querySelector("input")) return;
-  span.innerHTML = '<input type="text" maxlength="120">';
-  const input = $("input", span);
-  input.value = span.dataset.name;
-  input.addEventListener("blur", () => {
-    const value = input.value.replace(/\s+/g, " ").trim();
-    if (value) span.dataset.name = value;
-    span.innerHTML = esc(span.dataset.name) + ' <span class="pencil">✎</span>';
-    const edited = span.dataset.name !== span.dataset.orig;
-    for (const b of span.closest(".card").querySelectorAll(
-        'button[data-target], button[data-act="picker"]')) {
-      b.disabled = edited;
-    }
-  });
-  input.addEventListener("keydown", e => { if (e.key === "Enter") input.blur(); });
-  input.focus();
-}
-
-function collectSpec(card, pv) {
-  const people = [], events = [];
-  let changed = false;
-  pv.plans.forEach((plan, pi) => {
-    const block = card.querySelector('.plan[data-pi="' + pi + '"]');
-    const planCb = block.querySelector('input[data-role="plan"]');
-    if (planCb && !planCb.checked) { changed = true; return; }
-    if (plan.kind === "event") {
-      events.push({name: plan.name, date: plan.date, location: plan.location,
-                   attendees: plan.attendees, summary: plan.summary});
-      return;
-    }
-    const nameSpan = block.querySelector('span[data-role="pname"]');
-    const name = nameSpan ? nameSpan.dataset.name : plan.name;
-    if (name !== plan.name) changed = true;
-    const facts = [];
-    plan.facts.forEach((f, fi) => {
-      const cb = block.querySelector('input[data-fact="' + fi + '"]');
-      if (cb && !cb.checked) { changed = true; return; }
-      const span = block.querySelector('span[data-fact="' + fi + '"]');
-      const text = span ? span.dataset.text : f[1];
-      if (text !== f[1]) changed = true;
-      if (text) facts.push({date: f[0], fact: text});
-    });
-    const updates = {};
-    for (const [k, v] of Object.entries(plan.updates)) {
-      const cb = block.querySelector('input[data-field="' + CSS.escape(k) + '"]');
-      if (cb && !cb.checked) { changed = true; continue; }
-      const span = block.querySelector('span[data-field="' + CSS.escape(k) + '"]');
-      const value = span ? span.dataset.value : v;
-      if (value !== v) changed = true;
-      if (value) updates[k] = value;
-    }
-    if (!facts.length && !Object.keys(updates).length) return;
-    people.push({name, interacted: !!plan.interacted, facts, updates});
-  });
-  return {people, events, changed};
 }
 
 async function approveProposal(uuid, confirm) {
   const pv = queue.proposals.find(p => p.uuid === uuid);
-  const card = document.getElementById("c-" + uuid);
   let body = {action: "approve"};
   if (pv.editable) {
-    const spec = collectSpec(card, pv);
+    const spec = buildSpec(pv, overlayOf(local, "c-" + uuid));
     if (spec.changed || confirm) {
       if (!spec.people.length && !spec.events.length) {
         banner("Nothing left to file — use Reject instead.");
@@ -698,7 +849,8 @@ async function applyNow() {
 
 async function openDT() {
   try { await api("api/open-dt", {}); } catch (e) { banner(e.message); return; }
-  $("#content").innerHTML = '<div class="state"><div class="big">💤</div>Opening DEVONthink…</div>';
+  showState("opening",
+    '<div class="state"><div class="big">💤</div>Opening DEVONthink…</div>');
   let tries = 0;
   const wait = async () => {
     await refresh(false);
@@ -722,15 +874,8 @@ function jumpToHash() {
 document.addEventListener("click", e => {
   const el = e.target.closest("[data-act]");
   if (!el) {
-    const span = e.target.closest(
-      'span[data-role="fact"], span[data-role="field"], span[data-role="pname"]');
-    if (span && span.closest(".card")) {
-      const cardEl = span.closest(".card");
-      const pv = queue && queue.proposals.find(p => "c-" + p.uuid === cardEl.id);
-      if (pv && pv.editable) startEdit(span);
-    }
-    const who = e.target.closest('span[data-role="cname"]');
-    if (who) startEditName(who);
+    const span = e.target.closest("span[data-slot]");
+    if (span && span.closest("#content")) startEdit(span);
     if (e.target === $("#picker")) closePicker();
     return;
   }
@@ -749,8 +894,10 @@ document.addEventListener("click", e => {
       const extra = {target: d.target || undefined,
                      distinct: d.distinct ? true : undefined};
       if (d.action === "track" && !d.target) {
-        const who = el.closest(".card").querySelector('span[data-role="cname"]');
-        if (who && who.dataset.name !== who.dataset.orig) extra.name = who.dataset.name;
+        const cv = queue.candidates.find(c => c.uuid === d.uuid);
+        const name = editedValue(overlayOf(local, "c-" + d.uuid), "cname",
+                                 cv ? cv.name : "");
+        if (cv && name !== cv.name) extra.name = name;
       }
       decideCandidate(d.uuid, d.action, extra, d.msg, !!d.noundo);
       break;
@@ -761,9 +908,12 @@ document.addEventListener("click", e => {
 });
 
 document.addEventListener("change", e => {
-  if (e.target.matches('input[data-role="plan"]')) togglePlan(e.target);
-  else if (e.target.matches('input[data-role="row"]'))
-    e.target.closest("li").classList.toggle("off", !e.target.checked);
+  const t = e.target;
+  if (!t.matches('input[type="checkbox"][data-slot]')) return;
+  const key = cardKeyOf(t);
+  if (!key) return;
+  setOff(key, t.dataset.slot, !t.checked);
+  render();
 });
 
 document.addEventListener("visibilitychange", () => {
