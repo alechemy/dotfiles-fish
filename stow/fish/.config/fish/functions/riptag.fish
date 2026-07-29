@@ -6,6 +6,7 @@ function riptag -d "download, tag, and organize an album into the music library"
     set -l LOCAL_PYTHON $HOME/Developer/streamrip/.venv/bin/python3
     set -l LOCAL_RIP $HOME/Developer/streamrip/.venv/bin/rip
     set -l TAGGER $HOME/.local/bin/tagger.py
+    set -l MUSIC_TAGS $HOME/.local/bin/_music_tags.py
     set -l ORGANIZER $HOME/.local/bin/music-organize.py
     set -l WORKER $HOME/.local/bin/riptag-worker.sh
     set -l ALLOWED_GENRES Ambient Bluegrass Classical Country Electronic Experimental Folk Hip-Hop Jazz Lo-Fi Mashup Pop R&B Reggae Rock Soundtrack Unknown
@@ -335,7 +336,7 @@ for r in json.load(sys.stdin):
         end
 
         # Deploy scripts to NAS /tmp, then run via SSH
-        scp -q "$TAGGER" "$ORGANIZER" "$WORKER" "$NAS":/tmp/
+        scp -q "$TAGGER" "$MUSIC_TAGS" "$ORGANIZER" "$WORKER" "$NAS":/tmp/
         if test $status -ne 0
             echo "ERROR: Failed to deploy scripts to NAS."
             return 1
