@@ -1412,6 +1412,38 @@ class PromotionTarget(unittest.TestCase):
         self.assertIsNone(target)
         self.assertIn("alias collision", reason)
 
+    def test_track_target_disambiguates_a_shared_key(self):
+        people = [person("Jordan Pike", uuid="P1"),
+                  person("Jordan Pike", uuid="P2")]
+        target, reason, _near = self.preflight(
+            self.data(), md={"mdtracktarget": "P2"}, people=people)
+        self.assertEqual(target, "P2")
+        self.assertIsNone(reason)
+
+    def test_track_target_never_overrides_a_foreign_key(self):
+        people = [person("Jordan Pike", uuid="P1"),
+                  person("Someone Else", uuid="P2", email="jp@x.com")]
+        target, reason, _near = self.preflight(
+            self.data(emails=["jp@x.com"]), md={"mdtracktarget": "P1"},
+            people=people)
+        self.assertIsNone(target)
+        self.assertIn("Someone Else", reason)
+        self.assertIn("--split-candidate", reason)
+
+    def test_shared_key_bounce_advises_track_target(self):
+        people = [person("Jordan Pike", uuid="P1"),
+                  person("Jordan Pike", uuid="P2")]
+        _target, reason, _near = self.preflight(self.data(), people=people)
+        self.assertIn("set TrackTarget to choose", reason)
+
+    def test_conflation_bounce_advises_split(self):
+        people = [person("Jordan Pike", uuid="P1"),
+                  person("Someone Else", uuid="P2", email="jp@x.com")]
+        _target, reason, _near = self.preflight(
+            self.data(emails=["jp@x.com"]), people=people)
+        self.assertIn("--split-candidate", reason)
+        self.assertNotIn("set TrackTarget", reason)
+
     def test_track_target_wins_when_compatible(self):
         people = [person("Target Person", uuid="P2")]
         target, reason, _near = self.preflight(

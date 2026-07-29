@@ -141,12 +141,22 @@ class CandidateDisposition(unittest.TestCase):
         self.assertEqual(d["target"], {"uuid": FEN["uuid"],
                                        "name": "Fenwick Doyle"})
 
-    def test_identifiers_hitting_two_people_is_ambiguous(self):
+    def test_conflated_identifiers_are_ambiguous_with_no_choices(self):
         d = self.dispo(make_candidate("Fenwick Doyle",
                                       emails=["sable@x.com"]))
         self.assertEqual(d["kind"], "ambiguous")
         self.assertEqual({h["uuid"] for h in d["hits"]},
                          {FEN["uuid"], SAB["uuid"]})
+        self.assertEqual(d["choices"], [])
+
+    def test_shared_name_ambiguity_offers_both_as_choices(self):
+        people = [person("Fenwick Doyle"),
+                  person("Fenwick Doyle", uuid="uuid-fenwick-2")]
+        d = srv.candidate_disposition(make_candidate("Fenwick Doyle"), {},
+                                      people, ef.roster_index(people))
+        self.assertEqual(d["kind"], "ambiguous")
+        self.assertEqual({c["uuid"] for c in d["choices"]},
+                         {"uuid-fenwick-doyle", "uuid-fenwick-2"})
 
     def test_single_token_name_needs_choice(self):
         self.assertEqual(self.dispo(make_candidate("Juniper"))["kind"],
@@ -172,6 +182,29 @@ class CandidateDisposition(unittest.TestCase):
                        md={"mdtracktarget": FEN["uuid"]})
         self.assertEqual(d["kind"], "file_into")
         self.assertEqual(d["target"]["uuid"], FEN["uuid"])
+
+
+class CandidateRenameOps(unittest.TestCase):
+    def test_rename_rerenders_and_keeps_the_old_name_as_variant(self):
+        data = make_candidate("Juniper")
+        ops = srv.candidate_rename_ops("CAND-0001-UUID", "Juniper Wask",
+                                       ec.render_candidate(data), PEOPLE)
+        self.assertEqual([op["op"] for op in ops], ["set_text", "set_name"])
+        self.assertEqual(ops[1]["name"], "Candidate: Juniper Wask")
+        renamed = ec.parse_candidate(ops[0]["text"])
+        self.assertEqual(renamed["name"], "Juniper Wask")
+        self.assertIn("Juniper", renamed["name_variants"])
+
+    def test_unchanged_name_is_a_no_op(self):
+        data = make_candidate("Juniper")
+        self.assertEqual(
+            srv.candidate_rename_ops("CAND-0001-UUID", " juniper ",
+                                     ec.render_candidate(data), PEOPLE), [])
+
+    def test_unreadable_body_refuses_rename(self):
+        with self.assertRaises(srv.RequestError):
+            srv.candidate_rename_ops("CAND-0001-UUID", "Juniper Wask",
+                                     "no fence", PEOPLE)
 
 
 class CandidateView(unittest.TestCase):
@@ -455,6 +488,35 @@ class HandlerPlumbing(unittest.TestCase):
     def test_undo_does_not_kick_apply(self):
         srv.handle_candidate("CAND-0001-UUID", {"action": "undo"})
         self.assertEqual(self.kicks, [])
+
+    def test_corrected_name_prepends_rename_ops(self):
+        text = ec.render_candidate(make_candidate("Juniper"))
+
+        def bridge(ops, timeout=300):
+            self.calls.append(ops)
+            out = []
+            for op in ops:
+                if op["op"] == "get_text":
+                    out.append({"uuid": op["uuid"], "text": text})
+                elif op["op"] == "dump_people":
+                    out.append(PEOPLE)
+                else:
+                    out.append({"uuid": op.get("uuid", "")})
+            return out
+
+        ef.run_bridge = bridge
+        srv.handle_candidate("CAND-0001-UUID",
+                             {"action": "track", "distinct": True,
+                              "name": "Juniper Wask"})
+        ops = self.calls[-1]
+        self.assertEqual([op["op"] for op in ops],
+                         ["set_text", "set_name", "set_fields", "move_to"])
+
+    def test_corrected_name_with_target_is_refused(self):
+        with self.assertRaises(srv.RequestError):
+            srv.handle_candidate("CAND-0001-UUID",
+                                 {"action": "track", "target": FEN["uuid"],
+                                  "name": "Juniper Wask"})
 
     def test_proposal_reject_trashes(self):
         srv.handle_proposal("PROP-0001-UUID", {"action": "reject"})

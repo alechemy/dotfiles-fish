@@ -100,6 +100,12 @@ a.chip:active, button.chip:active { opacity: .7; }
 }
 li.off .rowtext { opacity: .4; text-decoration: line-through; }
 .fieldkey { color: var(--muted); }
+.pencil { opacity: .35; font-size: 12px; }
+.who input[type=text], .planhead input[type=text] {
+  font: inherit; color: inherit; background: var(--chip);
+  border: 1px solid var(--line); border-radius: 7px; padding: 2px 8px;
+  max-width: 14em;
+}
 .captured { background: var(--chip); border-radius: 9px; padding: 10px 12px;
   font-size: 14px; white-space: pre-wrap; margin-top: 8px; max-height: 180px; overflow-y: auto; }
 .state { text-align: center; color: var(--muted); padding: 48px 20px; }
@@ -294,7 +300,9 @@ function candidateCard(cv) {
   const seen = cv.seen.count + (cv.seen.count === 1 ? " sighting" : " sightings") +
     (cv.seen.last ? " · last " + cv.seen.last : "");
   let html = '<div class="card" id="c-' + esc(cv.uuid) + '"><div class="cardtop">' +
-    '<span class="who">' + esc(cv.name) + '</span>' +
+    '<span class="who" data-role="cname" data-name="' + esc(cv.name) +
+    '" data-orig="' + esc(cv.name) + '">' + esc(cv.name) +
+    ' <span class="pencil">✎</span></span>' +
     '<span class="meta">' + esc(seen) + "</span>" +
     (cv.urgent ? '<span class="badge">has a saved fact</span>' : "") +
     (cv.detached ? '<span class="badge">decide promptly</span>' : "") +
@@ -358,10 +366,17 @@ function candidateActions(cv) {
       '">Someone else…</button>';
     html += candBtn("", cv, "track", "New person", {distinct: true, msg: "Added"});
   } else if (d.kind === "ambiguous") {
-    html += '<div class="notice">Could be ' +
-      esc((d.hits || []).map(h => h.name).join(" or ")) +
-      " — this one needs untangling in DEVONthink.</div>" +
-      '<div class="chips">' + dtLink(cv.uuid, "Open in DEVONthink") + "</div>";
+    if ((d.choices || []).length) {
+      for (const c of d.choices) {
+        html += candBtn("primary", cv, "track", "This is " + c.name,
+          {target: c.uuid, msg: "Filed into " + c.name});
+      }
+    } else {
+      html += '<div class="notice">Could be ' +
+        esc((d.hits || []).map(h => h.name).join(" or ")) +
+        " — their evidence is mixed together and needs untangling in DEVONthink.</div>" +
+        '<div class="chips">' + dtLink(cv.uuid, "Open in DEVONthink") + "</div>";
+    }
   }
   html += candBtn("quiet", cv, "ignore", "Ignore", {msg: "Won’t be suggested again"});
   html += candBtn("danger", cv, "forget", "Dismiss",
@@ -469,8 +484,12 @@ function planBlock(plan, pi, editable) {
     return html + "</ul></div>";
   }
   const tag = plan.kind === "new" ? ' <span class="badge">new person</span>' : "";
+  const nameHtml = editable
+    ? '<span data-role="pname" data-name="' + esc(plan.name) +
+      '"><span class="txt">' + esc(plan.name) + '</span> <span class="pencil">✎</span></span>'
+    : esc(plan.name);
   let html = '<div class="plan" data-pi="' + pi + '"><div class="planhead">' + cb +
-    esc(plan.name) + tag + "</div><ul class='rows'>";
+    nameHtml + tag + "</div><ul class='rows'>";
   plan.facts.forEach((f, fi) => {
     html += "<li>" + (editable
       ? '<input type="checkbox" checked data-role="row" data-fact="' + fi + '">'
@@ -500,18 +519,33 @@ function togglePlan(cb) {
   }
 }
 
+const EDIT_KEY = {fact: "text", field: "value", pname: "name"};
+
 function startEdit(span) {
   if (span.querySelector("input")) return;
+  const key = EDIT_KEY[span.dataset.role];
   const txt = $(".txt", span);
-  const current = span.dataset.role === "fact" ? span.dataset.text : span.dataset.value;
   txt.innerHTML = '<input type="text" maxlength="400">';
   const input = $("input", txt);
-  input.value = current;
+  input.value = span.dataset[key];
   input.addEventListener("blur", () => {
-    const value = input.value.trim();
-    if (span.dataset.role === "fact") span.dataset.text = value || span.dataset.text;
-    else span.dataset.value = value || span.dataset.value;
-    txt.textContent = span.dataset.role === "fact" ? span.dataset.text : span.dataset.value;
+    const value = input.value.replace(/\s+/g, " ").trim();
+    if (value) span.dataset[key] = value;
+    txt.textContent = span.dataset[key];
+  });
+  input.addEventListener("keydown", e => { if (e.key === "Enter") input.blur(); });
+  input.focus();
+}
+
+function startEditName(span) {
+  if (span.querySelector("input")) return;
+  span.innerHTML = '<input type="text" maxlength="120">';
+  const input = $("input", span);
+  input.value = span.dataset.name;
+  input.addEventListener("blur", () => {
+    const value = input.value.replace(/\s+/g, " ").trim();
+    if (value) span.dataset.name = value;
+    span.innerHTML = esc(span.dataset.name) + ' <span class="pencil">✎</span>';
   });
   input.addEventListener("keydown", e => { if (e.key === "Enter") input.blur(); });
   input.focus();
@@ -529,6 +563,9 @@ function collectSpec(card, pv) {
                    attendees: plan.attendees, summary: plan.summary});
       return;
     }
+    const nameSpan = block.querySelector('span[data-role="pname"]');
+    const name = nameSpan ? nameSpan.dataset.name : plan.name;
+    if (name !== plan.name) changed = true;
     const facts = [];
     plan.facts.forEach((f, fi) => {
       const cb = block.querySelector('input[data-fact="' + fi + '"]');
@@ -548,7 +585,7 @@ function collectSpec(card, pv) {
       if (value) updates[k] = value;
     }
     if (!facts.length && !Object.keys(updates).length) return;
-    people.push({name: plan.name, interacted: !!plan.interacted, facts, updates});
+    people.push({name, interacted: !!plan.interacted, facts, updates});
   });
   return {people, events, changed};
 }
@@ -669,12 +706,15 @@ function jumpToHash() {
 document.addEventListener("click", e => {
   const el = e.target.closest("[data-act]");
   if (!el) {
-    const span = e.target.closest('span[data-role="fact"], span[data-role="field"]');
+    const span = e.target.closest(
+      'span[data-role="fact"], span[data-role="field"], span[data-role="pname"]');
     if (span && span.closest(".card")) {
       const cardEl = span.closest(".card");
       const pv = queue && queue.proposals.find(p => "c-" + p.uuid === cardEl.id);
       if (pv && pv.editable) startEdit(span);
     }
+    const who = e.target.closest('span[data-role="cname"]');
+    if (who) startEditName(who);
     if (e.target === $("#picker")) closePicker();
     return;
   }
@@ -689,11 +729,16 @@ document.addEventListener("click", e => {
       closePicker();
       decideCandidate(d.uuid, "track", {target: d.target}, "Filed into " + d.name);
       break;
-    case "cand":
-      decideCandidate(d.uuid, d.action,
-        {target: d.target || undefined, distinct: d.distinct ? true : undefined},
-        d.msg, !!d.noundo);
+    case "cand": {
+      const extra = {target: d.target || undefined,
+                     distinct: d.distinct ? true : undefined};
+      if (d.action === "track" && !d.target) {
+        const who = el.closest(".card").querySelector('span[data-role="cname"]');
+        if (who && who.dataset.name !== who.dataset.orig) extra.name = who.dataset.name;
+      }
+      decideCandidate(d.uuid, d.action, extra, d.msg, !!d.noundo);
       break;
+    }
     case "prop": decideProposal(d.uuid, d.action, d.msg, !!d.noundo); break;
     case "approve": approveProposal(d.uuid); break;
   }

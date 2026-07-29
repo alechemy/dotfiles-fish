@@ -1153,17 +1153,36 @@ def apply_approved(dry_run):
 # ---------------------------------------------------------------------------
 
 
+def identifier_hits(data, index):
+    """Per-identifier roster resolution: {key: [person, ...]} for every
+    normalized identifier key (canonical name, variants, emails) with at
+    least one hit."""
+    identifiers = [data["name"]] + list(data["name_variants"])
+    keys = {norm(i) for i in identifiers if norm(i)}
+    keys.update(e for e in data["emails"] if e)
+    return {k: index[k] for k in keys if index.get(k)}
+
+
+def resolvable_targets(by_key):
+    """Person UUIDs a TrackTarget may legally name when identifiers hit
+    more than one person: those every hitting key agrees on. A key whose
+    hits exclude the target is evidence belonging to someone else — that
+    candidate is a conflation only --split-candidate can fix."""
+    if not by_key:
+        return set()
+    return set.intersection(*({p["uuid"] for p in kh}
+                              for kh in by_key.values()))
+
+
 def promotion_target(data, md, people, index):
     """Identifier-wide preflight: (person_uuid_or_None, bounce_reason,
     near). No mutation happens here — every collision is caught before
     ensure_person could create anything. A None uuid with no reason means
     "create a new Person"."""
-    identifiers = [data["name"]] + list(data["name_variants"])
-    keys = {norm(i) for i in identifiers if norm(i)}
-    keys.update(e for e in data["emails"] if e)
+    by_key = identifier_hits(data, index)
     hits = {}
-    for key in keys:
-        for p in index.get(key, []):
+    for key_hits in by_key.values():
+        for p in key_hits:
             hits[p["uuid"]] = p
     near = ec.near_matches(data["name"], people)
     track_target = str(md.get("mdtracktarget", "") or "").strip()
@@ -1172,15 +1191,23 @@ def promotion_target(data, md, people, index):
         if not any(p["uuid"] == track_target for p in people):
             return None, (f"TrackTarget {track_target!r} is not a Person "
                           "record UUID"), near
-        others = [p["name"] for u, p in hits.items() if u != track_target]
-        if others:
+        foreign = sorted({p["name"] for kh in by_key.values()
+                          if all(q["uuid"] != track_target for q in kh)
+                          for p in kh})
+        if foreign:
             return None, ("alias collision: this candidate's identifiers "
-                          "already resolve to " + ", ".join(others)), near
+                          "already belong to " + ", ".join(foreign)
+                          + " — use --split-candidate to file each part "
+                          "separately"), near
         return track_target, None, near
     if len(hits) > 1:
-        return None, ("identifiers resolve to multiple people ("
-                      + ", ".join(p["name"] for p in hits.values())
-                      + ") — set TrackTarget to choose"), near
+        names = ", ".join(sorted(p["name"] for p in hits.values()))
+        if resolvable_targets(by_key):
+            return None, (f"identifiers resolve to multiple people ({names})"
+                          " — set TrackTarget to choose"), near
+        return None, (f"identifiers resolve to multiple people ({names})"
+                      " whose evidence is mixed together — use "
+                      "--split-candidate"), near
     if len(hits) == 1:
         return next(iter(hits)), None, near
     if ec.needs_confirmation(data, near) and not create_distinct:

@@ -90,21 +90,12 @@ def fetch_snapshot(bridge=None):
     return res[0], res[1], res[2]
 
 
-def candidate_hits(data, index):
-    identifiers = [data["name"]] + list(data["name_variants"])
-    keys = {ec.norm(i) for i in identifiers if ec.norm(i)}
-    keys.update(e for e in data["emails"] if e)
-    hits = {}
-    for key in keys:
-        for p in index.get(key, []):
-            hits[p["uuid"]] = p
-    return hits
-
-
 def candidate_disposition(data, md, people, index):
     """Structured form of the promotion preflight, so the card can render
     the one primary action promotion would actually take. promotion_target
-    stays the authority; the hits set only picks apart its bounce cases."""
+    stays the authority; the per-key hits only pick apart its bounce cases.
+    `choices` are the TrackTargets promotion would accept for a multi-hit
+    candidate — empty for a conflation, which only a split can fix."""
     uuid, reason, near = ef.promotion_target(data, md, people, index)
     near_refs = []
     for name in near:
@@ -118,11 +109,16 @@ def candidate_disposition(data, md, people, index):
                 "target": {"uuid": uuid, "name": target.get("name", "")}}
     if reason is None:
         return {"kind": "new_ok", "near": near_refs}
-    hits = candidate_hits(data, index)
+    by_key = ef.identifier_hits(data, index)
+    hits = {p["uuid"]: p for kh in by_key.values() for p in kh}
     if len(hits) > 1:
+        choices = sorted(ef.resolvable_targets(by_key),
+                         key=lambda u: hits[u]["name"])
         return {"kind": "ambiguous", "near": near_refs, "reason": reason,
                 "hits": [{"uuid": p["uuid"], "name": p["name"]}
-                         for p in hits.values()]}
+                         for p in hits.values()],
+                "choices": [{"uuid": u, "name": hits[u]["name"]}
+                            for u in choices]}
     return {"kind": "needs_choice", "near": near_refs, "reason": reason}
 
 
@@ -283,6 +279,30 @@ def candidate_decision_ops(action, uuid, target="", distinct=False):
             {"op": "move_to", "uuid": uuid, "group": ec.CANDIDATES_PATH},
         ]
     raise RequestError("unknown action")
+
+
+def candidate_rename_ops(uuid, new_name, text, people):
+    """set_text/set_name ops correcting a candidate's canonical name before
+    tracking — the old name stays a variant, so promotion aliases it and
+    future sightings still resolve. Empty when the name is unchanged."""
+    new_name = ef.collapse_ws(str(new_name))
+    if not new_name or len(new_name) > 120:
+        raise RequestError("bad name")
+    try:
+        data = ec.parse_candidate(text)
+    except ValueError:
+        raise RequestError("this record can't be read — it needs a look in "
+                           "DEVONthink", 409)
+    if ec.norm(new_name) == ec.norm(data["name"]):
+        return []
+    data["name_variants"] = [new_name] + [
+        v for v in data["name_variants"] if ec.norm(v) != ec.norm(new_name)]
+    data["name"] = new_name
+    return [
+        {"op": "set_text", "uuid": uuid,
+         "text": ec.render_candidate(data, ec.near_matches(new_name, people))},
+        {"op": "set_name", "uuid": uuid, "name": ec.record_name(data)},
+    ]
 
 
 def proposal_decision_ops(action, uuid):
@@ -547,11 +567,22 @@ def handle_queue():
 
 def handle_candidate(uuid, payload):
     action = str(payload.get("action", ""))
-    ops = candidate_decision_ops(
-        action, uuid, target=str(payload.get("target", "") or ""),
-        distinct=bool(payload.get("distinct")))
+    target = str(payload.get("target", "") or "")
+    new_name = str(payload.get("name", "") or "").strip()
+    if new_name and (action != "track" or target):
+        raise RequestError("a corrected name applies when adding a new "
+                           "person, not here")
+    ops = candidate_decision_ops(action, uuid, target=target,
+                                 distinct=bool(payload.get("distinct")))
     lock_fd = ec.acquire_candidates_lock()
     try:
+        if new_name:
+            state = ef.run_bridge([
+                {"op": "get_text", "uuid": uuid},
+                {"op": "dump_people", "include_bodies": False},
+            ])
+            ops = candidate_rename_ops(uuid, new_name, state[0]["text"],
+                                       state[1]) + ops
         ef.run_bridge(ops)
     finally:
         lock_fd.close()

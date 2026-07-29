@@ -734,7 +734,13 @@ record UUID) files the evidence into that existing person instead of
 creating one — this is also the alias-merge gesture, replacing the old
 "add an alias, delete the proposal, re-run `--force`" dance — and
 `CreateDistinct` confirms a genuinely new person despite the hints. The
-record's body says which is required and why.
+record's body says which is required and why. When identifiers hit more
+than one person, TrackTarget adjudicates only a *shared* key (two roster
+people matching the same name); it never overrides a key that belongs
+exclusively to someone else — that candidate is a conflation whose
+sightings span two real humans, and filing it anywhere would plant one
+person's evidence in the other's record, so the bounce directs it to
+`--split-candidate` instead.
 
 Identity keys are deliberately conservative: a candidate with a known email
 is looked up by email only; a candidate without one is the single
@@ -905,8 +911,13 @@ Things note-edit flow uses, minus the text grammar). Each candidate card runs
 `promotion_target()` as a read-only preflight and renders the one primary
 action promotion would actually take ("File into X", "Add as new person", or
 a pick-person/new-person choice when bare approval would bounce); a
-multi-hit candidate gets no pick button at all, since `promotion_target`
-refuses a TrackTarget while other identifiers still resolve elsewhere.
+multi-hit candidate gets pick buttons only for the people every hitting
+identifier agrees on (`resolvable_targets`) — a conflation gets none and is
+directed to `--split-candidate`. Names are correctable in place: tapping a
+candidate's name (or a person's name on an editable proposal card) opens an
+inline edit, and a corrected name rides the track gesture — the candidate is
+re-rendered under the candidates lock with the old name kept as a variant,
+so promotion aliases it and later sightings still resolve.
 After a decision the server debounces a `--apply-only` run (~20 s,
 `PIPELINE_MANUAL=1`, retreating to the 30-minute tick if the run lock stays
 busy), so the queue clears in seconds. The Things mirror needs no new
