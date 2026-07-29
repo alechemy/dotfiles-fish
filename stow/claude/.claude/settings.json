@@ -5,6 +5,7 @@
   "permissions": {
     "defaultMode": "bypassPermissions"
   },
+  "model": "opus[1m]",
   "hooks": {
     "PreToolUse": [
       {
@@ -96,6 +97,5 @@
   "skipDangerousModePermissionPrompt": true,
   "theme": "dark",
   "editorMode": "normal",
-  "voiceEnabled": false,
-  "model": "claude-fable-5[1m]"
+  "voiceEnabled": false
 }
