@@ -694,9 +694,13 @@ def check_files(albums: list[AlbumInfo], files: dict[str, FileInfo],
                 # A few holes in an otherwise-complete album is a failed rip; a
                 # handful of tracks out of many is deliberate curation, so the
                 # severity keys off completeness rather than the gap's size.
-                coverage = len(set(nums)) / len(expected)
-                pocked = (len(missing) <= GAP_CONCERN_MAX
-                          or coverage >= GAP_CONCERN_COVERAGE)
+                present = len(set(nums))
+                coverage = present / len(expected)
+                # A low absolute miss count only means "pocked" on an album that
+                # is mostly present: owning 1 of 2 tracks is one missing, but it
+                # is a single, not a failed rip.
+                pocked = (coverage >= GAP_CONCERN_COVERAGE
+                          or (len(missing) <= GAP_CONCERN_MAX and present > len(missing)))
                 add(findings, kind="track_gap",
                     severity=WARNING if pocked else INFO, target_kind="album",
                     targets=[alb.path],
