@@ -27,6 +27,22 @@ command -v git >/dev/null 2>&1 || exit 0
 root=$(git -C "$cwd" rev-parse --show-toplevel 2>/dev/null) || exit 0
 git -C "$root" rev-parse --verify -q HEAD >/dev/null 2>&1 || exit 0
 
+# Incremental gate: only the transcript region appended since the last completed
+# run can change the outcome — earlier regions were already scanned at their own
+# Stop. When that region carries no edit tool_use, skip the full parse.
+state=${XDG_STATE_HOME:-$HOME/.local/state}/agent-hooks
+offset_file="$state/$(printf '%s' "$transcript" | cksum | awk '{print $1 "-" $2}').stub-scan.offset"
+size=$(wc -c <"$transcript" 2>/dev/null | tr -d '[:space:]')
+case $size in '' | *[!0-9]*) size=0 ;; esac
+prev=$(cat "$offset_file" 2>/dev/null || true)
+case $prev in '' | *[!0-9]*) prev=0 ;; esac
+[ "$prev" -le "$size" ] || prev=0
+{ mkdir -p "$state" && printf '%s\n' "$size" >"$offset_file"; } 2>/dev/null || true
+if [ "$prev" -gt 0 ] &&
+  ! tail -c +"$((prev + 1))" "$transcript" 2>/dev/null | grep -Eq '"name":"(Edit|Write|MultiEdit|NotebookEdit)"'; then
+  exit 0
+fi
+
 edited=$(jq -r '
   select(.type=="assistant") | .message.content[]?
   | select(.type=="tool_use" and (.name|test("^(Edit|Write|MultiEdit|NotebookEdit)$")))

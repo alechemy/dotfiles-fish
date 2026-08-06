@@ -33,6 +33,27 @@ command -v git >/dev/null 2>&1 || exit 0
 root=$(git -C "$cwd" rev-parse --show-toplevel 2>/dev/null) || exit 0
 [ -f "$root/.uncommentrc.toml" ] || exit 0
 
+# Incremental gate: only the transcript region appended since the last completed
+# run can change the outcome — earlier regions were already stripped at their own
+# Stop. When that region carries no edit tool_use, skip the full parse. Claude
+# Code transcripts only (snake_case field): Copilot's edits never appear as these
+# markers, so gating its transcripts this way would skip real work.
+t_claude=$(printf '%s' "$input" | jq -r '.transcript_path // empty' 2>/dev/null || true)
+if [ -n "$t_claude" ] && [ -f "$t_claude" ]; then
+  state=${XDG_STATE_HOME:-$HOME/.local/state}/agent-hooks
+  offset_file="$state/$(printf '%s' "$t_claude" | cksum | awk '{print $1 "-" $2}').strip.offset"
+  size=$(wc -c <"$t_claude" 2>/dev/null | tr -d '[:space:]')
+  case $size in '' | *[!0-9]*) size=0 ;; esac
+  prev=$(cat "$offset_file" 2>/dev/null || true)
+  case $prev in '' | *[!0-9]*) prev=0 ;; esac
+  [ "$prev" -le "$size" ] || prev=0
+  { mkdir -p "$state" && printf '%s\n' "$size" >"$offset_file"; } 2>/dev/null || true
+  if [ "$prev" -gt 0 ] &&
+    ! tail -c +"$((prev + 1))" "$t_claude" 2>/dev/null | grep -Eq '"name":"(Edit|Write|MultiEdit|NotebookEdit)"'; then
+    exit 0
+  fi
+fi
+
 # Turn start = timestamp of the last real user prompt (string content, or an array
 # with no tool_result items; isMeta entries are hook/system injections, not prompts).
 turn_start=""
