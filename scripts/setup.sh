@@ -491,6 +491,7 @@ EOF
     load_launch_agent "$HOME/Library/LaunchAgents/com.user.check-stale-dev-servers.plist" "stale-dev-servers"
     load_launch_agent "$HOME/Library/LaunchAgents/com.user.aerospace-gaps-heartbeat.plist" "aerospace-gaps heartbeat"
     load_launch_agent "$HOME/Library/LaunchAgents/com.user.caddy.plist" "Caddy (oMLX CSP proxy)"
+    load_launch_agent "$HOME/Library/LaunchAgents/com.user.npm-tools-update.plist" "npm-tools update"
 
     # Chromium -> Safari bookmark bridge for Alfred. Gate on the Bookmarks file
     # (not the profile dir — a fresh profile has no Bookmarks until the first
@@ -693,8 +694,7 @@ EOF
                               com.user.dt-morning-brief \
                               com.user.entity-filing \
                               com.user.entity-review \
-                              com.user.dt-database-archive \
-                              com.user.defuddle-update)
+                              com.user.dt-database-archive)
             dt_agents=(com.user.dt-watchdog)
             if [ "$DT_ROLE" = driver ]; then
                 dt_agents+=("${dt_driver_agents[@]}")

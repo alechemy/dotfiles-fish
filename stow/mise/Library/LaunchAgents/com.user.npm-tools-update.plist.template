@@ -5,18 +5,18 @@
 	<key>Disabled</key>
 	<false/>
 	<key>Label</key>
-	<string>com.user.defuddle-update</string>
+	<string>com.user.npm-tools-update</string>
 	<key>ProgramArguments</key>
 	<array>
 		<string>/bin/bash</string>
-		<string>__HOME__/.local/bin/update-defuddle.sh</string>
+		<string>__HOME__/.local/bin/update-npm-tools.sh</string>
 	</array>
 	<key>RunAtLoad</key>
 	<false/>
 	<key>StandardErrorPath</key>
-	<string>/tmp/defuddle-update.log</string>
+	<string>/tmp/npm-tools-update.log</string>
 	<key>StandardOutPath</key>
-	<string>/tmp/defuddle-update.log</string>
+	<string>/tmp/npm-tools-update.log</string>
 	<key>StartCalendarInterval</key>
 	<dict>
 		<key>Hour</key>

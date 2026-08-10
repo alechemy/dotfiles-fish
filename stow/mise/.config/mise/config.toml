@@ -7,8 +7,8 @@ java = "latest"
 # Global npm CLIs — mise reinstalls these against the active node version,
 # so they survive node upgrades and get reproduced on fresh machines.
 # mise resolves `latest` only at install time, so a daily launchd agent
-# (com.user.defuddle-update) runs `mise upgrade npm:defuddle` to keep the
-# DT bookmark pipeline's readability extractor current.
+# (com.user.npm-tools-update) runs `mise upgrade` on each latest-pinned
+# npm tool; pinning a version here opts a tool out of the auto-upgrade.
 "npm:defuddle" = "latest"
 "npm:eas-cli" = "latest"
 "npm:@slidev/cli" = "latest"
