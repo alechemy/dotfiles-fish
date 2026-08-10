@@ -11,6 +11,7 @@ java = "latest"
 # DT bookmark pipeline's readability extractor current.
 "npm:defuddle" = "latest"
 "npm:eas-cli" = "latest"
+"npm:@slidev/cli" = "latest"
 # uncomment (goldziher/uncomment): AST/tree-sitter comment stripper. The
 # deterministic half of the agent comment-noise stack — invoked by the opt-in
 # Stop/agentStop hooks and per-repo commit gates. Installed from GitHub releases
