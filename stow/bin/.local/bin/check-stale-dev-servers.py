@@ -9,6 +9,8 @@ import sys
 import time
 from pathlib import Path
 
+# NOTE: RSS is judged per process, not per tree — a server whose memory is
+# spread across sub-1GB children (wrapper + workers) is never flagged.
 MIN_RSS_KB = 1024 * 1024            # 1 GB
 MIN_AGE_HOURS = 4
 RENOTIFY_AFTER_SEC = 24 * 3600
