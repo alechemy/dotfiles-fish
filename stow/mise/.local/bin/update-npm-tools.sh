@@ -65,12 +65,30 @@ for name, installs in json.load(sys.stdin).items():
     ):
         print(name)')"
 
+# mise draws progress frames even when stdout is a pipe, and capturing them
+# put ~365 "resolving N/M pkgs" lines into the shared pipeline log from a
+# single failed upgrade. --quiet drops the frames but keeps the error body.
+# A frame sequence is one physical line of CR-separated redraws, so keeping
+# only the text after the last CR resolves it to what a terminal would show —
+# discarding a redraw burst that would otherwise consume the whole line
+# budget and push the real error out of the record.
+MAX_ERR_LINES=6
+sanitize_output() {
+    awk -v max="$MAX_ERR_LINES" '
+        { sub(/^.*\r/, ""); sub(/[[:space:]]+$/, "") }
+        NF == 0 { next }
+        ++n <= max { print }
+        n == max + 1 { print "[output truncated]" }
+    '
+}
+
 FAILED=0
 while IFS= read -r tool; do
     [[ -z "$tool" ]] && continue
     BEFORE="$(version_of "$tool" || true)"
-    if ! OUTPUT=$("$MISE" upgrade "$tool" 2>&1); then
-        err "mise upgrade $tool failed: $OUTPUT"
+    if ! OUTPUT=$("$MISE" upgrade --quiet "$tool" 2>&1); then
+        err "mise upgrade $tool failed:
+$(printf '%s\n' "$OUTPUT" | sanitize_output)"
         FAILED=1
         continue
     fi

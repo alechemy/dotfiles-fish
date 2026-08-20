@@ -15,6 +15,13 @@
 # Writes to ~/Library/Logs/devonthink-pipeline.log. Uses append-mode echo,
 # which on macOS is atomic for writes up to PIPE_BUF (~4KB) so concurrent
 # rules don't interleave line fragments.
+#
+# One call emits exactly one record. A message spanning several lines (a
+# subprocess's captured stderr, a stack trace) keeps its shape but has its
+# continuation lines TAB-indented: dt-watchdog.sh treats a leading tab as
+# "belongs to the record above", so a multi-line failure raises one
+# notification instead of one per line. The record is capped to stay inside
+# PIPE_BUF, since the atomicity guarantee above is per write, not per line.
 
 set -euo pipefail
 
@@ -42,9 +49,24 @@ mkdir -p "$log_dir"
 
 ts=$(date '+%Y-%m-%dT%H:%M:%S')
 
-line="$ts $level [$component] $message"
+MAX_RECORD_CHARS=3000
+
+line="$ts $level [$component] ${message%%$'\n'*}"
 if [[ -n "$rec_name" || -n "$rec_uuid" ]]; then
     line="$line (record=\"$rec_name\"|uuid=$rec_uuid)"
 fi
 
-printf '%s\n' "$line" >> "$log_path"
+record="$line"
+if [[ "$message" == *$'\n'* ]]; then
+    while IFS= read -r cont; do
+        if [[ -n "${cont//[[:space:]]/}" ]]; then
+            record="$record"$'\n'$'\t'"$cont"
+        fi
+    done <<< "${message#*$'\n'}"
+fi
+
+if (( ${#record} > MAX_RECORD_CHARS )); then
+    record="${record:0:MAX_RECORD_CHARS}"$'\n'$'\t'"[truncated]"
+fi
+
+printf '%s\n' "$record" >> "$log_path"

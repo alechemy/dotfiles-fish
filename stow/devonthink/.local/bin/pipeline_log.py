@@ -40,16 +40,35 @@ from pathlib import Path
 LOG_PATH = Path.home() / "Library" / "Logs" / "devonthink-pipeline.log"
 
 
+MAX_RECORD_CHARS = 3000
+
+
 class _RecordSuffixFormatter(logging.Formatter):
-    """Format a log record with an optional `(record="..."|uuid=...)` suffix."""
+    """Format a log record as a single log entry.
+
+    Appends an optional `(record="..."|uuid=...)` suffix to the first line,
+    then TAB-indents every continuation line. A multi-line message (an
+    exception traceback, a subprocess's captured stderr) would otherwise be
+    read by dt-watchdog.sh as one failure per line and raise a notification
+    for each; the leading tab marks them as belonging to the entry above.
+    The entry is capped so the append stays within PIPE_BUF and concurrent
+    writers can't interleave fragments.
+    """
 
     def format(self, record: logging.LogRecord) -> str:
         base = super().format(record)
         name = getattr(record, "record_name", None)
         uuid = getattr(record, "record_uuid", None)
+        head, _, rest = base.partition("\n")
         if name or uuid:
-            base = f'{base} (record="{name or ""}"|uuid={uuid or ""})'
-        return base
+            head = f'{head} (record="{name or ""}"|uuid={uuid or ""})'
+        if rest:
+            head = "\n".join(
+                [head] + [f"\t{line}" for line in rest.split("\n") if line.strip()]
+            )
+        if len(head) > MAX_RECORD_CHARS:
+            head = head[:MAX_RECORD_CHARS] + "\n\t[truncated]"
+        return head
 
 
 def _is_manual() -> bool:

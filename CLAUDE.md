@@ -258,6 +258,21 @@ Three rules:
 
 `devonthink/tests/test_applescript_line_endings.py` enforces rules 1 and 2 across every AppleScript in the repo, including the ones embedded in Python and shell scripts, and asserts the underlying coercion still happens so the guard can't rot into a no-op.
 
+### Pipeline log: one call, one record
+
+`dt-watchdog.sh` scans the shared pipeline log and raises one macOS notification per new failure signature. It reads **records, not lines**: a line beginning with a TAB is folded into the record above instead of being matched on its own.
+
+Both writers enforce that shape — `pipeline-log` (shell) and `pipeline_log.py` (Python). A message spanning several lines (a captured subprocess stderr, an exception traceback) keeps its first line as the record head, TAB-indents the rest, drops blank continuations, and caps the whole record at 3000 characters. The cap is not cosmetic: the append is atomic only up to PIPE_BUF (~4 KB), so an uncapped record lets concurrent smart rules interleave fragments.
+
+The failure this prevents: one failed `mise upgrade` raised **four** notifications — one for each line carrying a level token — and not one of them contained the `caused by:` line that explained it, because that line has no level token for `FAILURE_PATTERN` to match. The scanner now lifts the first `caused by:` / `help:` / `hint:` continuation onto its parent's notification, so the alert names the reason and not just the failure.
+
+Two rules for new code:
+
+- Anything appending to this log **without** going through a writer must emit one physical line per record, or TAB-indent its continuations. A raw multi-line append is read as one failure per line.
+- When a tool's output is captured into a log message, suppress its progress rendering (`mise` needs `--quiet`). A redraw burst is CR-separated **on a single physical line**, so resolve it to the text after the last CR — `sanitize_output` in `update-npm-tools.sh`. Folding CRs to newlines instead spends the entire line budget on progress frames and pushes the real error out of the record.
+
+`devonthink/tests/test_pipeline_log_records.py` covers both writers, the scanner's grouping, and the redraw collapse.
+
 ### Python script shebangs
 
 Python interpreter management is split between mise and uv on purpose. mise (`stow/mise/.config/mise/config.toml`) provides the day-to-day `python3` on `$PATH`. uv (Brewfile) is reserved for scripts that declare third-party deps via PEP 723. There is no repo-wide `pyproject.toml` / `uv.lock` — each script stands alone.

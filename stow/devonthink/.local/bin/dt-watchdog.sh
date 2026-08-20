@@ -50,6 +50,15 @@ fi
 # notification per new failure signature. Signatures are digit-stripped (gap
 # sizes, dates, and byte counts vary between occurrences of the same failure)
 # and re-notify at most daily.
+#
+# A failure record can span several lines (a captured subprocess stderr, a
+# traceback); the writers indent those continuations with a TAB. Scanning is
+# therefore record-oriented, not line-oriented: a tab-indented line is folded
+# into the record above rather than matched on its own, which is what keeps
+# one failure from raising a notification per line. The explanatory line a
+# tool buries in its continuations (`caused by:`, `help:`) rarely carries a
+# level token of its own, so it is lifted onto the parent's notification —
+# without it the alert names the failure but not the reason.
 SCAN_STATE_DIR="$HOME/.local/state/devonthink/watchdog-scan"
 NOTIFIED_FILE="$SCAN_STATE_DIR/notified.txt"
 FAILURE_PATTERN=' ERROR | WARN(ING)? |WARNING:|ERROR:|ALERT:|FATAL:|FAILED:'
@@ -57,6 +66,11 @@ FAILURE_PATTERN=' ERROR | WARN(ING)? |WARNING:|ERROR:|ALERT:|FATAL:|FAILED:'
 # hand-run script's failures never page the user (pipeline_log.py, pipeline-log).
 MANUAL_MARKER='/manual]'
 MAX_NOTIFY_PER_LOG=5
+CAUSE_PATTERN='^(caused by|Caused by|because|help|hint|error):?[[:space:]]'
+MAX_CAUSE_CHARS=180
+PENDING_LINE=""
+PENDING_CAUSE=""
+SCAN_COUNT=0
 mkdir -p "$SCAN_STATE_DIR"
 touch "$NOTIFIED_FILE"
 
@@ -73,8 +87,33 @@ surface_line() {
     notify "$line" "DT pipeline failure"
 }
 
+absorb_continuation() {
+    local trimmed=${1#"${1%%[![:space:]]*}"}
+    if [[ -n "$PENDING_LINE" && -z "$PENDING_CAUSE" && "$trimmed" =~ $CAUSE_PATTERN ]]; then
+        PENDING_CAUSE="${trimmed:0:MAX_CAUSE_CHARS}"
+    fi
+    return 0
+}
+
+flush_pending() {
+    if [[ -z "$PENDING_LINE" ]]; then
+        return 0
+    fi
+    local msg="$PENDING_LINE"
+    if [[ -n "$PENDING_CAUSE" ]]; then
+        msg="$msg — $PENDING_CAUSE"
+    fi
+    PENDING_LINE=""
+    PENDING_CAUSE=""
+    SCAN_COUNT=$((SCAN_COUNT + 1))
+    if [[ "$SCAN_COUNT" -le "$MAX_NOTIFY_PER_LOG" ]]; then
+        surface_line "$msg"
+    fi
+    return 0
+}
+
 scan_log() {
-    local logfile=$1 offset_file size offset count=0 line
+    local logfile=$1 offset_file size offset line
     [[ -f "$logfile" ]] || return 0
     offset_file="$SCAN_STATE_DIR/$(basename "$logfile").offset"
     size=$(stat -f%z "$logfile" 2>/dev/null) || return 0
@@ -90,16 +129,22 @@ scan_log() {
         echo "$size" > "$offset_file"
         return 0
     fi
+    SCAN_COUNT=0
+    PENDING_LINE=""
+    PENDING_CAUSE=""
     while IFS= read -r line; do
-        count=$((count + 1))
-        if [[ "$count" -le "$MAX_NOTIFY_PER_LOG" ]]; then
-            surface_line "$line"
+        if [[ "$line" == $'\t'* ]]; then
+            absorb_continuation "$line"
+            continue
         fi
-    done < <(tail -c +"$((offset + 1))" "$logfile" \
-        | grep -E --color=never "$FAILURE_PATTERN" \
-        | grep -v -F -- "$MANUAL_MARKER" || true)
-    if [[ "$count" -gt "$MAX_NOTIFY_PER_LOG" ]]; then
-        surface_line "$(basename "$logfile"): $((count - MAX_NOTIFY_PER_LOG)) further failure line(s) since last check"
+        flush_pending
+        if [[ "$line" != *"$MANUAL_MARKER"* && "$line" =~ $FAILURE_PATTERN ]]; then
+            PENDING_LINE="$line"
+        fi
+    done < <(tail -c +"$((offset + 1))" "$logfile")
+    flush_pending
+    if [[ "$SCAN_COUNT" -gt "$MAX_NOTIFY_PER_LOG" ]]; then
+        surface_line "$(basename "$logfile"): $((SCAN_COUNT - MAX_NOTIFY_PER_LOG)) further failure(s) since last check"
     fi
     # Persisted only after the delta is fully scanned and notified, so a
     # crash mid-scan re-scans the same lines next run instead of dropping them.
