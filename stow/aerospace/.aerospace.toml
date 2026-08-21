@@ -275,6 +275,10 @@ if.app-id = 'com.apple.finder'
 run = 'layout floating'
 
 [[on-window-detected]]
+if.app-id = 'com.apple.iphonesimulator'
+run = 'layout floating'
+
+[[on-window-detected]]
 if.app-id = 'com.aone.keka'
 run = 'layout floating'
 
