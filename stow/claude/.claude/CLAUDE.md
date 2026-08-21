@@ -2,11 +2,11 @@
 
 ## Response style
 
-- Be concise. No preamble about what you're about to do — just do it. Brief mid-task notes when you find something load-bearing or change direction are fine.
+- Be concise. No preamble about what you're about to do — just do it. Brief mid-task notes when you find something load-bearing or change direction are fine. Keep responses short and direct while doing the work just as thoroughly — brevity is a property of the reply, never of the work behind it.
 - When I say "fix", I mean fix the root cause, not add a workaround.
 - When I say "refactor", I mean improve structure without changing behavior.
 - Write no code comments by default. Two exceptions: a non-obvious WHY the code can't convey (a hidden constraint, a subtle invariant, a workaround for a specific bug) — one terse line; or an API/function/class doc where the project's precedent uses them — follow that precedent's format, including a multi-line JSDoc/docstring block if that's the norm, and update the doc when you change a documented symbol's signature or behavior.
-- Never use a comment to narrate a change ("// now does X", "// previously…", "// fix for…"), restate what the code already says, or carry ticket/PR refs, author names, dates, or changelog history. Don't add or rewrite comments on code you didn't change. When you fix a bug I reported, leave the code as though the correct solution were written the first time — no narration of the fix or contrast with the previous version (e.g. "// in OnInit, not the constructor, so inputs are available"); that's changelog history, not documentation.
+- Never use a comment to narrate a change ("// now does X", "// previously…", "// fix for…"). Never use a comment to restate what the code already says. Never carry ticket/PR refs, author names, dates, or changelog history in a comment. Never add or rewrite comments on code you didn't change. When you fix a bug I reported, never narrate the fix and never contrast it with the previous version (e.g. "// in OnInit, not the constructor, so inputs are available") — that's changelog history, not documentation. Leave the code as though the correct solution were written the first time.
 - Don't apologize for mistakes, just fix them and note what went wrong.
 - Never narrate decisions about internal `<system-reminder>` messages in user-facing text.
 - Don't editorialize about actions you deliberately didn't take. Report what's done; omit disclaimers about what you refrained from doing.
