@@ -779,6 +779,22 @@ if [[ "$(uname)" == "Darwin" ]]; then
     fi
 fi
 
+# 5b. Metal wired-memory ceiling. `sysctl` writes the live kernel only and
+#     /etc/sysctl.conf is no longer read by macOS, so the raised
+#     iogpu.wired_limit_mb needed to load large local models is gone after a
+#     reboot unless a root LaunchDaemon reapplies it. The daemon lives in
+#     /Library/LaunchDaemons (root-owned, outside $HOME), so it is installed
+#     here rather than stowed. Idempotent; skips machines with < 32 GB.
+if [[ "$(uname)" == "Darwin" ]] && [ -f "$DOTFILES/scripts/install-iogpu-limit.sh" ]; then
+    info "Installing Metal wired-memory limit daemon..."
+    chmod +x "$DOTFILES/scripts/install-iogpu-limit.sh"
+    if "$DOTFILES/scripts/install-iogpu-limit.sh"; then
+        success "Metal wired-memory limit daemon in place"
+    else
+        info "WARNING: install-iogpu-limit.sh failed; the GPU wired limit will reset on reboot"
+    fi
+fi
+
 # 6. Fish Shell Setup (Add to /etc/shells and chsh)
 FISH_PATH="$(command -v fish || true)"
 if [ -n "$FISH_PATH" ]; then
