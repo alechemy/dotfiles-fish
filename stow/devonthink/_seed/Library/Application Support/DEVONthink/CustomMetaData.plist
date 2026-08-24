@@ -623,14 +623,6 @@
 		<array/>
 	</dict>
 	<dict>
-		<key>identifier</key>
-		<string>mdrewritesource</string>
-		<key>index</key>
-		<integer>60</integer>
-		<key>type</key>
-		<string>crosslink</string>
-	</dict>
-	<dict>
 		<key>date</key>
 		<real>798760401.939527</real>
 		<key>identifier</key>
