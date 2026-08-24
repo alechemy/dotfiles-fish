@@ -307,7 +307,7 @@ EOF
 
 Adjust `name`, `DocumentType`, and `SummarySource` per Step 2. Clean up `/tmp/summarize/` after import.
 
-**Name conventions** — always append `(summary)` so the derived record is visually obvious alongside its source (mirrors the `(rewritten)` convention used by prose-check):
+**Name conventions** — always append `(summary)` so the derived record is visually obvious alongside its source (mirrors the `(rewritten)` convention used for rewrite records):
 
 - DT record source (invoked via `--dt-source <UUID>`): `<source record's name> (summary)`
 - YouTube/podcast: `Channel Name — Video Title (summary)`

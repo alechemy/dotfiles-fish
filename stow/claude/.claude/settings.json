@@ -24,6 +24,10 @@
           {
             "type": "command",
             "command": "bash \"$HOME/.claude/hooks/comment-policy-inject.sh\" UserPromptSubmit"
+          },
+          {
+            "type": "command",
+            "command": "bash \"$HOME/.claude/hooks/unslop-inject.sh\" UserPromptSubmit"
           }
         ]
       }
@@ -35,6 +39,10 @@
           {
             "type": "command",
             "command": "bash \"$HOME/.claude/hooks/comment-policy-inject.sh\" SessionStart"
+          },
+          {
+            "type": "command",
+            "command": "bash \"$HOME/.claude/hooks/unslop-inject.sh\" SessionStart"
           }
         ]
       }
@@ -61,6 +69,10 @@
           {
             "type": "command",
             "command": "bash \"$HOME/.claude/hooks/comment-policy-inject.sh\" SubagentStart"
+          },
+          {
+            "type": "command",
+            "command": "bash \"$HOME/.claude/hooks/unslop-inject.sh\" SubagentStart"
           }
         ]
       }

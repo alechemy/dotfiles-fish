@@ -68,6 +68,6 @@ Lead with the capsule, then the thread status, then the problems, then the next 
 
 An adjacent feature or ticket stays out unless it blocks this one. When the capsule and thread lines outgrow a screen, cut detail before you cut threads.
 
-Cite transcript findings by agent and session id (`copilot 358ffd28`, `claude f945ded5`) and shared-record findings by their source (PR #, ticket ID, page URL). Apply `prose-check`'s rules to the brief. Sanitize private context before any public output.
+Cite transcript findings by agent and session id (`copilot 358ffd28`, `claude f945ded5`) and shared-record findings by their source (PR #, ticket ID, page URL). Apply the `unslop` rules to the brief. Sanitize private context before any public output.
 
 **Reply:** the brief, to the contract above, and whether it came from a handoff or from mining.
