@@ -1,6 +1,6 @@
 ---
 name: recall
-description: "Reconstruct recent working context from handoff documents, your own transcripts, live git/gh state, and the shared record (tickets, prior fixes, incidents), then hand back a tight current-state brief. Use for 'recall my work on X', 'catch me up', 'what have I been working on', 'where did I leave off', before starting or resuming work."
+description: "Reconstruct recent working context from handoff documents, your Claude Code and Copilot CLI transcripts, live git/gh state, and the shared record (tickets, prior fixes, incidents), then hand back a tight current-state brief. Use for 'recall my work on X', 'catch me up', 'what have I been working on', 'where did I leave off', before starting or resuming work."
 disable-model-invocation: true
 ---
 
@@ -10,7 +10,7 @@ disable-model-invocation: true
 
 Keep it tight and on-topic. Read only what the in-scope threads need, then stop. Heavy reading fans out to subagents; the main thread keeps only their findings and the final brief.
 
-Context lives in three records. A **handoff document** is the cheapest and most accurate, because a past session wrote it deliberately. Your **transcripts** hold what you did and decided, at much higher cost to read. The **shared record** holds what happened around the same code under other names: symptoms users keep reporting, fixes that shipped and got reverted, errors still firing in prod.
+Context lives in three records. A **handoff document** is the cheapest and most accurate, because a past session wrote it deliberately. Your **transcripts** hold what you did and decided, at much higher cost to read; they span two agents, Claude Code and Copilot CLI, and work on one repo is routinely split across both. The **shared record** holds what happened around the same code under other names: symptoms users keep reporting, fixes that shipped and got reverted, errors still firing in prod.
 
 ## 0. Read the handoff first
 
@@ -30,9 +30,12 @@ Pin the window ("recent" is a real range, default the last 7 days), the topic if
 
 ## 3. Fan out across transcripts
 
-Transcripts live at `~/.claude/projects/<slug>/<uuid>.jsonl`, one JSON object per line, one line per message. `<slug>` is the absolute workspace path with every `/` and `.` replaced by `-`, so `/Users/alec/.dotfiles` becomes `-Users-alec--dotfiles`.
+**Search both agents.** `agent-read list` prints Claude Code and Copilot CLI sessions in one stream, newest first, with a `CLI` column, the project, and a short id. That listing is the index; never order by UUID filename, which is unsorted. Narrow with `--cli claude` or `--cli copilot` only when the user names one.
 
-Order candidates with `agent-read list --cli claude`, which prints sessions newest-first with their project and short id. Never order by the UUID filename, which is unsorted.
+The two layouts differ, and Copilot's is the cheaper to scope:
+
+- **Claude Code** — `~/.claude/projects/<slug>/<uuid>.jsonl`, one JSON object per line, one line per message. `<slug>` is the absolute workspace path with every `/` and `.` replaced by `-`, so `/Users/alec/.dotfiles` becomes `-Users-alec--dotfiles`. The project is recoverable only from that slug.
+- **Copilot CLI** — `~/.copilot/session-state/<uuid>/`, holding `events.jsonl` plus a `workspace.yaml`. Read `workspace.yaml` first: it carries `cwd`, `git_root`, `repository`, `branch`, a human-readable `name`, and `created_at`/`updated_at`, so you can scope by project, branch, and time without opening the transcript at all. In `events.jsonl` each line has `type`, `timestamp`, `data`; the ones that carry the story are `user.message` and `assistant.message`. Skip `tool.execution_*`, which is the bulk of the file, unless the question is specifically what a past session ran.
 
 **Cap the fan-out at 4 subagents, and say how many you are spawning before you spawn them.** For one or two candidate sessions, skip the fan-out and read directly.
 
@@ -65,6 +68,6 @@ Lead with the capsule, then the thread status, then the problems, then the next 
 
 An adjacent feature or ticket stays out unless it blocks this one. When the capsule and thread lines outgrow a screen, cut detail before you cut threads.
 
-Cite transcript findings by session id and shared-record findings by their source (PR #, ticket ID, page URL). Apply `prose-check`'s rules to the brief. Sanitize private context before any public output.
+Cite transcript findings by agent and session id (`copilot 358ffd28`, `claude f945ded5`) and shared-record findings by their source (PR #, ticket ID, page URL). Apply `prose-check`'s rules to the brief. Sanitize private context before any public output.
 
 **Reply:** the brief, to the contract above, and whether it came from a handoff or from mining.
