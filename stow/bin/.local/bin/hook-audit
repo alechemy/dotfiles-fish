@@ -1,0 +1,59 @@
+#!/usr/bin/env python3
+"""Report how often each UserPromptSubmit-style hook injected context, per session.
+
+Hook output lands on its own transcript line as type "attachment" with
+attachment.type "hook_additional_context", not inside the user message.
+"""
+import json, os, sys, glob, time
+
+def audit(path):
+    prompts = 0
+    hooks = {}
+    for line in open(path, encoding="utf8", errors="replace"):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            o = json.loads(line)
+        except ValueError:
+            continue
+        t = o.get("type")
+        if t == "attachment":
+            a = o.get("attachment") or {}
+            if a.get("type") == "hook_additional_context":
+                for c in a.get("content") or []:
+                    k = c.split("\n")[0].strip()[:44]
+                    hooks[k] = hooks.get(k, 0) + 1
+        elif t == "user" and not o.get("isMeta"):
+            c = o.get("message", {}).get("content")
+            if isinstance(c, list) and any(
+                isinstance(b, dict) and b.get("type") == "tool_result" for b in c
+            ):
+                continue
+            text = c if isinstance(c, str) else " ".join(
+                b.get("text", "") for b in c if isinstance(b, dict) and b.get("type") == "text"
+            )
+            # interrupt markers are transcript bookkeeping, not prompts, and fire no hook
+            if text.strip().startswith("[Request interrupted"):
+                continue
+            prompts += 1
+    return prompts, hooks
+
+def main():
+    root = os.path.expanduser("~/.claude/projects")
+    pat = sys.argv[1] if len(sys.argv) > 1 else ""
+    limit = int(os.environ.get("HOOK_AUDIT_LIMIT", "8"))
+    files = [f for f in glob.glob(f"{root}/*/*.jsonl") if pat in f]
+    files.sort(key=os.path.getmtime, reverse=True)
+    for f in files[:limit]:
+        prompts, hooks = audit(f)
+        proj = os.path.basename(os.path.dirname(f))
+        when = time.strftime("%m-%d %H:%M", time.localtime(os.path.getmtime(f)))
+        print(f"{when}  {os.path.basename(f)[:8]}  {proj[:36]:36}  prompts={prompts}")
+        if not hooks:
+            print("      (no hook injections)")
+        for k, v in sorted(hooks.items()):
+            flag = "" if v >= prompts else "   <-- fewer than prompts"
+            print(f"      {v:>4} x {k}{flag}")
+
+main()
