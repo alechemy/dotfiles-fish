@@ -337,14 +337,18 @@ This phase depends on the Claude fallback decision and successful migration of a
 
 ## Immediate next checkpoint
 
-Before starting Phase 3:
+Phase 4's first skill cohort is complete (`2bf342a`): invocation history showed no use of the five candidates, so only explicit-only `handoff` moved to the shared skill directory because recall depends on its artifacts. `blast-radius`, `diagnosing-bugs`, the `music-doctor` skill, and `wait-what` were deleted; the independently used `music-doctor.py` engine remains.
 
-- [x] Review the Pi-baseline and dead-weight-removal change as one coherent diff.
-- [x] Commit that checkpoint without including unrelated work (`c08b399`).
-- [x] Retain Claude Code as a narrow Max-plan fallback and summarize host.
-- [x] Do not retire standalone Copilot CLI until its work-only MCP and Zed consumers are migrated or removed.
+Next:
 
-Phase 3 moved only instructions and context files. Skill moves remain separate Phase 4 changes so a broken skill cannot obscure the configuration transition.
+- [ ] Audit invocation history for `batch-review`, `teach`, and `things` before adapting any of them.
+- [ ] Delete dormant skills rather than porting them.
+- [ ] Move each retained skill in a separate reviewable commit or tightly related checkpoint.
+- [ ] Keep `recall` for the Phase 5 session-format work instead of partially adapting it now.
+- [ ] Treat `summarize` as its own load-bearing workflow audit because Fish and DEVONthink call it directly.
+- [ ] Decide the formula-provided `hunk-review` setup after the user-authored skill audit.
+
+The working tree may contain changes from parallel sessions. Keep unrelated changes out of migration commits.
 
 ## Definition of done
 
