@@ -7,7 +7,7 @@
 # (update / json / cancel — the `add` command does not need it).
 #
 # Why ~/.zshenv and not a fish conf.d like build-context7-config.sh: the context7
-# key feeds an MCP server, which inherits the env of a fish-launched `claude`.
+# key feeds a CLI used from terminal sessions that source fish's environment.
 # The `things` skill instead runs `op`/`python3`/`open` through the Bash *tool*,
 # whose zsh does NOT inherit fish's env — proven: with context7.fish built, fish
 # has CONTEXT7_API_KEY but the Bash tool does not. ~/.zshenv is the injection

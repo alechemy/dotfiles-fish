@@ -59,6 +59,7 @@
   - `rg` - ripgrep text search, faster than grep (`brew install ripgrep`)
   - `jscpd` - copy/paste detection for code duplication (`brew install jscpd` or `npx jscpd`)
   - `sg` - ast-grep for structural code search (`brew install ast-grep` or `npm i -g @ast-grep/cli`)
+  - `context7` - current third-party library documentation; run `context7 --help`, generalize queries so no private details leave the machine, and use only when the task depends on external docs
 
 ## When something goes wrong
 

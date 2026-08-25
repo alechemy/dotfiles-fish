@@ -46,7 +46,7 @@ This installs Homebrew + all dependencies from `Brewfile`, builds generated conf
 │   ├── git-hooks/                # Tracked hooks wired via core.hooksPath
 │   ├── build-zed-config.sh       # Inject 1Password secrets into Zed config
 │   ├── build-streamrip-config.sh # Inject 1Password secrets into streamrip config
-│   ├── build-context7-config.sh  # op read → fish conf.d Context7 key export
+│   ├── build-context7-config.sh  # op read → fish conf.d Context7 CLI key export
 │   ├── build-things-config.sh    # op read → ~/.zshenv Things auth token
 │   ├── build-vscode-config.sh    # Expand ${HOME} in VSCodium settings.json
 │   ├── merge-pi-settings.sh      # Merge portable preferences into Pi-owned settings
