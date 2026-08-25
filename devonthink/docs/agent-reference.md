@@ -121,10 +121,12 @@ their failures still notify.
 
 ## MCP server vs the automation bridges
 
-The DEVONthink MCP server is the **interactive** interface — use it freely from an AI session for searches, reads, and one-off record work. It is never a pipeline transport: launchd automation must not depend on a server process or session being alive, so runtime code talks to DT only via `/usr/bin/osascript` (AppleScript or `entity-dt-bridge.js`). Rules for sessions using the MCP tools:
+The official DEVONthink MCP server is the backend for narrow **interactive reads**. Agent sessions reach it only through the shared `devonthink` skill, whose bundled client starts the stdio transport on demand and allowlists metadata-field discovery, record search, and custom-metadata reads. It fixes search results to record UUID and name, exposes no record-content or mutation method, and rejects responses large enough to flood context. The separate full-tool HTTP login item is disabled by `setup.sh`.
 
-- `/20_ENTITIES/People`, `/20_ENTITIES/_Review`, `/20_ENTITIES/_Review/Approved`, `/20_ENTITIES/_Facts`, and `/20_ENTITIES/_Candidates` (with its `Approved`/`Ignored` subgroups) are excluded from AI access; MCP tools refuse their UUIDs ("Record is excluded from AI access") and omit them from results. This is by design, not breakage — operate on entity records via osascript/the bridge instead. Same applies to `/10_DAILY` and `/15_JOURNAL`.
-- Custom-metadata writes through MCP auto-create fields (typos become new fields) and can flip the flags the smart-rule state machine keys on (`NeedsProcessing`, `Recognized`, `Commented`, `AIEnriched`, …). Before setting any flag from the README's metadata table, understand which rule watches it.
+MCP is never a pipeline transport: launchd automation must not depend on a server process or session being alive, so runtime code talks to DT only via `/usr/bin/osascript` (AppleScript or `entity-dt-bridge.js`). Rules for interactive sessions:
+
+- `/20_ENTITIES/People`, `/20_ENTITIES/_Review`, `/20_ENTITIES/_Review/Approved`, `/20_ENTITIES/_Facts`, and `/20_ENTITIES/_Candidates` (with its `Approved`/`Ignored` subgroups) are excluded from AI access; the official server refuses their UUIDs or omits them from results. The same applies to `/10_DAILY` and `/15_JOURNAL`. This is an intentional privacy boundary: an agent must not bypass it through AppleScript, JXA, direct database access, or another tool. The entity pipeline's existing deterministic bridge is trusted local automation, not an interactive fallback around the exclusion.
+- MCP mutation tools are not exposed. A future write workflow must first demonstrate demand, account for typo-created metadata fields and smart-rule state flags, and receive a separate least-privilege design.
 - The server's privacy posture (exposed databases, private-info redaction — currently enabled) lives in DT's Settings → AI on the machine, not in this repo; see the README fresh-machine checklist.
 
 ## Key design decisions

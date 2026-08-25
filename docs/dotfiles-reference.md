@@ -144,22 +144,24 @@ Current consumers:
 - `stow/devonthink/_seed/` — DEVONthink smart rules, smart groups, custom metadata, and batch-processing presets (`scripts/seed-devonthink-config.sh`). DEVONthink AI keys live in the macOS Keychain, not these plists, so they are never captured here.
 - `stow/linearmouse/_seed/` — LinearMouse scroll config (`~/.config/linearmouse/linearmouse.json`), scoped to the Ploopy Knob (VID `0x5043` / PID `0x63C3`) (`scripts/seed-linearmouse-config.sh`).
 
-### Merged config (fragment → merge into app-owned JSON, not stowed)
+### Merged work config (fragment → merge into app-owned JSON, not stowed)
 
-`~/.claude.json` is Claude Code's state file: ~68 KB of runtime data the app rewrites via atomic rename on every launch (`projects`, `cachedGrowthBookFeatures`, `numStartups`, per-machine identity `machineID`/`userID`/`oauthAccount`). Stowing it whole is wrong on every axis — the atomic-rename save de-stows the symlink (as with a seeded plist), the churn produces constant cross-machine diffs, and committing machine identity leaks it and clobbers each machine's own. The only portable, user-authored slice is `.mcpServers`. So instead of stow-or-seed, a tracked **fragment** is merged into just that key, leaving everything else the app owns untouched.
+`~/.claude.json` is Claude Code's state file: ~68 KB of runtime data the app rewrites via atomic rename on every launch (`projects`, `cachedGrowthBookFeatures`, `numStartups`, per-machine identity `machineID`/`userID`/`oauthAccount`). Stowing it whole is wrong on every axis — the atomic-rename save de-stows the symlink (as with a seeded plist), the churn produces constant cross-machine diffs, and committing machine identity leaks it and clobbers each machine's own. The only portable, user-authored slice is `.mcpServers`, so the optional work definition is merged into just that key while every other field remains app-owned.
 
 The pattern:
 
-1. A tracked `mcp-servers.json` fragment holds only the `mcpServers` object. It lives inside a stow package but is excluded from stowing (the package's `.stow-local-ignore` lists `mcp-servers\.json`), because nothing reads it from `$HOME` — the merge script reads it straight from the repo.
-2. `scripts/merge-claude-mcp.sh` (jq) sets `~/.claude.json`'s `.mcpServers` to `(live ∪ personal ∪ work)`, writes atomically, and preserves every other key. It is **additive, fragment-wins**: a fragment entry overwrites a stale live copy of the same server and adds new ones, while an ad-hoc server survives unless the script explicitly retires its name. The retirement list removes obsolete managed servers such as `filesystem` and `ankimcp` from existing machines on the next setup run. Missing `~/.claude.json` (Claude Code never launched yet) starts from `{}`; missing `jq` skips with a warning.
+1. The work fragment (`stow-work/work/mcp-servers.json`) holds only the work MCP definitions. It stays in the gitignored work package because even a server URL can identify the employer. Nothing reads it from `$HOME`; the merge script reads it directly from the local checkout when present. See `stow-work/work/ATLASSIAN-MCP-SETUP.md`.
+2. `scripts/merge-claude-mcp.sh` (jq) removes retired managed personal servers, then sets `.mcpServers` to `(remaining live ∪ work)`, writes atomically, and preserves every other key. The work fragment wins over a stale live entry with the same name, while unrelated ad-hoc servers survive. Missing work config is valid; missing `~/.claude.json` (Claude Code never launched yet) starts from `{}`; missing `jq` skips with a warning. An existing unreadable, non-file, or invalid input aborts, as does a failed mode change or atomic replacement, and the live target remains untouched.
 3. `setup.sh` runs the merge in the generated-configs step (no `op` needed).
-4. **Work/personal split.** MCP `env` values are `${VAR}` placeholders (Claude Code expands them at launch), so no fragment carries a literal secret — but a server URL can still be work-identifying (`<company>.atlassian.net`), and the repo is public. The personal fragment (`stow/claude/mcp-servers.json`: `devonthink`) is tracked publicly; the work fragment (`stow-work/work/mcp-servers.json`: `atlassian`) lives in the gitignored work package, and the merge folds it in only when present. See `stow-work/work/ATLASSIAN-MCP-SETUP.md`.
+4. No personal MCP fragment remains. Context7 is a reviewed native Pi package, and DEVONthink is a lazy shared read-only skill backed by its official stdio server. The work-only Atlassian definition remains isolated under `stow-work/` and is merged only on machines that carry it.
 
 Current consumer: `~/.claude.json` `.mcpServers` (`scripts/merge-claude-mcp.sh`).
 
-### Shared agent instructions
+### Shared agent instructions and skills
 
 `stow/agents/.agents/AGENTS.md` is the only global instruction source. Pi, Claude Code, and Copilot CLI expose it through symlinks in their own config directories. Project instructions use `AGENTS.md` canonically and retain `CLAUDE.md` only as a Claude Code compatibility symlink; Pi's filename precedence prevents duplicate loading.
+
+Harness-neutral Agent Skills live under `stow/agents/.agents/skills/`. Pi discovers them directly under `~/.agents/skills`; retained Claude skills are compatibility symlinks to the same directories. Keep detailed skill instructions and bundled helpers there so Pi loads only each description until use. The `devonthink` skill follows this pattern: its bundled read-only client starts DEVONthink's official stdio server on demand and exposes only field discovery, record search, and custom-metadata reads. `setup.sh` disables and boots out DEVONthink's separate HTTP MCP login item because no retained client needs its always-on full tool surface; it warns if a loaded service cannot be stopped, while direct stdio requests remain available. To restore the HTTP service deliberately, run `launchctl enable "gui/$(id -u)/com.devon-technologies.think.mcp-server"`, then turn **Launch at login** back on under DEVONthink's Settings → AI → MCP.
 
 ### Merged Pi settings (fragment → merge into app-owned JSON, not stowed)
 

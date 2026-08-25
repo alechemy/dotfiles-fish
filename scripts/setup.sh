@@ -359,12 +359,27 @@ if ! jq -e '
     info "Pi provider logins are machine-local. Run pi, then /login for OpenAI, GitHub Copilot, and Anthropic."
 fi
 
-# Merge tracked MCP-server fragments into ~/.claude.json (personal always, the
-# work fragment only if the gitignored stow-work/work carries one). No op needed;
-# ~/.claude.json is app-owned runtime state, so this merges rather than stows.
+# Merge the optional gitignored work MCP fragment into ~/.claude.json. No op is
+# needed; ~/.claude.json is app-owned runtime state, so this merges rather than
+# stows it.
 chmod +x "$DOTFILES/scripts/merge-claude-mcp.sh"
 "$DOTFILES/scripts/merge-claude-mcp.sh" \
     || info "WARNING: Claude Code MCP-server merge failed; check jq and ~/.claude.json."
+
+# The focused DEVONthink skill starts the official stdio server per request. The
+# separate HTTP login item exposes the full tool set and has no retained client.
+if [ -d "/Applications/DEVONthink.app" ]; then
+    dt_mcp_service="gui/$(id -u)/com.devon-technologies.think.mcp-server"
+    if launchctl disable "$dt_mcp_service"; then
+        if launchctl print "$dt_mcp_service" >/dev/null 2>&1; then
+            if ! launchctl bootout "$dt_mcp_service"; then
+                info "WARNING: DEVONthink's HTTP MCP login item is disabled but still running."
+            fi
+        fi
+    else
+        info "WARNING: Could not disable DEVONthink's unused HTTP MCP login item."
+    fi
+fi
 
 chmod +x "$DOTFILES/scripts/build-launchd-plists.sh"
 CHANGED_PLISTS_FILE=$(mktemp)

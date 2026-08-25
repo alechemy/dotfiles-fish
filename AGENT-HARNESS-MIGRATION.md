@@ -272,14 +272,14 @@ Do not port the existing hook stack automatically. First decide which outcomes r
 - [x] Remove the filesystem MCP server from Claude and work Copilot configuration. Pi ships native read, write, edit, bash, grep, find, and ls tools; Claude transcripts recorded zero filesystem MCP calls, and Copilot's 13 historical calls used only operations covered by those native tools.
 - [x] Retain Context7 through the official native Pi extension. Historical use is substantial (104 Copilot and 3 Claude tool calls). Source-review and pin `@upstash/context7-pi` 0.1.2, which registers two native tools, a skill, and `/c7-docs` without MCP; remove the redundant homegrown CLI/shared skill plus the old Copilot and Zed registrations. The active tools contribute 4,467 schema characters and the skill description 778 characters; that cost is justified by demonstrated use. This still removes a 250-character Context7 reminder from each Copilot turn (observed in 91 retained reminders) before any deferred tool schema is requested.
 - [x] Retire Anki MCP. Across 246 retained Claude, Copilot, and Pi transcripts (20,077 structured tool calls, 2026-06-28 through 2026-08-25), no Anki tool call was recorded. No tracked or gitignored workflow depends on it. Remove it from the personal Claude MCP fragment, explicitly retire the stale live `ankimcp` key during the additive merge, and remove the enabled AnkiMCP add-on from Anki's active add-on directory on this machine. Preserve the Anki app, profiles, decks, media, and other user data, which are outside the agent-harness integration.
-- [-] Evaluate DEVONthink as a narrow tool or lazily loaded integration. Five recorded calls in one Claude session used only metadata-field discovery, record search, and custom-metadata reads; the current official server exposes 59 tools, so the demonstrated workflow is much narrower than the loaded surface.
+- [x] Retain DEVONthink through a lazy shared read-only skill. Five recorded calls in one Claude session used only metadata-field discovery, record search, and custom-metadata reads. A bundled stdlib client now allowlists exactly those three operations over DEVONthink's official stdio server, preserving the vendor's Chat/MCP exclusions and redaction without a third-party bridge; the broad 59-tool Claude registration and final personal MCP fragment are retired.
 - [ ] Keep Atlassian configuration in the gitignored work package.
 - [ ] Decide whether browser debugging needs Chrome DevTools MCP, a Pi package, or no integration.
 - [ ] Review all third-party extension source before installation.
 - [ ] Measure tool-schema and system-prompt cost before and after each addition.
 - [ ] Prefer Pi's dynamic tool loading for expensive, rarely used capabilities.
 
-#### DEVONthink audit and proposed implementation
+#### DEVONthink audit and implementation
 
 Evidence collected 2026-08-25:
 
@@ -295,7 +295,7 @@ Options considered:
 - **Install a generic Pi MCP bridge:** could load tools lazily, but there is no official DEVONthink or Pi package, the bridge would run with full local authority, and broad MCP access is not justified by five read-only calls.
 - **Use a focused local client for the official stdio MCP:** retain DEVONthink's own privacy and record-access enforcement while exposing only the three demonstrated read operations. The client can start on explicit use, so no MCP schema or server instructions need to be model-visible between uses.
 
-Proposed next checkpoint: add a lazy shared `devonthink` skill with a bundled, stdlib-only client for DEVONthink's built-in `--stdio` transport. Hard-allowlist the three demonstrated read operations, bound search result counts, return structured JSON, expose no arbitrary MCP method or mutation escape hatch, and load the detailed instructions only when the skill is invoked. Test protocol handling against a synthetic server and run privacy-preserving live canaries before removing the broad `devonthink` Claude MCP registration. Measure the skill-description and command-schema cost after implementation. This uses no third-party package and makes no DEVONthink pipeline or database change.
+Implemented checkpoint: the shared `devonthink` skill bundles a stdlib-only client for DEVONthink's built-in `--stdio` transport. It hard-allowlists the three demonstrated read operations, fixes search results to UUID and name, caps search results at 100, metadata batches at 50 records, and responses at 256,000 characters, and exposes no arbitrary MCP method or mutation escape hatch. Sixteen synthetic client tests cover all three calls, argument revalidation, protocol negotiation, colliding server pings, invalid frames and results, bounds, errors, timeouts, and refusal of mutation or expanded search fields. Six merge tests verify retirement and preservation behavior plus fail-closed handling of invalid, unreadable, non-file, chmod-failed, and move-failed state. Pi's loader reports no diagnostics, `/skill:devonthink` expands with arguments, and privacy-preserving live canaries verified field listing, an empty synthetic search, one metadata read, and exclusion behavior without printing record values. The skill adds no registered tool schema: its 228-character description contributes 381 characters to Pi's always-loaded system prompt, while the 1,825-character body expands only on use. The broad Claude MCP registration is retired. An otherwise-unused full-tool HTTP login item remained listening after that removal, so setup now disables it and stops it when loaded, warning on a real shutdown failure; live canaries still pass with the service disabled and do not restart it. This uses no third-party package and makes no DEVONthink pipeline or database change.
 
 ### Subagents
 
@@ -321,7 +321,7 @@ This phase depends on the Claude fallback decision and successful migration of a
 - [ ] Remove the `claude-code` Brewfile cask only if the Max-plan fallback is no longer wanted.
 - [ ] Reduce or remove `stow/claude/` after shared instructions and skills move out.
 - [ ] Remove `merge-claude-mcp.sh` and its setup integration when no Claude MCP consumer remains.
-- [ ] Remove personal Claude MCP fragments when their capabilities are migrated or retired.
+- [x] Remove personal Claude MCP fragments when their capabilities are migrated or retired; Context7 is native to Pi, DEVONthink is a lazy shared skill, and Anki is retired.
 - [ ] Remove the Claude-specific Zed agent and its setup/build dependency if unused.
 - [ ] Remove the Karabiner Claude restart binding if unused.
 - [ ] Remove Claude-specific terminal key mappings that no retained tool needs.
@@ -350,13 +350,13 @@ This phase depends on the Claude fallback decision and successful migration of a
 
 ## Immediate next checkpoint
 
-Phase 7's Context7 audit is complete. Current Context7 documentation revealed an official native Pi package that the cached MCP README did not list. The source-reviewed, pinned extension replaces the temporary homegrown CLI and shared skill while the Copilot and Zed MCP registrations remain retired.
+Phase 7's personal integration audit is complete. Context7 uses its source-reviewed official native Pi package, Anki is retired, and DEVONthink now uses a lazy three-operation shared skill backed by the official server instead of a broad Claude MCP registration.
 
 Next:
 
 - [x] Retire Anki MCP without touching the Anki app or user data.
-- [ ] Complete the DEVONthink architecture audit and propose the narrowest retained interactive surface before changing it.
-- [ ] Confirm the work-only Atlassian split and decide the browser-debugging and subagent items from measured demand.
+- [x] Retain only the three demonstrated DEVONthink read operations and preserve the official privacy boundary.
+- [ ] Record the verified work-only Atlassian split and browser-debugging decision, then resolve the subagent checklist from demonstrated demand.
 
 The working tree may contain changes from parallel sessions. Keep unrelated changes out of migration commits.
 
