@@ -269,7 +269,7 @@ Do not port the existing hook stack automatically. First decide which outcomes r
 
 ### MCP and tool integrations
 
-- [ ] Remove the filesystem MCP server wherever Pi's native file tools make it redundant.
+- [x] Remove the filesystem MCP server from Claude and work Copilot configuration. Pi ships native read, write, edit, bash, grep, find, and ls tools; Claude transcripts recorded zero filesystem MCP calls, and Copilot's 13 historical calls used only operations covered by those native tools.
 - [ ] Evaluate Context7 as a focused CLI-backed skill rather than an always-loaded MCP server.
 - [ ] Evaluate DEVONthink and Anki as narrow tools or lazily loaded integrations.
 - [ ] Keep Atlassian configuration in the gitignored work package.
@@ -331,11 +331,11 @@ This phase depends on the Claude fallback decision and successful migration of a
 
 ## Immediate next checkpoint
 
-Phase 6 is complete. The deterministic comment tools remain available for the opted-in repository, but Pi gets no automatic stripper integration unless normal use demonstrates that the standing comment policy is insufficient.
+Phase 7's filesystem audit is complete. Pi's native file and shell tools cover the server's full demonstrated use, so the unused Claude registration and redundant work Copilot registration were removed rather than ported.
 
 Next:
 
-- [ ] Begin Phase 7 by auditing the filesystem MCP server against Pi's native file tools.
+- [ ] Evaluate Context7 as a focused CLI-backed skill rather than an always-loaded MCP server.
 
 The working tree may contain changes from parallel sessions. Keep unrelated changes out of migration commits.
 

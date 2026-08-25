@@ -6,9 +6,8 @@
 # the public tree; the optional work fragment lives under the gitignored
 # stow-work/work so a work-only server URL never reaches GitHub.
 #
-# Additive, fragment-wins: fragment definitions overwrite any stale live copy of
-# the same server and add new ones, but a server added ad-hoc on a machine (not
-# named in a fragment) is preserved. Removing a server is therefore manual.
+# Fragment definitions overwrite stale live copies and add new ones. Ad-hoc
+# servers are preserved unless explicitly retired below.
 #
 # Not stowed — ~/.claude.json is app-owned and rewritten via atomic rename, so a
 # symlink would de-stow on first save. This merge runs at setup time instead.
@@ -37,6 +36,7 @@ if jq -n \
     --slurpfile personal "$PERSONAL" \
     --slurpfile work <(cat "$WORK" 2>/dev/null || echo '{}') \
     '($cur[0] // {})
+     | del(.mcpServers.filesystem)
      | .mcpServers = ((.mcpServers // {}) + ($personal[0] // {}) + ($work[0] // {}))' \
     >"$tmp" && jq -e . "$tmp" >/dev/null 2>&1; then
     mv "$tmp" "$TARGET"
