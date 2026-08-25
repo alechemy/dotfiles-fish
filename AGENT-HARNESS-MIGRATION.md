@@ -165,6 +165,13 @@ This phase replaces the Claude-centric directory layout without removing useful 
 
 Current decision: both legacy harnesses remain compatibility adapters during migration. Their recent session history is still active, Claude owns the summarize workflow, and Copilot owns work-only MCP and Zed integrations. Reassess deletion in Phase 8 after those consumers move.
 
+### Reduce always-loaded project context
+
+- [x] Move the detailed dotfiles architecture from root `AGENTS.md` to `docs/dotfiles-reference.md`.
+- [x] Move detailed DEVONthink implementation notes to `devonthink/docs/agent-reference.md`.
+- [x] Keep concise task routing and repository-wide constraints in the two context files.
+- [x] Reduce project-specific context from 8,006 to 316 words at the root and from 10,791 to 573 words under `devonthink/`, excluding unchanged global instructions.
+
 ## Phase 4: migrate, adapt, or delete skills
 
 Pi natively discovers Agent Skills under `~/.agents/skills`. Do not point Pi at the complete legacy `~/.claude/skills` directory.

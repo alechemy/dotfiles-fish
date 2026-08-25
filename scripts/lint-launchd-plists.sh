@@ -34,7 +34,7 @@
 # Scans *.plist.template plus any plain *.plist without a .template sibling
 # (generated outputs are skipped) under stow/, stow-work/, and stow-local/.
 #
-# See AGENTS.md → "Launch Agents and AppleEvents" for the full rationale and
+# See docs/dotfiles-reference.md → "Launch Agents and AppleEvents" for the full rationale and
 # the canonical split-architecture pattern when third-party Python deps are
 # needed (entry under /usr/bin/python3, parser under uv run).
 #
@@ -266,7 +266,7 @@ for plist in "${plists[@]}"; do
 done
 
 if (( errors > 0 )); then
-    printf '\n%d violation(s). See AGENTS.md → "Launch Agents and AppleEvents" for the rule.\n' "$errors" >&2
+    printf '\n%d violation(s). See docs/dotfiles-reference.md → "Launch Agents and AppleEvents" for the rule.\n' "$errors" >&2
     exit 1
 fi
 

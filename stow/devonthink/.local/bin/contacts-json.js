@@ -4,7 +4,7 @@
 // Queries the Contacts framework directly from osascript so the Contacts
 // TCC grant attaches to Apple-signed /usr/bin/osascript and survives
 // interpreter upgrades (same principle as calendar-events-json.js; see
-// dotfiles AGENTS.md "Launch Agents and AppleEvents"). First run must be
+// docs/dotfiles-reference.md "Launch Agents and AppleEvents"). First run must be
 // interactive to answer the one-time Contacts permission prompt:
 //
 //   osascript -l JavaScript ~/.local/bin/contacts-json.js

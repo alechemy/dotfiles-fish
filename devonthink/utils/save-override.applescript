@@ -31,7 +31,7 @@ tell application id "DNtp"
         -- 3. Flush the editor's in-memory edits into DT's record state so
         --    `plain text` reflects what the user just typed. (Previously this
         --    script ran `sed -i ''` on `path of theRecord` then
-        --    `synchronize record` — exactly the pattern devonthink/AGENTS.md
+        --    `synchronize record` — exactly the pattern in docs/agent-reference.md
         --    warns against, because sync races DT's buffered write and can
         --    overwrite the in-memory record with stale/empty disk state.)
         save theWindow

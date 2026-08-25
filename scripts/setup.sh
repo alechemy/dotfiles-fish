@@ -395,7 +395,7 @@ success "Generated configs built"
 # 3b. Lint launchd plist templates: catch ProgramArguments[0] regressions and
 #     sub-scripts whose interpreter would resolve through the launchd PATH
 #     (which puts mise's shim dir first and re-prompts for Automation
-#     permission on every Python rotation). See AGENTS.md for the rule.
+#     permission on every Python rotation). See docs/dotfiles-reference.md for the rule.
 info "Linting launchd plist templates..."
 chmod +x "$DOTFILES/scripts/lint-launchd-plists.sh"
 "$DOTFILES/scripts/lint-launchd-plists.sh"
@@ -511,7 +511,7 @@ EOF
     # it at login regardless, but the watcher exits 0 when Bookmarks is absent
     # and KeepAlive.SuccessfulExit=false leaves it dormant. Writing Safari's
     # bookmarks is Full Disk Access-gated, so /usr/bin/python3 must be granted
-    # FDA (see AGENTS.md); until then the agent logs a permission error.
+    # FDA (see docs/dotfiles-reference.md); until then the agent logs a permission error.
     if [ -f "$HOME/Library/Application Support/Chromium/Default/Bookmarks" ]; then
         load_launch_agent "$HOME/Library/LaunchAgents/com.user.chromium-bookmarks-sync.plist" "chromium-bookmarks sync"
         info "  Grant Full Disk Access to /usr/bin/python3 so the bookmark sync can write Safari's bookmarks"

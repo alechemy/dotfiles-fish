@@ -4,7 +4,7 @@
 # pull.rebase=true, which never triggers post-merge) and `git commit --amend`.
 # Only act on rebase; amend rarely changes which files a package ships and the
 # stale ORIG_HEAD it leaves would diff the wrong range. git sets ORIG_HEAD to
-# the pre-rebase tip. See scripts/restow-changed.sh and AGENTS.md.
+# the pre-rebase tip. See scripts/restow-changed.sh and docs/dotfiles-reference.md.
 
 # Drain the old/new SHA pairs git streams on stdin so it doesn't see SIGPIPE.
 cat >/dev/null

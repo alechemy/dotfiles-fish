@@ -33,6 +33,7 @@ This installs Homebrew + all dependencies from `Brewfile`, builds generated conf
 ├── Brewfile                 # Homebrew dependencies
 ├── homebrew/                # Local-only tap (casks with no upstream cask)
 ├── devonthink/              # DEVONthink pipeline docs
+├── docs/                    # Detailed architecture loaded on demand by agents
 ├── drafts/                  # Drafts action scripts (repo is canonical)
 ├── keyboard-maestro/        # Scripts referenced by KM macros
 ├── hrm/                     # Glove80 keyboard layout + README
