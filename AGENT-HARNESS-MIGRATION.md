@@ -335,18 +335,18 @@ The usage audit retains both legacy harnesses as thin adapters. As of 2026-08-25
 
 ## Phase 9: final validation and documentation
 
-- [ ] Run setup in a clean or isolated home directory.
-- [ ] Verify Stow creates only intended links and prunes deleted ones.
-- [ ] Verify no secrets or generated runtime state are tracked.
-- [ ] Verify OpenAI, Copilot, and oMLX model selection.
-- [ ] Verify direct Anthropic remains outside model cycling.
-- [ ] Verify global and project instructions load exactly once.
-- [ ] Verify every retained skill works from Pi.
-- [ ] Verify `/resume`, `/tree`, `/compact`, and model cycling in the TUI.
-- [ ] Verify battery-sensitive background behavior remains gated appropriately.
-- [ ] Run shell, Fish, JSON, relevant unit, and secret scans.
-- [ ] Update `README.md`, `AGENTS.md`, setup comments, and migration documentation.
-- [ ] Delete compatibility symlinks after their final consumer is gone.
+- [ ] Run setup in a clean or isolated home directory. A temporary `HOME` is not a safe sandbox because setup still changes shared Homebrew, sudo/PAM, launchd, defaults, and services; use a disposable macOS VM or new-machine snapshot after the `agent-reader` pin is publishable.
+- [x] Verify Stow creates only intended links and prunes deleted ones. A clean archived tree created 173 links whose targets all remained inside the tree, and a disposable-package restow removed a deleted source link.
+- [x] Verify no secrets or generated runtime state are tracked. Full tracked-history Betterleaks, forbidden runtime filename checks, the Pi tracked-file allowlist, and work-package isolation all pass.
+- [x] Verify OpenAI, Copilot, and oMLX model selection. Pi's cached catalog resolves every configured route, the live merged settings match the tracked fragment, and an offline RPC cycle returns to the start after the four configured routes across those three providers.
+- [x] Verify direct Anthropic remains outside model cycling. It is authenticated and available through `/model`, but absent from `enabledModels` and from a complete offline RPC cycle.
+- [x] Verify global and project instructions load exactly once. Pi's exported loader returns one global `AGENTS.md` plus the applicable root and nested project files, prefers each `AGENTS.md`, and loads no Claude compatibility path.
+- [ ] Verify every retained skill works from Pi end to end. The safe integration boundary passes: Pi loads and expands `devonthink`, `handoff`, `recall`, `teach`, and `things` with zero diagnostics; live Pi exposes the pinned Context7 skill/command; bundled helpers compile; and DEVONthink's synthetic and live read canaries pass. Disposable or deliberate backend checks remain for `handoff`, `recall`, `teach`, `things`, and Context7.
+- [ ] Verify `/resume`, `/tree`, `/compact`, and model cycling in the TUI. Built-in command registration, RPC tree/session switching, and a full four-route model cycle pass without a model request; `/compact` and the interactive selectors still need a natural/disposable TUI session because compaction calls a model and session navigation depends on real history.
+- [x] Verify battery-sensitive background behavior remains gated appropriately. The real gate matches current AC state, `--urgent` overrides it, and a temporary exact-copy harness passes AC/urgent while skipping battery, UPS, and unknown power and failing open only when `pmset` cannot report.
+- [x] Run shell, Fish, JSON, relevant unit, and secret scans. The clean checkpoint passes repository-wide Bash/Fish syntax, strict JSON plus JSONC formatting, Python compilation, launchd lint, focused agent tests, the full DEVONthink suite, whitespace checks, and full tracked-history Betterleaks.
+- [x] Update `README.md`, `AGENTS.md`, setup comments, and migration documentation. Final review found the root routing/current architecture accurate, corrected one retired Summarize-doc reference and the shared Super+Enter comment, and records retained adapters and remaining blockers here.
+- [x] Retain compatibility symlinks while their final consumers remain. Claude and Copilot are active retained adapters, so deleting their global/project/skill compatibility links would be destructive rather than cleanup.
 
 ## Immediate next checkpoint
 

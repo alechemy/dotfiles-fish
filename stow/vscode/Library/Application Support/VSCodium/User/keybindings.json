@@ -169,8 +169,8 @@
 
   // xterm.js never reports the Super modifier, so Cmd+Enter reaches a terminal
   // program as a bare CR — indistinguishable from Enter. Forge the CSI-u
-  // encoding of Super+Enter (mod 9 = 1 + super) that Claude Code's input parser
-  // decodes, so its `cmd+enter` binding fires here as it does in Ghostty.
+  // encoding of Super+Enter (mod 9 = 1 + super) that Pi and Claude Code
+  // decode, so their submit binding fires here as it does in Ghostty.
   {
     "key": "cmd+enter",
     "command": "workbench.action.terminal.sendSequence",
