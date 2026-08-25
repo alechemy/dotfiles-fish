@@ -230,9 +230,7 @@ For each moved skill:
 
 ### Formula-provided skills
 
-- [ ] Decide whether `hunk-review` is useful in Pi.
-- [ ] If useful, expose the formula's skill under `~/.agents/skills` and avoid a Claude-only setup path.
-- [ ] Otherwise remove its special setup linking.
+- [x] Remove the special `hunk-review` setup link: no Claude, Pi, or Copilot transcript records an invocation since installation. Retain the independently useful Hunk CLI and its formula-provided skill source without loading the dormant skill into any harness.
 
 ## Phase 5: make session recall harness-neutral
 
@@ -336,12 +334,11 @@ This phase depends on the Claude fallback decision and successful migration of a
 
 ## Immediate next checkpoint
 
-Phase 4's user-authored skill audit is complete. The first cohort landed in `2bf342a`. In the second cohort, invocation history showed `batch-review` dormant, one explicit `teach` invocation, and repeated use of the `things` helper across three sessions. `batch-review` was deleted; `teach` and `things` moved to the shared skill directory with Claude compatibility symlinks and harness-neutral instructions.
+Phase 4 is complete. The first skill cohort landed in `2bf342a`; the second landed in `1b3cf8b`. Invocation history retained only `handoff`, `teach`, and `things` in the shared skill directory. The dormant user-authored skills were deleted, and the unused formula-provided `hunk-review` setup link was removed while retaining the Hunk CLI itself.
 
 Next:
 
-- [ ] Decide the formula-provided `hunk-review` setup.
-- [ ] Keep `recall` deferred to Phase 5 session-format work.
+- [ ] Begin Phase 5 by adding Pi session support to `agent-reader`, then adapt `recall` against the tested parser.
 - [ ] Audit `summarize` separately as a load-bearing workflow because Fish and DEVONthink call it directly.
 
 The working tree may contain changes from parallel sessions. Keep unrelated changes out of migration commits.
