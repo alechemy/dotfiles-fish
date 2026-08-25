@@ -73,6 +73,14 @@ class ParseSourceUrl(unittest.TestCase):
         p = self._html("<!-- Page saved with SingleFile\n url: https://ex.com/a -->\n")
         self.assertEqual(sf.parse_source_url(p), "https://ex.com/a")
 
+    def test_extracts_url_after_large_opening_tag_data(self):
+        p = self._html(
+            '<html style="background:url(data:image/png;base64,'
+            + "A" * 200_000
+            + ')"><!-- Page saved with SingleFile\n url: https://ex.com/large -->'
+        )
+        self.assertEqual(sf.parse_source_url(p), "https://ex.com/large")
+
     def test_returns_none_without_the_singlefile_marker(self):
         p = self._html("<html>url: https://ex.com/a</html>")
         self.assertIsNone(sf.parse_source_url(p))

@@ -50,6 +50,8 @@ DEFUDDLE_SHIM = Path.home() / ".local" / "share" / "mise" / "shims" / "defuddle"
 # Post-compression size over this threshold → skip ingest, flag the bookmark as
 # SingleFileTooLarge so the user can review and re-capture manually if desired.
 MAX_INGEST_BYTES = 25 * 1024 * 1024
+SINGLEFILE_SCAN_CHUNK_BYTES = 64 * 1024
+MAX_SINGLEFILE_COMMENT_BYTES = 64 * 1024
 COMPRESS_TIMEOUT_SECS = 120
 DEFUDDLE_TIMEOUT_SECS = 60
 TRANSFORM_TIMEOUT_SECS = 240
@@ -380,12 +382,34 @@ def capture_timestamp(mtime: float) -> tuple[str, str]:
 
 
 def parse_source_url(html_path: Path) -> str | None:
+    marker = b"Page saved with SingleFile"
+    overlap = b""
+
     with open(html_path, "rb") as f:
-        head = f.read(4096).decode("utf-8", errors="replace")
-    if "Page saved with SingleFile" not in head:
-        return None
-    m = re.search(r"url:\s+(https?://\S+)", head)
-    return m.group(1) if m else None
+        while chunk := f.read(SINGLEFILE_SCAN_CHUNK_BYTES):
+            scanned = overlap + chunk
+            marker_pos = scanned.find(marker)
+            if marker_pos < 0:
+                overlap = scanned[-(len(marker) - 1) :]
+                continue
+
+            metadata = scanned[marker_pos:]
+            while b"-->" not in metadata and len(metadata) < MAX_SINGLEFILE_COMMENT_BYTES:
+                chunk = f.read(
+                    min(
+                        SINGLEFILE_SCAN_CHUNK_BYTES,
+                        MAX_SINGLEFILE_COMMENT_BYTES - len(metadata),
+                    )
+                )
+                if not chunk:
+                    break
+                metadata += chunk
+
+            text = metadata.decode("utf-8", errors="replace")
+            match = re.search(r"url:\s+(https?://\S+)", text)
+            return match.group(1) if match else None
+
+    return None
 
 
 def truncate_at_word(s: str, limit: int = TITLE_MAX_LEN) -> str:
