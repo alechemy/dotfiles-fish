@@ -30,6 +30,10 @@
 - Before reporting a multi-step task as done, re-read the original request and confirm the end result meets the original goal. All steps completing is not the same as the goal being met — check the outcome, not the checklist.
 - When fixing a bug in a project that has a test suite, reproduce it with a failing test before fixing — when a failing test is practical (it isn't always: races, visual bugs, environment-dependent failures) — and keep the test. When changing already-tested code, update the tests to cover the changed behavior. Defer to each project's existing testing conventions; don't impose a test framework or coverage bar on a project that doesn't have one.
 
+## External integrations
+
+- Before concluding that a current integration does not exist or building a custom adapter, fetch the provider's current documentation index when available and review its official client/package documentation. Do not rely only on a cached package README or remembered support matrix.
+
 ## Transcript and privacy audits
 
 - Never print raw matching lines from live agent transcripts. Tool results and transformed prompts can contain secrets or private content; use structured parsing and output only counts, field names, session metadata, or explicitly sanitized values.
