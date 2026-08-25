@@ -258,7 +258,7 @@ Do not port the existing hook stack automatically. First decide which outcomes r
 
 - [x] Scan unindexed repositories for `.uncommentrc.toml` consumers.
 - [x] Retain `agent-strip-comments`, `comment-gate-init`, `uncomment-clean`, `uncomment-scoped`, the Copilot comment hook, and the pinned `uncomment` installation for the active consumer.
-- [ ] Decide whether the opted-in repository needs a small event-driven Pi stripper integration.
+- [x] Defer a Pi stripper integration until normal Pi use demonstrates a need; revisit after several days of coding rather than porting the hook speculatively.
 - [x] Delete `agent-stub-scan`; its observed hits were noisy and did not catch a genuine incomplete implementation.
 - [x] Do not port the stub scan to Pi.
 - [x] Remove `hook-audit` with the last prompt-submit hook.
@@ -331,11 +331,11 @@ This phase depends on the Claude fallback decision and successful migration of a
 
 ## Immediate next checkpoint
 
-The summarize audit is complete. Invocation history showed little use, so the Claude skill, Fish function, DEVONthink smart rule and seed, direct token read, dedicated documentation, and summarize-only extraction dependencies were retired rather than ported to Pi. Existing `SummarySource` metadata remains historical.
+Phase 6 is complete. The deterministic comment tools remain available for the opted-in repository, but Pi gets no automatic stripper integration unless normal use demonstrates that the standing comment policy is insufficient.
 
 Next:
 
-- [ ] Continue to Phase 6's remaining event-driven comment-stripper decision.
+- [ ] Begin Phase 7 by auditing the filesystem MCP server against Pi's native file tools.
 
 The working tree may contain changes from parallel sessions. Keep unrelated changes out of migration commits.
 
