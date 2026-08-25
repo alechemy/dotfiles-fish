@@ -2,7 +2,7 @@
 
 # Agent harness migration plan
 
-Last updated: 2026-08-24
+Last updated: 2026-08-25
 
 This plan combines the original Pi adoption plan with the later decision to make the shared agent configuration provider- and harness-agnostic. It is the cross-session source of truth for this migration.
 
@@ -271,7 +271,8 @@ Do not port the existing hook stack automatically. First decide which outcomes r
 
 - [x] Remove the filesystem MCP server from Claude and work Copilot configuration. Pi ships native read, write, edit, bash, grep, find, and ls tools; Claude transcripts recorded zero filesystem MCP calls, and Copilot's 13 historical calls used only operations covered by those native tools.
 - [x] Retain Context7 through the official native Pi extension. Historical use is substantial (104 Copilot and 3 Claude tool calls). Source-review and pin `@upstash/context7-pi` 0.1.2, which registers two native tools, a skill, and `/c7-docs` without MCP; remove the redundant homegrown CLI/shared skill plus the old Copilot and Zed registrations. The active tools contribute 4,467 schema characters and the skill description 778 characters; that cost is justified by demonstrated use. This still removes a 250-character Context7 reminder from each Copilot turn (observed in 91 retained reminders) before any deferred tool schema is requested.
-- [ ] Evaluate DEVONthink and Anki as narrow tools or lazily loaded integrations.
+- [x] Retire Anki MCP. Across 246 retained Claude, Copilot, and Pi transcripts (20,077 structured tool calls, 2026-06-28 through 2026-08-25), no Anki tool call was recorded. No tracked or gitignored workflow depends on it. Remove it from the personal Claude MCP fragment, explicitly retire the stale live `ankimcp` key during the additive merge, and remove the enabled AnkiMCP add-on from Anki's active add-on directory on this machine. Preserve the Anki app, profiles, decks, media, and other user data, which are outside the agent-harness integration.
+- [-] Evaluate DEVONthink as a narrow tool or lazily loaded integration. Five recorded calls in one Claude session used only metadata-field discovery, record search, and custom-metadata reads; the current official server exposes 59 tools, so the demonstrated workflow is much narrower than the loaded surface.
 - [ ] Keep Atlassian configuration in the gitignored work package.
 - [ ] Decide whether browser debugging needs Chrome DevTools MCP, a Pi package, or no integration.
 - [ ] Review all third-party extension source before installation.
@@ -335,7 +336,9 @@ Phase 7's Context7 audit is complete. Current Context7 documentation revealed an
 
 Next:
 
-- [ ] Evaluate DEVONthink and Anki as narrow tools or lazily loaded integrations.
+- [x] Retire Anki MCP without touching the Anki app or user data.
+- [ ] Complete the DEVONthink architecture audit and propose the narrowest retained interactive surface before changing it.
+- [ ] Confirm the work-only Atlassian split and decide the browser-debugging and subagent items from measured demand.
 
 The working tree may contain changes from parallel sessions. Keep unrelated changes out of migration commits.
 

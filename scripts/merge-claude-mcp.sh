@@ -36,7 +36,7 @@ if jq -n \
     --slurpfile personal "$PERSONAL" \
     --slurpfile work <(cat "$WORK" 2>/dev/null || echo '{}') \
     '($cur[0] // {})
-     | del(.mcpServers.filesystem)
+     | del(.mcpServers.filesystem, .mcpServers.ankimcp)
      | .mcpServers = ((.mcpServers // {}) + ($personal[0] // {}) + ($work[0] // {}))' \
     >"$tmp" && jq -e . "$tmp" >/dev/null 2>&1; then
     mv "$tmp" "$TARGET"
