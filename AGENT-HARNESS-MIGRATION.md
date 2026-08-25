@@ -279,6 +279,24 @@ Do not port the existing hook stack automatically. First decide which outcomes r
 - [ ] Measure tool-schema and system-prompt cost before and after each addition.
 - [ ] Prefer Pi's dynamic tool loading for expensive, rarely used capabilities.
 
+#### DEVONthink audit and proposed implementation
+
+Evidence collected 2026-08-25:
+
+- The official `llms.txt` path returns 404. The current documentation index is [Handbooks and Extras](https://www.devontechnologies.com/support/download/extras), which links the [DEVONthink 4.3.2 manual](https://download.devontechnologies.com/download/devonthink/4.3.2/DEVONthink%20Manual.pdf). DEVONthink 4.3.2 ships the official MCP server and documents stdio plus local or remote HTTP transports, record/group/database exclusion from Chat and MCP, optional sensitive-content redaction, and AppleScript/JXA and URL automation. It documents no native DEVONthink CLI.
+- Neither DEVONtechnologies' current documentation nor Pi's package catalog lists an official Pi integration. The catalog's generic MCP bridges are third-party packages with full local execution authority; none was installed or needed for this audit.
+- The retained transcript index contains five DEVONthink calls, all from one Claude session on one day. The only operations were `list_custom_metadata_fields` twice, `search_records` twice, and `get_record_custom_metadata` once. No mutation operation was recorded.
+- The installed official 4.3.2 server advertises 59 tools. Direct `initialize` and `tools/list` measurements show 2,395 characters of server instructions and 80,694 characters of compact tool definitions. The three demonstrated tool definitions total 5,566 characters, or 6.9% of that advertised schema. A client may defer schemas, so these are protocol-surface measurements rather than a claim that Claude injects all 83,089 characters into every turn.
+
+Options considered:
+
+- **Retain the broad Claude MCP registration:** preserves vendor maintenance, exclusions, and redaction, but keeps 56 unused operations available and does not serve the normal Pi path.
+- **Write a direct AppleScript/JXA tool:** avoids third-party code and MCP, but DEVONthink does not document Chat/MCP exclusions or redaction as applying automatically to arbitrary scripts. Recreating those privacy boundaries would be custom security work.
+- **Install a generic Pi MCP bridge:** could load tools lazily, but there is no official DEVONthink or Pi package, the bridge would run with full local authority, and broad MCP access is not justified by five read-only calls.
+- **Use a focused local client for the official stdio MCP:** retain DEVONthink's own privacy and record-access enforcement while exposing only the three demonstrated read operations. The client can start on explicit use, so no MCP schema or server instructions need to be model-visible between uses.
+
+Proposed next checkpoint: add a lazy shared `devonthink` skill with a bundled, stdlib-only client for DEVONthink's built-in `--stdio` transport. Hard-allowlist the three demonstrated read operations, bound search result counts, return structured JSON, expose no arbitrary MCP method or mutation escape hatch, and load the detailed instructions only when the skill is invoked. Test protocol handling against a synthetic server and run privacy-preserving live canaries before removing the broad `devonthink` Claude MCP registration. Measure the skill-description and command-schema cost after implementation. This uses no third-party package and makes no DEVONthink pipeline or database change.
+
 ### Subagents
 
 - [ ] Do not add subagents merely to match Claude Code.
