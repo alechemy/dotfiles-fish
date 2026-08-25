@@ -7,8 +7,8 @@
 -- on-disk file. The earlier version did `sed -i` + `markdownlint --fix`
 -- directly on `path of theRecord` and then called `synchronize record`,
 -- which races with DT's buffered write of `set plain text of newRecord`
--- for programmatically-created records (e.g. from the summarize
--- skill). If the rule fires before DT flushes, the disk
+-- for programmatically-created records. If the rule fires before DT
+-- flushes, the disk
 -- file is stale or empty, the sed pipeline runs on that, and
 -- `synchronize record` then overwrites DT's authoritative in-memory
 -- content with the stale/empty disk state — silently wiping the record.

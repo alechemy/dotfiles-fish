@@ -4,7 +4,7 @@
 # Runs the same sed-plus-markdownlint-plus-tilde-escape sequence that
 # Extract: Native Text Bypass → lint-markdown.applescript applies to
 # freshly-arrived markdown. Programmatic record creators (the SingleFile
-# ingester, summarize skill, Granola importer, etc.) call this BEFORE
+# ingester, GitHub Stars importer, etc.) call this BEFORE
 # handing the file to DT so the resulting record arrives fully lint-fixed
 # and can be pre-flagged with Recognized=1, Commented=1 — which keeps
 # Extract: Native Text Bypass from matching the new record and firing a

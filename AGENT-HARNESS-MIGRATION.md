@@ -157,13 +157,13 @@ This phase replaces the Claude-centric directory layout without removing useful 
 
 ### Keep adapters thin
 
-- [x] Retain Claude Code as a Max-plan fallback and for the still-load-bearing summarize workflow.
+- [x] Retain Claude Code as a Max-plan fallback; the dormant summarize workflow no longer requires it.
 - [x] Retain standalone Copilot CLI until its active work-only MCP and Zed integrations move or are retired; Pi already replaces its ordinary terminal coding role.
 - [x] Keep provider authentication and model selection out of shared skills and instructions.
 - [x] Use `AI_AGENT` for generic child-process attribution where needed.
 - [x] Keep `PI_*` variables inside Pi-specific adapters rather than shared workflows.
 
-Current decision: both legacy harnesses remain compatibility adapters during migration. Their recent session history is still active, Claude owns the summarize workflow, and Copilot owns work-only MCP and Zed integrations. No migration goal requires uninstalling Copilot; reassess either harness only if its remaining workflows become unused.
+Current decision: both legacy harnesses remain compatibility adapters during migration. Their recent session history is still active, Claude remains a Max-plan fallback, and Copilot owns work-only MCP and Zed integrations. No migration goal requires uninstalling Copilot; reassess either harness only if its remaining workflows become unused.
 
 ### Reduce always-loaded project context
 
@@ -222,11 +222,10 @@ For each moved skill:
 
 #### `summarize`
 
-- [ ] Inventory every caller before changing it: Fish function, DEVONthink smart rule, documentation, token setup, and direct skill use.
-- [ ] Remove fixed Opus and Claude Task-agent assumptions.
-- [ ] Decide whether Pi should summarize in one session, use explicit worker processes, or retire the workflow.
-- [ ] Preserve DEVONthink import metadata and pipeline behavior if migrated.
-- [ ] Delete the workflow instead of partially porting it if it is no longer used.
+- [x] Inventory every caller: the Claude skill, Fish function, DEVONthink smart rule and seed, user-facing documentation, direct 1Password token read, and extraction dependencies.
+- [x] Retire the workflow instead of porting its fixed Opus and Claude Task-agent assumptions to Pi.
+- [x] Delete every invocation path and remove dependencies used only by this workflow.
+- [x] Preserve `SummarySource` as historical metadata for existing records; no new summary import path remains.
 
 ### Formula-provided skills
 
@@ -307,13 +306,10 @@ This phase depends on the Claude fallback decision and successful migration of a
 - [ ] Remove the Claude-specific Zed agent and its setup/build dependency if unused.
 - [ ] Remove the Karabiner Claude restart binding if unused.
 - [ ] Remove Claude-specific terminal key mappings that no retained tool needs.
-- [ ] Remove generated Claude token setup only after every direct Claude automation is gone.
+- [x] Remove the summarize automation's direct Claude token read with its final caller; no generated token configuration was tracked.
 
 ### Load-bearing items that must not be deleted blindly
 
-- DEVONthink's summarize smart rule and import path
-- `stow/fish/.config/fish/functions/summarize.fish`
-- `devonthink/docs/summarize.md` and related user-facing documentation
 - Work-only Atlassian configuration
 - Historical transcripts needed by `recall`
 - Any Zed workflow still used for agent sessions
@@ -335,12 +331,11 @@ This phase depends on the Claude fallback decision and successful migration of a
 
 ## Immediate next checkpoint
 
-Phase 5 is complete. `agent-reader` now discovers and parses Pi version-3 sessions alongside historical Claude and Copilot records, exposes normalized JSON for local consumers, and is covered by synthetic fixtures for all three formats. `recall` uses that parser, prefers handoffs, treats parallel workers and shared-record integrations as optional capabilities, and cites Pi sessions explicitly.
+The summarize audit is complete. Invocation history showed little use, so the Claude skill, Fish function, DEVONthink smart rule and seed, direct token read, dedicated documentation, and summarize-only extraction dependencies were retired rather than ported to Pi. Existing `SummarySource` metadata remains historical.
 
 Next:
 
-- [ ] Audit `summarize` separately as a load-bearing workflow because Fish and DEVONthink call it directly.
-- [ ] Continue to Phase 6's remaining event-driven comment-stripper decision after the summarize audit.
+- [ ] Continue to Phase 6's remaining event-driven comment-stripper decision.
 
 The working tree may contain changes from parallel sessions. Keep unrelated changes out of migration commits.
 
