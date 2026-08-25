@@ -273,11 +273,11 @@ Do not port the existing hook stack automatically. First decide which outcomes r
 - [x] Retain Context7 through the official native Pi extension. Historical use is substantial (104 Copilot and 3 Claude tool calls). Source-review and pin `@upstash/context7-pi` 0.1.2, which registers two native tools, a skill, and `/c7-docs` without MCP; remove the redundant homegrown CLI/shared skill plus the old Copilot and Zed registrations. The active tools contribute 4,467 schema characters and the skill description 778 characters; that cost is justified by demonstrated use. This still removes a 250-character Context7 reminder from each Copilot turn (observed in 91 retained reminders) before any deferred tool schema is requested.
 - [x] Retire Anki MCP. Across 246 retained Claude, Copilot, and Pi transcripts (20,077 structured tool calls, 2026-06-28 through 2026-08-25), no Anki tool call was recorded. No tracked or gitignored workflow depends on it. Remove it from the personal Claude MCP fragment, explicitly retire the stale live `ankimcp` key during the additive merge, and remove the enabled AnkiMCP add-on from Anki's active add-on directory on this machine. Preserve the Anki app, profiles, decks, media, and other user data, which are outside the agent-harness integration.
 - [x] Retain DEVONthink through a lazy shared read-only skill. Five recorded calls in one Claude session used only metadata-field discovery, record search, and custom-metadata reads. A bundled stdlib client now allowlists exactly those three operations over DEVONthink's official stdio server, preserving the vendor's Chat/MCP exclusions and redaction without a third-party bridge; the broad 59-tool Claude registration and final personal MCP fragment are retired.
-- [ ] Keep Atlassian configuration in the gitignored work package.
-- [ ] Decide whether browser debugging needs Chrome DevTools MCP, a Pi package, or no integration.
-- [ ] Review all third-party extension source before installation.
-- [ ] Measure tool-schema and system-prompt cost before and after each addition.
-- [ ] Prefer Pi's dynamic tool loading for expensive, rarely used capabilities.
+- [x] Keep Atlassian configuration in the gitignored work package. `git ls-files stow-work` exposes only `.gitkeep`; the Claude fragment, Copilot config, 1Password-backed builder, generated environment, and identifying documentation remain ignored. Live Claude state is app-owned and mode 0600, while the Copilot config and Fish environment resolve into the ignored package. No work endpoint is tracked.
+- [x] Retain the existing pinned Claude Chrome DevTools plugin and add no Pi browser integration yet. Sixty calls across five Claude sessions demonstrate real Claude demand, while 115 Copilot and 10 Pi sessions contain none. The recorded official plugin snapshot is Chrome DevTools MCP 1.4.0 at commit `6a9466378c13b6ccba91b54091ea83a5ca37a8db`; it exposes 29 tools totaling 23,336 bytes of wire-format definitions. A Pi bridge or direct-CDP extension would add a second full-permission supply chain without demonstrated Pi demand. Revisit on the first real Pi browser task, starting with the narrow official Chrome CLI path if navigation, evaluation, and screenshots are enough.
+- [x] Review third-party extension source before installation. Context7 0.1.2 was reviewed and pinned before addition; the browser audit reviewed the retained official Claude plugin snapshot and installed no Pi package.
+- [x] Measure tool-schema and system-prompt cost before and after each addition. Context7, DEVONthink, and the retained browser plugin have recorded wire or prompt measurements above; no unmeasured Phase 7 capability was added.
+- [x] Prefer Pi's dynamic tool loading for expensive, rarely used capabilities. DEVONthink is an on-demand skill with no registered tool schema, and the unused Pi browser surface was not added. Context7 remains native because its 107 historical calls justify two focused tools.
 
 #### DEVONthink audit and implementation
 
@@ -299,11 +299,11 @@ Implemented checkpoint: the shared `devonthink` skill bundles a stdlib-only clie
 
 ### Subagents
 
-- [ ] Do not add subagents merely to match Claude Code.
-- [ ] Identify a workflow that cannot be handled cleanly in one Pi session.
-- [ ] Compare explicit `pi -p` workers, tmux sessions, and a reviewed extension.
-- [ ] Account for nested model usage and subscription routing.
-- [ ] Add the smallest implementation that solves the demonstrated case.
+- [x] Do not add subagents merely to match Claude Code. The migration's independent read-only audits and implementation review showed that parallel workers can help with bounded research, but they did not establish a need for a permanent Pi subagent architecture.
+- [x] Identify a workflow that cannot be handled cleanly in one Pi session. None is demonstrated: the useful audit tasks can run serially, and parallelism was an optimization rather than a functional requirement.
+- [x] Compare explicit `pi -p` workers, tmux sessions, and a reviewed extension only after that demand gate. Explicit print-mode workers would be the smallest disposable option; tmux provides manual independent sessions; an extension would add persistent orchestration code with full local authority. With no qualifying workflow, none should be added.
+- [x] Account for nested model usage and subscription routing by adding no nested Pi calls. Any future worker design must state which provider/account pays for child calls instead of assuming Claude's Max-plan routing.
+- [x] Add the smallest implementation that solves the demonstrated case. The current answer is no implementation; use one Pi session until a concrete task proves otherwise.
 
 ## Phase 8: retire legacy harness infrastructure
 
@@ -350,13 +350,13 @@ This phase depends on the Claude fallback decision and successful migration of a
 
 ## Immediate next checkpoint
 
-Phase 7's personal integration audit is complete. Context7 uses its source-reviewed official native Pi package, Anki is retired, and DEVONthink now uses a lazy three-operation shared skill backed by the official server instead of a broad Claude MCP registration.
+Phase 7 is complete. Context7 uses its source-reviewed official native Pi package, Anki is retired, DEVONthink uses a lazy three-operation shared skill backed by the official server, Atlassian stays isolated in the ignored work package, and the demonstrated Claude browser workflow remains on its pinned plugin without duplicating that surface in Pi. No Pi subagent layer was added without a qualifying workflow.
 
 Next:
 
-- [x] Retire Anki MCP without touching the Anki app or user data.
-- [x] Retain only the three demonstrated DEVONthink read operations and preserve the official privacy boundary.
-- [ ] Record the verified work-only Atlassian split and browser-debugging decision, then resolve the subagent checklist from demonstrated demand.
+- [ ] Audit the remaining Copilot- and Claude-specific infrastructure against current use.
+- [ ] Ask before retiring Claude Code or its Max-plan fallback; do not infer that decision from Pi adoption.
+- [ ] Remove only independently unused legacy adapters, then run Phase 9 validation.
 
 The working tree may contain changes from parallel sessions. Keep unrelated changes out of migration commits.
 
