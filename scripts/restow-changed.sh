@@ -126,7 +126,7 @@ fi
 if grep -q '^stow/vscode/.*settings\.template\.json$' <<<"$changed_files"; then
     rebuild build-vscode-config.sh
 fi
-if grep -q '^stow/pi/\.pi/agent/settings\.fragment\.json$\|^scripts/merge-pi-settings\.sh$' <<<"$changed_files"; then
+if grep -Eq '^stow/pi/\.pi/agent/settings\.fragment\.json$|^scripts/merge-pi-settings\.sh$' <<<"$changed_files"; then
     rebuild merge-pi-settings.sh
 fi
 if grep -q '^stow/zed/.*settings\.template\.jsonc$' <<<"$changed_files"; then
@@ -143,7 +143,7 @@ if grep -q '^stow/streamrip/.*config\.template\.toml$' <<<"$changed_files"; then
         echo "restow-changed: streamrip template changed but 1Password CLI is unavailable; run scripts/build-streamrip-config.sh by hand" >&2
     fi
 fi
-if grep -q '^devonthink/utils/dtnote-handler\.applescript$\|^scripts/build-dtnote-handler\.sh$' <<<"$changed_files"; then
+if grep -Eq '^devonthink/utils/dtnote-handler\.applescript$|^scripts/build-dtnote-handler\.sh$' <<<"$changed_files"; then
     if [ -d "$HOME/Applications/DTNote.app" ]; then
         rebuild build-dtnote-handler.sh
     fi
