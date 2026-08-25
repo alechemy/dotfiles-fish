@@ -165,7 +165,7 @@
     "claude-acp": {
       "type": "registry",
       "env": {
-        "CLAUDE_CODE_EXECUTABLE": "${HOME}/.local/bin/claude",
+        "CLAUDE_CODE_EXECUTABLE": "/opt/homebrew/bin/claude",
         "GIT_PAGER": "cat"
       },
       "default_config_options": {
