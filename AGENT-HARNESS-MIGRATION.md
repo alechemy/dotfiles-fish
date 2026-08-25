@@ -234,13 +234,14 @@ For each moved skill:
 
 ## Phase 5: make session recall harness-neutral
 
-- [ ] Add Pi's version-3 JSONL session format to `agent-reader`.
-- [ ] Index Pi session id, cwd, name, timestamps, model/provider, user messages, and assistant messages.
-- [ ] Preserve support for historical Claude and Copilot transcripts while those records remain useful.
-- [ ] Prefer explicit handoff files before transcript mining.
-- [ ] Update `recall` to search available harnesses rather than a fixed pair.
-- [ ] Add tests with redacted fixtures for all retained session formats.
-- [ ] Decide when old Claude/Copilot transcript support can be retired.
+- [x] Add Pi's version-3 JSONL session format to `agent-reader` (`429868b`).
+- [x] Index Pi session id, cwd, optional name, timestamps, model/provider, user messages, and assistant messages.
+- [x] Preserve support for historical Claude and Copilot transcripts while those records remain useful.
+- [x] Prefer explicit handoff files before transcript mining.
+- [x] Update `recall` to discover available harnesses from agent-reader rather than assuming a fixed pair.
+- [x] Add synthetic schema-faithful fixtures and extractor tests for all retained session formats.
+- [x] Retain old Claude/Copilot parsing while their historical records remain useful; reassess only when those records are intentionally retired.
+- [x] Expose a normalized JSON session index and transcript command for recall and other local consumers (`6105b5c`).
 
 ## Phase 6: reassess completion and comment gates
 
@@ -334,12 +335,12 @@ This phase depends on the Claude fallback decision and successful migration of a
 
 ## Immediate next checkpoint
 
-Phase 4 is complete. The first skill cohort landed in `2bf342a`; the second landed in `1b3cf8b`. Invocation history retained only `handoff`, `teach`, and `things` in the shared skill directory. The dormant user-authored skills were deleted, and the unused formula-provided `hunk-review` setup link was removed while retaining the Hunk CLI itself.
+Phase 5 is complete. `agent-reader` now discovers and parses Pi version-3 sessions alongside historical Claude and Copilot records, exposes normalized JSON for local consumers, and is covered by synthetic fixtures for all three formats. `recall` uses that parser, prefers handoffs, treats parallel workers and shared-record integrations as optional capabilities, and cites Pi sessions explicitly.
 
 Next:
 
-- [ ] Begin Phase 5 by adding Pi session support to `agent-reader`, then adapt `recall` against the tested parser.
 - [ ] Audit `summarize` separately as a load-bearing workflow because Fish and DEVONthink call it directly.
+- [ ] Continue to Phase 6's remaining event-driven comment-stripper decision after the summarize audit.
 
 The working tree may contain changes from parallel sessions. Keep unrelated changes out of migration commits.
 
