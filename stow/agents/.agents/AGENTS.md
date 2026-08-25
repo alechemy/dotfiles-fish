@@ -33,6 +33,7 @@
 ## Transcript and privacy audits
 
 - Never print raw matching lines from live agent transcripts. Tool results and transformed prompts can contain secrets or private content; use structured parsing and output only counts, field names, session metadata, or explicitly sanitized values.
+- Never read or print a generated configuration that may contain resolved secrets. Inspect its tracked template, query only structural fields with a redacting parser, or test for the specific property without displaying values.
 
 ## Git and remote operations
 
