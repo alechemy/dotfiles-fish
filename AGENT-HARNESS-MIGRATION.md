@@ -307,24 +307,24 @@ Implemented checkpoint: the shared `devonthink` skill bundles a stdlib-only clie
 
 ## Phase 8: retire legacy harness infrastructure
 
-This phase depends on the Claude fallback decision and successful migration of any load-bearing workflows.
+The usage audit retains both legacy harnesses as thin adapters. As of 2026-08-25, the local index contains 121 Claude sessions through that day and 115 Copilot sessions through the prior day; the fixed 2026-08-19 through 2026-08-25 window includes 36 Claude, 10 Copilot, and 11 Pi sessions. Pi is the normal path, but inactivity does not justify uninstalling either fallback.
 
 ### Standalone Copilot CLI candidates
 
-- [ ] Remove the `copilot-cli` Brewfile cask if Pi fully replaces it.
-- [ ] Remove `stow/copilot/`.
-- [ ] Remove the Copilot MCP config and comment hook.
-- [ ] Preserve historical transcript parsing only as long as `recall` needs it.
+- [x] Retain the `copilot-cli` Brewfile cask. It still owns the ignored work-only Atlassian config, the Zed `copilot-acp` server, a terminal abbreviation, and recent Copilot sessions. Pi's Copilot-backed models do not replace those clients.
+- [x] Retain the already-thin `stow/copilot/` adapter: one canonical-instruction symlink and one shared comment-gate hook.
+- [x] Retain the ignored Copilot work MCP config and comment hook while their current consumers remain. Neither contains a personal capability that should move into shared Pi context.
+- [x] Preserve Claude and Copilot transcript parsing while `recall` needs 236 indexed legacy sessions and both histories remain current.
 
 ### Claude Code candidates
 
-- [ ] Remove the `claude-code` Brewfile cask only if the Max-plan fallback is no longer wanted.
-- [ ] Reduce or remove `stow/claude/` after shared instructions and skills move out.
-- [ ] Remove `merge-claude-mcp.sh` and its setup integration when no Claude MCP consumer remains.
+- [x] Retain the `claude-code@latest` Brewfile cask as the explicit Max-plan fallback. Recent terminal/SDK sessions and the demonstrated Chrome DevTools workflow independently justify it; retirement still requires a direct user decision.
+- [x] Retain the reduced `stow/claude/` adapter. Shared instructions and five skills are symlinks; the remaining settings, keybindings, grep guard, comment hook, and browser plugin are Claude-specific and either configured or independently demonstrated.
+- [x] Retain `merge-claude-mcp.sh` and its setup integration while Claude consumes the ignored work-only Atlassian fragment. The merge has no personal MCP fragment left.
 - [x] Remove personal Claude MCP fragments when their capabilities are migrated or retired; Context7 is native to Pi, DEVONthink is a lazy shared skill, and Anki is retired.
-- [ ] Remove the Claude-specific Zed agent and its setup/build dependency if unused.
-- [ ] Remove the Karabiner Claude restart binding if unused.
-- [ ] Remove Claude-specific terminal key mappings that no retained tool needs.
+- [x] Retain both Claude Zed ACP entries until direct usage can distinguish them. Seven recent `sdk-cli` sessions are consistent with ACP use but cannot identify the client. The registry entry's dead executable path was corrected to Homebrew's installed Claude binary; the custom bridge remains provisioned rather than deleting a possibly load-bearing workflow.
+- [x] Retain the live Ghostty-scoped Karabiner restart binding because safe metadata has no invocation counter and cannot prove it unused. It remains isolated from general Karabiner, display, and AeroSpace rules.
+- [x] Retain terminal submit mappings. Ghostty and VSCodium's CSI-u Super+Enter path now provides Pi's configured submit route as well as Claude's; it is no longer Claude-only. Claude's own keybindings remain inside its thin adapter. Ghostty's separate Shift+Enter escape-CR mapping has no tracked consumer, but safe metadata cannot prove it unused, so retain it pending an interactive Ghostty/Pi/Claude key smoke rather than attributing it to Pi.
 - [x] Remove the summarize automation's direct Claude token read with its final caller; no generated token configuration was tracked.
 
 ### Load-bearing items that must not be deleted blindly
@@ -350,13 +350,13 @@ This phase depends on the Claude fallback decision and successful migration of a
 
 ## Immediate next checkpoint
 
-Phase 7 is complete. Context7 uses its source-reviewed official native Pi package, Anki is retired, DEVONthink uses a lazy three-operation shared skill backed by the official server, Atlassian stays isolated in the ignored work package, and the demonstrated Claude browser workflow remains on its pinned plugin without duplicating that surface in Pi. No Pi subagent layer was added without a qualifying workflow.
+Phases 1–8 are complete. Pi is the normal entry point, while current evidence retains Claude and Copilot as thin adapters for distinct active workflows. No legacy adapter was removed merely because Pi exists, and Claude's Max-plan fallback remains intact.
 
 Next:
 
-- [ ] Audit the remaining Copilot- and Claude-specific infrastructure against current use.
-- [ ] Ask before retiring Claude Code or its Max-plan fallback; do not infer that decision from Pi adoption.
-- [ ] Remove only independently unused legacy adapters, then run Phase 9 validation.
+- [ ] Make `agent-reader` reproducible on a clean machine. The required local commits `429868b` and `6105b5c` are not reachable from its public remote, so setup cannot reproducibly pin them from the public remote until they are published; do not push that separate repository from this migration.
+- [ ] Complete the safe automated Phase 9 checks, then record the manual/interactive checks that require a disposable macOS VM, live provider state, Pi TUI history, or physical battery transition.
+- [ ] Update final documentation and close the migration only when every definition-of-done item has evidence or an explicitly retained consumer.
 
 The working tree may contain changes from parallel sessions. Keep unrelated changes out of migration commits.
 
