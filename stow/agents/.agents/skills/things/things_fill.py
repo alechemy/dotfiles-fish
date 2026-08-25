@@ -5,7 +5,7 @@ things_fill.py — reliable, idempotent bulk fill for Things 3.
 Encodes the hard-won rules for automating Things via its URL scheme:
   * Writes fire in the BACKGROUND via `open -g` (no activation), so Things never
     steals focus / yanks you to another Space; it need not be frontmost.
-  * The MCP / `add` command CANNOT create headings; only the `json` command
+  * The `add` command CANNOT create headings; only the `json` command
     (with an auth token) can                                       -> ensure_headings().
   * Multi-item `json` imports TRUNCATE on long URLs (>~4 KB) into a modal
     "problem with JSON" sheet that BLOCKS all further writes        -> we add ONE
@@ -26,11 +26,12 @@ SPEC.json:
   ]
 }
 
-Auth token (only needed to CREATE headings): set env THINGS_AUTH_TOKEN.
-Get it from Things -> Settings -> General -> Enable Things URLs -> Manage.
+Auth token (only needed to CREATE headings): THINGS_AUTH_TOKEN in the environment
+or the managed export in ~/.zshenv. Get it from Things -> Settings -> General ->
+Enable Things URLs -> Manage.
 Tags must already exist in Things (the `add` command won't create them).
 """
-import sys, os, json, time, glob, sqlite3, subprocess, urllib.parse
+import sys, os, re, json, time, glob, sqlite3, subprocess, urllib.parse
 
 def find_db():
     pats = os.path.expanduser("~/Library/Group Containers/*/ThingsData-*/Things Database.thingsdatabase/main.sqlite")
@@ -43,6 +44,18 @@ DB = find_db()
 
 def _con():
     return sqlite3.connect(f"file:{DB}?mode=ro", uri=True)
+
+def auth_token():
+    token = os.environ.get("THINGS_AUTH_TOKEN")
+    if token:
+        return token
+    try:
+        with open(os.path.expanduser("~/.zshenv")) as f:
+            text = f.read()
+    except OSError:
+        return None
+    match = re.search(r"^export THINGS_AUTH_TOKEN='([^']+)'$", text, re.MULTILINE)
+    return match.group(1) if match else None
 
 def resolve_project(p):
     """Accept a uuid or an exact title; return the project uuid."""
@@ -218,4 +231,4 @@ if __name__ == "__main__":
         sys.exit(__doc__)
     spec = json.load(open(args[0]))
     fill(spec["project"], spec["todos"], spec.get("headings"),
-         os.environ.get("THINGS_AUTH_TOKEN"), dry_run=dry)
+         auth_token(), dry_run=dry)

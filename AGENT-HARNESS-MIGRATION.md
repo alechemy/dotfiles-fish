@@ -186,33 +186,32 @@ Pi natively discovers Agent Skills under `~/.agents/skills`. Do not point Pi at 
 
 For each moved skill:
 
-- [x] Put the retained canonical copy under `stow/agents/.agents/skills/handoff/`.
+- [x] Put retained canonical copies under `stow/agents/.agents/skills/`.
 - [x] Replace Claude-specific commands and paths.
-- [x] Preserve helper scripts beside retained skills and use relative paths; `handoff` has no helper.
-- [x] Keep `disable-model-invocation` for explicit-only `handoff`.
-- [x] Validate the Agent Skills frontmatter with Pi's loader.
-- [x] Expose canonical `handoff` to Claude Code through a symlink rather than a copy.
-- [x] Test Pi's `/skill:handoff` expansion path with arguments.
+- [x] Preserve helper scripts beside retained skills and use relative paths; only `things` has a helper.
+- [x] Keep `disable-model-invocation` for explicit-only `handoff` and `teach`.
+- [x] Validate all retained Agent Skills with Pi's loader.
+- [x] Expose each canonical skill to Claude Code through a symlink rather than a copy.
+- [x] Test Pi's `/skill:<name>` expansion path with arguments for every retained skill.
 
 ### Adapt before moving
 
 #### `batch-review`
 
-- [ ] Replace Claude's `$ARGUMENTS` assumption with the Agent Skills argument convention.
-- [ ] Replace `WebFetch` and web-search assumptions with an explicit reviewed tool or CLI path.
-- [ ] Verify Qobuz fallback behavior before enabling it in Pi.
+- [x] Delete it: Claude command history and transcripts record no invocation, and neither Pi nor Copilot history records one. Do not adapt its argument, web-fetch, or Qobuz fallback assumptions without demonstrated demand.
 
 #### `teach`
 
-- [ ] Remove the assumption that Explore subagents exist.
-- [ ] Make parallel exploration optional and capability-based.
-- [ ] Keep the useful explanation contract without carrying a second global prose policy.
+- [x] Retain it: Claude transcripts record one explicit `/teach` invocation after installation.
+- [x] Remove the assumption that Explore subagents exist; parallel exploration is optional and capability-based.
+- [x] Keep the explanation contract without carrying a second global prose policy.
 
 #### `things`
 
-- [ ] Replace absolute `~/.claude/skills/...` paths with relative skill paths.
-- [ ] Decide whether the helper and Things URL scheme eliminate the need for `things-mcp`.
-- [ ] Keep the documented idempotency and heading edge cases.
+- [x] Retain it: transcripts record repeated `things_fill.py` use across three sessions.
+- [x] Replace absolute Claude paths with a helper path relative to the skill directory.
+- [x] Remove `things-mcp` assumptions: no transcript records an MCP tool invocation and no active MCP configuration remains; the helper, URL scheme, SQLite reads, and AppleScript cover the retained workflow.
+- [x] Keep the documented idempotency and heading edge cases.
 
 #### `recall`
 
@@ -337,16 +336,13 @@ This phase depends on the Claude fallback decision and successful migration of a
 
 ## Immediate next checkpoint
 
-Phase 4's first skill cohort is complete (`2bf342a`): invocation history showed no use of the five candidates, so only explicit-only `handoff` moved to the shared skill directory because recall depends on its artifacts. `blast-radius`, `diagnosing-bugs`, the `music-doctor` skill, and `wait-what` were deleted; the independently used `music-doctor.py` engine remains.
+Phase 4's user-authored skill audit is complete. The first cohort landed in `2bf342a`. In the second cohort, invocation history showed `batch-review` dormant, one explicit `teach` invocation, and repeated use of the `things` helper across three sessions. `batch-review` was deleted; `teach` and `things` moved to the shared skill directory with Claude compatibility symlinks and harness-neutral instructions.
 
 Next:
 
-- [ ] Audit invocation history for `batch-review`, `teach`, and `things` before adapting any of them.
-- [ ] Delete dormant skills rather than porting them.
-- [ ] Move each retained skill in a separate reviewable commit or tightly related checkpoint.
-- [ ] Keep `recall` for the Phase 5 session-format work instead of partially adapting it now.
-- [ ] Treat `summarize` as its own load-bearing workflow audit because Fish and DEVONthink call it directly.
-- [ ] Decide the formula-provided `hunk-review` setup after the user-authored skill audit.
+- [ ] Decide the formula-provided `hunk-review` setup.
+- [ ] Keep `recall` deferred to Phase 5 session-format work.
+- [ ] Audit `summarize` separately as a load-bearing workflow because Fish and DEVONthink call it directly.
 
 The working tree may contain changes from parallel sessions. Keep unrelated changes out of migration commits.
 
