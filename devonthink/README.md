@@ -417,7 +417,7 @@ Either way, `capture-bookmarks-batch.py` launches in the background, a macOS not
 
 ### AI chat transcript rewrite
 
-When the SingleFile capture's source URL is hosted on `claude.ai`, `gemini.google.com`, or `chatgpt.com`, the defuddle output is a raw turn-by-turn transcript that reads poorly as a reference document. Before import, `ingest-singlefile-html.py` calls DEVONthink's `get chat response` with a curated rewrite prompt that reorganizes the transcript by topic, drops conversational framing (greetings, "great question", model signatures, the user's questions restated), and applies the prose style rules from `~/.claude/CLAUDE.md`. The result is a topic-organized writeup, not a summary — every fact, recommendation, and caveat the assistant produced is preserved.
+When the SingleFile capture's source URL is hosted on `claude.ai`, `gemini.google.com`, or `chatgpt.com`, the defuddle output is a raw turn-by-turn transcript that reads poorly as a reference document. Before import, `ingest-singlefile-html.py` calls DEVONthink's `get chat response` with a curated rewrite prompt that reorganizes the transcript by topic, drops conversational framing (greetings, "great question", model signatures, the user's questions restated), and applies the prose style rules from `~/.agents/AGENTS.md`. The result is a topic-organized writeup, not a summary — every fact, recommendation, and caveat the assistant produced is preserved.
 
 A provenance line is prepended to the markdown body inside the import AppleScript: `*Generated from a conversation with Claude on YYYY-MM-DD. Original capture: [title](x-devonthink-item://...).*` The link points at the HTML snapshot record so the original conversation is one click away.
 

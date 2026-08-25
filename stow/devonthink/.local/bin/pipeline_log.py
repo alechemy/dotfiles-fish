@@ -29,7 +29,7 @@ unset, so their failures still notify.
 """
 
 # Imported by scripts pinned to /usr/bin/python3 (3.9); future annotations
-# keep PEP 604 union syntax parseable. See CLAUDE.md.
+# keep PEP 604 union syntax parseable. See AGENTS.md.
 from __future__ import annotations
 
 import logging

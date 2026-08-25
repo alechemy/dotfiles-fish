@@ -4,7 +4,7 @@
 // Queries EventKit directly from osascript so the Calendars TCC grant
 // attaches to Apple-signed /usr/bin/osascript and survives interpreter
 // upgrades (same principle as the pipeline's AppleEvents rules; see
-// dotfiles CLAUDE.md "Launch Agents and AppleEvents"). First run must be
+// dotfiles AGENTS.md "Launch Agents and AppleEvents"). First run must be
 // interactive to answer the one-time Calendars permission prompt:
 //
 //   osascript -l JavaScript ~/.local/bin/calendar-events-json.js

@@ -95,7 +95,7 @@ Projects should eventually use `AGENTS.md` as their canonical context file. If C
 
 - [x] Make the existing global instruction text harness-neutral.
 - [x] Link Pi's global `AGENTS.md` to that instruction source.
-- [-] The text is neutral, but its canonical file still lives under `stow/claude/`. Relocation is Phase 3.
+- [x] Move the canonical text to `stow/agents/.agents/AGENTS.md`; retained harnesses expose it through compatibility symlinks.
 
 ### Intentional omissions
 
@@ -139,31 +139,31 @@ This phase replaces the Claude-centric directory layout without removing useful 
 
 ### Canonical user instructions
 
-- [ ] Create `stow/agents/.agents/AGENTS.md` as the canonical global instruction file.
-- [ ] Move the current harness-neutral contents from `stow/claude/.claude/CLAUDE.md` into it.
-- [ ] Point `stow/pi/.pi/agent/AGENTS.md` at the canonical file.
-- [ ] If Claude Code remains, replace its `CLAUDE.md` with a compatibility symlink.
-- [ ] If standalone Copilot CLI remains, point `copilot-instructions.md` at the same canonical file.
-- [ ] Update setup, Stow documentation, and architecture documentation.
-- [ ] Verify each retained harness loads exactly one copy of the global instructions.
+- [x] Create `stow/agents/.agents/AGENTS.md` as the canonical global instruction file.
+- [x] Move the current harness-neutral contents from `stow/claude/.claude/CLAUDE.md` into it.
+- [x] Point `stow/pi/.pi/agent/AGENTS.md` at the canonical file.
+- [x] Retain Claude Code and replace its `CLAUDE.md` with a compatibility symlink.
+- [x] Retain standalone Copilot CLI for now and point `copilot-instructions.md` at the same canonical file.
+- [x] Update setup, Stow documentation, and architecture documentation.
+- [x] Verify each retained harness loads exactly one copy of the global instructions.
 
 ### Project context files
 
-- [ ] Rename the repository root `CLAUDE.md` to `AGENTS.md`.
-- [ ] Add a `CLAUDE.md` compatibility symlink only if Claude Code remains.
-- [ ] Apply the same pattern to `devonthink/CLAUDE.md`.
-- [ ] Update internal links and references.
-- [ ] Verify Pi does not load both names as duplicate context.
+- [x] Rename the repository root `CLAUDE.md` to `AGENTS.md`.
+- [x] Add a `CLAUDE.md` compatibility symlink for Claude Code.
+- [x] Apply the same pattern to `devonthink/CLAUDE.md`.
+- [x] Update internal links and references.
+- [x] Verify Pi prefers `AGENTS.md` and does not load the compatibility symlink as duplicate context.
 
 ### Keep adapters thin
 
-- [ ] Decide whether Claude Code remains as a Max-plan fallback.
-- [ ] Decide whether standalone Copilot CLI has any purpose once Pi is stable.
-- [ ] Keep provider authentication and model selection out of shared skills and instructions.
-- [ ] Use `AI_AGENT` for generic child-process attribution where needed.
-- [ ] Keep `PI_*` variables inside Pi-specific adapters rather than shared workflows.
+- [x] Retain Claude Code as a Max-plan fallback and for the still-load-bearing summarize workflow.
+- [x] Retain standalone Copilot CLI until its active work-only MCP and Zed integrations move or are retired; Pi already replaces its ordinary terminal coding role.
+- [x] Keep provider authentication and model selection out of shared skills and instructions.
+- [x] Use `AI_AGENT` for generic child-process attribution where needed.
+- [x] Keep `PI_*` variables inside Pi-specific adapters rather than shared workflows.
 
-Recommended decision: retain Claude Code only as a narrow Max-plan escape hatch, and retire standalone Copilot CLI because Pi already provides the enterprise subscription.
+Current decision: both legacy harnesses remain compatibility adapters during migration. Their recent session history is still active, Claude owns the summarize workflow, and Copilot owns work-only MCP and Zed integrations. Reassess deletion in Phase 8 after those consumers move.
 
 ## Phase 4: migrate, adapt, or delete skills
 
@@ -333,12 +333,12 @@ This phase depends on the Claude fallback decision and successful migration of a
 
 Before starting Phase 3:
 
-- [ ] Review the current diff as one coherent Pi-baseline and dead-weight-removal change.
-- [ ] Commit that checkpoint without including unrelated work.
-- [ ] Decide whether Claude Code remains as a narrow Max-plan fallback.
-- [ ] Decide whether standalone Copilot CLI can be retired immediately.
+- [x] Review the Pi-baseline and dead-weight-removal change as one coherent diff.
+- [x] Commit that checkpoint without including unrelated work (`c08b399`).
+- [x] Retain Claude Code as a narrow Max-plan fallback and summarize host.
+- [x] Do not retire standalone Copilot CLI until its work-only MCP and Zed consumers are migrated or removed.
 
-The first Phase 3 implementation should then move only the canonical global instructions. Skill moves should follow in separate, reviewable commits so a broken skill cannot obscure the configuration transition.
+Phase 3 moved only instructions and context files. Skill moves remain separate Phase 4 changes so a broken skill cannot obscure the configuration transition.
 
 ## Definition of done
 

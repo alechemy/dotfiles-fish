@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # UserPromptSubmit / SessionStart hook: re-inject the standing comment policy so it
-# survives long sessions and compaction (the durability gap CLAUDE.md alone leaves).
+# survives long sessions and compaction (the durability gap global instructions alone leave).
 # Emits the additionalContext JSON form; arg 1 is the hook event name.
 
 event=${1:-UserPromptSubmit}

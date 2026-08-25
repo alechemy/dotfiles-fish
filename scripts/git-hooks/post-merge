@@ -2,7 +2,7 @@
 #
 # Restow packages whose files changed in the merge that just completed, so a
 # `git pull` syncing config from another machine self-heals its symlinks
-# without re-running setup.sh. See scripts/restow-changed.sh and CLAUDE.md
+# without re-running setup.sh. See scripts/restow-changed.sh and AGENTS.md
 # ("Auto-restow on pull"). Installed via core.hooksPath by setup.sh.
 
 toplevel="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0

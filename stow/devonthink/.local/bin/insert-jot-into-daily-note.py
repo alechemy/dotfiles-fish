@@ -30,7 +30,7 @@ Shebang is `/usr/bin/python3` (the Apple-signed system interpreter) to match
 the AppleScript caller's `do shell script "/usr/bin/python3 <path>"`. The
 script is pure stdlib and doesn't itself send AppleEvents, so the choice is
 for testing parity (direct invocation runs the same interpreter as the smart
-rule) rather than TCC stability — same principle the project's CLAUDE.md
+rule) rather than TCC stability — same principle the project's AGENTS.md
 applies to tier-1 scripts.
 """
 

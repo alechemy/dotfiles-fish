@@ -36,7 +36,7 @@ If `setup.sh` halts early, fix the reported issue and re-run — it's idempotent
 - [ ] **Operator Mono SSm Lig** — paid font from typography.com. Used by Ghostty and Zed. Drop the `.otf` files into `~/Library/Fonts/`. Without this, both apps fall back to a system monospace.
 - [ ] **SingleFile browser extension** — install in Chromium (`ungoogled-chromium`, installed via Brewfile):
   - From the Chrome Web Store (or load unpacked from the SingleFile repo).
-  - Import the canonical settings: **SingleFile → Options → JSON settings editor**, paste the contents of `stow/devonthink/.config/devonthink-pipeline/singlefile-extension-settings.json`, save. This sets the filename template, the `url:` comment the ingester requires, and every other load-bearing option in one step (see CLAUDE.md → "SingleFile extension settings").
+  - Import the canonical settings: **SingleFile → Options → JSON settings editor**, paste the contents of `stow/devonthink/.config/devonthink-pipeline/singlefile-extension-settings.json`, save. This sets the filename template, the `url:` comment the ingester requires, and every other load-bearing option in one step (see AGENTS.md → "SingleFile extension settings").
   - In Chromium settings, leave the download location at the default `~/Downloads` and turn **off** "Ask where to save each file" — otherwise the `SingleFile/` prefix won't resolve to the watched folder.
   - Bind SingleFile's shortcut to `Cmd+D` in `chrome://extensions/shortcuts` (used by `capture-with-singlefile` and for one-click desktop capture).
   - Full rationale: `devonthink/README.md` → "SingleFile extension setup".

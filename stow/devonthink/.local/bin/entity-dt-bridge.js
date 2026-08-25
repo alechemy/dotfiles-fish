@@ -105,7 +105,7 @@ function mdValue(rec, key) {
 }
 
 // A flag set by script reads back as '1'; the same flag ticked in the GUI
-// reads back as 'true' (see CLAUDE.md on DT's boolean representation).
+// reads back as 'true' (see AGENTS.md on DT's boolean representation).
 function flagSet(v) {
   return v === '1' || v === 'true'
 }

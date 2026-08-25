@@ -21,7 +21,7 @@ path (Scenario 1) and the ingester will create a bookmark in 99_ARCHIVE.
 On success the staging HTML file is deleted.
 """
 
-# Pinned to /usr/bin/python3 (3.9) for TCC stability — see CLAUDE.md.
+# Pinned to /usr/bin/python3 (3.9) for TCC stability — see AGENTS.md.
 from __future__ import annotations
 
 import argparse

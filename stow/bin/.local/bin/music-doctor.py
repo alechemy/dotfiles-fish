@@ -1125,7 +1125,7 @@ def fix_compilation_mismatch(finding: dict, ctx: FixContext) -> None:
             if ctx.apply:
                 if ext == ".m4a":
                     a = MP4(p)
-                    a["cpil"] = bool(new_value)  # bare bool — see CLAUDE.md
+                    a["cpil"] = bool(new_value)  # bare bool — see AGENTS.md
                     a.save()
                 elif ext == ".flac":
                     a = FLAC(p)
