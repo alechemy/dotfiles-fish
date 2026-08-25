@@ -347,6 +347,18 @@ fi
 chmod +x "$DOTFILES/scripts/build-vscode-config.sh"
 "$DOTFILES/scripts/build-vscode-config.sh"
 
+# Pi rewrites settings.json itself. Merge the portable preferences rather than
+# stowing the live settings file, leaving runtime fields and OAuth credentials
+# local.
+chmod +x "$DOTFILES/scripts/merge-pi-settings.sh"
+"$DOTFILES/scripts/merge-pi-settings.sh" \
+    || info "WARNING: Pi settings merge failed; check jq and ~/.pi/agent/settings.json."
+if ! jq -e '
+    has("openai-codex") and has("github-copilot") and has("anthropic")
+' "$HOME/.pi/agent/auth.json" >/dev/null 2>&1; then
+    info "Pi provider logins are machine-local. Run pi, then /login for OpenAI, GitHub Copilot, and Anthropic."
+fi
+
 # Merge tracked MCP-server fragments into ~/.claude.json (personal always, the
 # work fragment only if the gitignored stow-work/work carries one). No op needed;
 # ~/.claude.json is app-owned runtime state, so this merges rather than stows.

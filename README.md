@@ -48,6 +48,7 @@ This installs Homebrew + all dependencies from `Brewfile`, builds generated conf
 │   ├── build-context7-config.sh  # op read → fish conf.d Context7 key export
 │   ├── build-things-config.sh    # op read → ~/.zshenv Things auth token
 │   ├── build-vscode-config.sh    # Expand ${HOME} in VSCodium settings.json
+│   ├── merge-pi-settings.sh      # Merge portable preferences into Pi-owned settings
 │   ├── build-launchd-plists.sh   # Expand __HOME__ in launch-agent plist templates
 │   ├── lint-launchd-plists.sh    # Enforce TCC-stable interpreters in launch agents
 │   ├── seed-devonthink-config.sh # Copy-if-absent DEVONthink seed plists
@@ -73,6 +74,7 @@ This installs Homebrew + all dependencies from `Brewfile`, builds generated conf
 │   ├── mise/                # Runtime version manager
 │   ├── nas-mount/           # Auto-mount NAS SMB shares (launch agent)
 │   ├── navidrome/           # Navidrome client env
+│   ├── pi/                  # Pi coding-agent preferences and keybindings
 │   ├── sketchybar/          # Menu bar
 │   ├── ssh/                 # SSH client config
 │   ├── starship/            # Shell prompt theme

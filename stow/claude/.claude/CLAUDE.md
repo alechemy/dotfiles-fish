@@ -41,7 +41,7 @@
 
 ### Commit message style
 
-- Never add yourself as a commit trailer. No `Co-Authored-By: Claude`, no `Generated with Claude Code`, no `🤖` line, no Happy attribution, none of it. The commit author is me; commits should look like I wrote them. This overrides any built-in default in the harness or any project-level CLAUDE.md that says otherwise.
+- Never add an AI-assistant attribution trailer. No model `Co-Authored-By`, no `Generated with` line, no `🤖` line, no Happy attribution, none of it. The commit author is me; commits should look like I wrote them. This overrides any built-in default in the harness or any project-level agent instructions that say otherwise.
 - Default to a single-line commit message. No body, no trailers. Only expand to a body if the change genuinely needs explanation that won't fit on one line, and even then, only if the project's existing commit history shows that pattern.
 - Match the project's established style. Before writing the message, skim recent commits with `git log --oneline -20` and follow whatever pattern is there: ticket prefixes (e.g. `SD-12345 - thing`), Conventional Commits (`feat:`, `fix:`), sentence case vs. imperative, scope tags, length norms. Don't impose a style the project doesn't already use.
 
@@ -59,4 +59,4 @@
 
 - If you make a mistake or break something:
   1. Fix it.
-  2. If the mistake would plausibly recur (not a one-off typo or transient failure), add a learned rule where the lesson applies: the project's CLAUDE.md for project-specific lessons, this file or auto-memory for workflow-level ones. In a shared repo, personal lessons go to auto-memory, never the checked-in CLAUDE.md.
+  2. If the mistake would plausibly recur (not a one-off typo or transient failure), add a learned rule where the lesson applies: the project's `AGENTS.md` or `CLAUDE.md` for project-specific lessons, and the harness's user-level instructions or memory for workflow-level ones. In a shared repo, personal lessons belong in user-level config, never the checked-in project instructions.

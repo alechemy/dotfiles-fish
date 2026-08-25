@@ -105,6 +105,9 @@ fi
 if grep -q '^stow/vscode/.*settings\.template\.json$' <<<"$changed_files"; then
     rebuild build-vscode-config.sh
 fi
+if grep -q '^stow/pi/\.pi/agent/settings\.fragment\.json$\|^scripts/merge-pi-settings\.sh$' <<<"$changed_files"; then
+    rebuild merge-pi-settings.sh
+fi
 if grep -q '^stow/zed/.*settings\.template\.jsonc$' <<<"$changed_files"; then
     if op_ok; then
         rebuild build-zed-config.sh

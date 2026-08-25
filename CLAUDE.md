@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Personal dotfiles managed with GNU Stow on macOS. All packages under `stow/` mirror the `$HOME` directory structure and are auto-linked by `setup.sh`. `stow-work/` holds work-specific config: gitignored apart from `.gitkeep`, so a fresh `git clone` leaves it empty and `setup.sh` skips it. After a file-copy from another machine the package has content and `setup.sh` auto-stows it (see step 4a in `scripts/setup.sh`).
 
-**Key tools:** Fish shell, Homebrew, Mise (runtime versions), Starship (prompt), Ghostty (terminal), Zed (editor).
+**Key tools:** Fish shell, Homebrew, Mise (runtime versions), Pi (coding-agent harness), Starship (prompt), Ghostty (terminal), Zed (editor).
 
 ## Hardware setup
 
@@ -156,6 +156,14 @@ The pattern:
 4. **Work/personal split.** MCP `env` values are `${VAR}` placeholders (Claude Code expands them at launch), so no fragment carries a literal secret — but a server URL can still be work-identifying (`<company>.atlassian.net`), and the repo is public. The personal fragment (`stow/claude/mcp-servers.json`: `devonthink`, `ankimcp`) is tracked publicly; the work fragment (`stow-work/work/mcp-servers.json`: `atlassian`) lives in the gitignored work package, and the merge folds it in only when present. See `stow-work/work/ATLASSIAN-MCP-SETUP.md`.
 
 Current consumer: `~/.claude.json` `.mcpServers` (`scripts/merge-claude-mcp.sh`).
+
+### Merged Pi settings (fragment → merge into app-owned JSON, not stowed)
+
+Pi updates files under `~/.pi/agent/`. Stowing the live `settings.json` would let runtime writes churn the repo or atomically replace the symlink. The tracked `stow/pi/.pi/agent/settings.fragment.json` therefore contains only portable preferences, is excluded by `stow/pi/.stow-local-ignore`, and `scripts/merge-pi-settings.sh` recursively merges it over the live settings while preserving runtime-owned fields such as `lastChangelogVersion`. `setup.sh` runs the merge before stowing, and `restow-changed.sh` reruns it when the fragment or merge script changes.
+
+Keep `auth.json`, `models-store.json`, sessions, backups, and the live `models.json` out of Stow and git. `auth.json` contains OAuth credentials. oMLX generates `models.json` and timestamped backups with its local server credential, so the local integration owns those files. Fresh machines authenticate interactively with Pi's `/login`; setup only prints a reminder when the three subscription providers are missing.
+
+`stow/pi/.pi/agent/AGENTS.md` shares the harness-neutral global preferences from `stow/claude/.claude/CLAUDE.md`. Pi also loads each project's existing `CLAUDE.md` automatically, so projects do not need duplicate `AGENTS.md` files. The settings fragment scopes model cycling to OpenAI Codex, two Copilot-backed alternatives, and oMLX. Direct Anthropic stays out of the cycle because Pi's third-party Anthropic OAuth uses paid extra usage rather than the included Claude Max allowance; it remains reachable through `/model`. Pi's keybindings preserve the agent-CLI convention of Enter for a newline and Cmd+Enter or Ctrl+S to submit.
 
 ### Local Homebrew tap (apps with no upstream cask)
 
