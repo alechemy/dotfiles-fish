@@ -270,7 +270,7 @@ Do not port the existing hook stack automatically. First decide which outcomes r
 ### MCP and tool integrations
 
 - [x] Remove the filesystem MCP server from Claude and work Copilot configuration. Pi ships native read, write, edit, bash, grep, find, and ls tools; Claude transcripts recorded zero filesystem MCP calls, and Copilot's 13 historical calls used only operations covered by those native tools.
-- [x] Retain Context7 as a focused CLI-backed shared skill. Historical use is substantial (104 Copilot and 3 Claude tool calls), but the two-operation API does not justify an always-loaded MCP server; remove the Copilot and Zed registrations and expose authenticated-or-anonymous `context7 search`/`context7 docs` commands instead. This removes a 250-character Context7 reminder from each Copilot turn (observed in 91 retained reminders) before any deferred tool schema is requested.
+- [x] Retain Context7 through the official native Pi extension. Historical use is substantial (104 Copilot and 3 Claude tool calls). Source-review and pin `@upstash/context7-pi` 0.1.2, which registers two native tools, a skill, and `/c7-docs` without MCP; remove the redundant homegrown CLI/shared skill plus the old Copilot and Zed registrations. The active tools contribute 4,467 schema characters and the skill description 778 characters; that cost is justified by demonstrated use. This still removes a 250-character Context7 reminder from each Copilot turn (observed in 91 retained reminders) before any deferred tool schema is requested.
 - [ ] Evaluate DEVONthink and Anki as narrow tools or lazily loaded integrations.
 - [ ] Keep Atlassian configuration in the gitignored work package.
 - [ ] Decide whether browser debugging needs Chrome DevTools MCP, a Pi package, or no integration.
@@ -331,7 +331,7 @@ This phase depends on the Claude fallback decision and successful migration of a
 
 ## Immediate next checkpoint
 
-Phase 7's Context7 audit is complete. The capability has demonstrated value, so it remains available through a focused CLI and shared skill while its Copilot and Zed MCP registrations are retired. This preserves current documentation lookup without loading an MCP registration and deferred tool inventory into every session.
+Phase 7's Context7 audit is complete. Current Context7 documentation revealed an official native Pi package that the cached MCP README did not list. The source-reviewed, pinned extension replaces the temporary homegrown CLI and shared skill while the Copilot and Zed MCP registrations remain retired.
 
 Next:
 

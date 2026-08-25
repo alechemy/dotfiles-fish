@@ -6,9 +6,9 @@
 # this is what makes the token reach the `things` skill's Things URL writes
 # (update / json / cancel — the `add` command does not need it).
 #
-# Why ~/.zshenv and not a fish conf.d like build-context7-config.sh: the context7
-# key feeds a CLI used from terminal sessions that source fish's environment.
-# The `things` skill instead runs `op`/`python3`/`open` through the Bash *tool*,
+# Why ~/.zshenv and not a fish conf.d like build-context7-config.sh: the Context7
+# key feeds an extension inherited by Pi from fish's environment. The `things`
+# skill instead runs `op`/`python3`/`open` through the Bash *tool*,
 # whose zsh does NOT inherit fish's env — proven: with context7.fish built, fish
 # has CONTEXT7_API_KEY but the Bash tool does not. ~/.zshenv is the injection
 # point the Bash tool actually honors.

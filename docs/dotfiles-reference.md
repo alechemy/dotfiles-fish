@@ -119,7 +119,7 @@ Current consumers:
 - `stow/zed/` — op inject + `${HOME}` (`scripts/build-zed-config.sh`)
 - `stow/streamrip/` — op inject + `${HOME}` (`scripts/build-streamrip-config.sh`)
 - `stow/vscode/` — `${HOME}` only (`scripts/build-vscode-config.sh`)
-- `stow/fish/.config/fish/conf.d/context7.fish` — op read (`scripts/build-context7-config.sh`); exports the optional `CONTEXT7_API_KEY` so the focused `~/.local/bin/context7` CLI gets authenticated higher rate limits in terminal sessions. The CLI is usable anonymously when the key is absent. Its `search` and `docs` commands wrap the two API endpoints used by the reviewed `@upstash/context7-mcp` 4.0.3 implementation. Agent instructions expose it through the shared `context7` skill instead of loading an MCP server and its tool schemas into every session.
+- `stow/fish/.config/fish/conf.d/context7.fish` — op read (`scripts/build-context7-config.sh`); exports the optional `CONTEXT7_API_KEY` so the official `@upstash/context7-pi` extension gets authenticated higher rate limits in terminal Pi sessions. The extension remains usable anonymously when the key is absent. Version `0.1.2` is source-reviewed and pinned in Pi's settings fragment; it registers two native tools, its `context7-docs` skill, and the `/c7-docs` command without an MCP server.
 - `~/.zshenv` — op read (`scripts/build-things-config.sh`); exports `THINGS_AUTH_TOKEN` for the Things URL-scheme automation. Output lives outside the stow tree, so there is no package; the script chmods it 600.
 
 A separate `__HOME__` expansion pattern exists for launch-agent plist templates under `stow/*/Library/LaunchAgents/*.plist.template`, handled by `scripts/build-launchd-plists.sh`.
@@ -167,7 +167,7 @@ Pi updates files under `~/.pi/agent/`. Stowing the live `settings.json` would le
 
 Keep `auth.json`, `models-store.json`, sessions, backups, and the live `models.json` out of Stow and git. `auth.json` contains OAuth credentials. oMLX generates `models.json` and timestamped backups with its local server credential, so the local integration owns those files. Fresh machines authenticate interactively with Pi's `/login`; setup only prints a reminder when the three subscription providers are missing.
 
-The settings fragment scopes model cycling to OpenAI Codex, two Copilot-backed alternatives, and oMLX. Direct Anthropic stays out of the cycle because Pi's third-party Anthropic OAuth uses paid extra usage rather than the included Claude Max allowance; it remains reachable through `/model`. Pi's keybindings preserve the agent-CLI convention of Enter for a newline and Cmd+Enter or Ctrl+S to submit.
+The settings fragment scopes model cycling to OpenAI Codex, two Copilot-backed alternatives, and oMLX, and pins reviewed global Pi packages such as `@upstash/context7-pi`. Direct Anthropic stays out of the cycle because Pi's third-party Anthropic OAuth uses paid extra usage rather than the included Claude Max allowance; it remains reachable through `/model`. Pi's keybindings preserve the agent-CLI convention of Enter for a newline and Cmd+Enter or Ctrl+S to submit.
 
 ### Local Homebrew tap (apps with no upstream cask)
 
