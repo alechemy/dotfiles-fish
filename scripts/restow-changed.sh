@@ -80,6 +80,27 @@ changed="$(git -C "$DOTFILES" -c core.quotePath=off diff --name-only "$OLD" "$NE
 
 [ -n "$changed" ] || exit 0
 
+# GNU Stow cannot discover a stale destination when the source's whole parent
+# directory disappeared. Remove links for tracked deletions explicitly before
+# restowing the surviving package contents.
+while IFS= read -r deleted; do
+    [ -n "$deleted" ] || continue
+    root="${deleted%%/*}"
+    rest="${deleted#*/}"
+    pkg="${rest%%/*}"
+    rel="${rest#*/}"
+    [ "$rel" != "$rest" ] || continue
+    dest="$HOME/$rel"
+    [ -L "$dest" ] || continue
+    target="$(readlink "$dest")"
+    case "$target" in
+        *"/$root/$pkg/"*)
+            rm "$dest"
+            echo "restow-changed: pruned deleted link $dest"
+            ;;
+    esac
+done < <(git -C "$DOTFILES" -c core.quotePath=off diff --diff-filter=D --name-only "$OLD" "$NEW" -- stow stow-work stow-local 2>/dev/null)
+
 # Generated configs: outputs are gitignored, so a pull that changes a template
 # leaves the built file stale (restow is a no-op for it). Rebuild them BEFORE the
 # restow below so a newly generated output (e.g. a brand-new launch agent's

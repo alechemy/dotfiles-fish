@@ -18,27 +18,6 @@
         ]
       }
     ],
-    "UserPromptSubmit": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash \"$HOME/.claude/hooks/comment-policy-inject.sh\" UserPromptSubmit"
-          }
-        ]
-      }
-    ],
-    "SessionStart": [
-      {
-        "matcher": "compact",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash \"$HOME/.claude/hooks/comment-policy-inject.sh\" SessionStart"
-          }
-        ]
-      }
-    ],
     "Stop": [
       {
         "hooks": [
@@ -46,21 +25,6 @@
             "type": "command",
             "command": "bash \"$HOME/.local/bin/agent-strip-comments\"",
             "timeout": 30
-          },
-          {
-            "type": "command",
-            "command": "bash \"$HOME/.local/bin/agent-stub-scan\"",
-            "timeout": 15
-          }
-        ]
-      }
-    ],
-    "SubagentStart": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash \"$HOME/.claude/hooks/comment-policy-inject.sh\" SubagentStart"
           }
         ]
       }
@@ -85,7 +49,6 @@
       }
     }
   },
-  "outputStyle": "Terse",
   "effortLevel": "high",
   "awaySummaryEnabled": false,
   "tui": "fullscreen",

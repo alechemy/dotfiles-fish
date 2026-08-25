@@ -163,7 +163,7 @@ This phase replaces the Claude-centric directory layout without removing useful 
 - [x] Use `AI_AGENT` for generic child-process attribution where needed.
 - [x] Keep `PI_*` variables inside Pi-specific adapters rather than shared workflows.
 
-Current decision: both legacy harnesses remain compatibility adapters during migration. Their recent session history is still active, Claude owns the summarize workflow, and Copilot owns work-only MCP and Zed integrations. Reassess deletion in Phase 8 after those consumers move.
+Current decision: both legacy harnesses remain compatibility adapters during migration. Their recent session history is still active, Claude owns the summarize workflow, and Copilot owns work-only MCP and Zed integrations. No migration goal requires uninstalling Copilot; reassess either harness only if its remaining workflows become unused.
 
 ### Reduce always-loaded project context
 
@@ -251,23 +251,22 @@ Do not port the existing hook stack automatically. First decide which outcomes r
 
 ### Current findings
 
-- The comment policy already exists in global instructions.
-- The deterministic stripper is opt-in, but no `.uncommentrc.toml` marker was found in the indexed local repositories during this audit.
-- The existing comment/stop infrastructure is about 585 lines before tests and documentation.
-- Its transcript parsing is tightly coupled to Claude Code and Copilot CLI.
-- Pi exposes direct tool and lifecycle events, so transcript parsing is unnecessary in a Pi implementation.
+- The comment policy already exists in the canonical global instructions.
+- A home-directory scan found one explicit `.uncommentrc.toml` consumer: `~/Work/tmdb-mobile`.
+- The deterministic stripper therefore remains useful to that opted-in repository.
+- The stub scan's recorded hits were repeated false positives from TODO text quoted in a review document, not unfinished implementations.
+- Pi exposes direct tool and lifecycle events, so any future Pi enforcement should not parse transcripts.
 
 ### Decisions and work
 
-- [ ] Confirm whether any unindexed repository still uses `.uncommentrc.toml`.
-- [ ] If none do, delete `agent-strip-comments`, `comment-gate-init`, `uncomment-clean`, `uncomment-scoped`, the Copilot comment hook, and the pinned `uncomment` installation.
-- [ ] Decide whether the stub-scan completion gate catches enough real failures to keep.
-- [ ] If yes, implement one small Pi extension that records exact `edit` and `write` targets and scans only newly added lines at `agent_settled`.
-- [ ] Ensure any corrective follow-up runs at most once per edit batch.
-- [ ] If no, delete `agent-stub-scan` rather than carrying a Claude-only enforcement mechanism.
-- [ ] Remove `hook-audit` when no prompt-submit hooks require it.
-- [ ] Remove Claude's Bash grep guard when Claude Code is retired or reduced enough that the workaround no longer matters.
-- [ ] Remove duplicated comment-policy carriers once each retained harness has one sufficient source.
+- [x] Scan unindexed repositories for `.uncommentrc.toml` consumers.
+- [x] Retain `agent-strip-comments`, `comment-gate-init`, `uncomment-clean`, `uncomment-scoped`, the Copilot comment hook, and the pinned `uncomment` installation for the active consumer.
+- [ ] Decide whether the opted-in repository needs a small event-driven Pi stripper integration.
+- [x] Delete `agent-stub-scan`; its observed hits were noisy and did not catch a genuine incomplete implementation.
+- [x] Do not port the stub scan to Pi.
+- [x] Remove `hook-audit` with the last prompt-submit hook.
+- [-] Retain Claude's Bash grep guard while Claude Code remains and the PTY-rendering workaround is still needed.
+- [x] Remove Claude's Terse output style and comment-policy lifecycle injections; the canonical global instructions are the one generation source for every retained harness.
 
 ## Phase 7: add external capabilities only on demonstrated demand
 
