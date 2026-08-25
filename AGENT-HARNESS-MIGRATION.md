@@ -178,21 +178,21 @@ Pi natively discovers Agent Skills under `~/.agents/skills`. Do not point Pi at 
 
 ### Move after small portability edits
 
-- [ ] `blast-radius`
-- [ ] `diagnosing-bugs`
-- [ ] `handoff`
-- [ ] `music-doctor`
-- [ ] `wait-what`
+- [x] Delete `blast-radius`: no recorded invocation since installation.
+- [x] Delete `diagnosing-bugs`: no recorded invocation, and its core failing-test rule already exists globally.
+- [x] Move `handoff`: explicit-only and retained as the preferred input path for later recall.
+- [x] Delete the `music-doctor` skill: no recorded invocation since May; retain the independently used CLI engine.
+- [x] Delete `wait-what`: no recorded invocation and ordinary conversation already covers the request.
 
 For each moved skill:
 
-- [ ] Put the canonical copy under `stow/agents/.agents/skills/<name>/`.
-- [ ] Replace Claude-specific commands and paths.
-- [ ] Preserve helper scripts beside the skill and use relative paths.
-- [ ] Keep `disable-model-invocation` where explicit invocation is safer.
-- [ ] Validate the Agent Skills frontmatter.
-- [ ] If Claude Code remains, expose the same canonical skill through a symlink rather than a copy.
-- [ ] Test invocation through `/skill:<name>` in Pi.
+- [x] Put the retained canonical copy under `stow/agents/.agents/skills/handoff/`.
+- [x] Replace Claude-specific commands and paths.
+- [x] Preserve helper scripts beside retained skills and use relative paths; `handoff` has no helper.
+- [x] Keep `disable-model-invocation` for explicit-only `handoff`.
+- [x] Validate the Agent Skills frontmatter with Pi's loader.
+- [x] Expose canonical `handoff` to Claude Code through a symlink rather than a copy.
+- [x] Test Pi's `/skill:handoff` expansion path with arguments.
 
 ### Adapt before moving
 
