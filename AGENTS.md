@@ -18,7 +18,7 @@ Also read:
 
 ## Repository-wide constraints
 
-- Preserve the Stow mirror: a file destined for `~/.config/tool/config` belongs at `stow/<package>/.config/tool/config`. Restow only when files are added or removed.
+- Preserve the Stow mirror. A file destined for `~/.config/tool/config` belongs at `stow/<package>/.config/tool/config`. Restow only when files are added or removed.
 - Never treat display count as docking state. Gate ultrawide behavior on the `DELL U4025QW` name. Gate power behavior independently through `~/.local/bin/should-run-background-job`.
 - Do not stow app-owned files that are atomically rewritten. Use the repository's generated, seeded, fragment-merge, or copy-if-absent pattern.
 - Before modifying launchd-driven code, read the AppleEvents and TCC sections in `docs/dotfiles-reference.md`. Interpreter identity and protected-folder staging are load-bearing.
