@@ -18,6 +18,7 @@ This directory documents and tests a DEVONthink 4 document-processing pipeline. 
 - Set `PIPELINE_MANUAL=1` before an agent or CI manually drives pipeline scripts, so watchdog notifications remain reserved for unattended failures.
 - Never put a real third party's name, contact details, calendar data, or other identifier in tracked files. Use fictional reserved test data. Machine-local identifiers belong in `~/.config/dt-pipeline/entities.conf`.
 - Preserve the smart-rule state machine and pre-flagging contract for programmatically created records. Read the detailed reference before changing any creator or metadata flag.
+- A filesystem watcher that delays backlog handling must subscribe before starting the sweep, so changes during the delay cannot land in a startup blind spot.
 - Record-body writers must preserve LF line endings; readers must tolerate CR, LF, and CRLF.
 
 ## Tests

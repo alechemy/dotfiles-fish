@@ -8,10 +8,12 @@ for markdown, bookmarks, and other non-handwritten record types.
 
 ## Flow
 
-1. `boox-import-watcher.sh` hands every named `.pdf` export to
-   `boox-stage.sh` (untitled `Notebook-<n>` / `Infinite-<n>` exports are
-   deleted — naming a notebook on the device is the deliberate signal that
-   it enters DEVONthink).
+1. `boox-import-watcher.sh` holds each `.pdf` until its local birth time is
+   at least two minutes old, giving a device-side rename or deletion time to
+   sync, then hands every named export to `boox-stage.sh` (untitled
+   `Notebook-<n>` / `Infinite-<n>` exports are deleted after the same grace
+   period — naming a notebook on the device is the deliberate signal that it
+   enters DEVONthink).
 2. `boox-stage.sh` byte-hashes the export (the Boox re-emits unchanged
    notebooks on every sync), short-circuits against the done marker and
    any already-staged copy, then atomically stages it in
@@ -162,4 +164,5 @@ Breakage modes to know:
   journal records through `entity-dt-bridge.js` (`get_text` /
   `get_fields`) or the DT UI, not MCP search.
 - **Unnamed notebooks are deleted by the watcher.** A notebook must be
-  named on the device or its exports never reach staging.
+  named on the device before the two-minute grace expires or its exports
+  never reach staging.
