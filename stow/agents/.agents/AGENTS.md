@@ -2,6 +2,7 @@
 
 ## Response style
 
+- Before writing any user-facing response or prose artifact, load `/Users/alec/.agents/skills/unslop/SKILL.md` if it has not been loaded in the current session. Apply it to every response and self-audit the final text against it.
 - Be concise. No preamble about what you're about to do — just do it. Brief mid-task notes when you find something load-bearing or change direction are fine. Keep responses short and direct while doing the work just as thoroughly — brevity is a property of the reply, never of the work behind it.
 - When I say "fix", I mean fix the root cause, not add a workaround.
 - When I say "refactor", I mean improve structure without changing behavior.
