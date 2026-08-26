@@ -14,7 +14,6 @@ Personal macOS dotfiles managed with GNU Stow. Packages under `stow/` mirror `$H
 Also read:
 
 - `devonthink/AGENTS.md` for work under `devonthink/` or `stow/devonthink/`.
-- `AGENT-HARNESS-MIGRATION.md` before changing agent harnesses, skills, hooks, MCP integrations, or transcript tooling.
 - The subsystem README or design document linked from the reference before changing a documented workflow.
 
 ## Repository-wide constraints
