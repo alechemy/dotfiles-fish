@@ -521,6 +521,7 @@ EOF
     load_launch_agent "$HOME/Library/LaunchAgents/com.user.aerospace-gaps-heartbeat.plist" "aerospace-gaps heartbeat"
     load_launch_agent "$HOME/Library/LaunchAgents/com.user.caddy.plist" "Caddy (oMLX CSP proxy)"
     load_launch_agent "$HOME/Library/LaunchAgents/com.user.npm-tools-update.plist" "npm-tools update"
+    load_launch_agent "$HOME/Library/LaunchAgents/com.user.btd700-audio-watcher.plist" "BTD 700 audio watcher"
 
     # Chromium -> Safari bookmark bridge for Alfred. Gate on the Bookmarks file
     # (not the profile dir — a fresh profile has no Bookmarks until the first

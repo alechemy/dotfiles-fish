@@ -1,0 +1,405 @@
+#!/usr/bin/python3
+"""Follow BTD 700 headset state and select the preferred audio output."""
+
+import ctypes
+import os
+import subprocess
+import sys
+import time
+
+VENDOR_ID = 0x3542
+PRODUCT_ID = 0x3001
+CONTROL_USAGE_PAGE = 0x0C
+CONTROL_REPORT_SIZE = 64
+REPORT_ID = 0x34
+COMMAND_GET_DONGLE_STATE = 0x06
+STATE_DISCONNECTED = 0x01
+STATE_CONNECTED = 0x02
+QUERY_INTERVAL = 1.0
+ACTION_RETRY_INTERVAL = 1.0
+
+BTD_OUTPUT = "BTD 700"
+FALLBACK_OUTPUTS = (
+    "USB-C to 3.5mm Headphone Jack Adapter",
+    "DELL U4025QW",
+    "MacBook Pro Speakers",
+)
+SWITCH_AUDIO_CANDIDATES = (
+    "/opt/homebrew/bin/SwitchAudioSource",
+    "/usr/local/bin/SwitchAudioSource",
+)
+
+IOKIT_PATH = "/System/Library/Frameworks/IOKit.framework/IOKit"
+CORE_FOUNDATION_PATH = "/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation"
+
+c_void_p = ctypes.c_void_p
+CFIndex = ctypes.c_long
+IOReturn = ctypes.c_int
+
+
+def log(message):
+    print(f"{time.strftime('%Y-%m-%d %H:%M:%S')} btd700-audio-watcher: {message}", flush=True)
+
+
+def choose_fallback(available):
+    return next((name for name in FALLBACK_OUTPUTS if name in available), None)
+
+
+class HidApi:
+    def __init__(self):
+        self.iokit = ctypes.CDLL(IOKIT_PATH)
+        self.cf = ctypes.CDLL(CORE_FOUNDATION_PATH)
+        self._configure_functions()
+        self.default_mode = c_void_p.in_dll(self.cf, "kCFRunLoopDefaultMode").value
+        self.keys = {
+            name: self.cf.CFStringCreateWithCString(None, value, 0x08000100)
+            for name, value in {
+                "vendor": b"VendorID",
+                "product": b"ProductID",
+                "usage_page": b"PrimaryUsagePage",
+                "max_output": b"MaxOutputReportSize",
+            }.items()
+        }
+
+    def _configure_functions(self):
+        self.iokit.IOHIDManagerCreate.restype = c_void_p
+        self.iokit.IOHIDManagerCreate.argtypes = [c_void_p, ctypes.c_uint32]
+        self.iokit.IOHIDManagerSetDeviceMatching.argtypes = [c_void_p, c_void_p]
+        self.iokit.IOHIDManagerOpen.restype = IOReturn
+        self.iokit.IOHIDManagerOpen.argtypes = [c_void_p, ctypes.c_uint32]
+        self.iokit.IOHIDManagerScheduleWithRunLoop.argtypes = [c_void_p, c_void_p, c_void_p]
+        self.iokit.IOHIDManagerRegisterDeviceMatchingCallback.argtypes = [
+            c_void_p,
+            DEVICE_CALLBACK,
+            c_void_p,
+        ]
+        self.iokit.IOHIDManagerRegisterDeviceRemovalCallback.argtypes = [
+            c_void_p,
+            DEVICE_CALLBACK,
+            c_void_p,
+        ]
+        self.iokit.IOHIDDeviceGetProperty.restype = c_void_p
+        self.iokit.IOHIDDeviceGetProperty.argtypes = [c_void_p, c_void_p]
+        self.iokit.IOHIDDeviceRegisterInputReportCallback.argtypes = [
+            c_void_p,
+            ctypes.POINTER(ctypes.c_uint8),
+            CFIndex,
+            INPUT_CALLBACK,
+            c_void_p,
+        ]
+        self.iokit.IOHIDDeviceSetReport.restype = IOReturn
+        self.iokit.IOHIDDeviceSetReport.argtypes = [
+            c_void_p,
+            ctypes.c_int,
+            ctypes.c_long,
+            ctypes.POINTER(ctypes.c_uint8),
+            CFIndex,
+        ]
+
+        self.cf.CFNumberCreate.restype = c_void_p
+        self.cf.CFNumberCreate.argtypes = [c_void_p, ctypes.c_int, c_void_p]
+        self.cf.CFNumberGetValue.restype = ctypes.c_bool
+        self.cf.CFNumberGetValue.argtypes = [c_void_p, ctypes.c_int, c_void_p]
+        self.cf.CFDictionaryCreateMutable.restype = c_void_p
+        self.cf.CFDictionaryCreateMutable.argtypes = [
+            c_void_p,
+            CFIndex,
+            c_void_p,
+            c_void_p,
+        ]
+        self.cf.CFDictionarySetValue.argtypes = [c_void_p, c_void_p, c_void_p]
+        self.cf.CFStringCreateWithCString.restype = c_void_p
+        self.cf.CFStringCreateWithCString.argtypes = [
+            c_void_p,
+            ctypes.c_char_p,
+            ctypes.c_uint32,
+        ]
+        self.cf.CFRunLoopGetCurrent.restype = c_void_p
+        self.cf.CFRunLoopRunInMode.restype = ctypes.c_int
+        self.cf.CFRunLoopRunInMode.argtypes = [c_void_p, ctypes.c_double, ctypes.c_bool]
+        self.cf.CFRelease.argtypes = [c_void_p]
+
+    def matching_dictionary(self):
+        key_callbacks = ctypes.addressof(
+            ctypes.c_byte.in_dll(self.cf, "kCFTypeDictionaryKeyCallBacks")
+        )
+        value_callbacks = ctypes.addressof(
+            ctypes.c_byte.in_dll(self.cf, "kCFTypeDictionaryValueCallBacks")
+        )
+        result = self.cf.CFDictionaryCreateMutable(
+            None, 0, key_callbacks, value_callbacks
+        )
+        for key, raw_value in (
+            (self.keys["vendor"], VENDOR_ID),
+            (self.keys["product"], PRODUCT_ID),
+        ):
+            value = ctypes.c_int(raw_value)
+            number = self.cf.CFNumberCreate(None, 9, ctypes.byref(value))
+            self.cf.CFDictionarySetValue(result, key, number)
+            self.cf.CFRelease(number)
+        return result
+
+    def int_property(self, device, key):
+        value_ref = self.iokit.IOHIDDeviceGetProperty(device, self.keys[key])
+        if not value_ref:
+            return None
+        value = ctypes.c_int()
+        if not self.cf.CFNumberGetValue(value_ref, 9, ctypes.byref(value)):
+            return None
+        return value.value
+
+
+DEVICE_CALLBACK = ctypes.CFUNCTYPE(
+    None, c_void_p, IOReturn, c_void_p, c_void_p
+)
+INPUT_CALLBACK = ctypes.CFUNCTYPE(
+    None,
+    c_void_p,
+    IOReturn,
+    c_void_p,
+    ctypes.c_int,
+    ctypes.c_uint32,
+    ctypes.POINTER(ctypes.c_uint8),
+    CFIndex,
+)
+ACTIVE_WATCHER = None
+
+
+def _device_added(context, result, sender, device):
+    if ACTIVE_WATCHER is not None:
+        ACTIVE_WATCHER.device_added(device)
+
+
+def _device_removed(context, result, sender, device):
+    if ACTIVE_WATCHER is not None:
+        ACTIVE_WATCHER.device_removed(device)
+
+
+def _input_received(context, result, sender, report_type, report_id, report, length):
+    if ACTIVE_WATCHER is not None:
+        ACTIVE_WATCHER.input_received(report_id, bytes(report[:length]))
+
+
+DEVICE_ADDED_CALLBACK = DEVICE_CALLBACK(_device_added)
+DEVICE_REMOVED_CALLBACK = DEVICE_CALLBACK(_device_removed)
+INPUT_RECEIVED_CALLBACK = INPUT_CALLBACK(_input_received)
+
+
+class AudioOutputs:
+    def __init__(self, executable):
+        self.executable = executable
+
+    def _run(self, *args):
+        return subprocess.run(
+            [self.executable, *args],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+    def available(self):
+        result = self._run("-a", "-t", "output")
+        if result.returncode != 0:
+            raise RuntimeError(result.stderr.strip() or "failed to list audio outputs")
+        return {line for line in result.stdout.splitlines() if line}
+
+    def current(self):
+        result = self._run("-c", "-t", "output")
+        if result.returncode != 0:
+            raise RuntimeError(result.stderr.strip() or "failed to read current audio output")
+        return result.stdout.strip()
+
+    def select(self, name):
+        result = self._run("-s", name, "-t", "output")
+        if result.returncode != 0:
+            raise RuntimeError(result.stderr.strip() or f"failed to select {name}")
+
+
+class Watcher:
+    def __init__(self, hid, outputs):
+        self.hid = hid
+        self.outputs = outputs
+        self.manager = None
+        self.device = None
+        self.input_buffer = None
+        self.state = None
+        self.awaiting_response = False
+        self.next_query = float("inf")
+        self.pending_action = None
+        self.next_action = float("inf")
+        self.last_error = None
+
+    def start(self):
+        self.manager = self.hid.iokit.IOHIDManagerCreate(None, 0)
+        matching = self.hid.matching_dictionary()
+        self.hid.iokit.IOHIDManagerSetDeviceMatching(self.manager, matching)
+        self.hid.cf.CFRelease(matching)
+        self.hid.iokit.IOHIDManagerRegisterDeviceMatchingCallback(
+            self.manager, DEVICE_ADDED_CALLBACK, None
+        )
+        self.hid.iokit.IOHIDManagerRegisterDeviceRemovalCallback(
+            self.manager, DEVICE_REMOVED_CALLBACK, None
+        )
+        run_loop = self.hid.cf.CFRunLoopGetCurrent()
+        self.hid.iokit.IOHIDManagerScheduleWithRunLoop(
+            self.manager, run_loop, self.hid.default_mode
+        )
+        result = self.hid.iokit.IOHIDManagerOpen(self.manager, 0)
+        if result != 0:
+            raise RuntimeError(f"IOHIDManagerOpen failed: {result & 0xffffffff:#x}")
+        log("armed")
+        self.run()
+
+    def run(self):
+        while True:
+            now = time.monotonic()
+            wake_at = min(self.next_query, self.next_action)
+            timeout = max(0.0, wake_at - now) if wake_at != float("inf") else 3600.0
+            self.hid.cf.CFRunLoopRunInMode(
+                self.hid.default_mode, timeout, True
+            )
+            now = time.monotonic()
+            if self.pending_action is not None and now >= self.next_action:
+                self.apply_pending_action()
+            if self.device is not None and now >= self.next_query:
+                self.query_state()
+
+    def device_added(self, device):
+        if (
+            self.hid.int_property(device, "usage_page") != CONTROL_USAGE_PAGE
+            or self.hid.int_property(device, "max_output") != CONTROL_REPORT_SIZE
+        ):
+            return
+        self.device = device
+        self.input_buffer = (ctypes.c_uint8 * 512)()
+        self.hid.iokit.IOHIDDeviceRegisterInputReportCallback(
+            device,
+            self.input_buffer,
+            len(self.input_buffer),
+            INPUT_RECEIVED_CALLBACK,
+            None,
+        )
+        self.state = None
+        self.awaiting_response = False
+        self.next_query = 0.0
+        log("BTD 700 control interface available")
+
+    def device_removed(self, device):
+        if self.device is None or int(device) != int(self.device):
+            return
+        was_connected = self.state == STATE_CONNECTED
+        self.device = None
+        self.input_buffer = None
+        self.state = None
+        self.awaiting_response = False
+        self.next_query = float("inf")
+        log("BTD 700 control interface unavailable")
+        if was_connected:
+            self.queue_action("fallback")
+
+    def query_state(self):
+        if self.awaiting_response:
+            self.report_error("state query timed out")
+        report = (ctypes.c_uint8 * CONTROL_REPORT_SIZE)()
+        report[0:4] = (REPORT_ID, 0xFE, COMMAND_GET_DONGLE_STATE, 0x00)
+        result = self.hid.iokit.IOHIDDeviceSetReport(
+            self.device, 1, REPORT_ID, report, len(report)
+        )
+        self.next_query = time.monotonic() + QUERY_INTERVAL
+        if result != 0:
+            self.awaiting_response = False
+            self.report_error(f"state query failed: {result & 0xffffffff:#x}")
+            return
+        self.awaiting_response = True
+
+    def input_received(self, report_id, data):
+        if (
+            report_id != REPORT_ID
+            or len(data) < 5
+            or data[0] != REPORT_ID
+            or data[2] != COMMAND_GET_DONGLE_STATE
+            or data[3] < 1
+        ):
+            return
+        if data[1] == 0xFF:
+            self.awaiting_response = False
+        elif data[1] != 0xFC:
+            return
+        state = data[4]
+        if state not in (STATE_DISCONNECTED, STATE_CONNECTED):
+            self.report_error(f"unknown headset state: {state:#x}")
+            return
+        self.last_error = None
+        self.receive_state(state)
+
+    def receive_state(self, state):
+        previous = self.state
+        if state == previous:
+            return
+        self.state = state
+        label = "connected" if state == STATE_CONNECTED else "disconnected"
+        log(f"headset {label}")
+        if state == STATE_CONNECTED:
+            self.queue_action("btd")
+        elif previous is not None:
+            self.queue_action("fallback")
+        else:
+            try:
+                if self.outputs.current() == BTD_OUTPUT:
+                    self.queue_action("fallback")
+            except RuntimeError as error:
+                self.report_error(str(error))
+
+    def queue_action(self, action):
+        self.pending_action = action
+        self.next_action = 0.0
+        self.apply_pending_action()
+
+    def apply_pending_action(self):
+        try:
+            available = self.outputs.available()
+            if self.pending_action == "btd":
+                target = BTD_OUTPUT if BTD_OUTPUT in available else None
+            else:
+                target = choose_fallback(available)
+            if target is None:
+                raise RuntimeError(f"no available output for {self.pending_action} action")
+            if self.outputs.current() != target:
+                self.outputs.select(target)
+                log(f"selected audio output: {target}")
+            self.pending_action = None
+            self.next_action = float("inf")
+            self.last_error = None
+        except RuntimeError as error:
+            self.report_error(str(error))
+            self.next_action = time.monotonic() + ACTION_RETRY_INTERVAL
+
+    def report_error(self, message):
+        if message != self.last_error:
+            log(message)
+            self.last_error = message
+
+
+def find_switch_audio_source():
+    return next((path for path in SWITCH_AUDIO_CANDIDATES if os.path.isfile(path)), None)
+
+
+def main():
+    global ACTIVE_WATCHER
+    executable = find_switch_audio_source()
+    if executable is None:
+        log("SwitchAudioSource is not installed; exiting")
+        return 0
+    ACTIVE_WATCHER = Watcher(HidApi(), AudioOutputs(executable))
+    try:
+        ACTIVE_WATCHER.start()
+    except KeyboardInterrupt:
+        return 0
+    except (OSError, RuntimeError) as error:
+        log(str(error))
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
