@@ -300,6 +300,18 @@ if brew tap | grep -q '^domt4/autoupdate$'; then
     fi
 fi
 
+# 2c. recall depends on agent-reader's normalized Pi/Claude/Copilot index.
+# Install the exact reviewed downstream overlay only when its private help-only
+# capability probe says the current tool is absent or stale.
+info "Ensuring the reviewed agent-reader CLI is available..."
+chmod +x "$DOTFILES/scripts/install-agent-reader.sh"
+if "$DOTFILES/scripts/install-agent-reader.sh"; then
+    success "agent-reader ready"
+else
+    info "WARNING: agent-reader installation failed; recall transcript discovery is unavailable."
+    info "  Fix Git/network/uv access, then run scripts/install-agent-reader.sh."
+fi
+
 # 3. Build generated configs (before stowing so the files exist)
 info "Building generated configs..."
 

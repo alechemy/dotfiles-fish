@@ -215,10 +215,10 @@ For each moved skill:
 
 #### `recall`
 
-- [ ] Add Pi session discovery and parsing.
-- [ ] Remove the assumption that work spans only Claude Code and Copilot CLI.
-- [ ] Make shared-record integrations optional capabilities rather than hard MCP assumptions.
-- [ ] Update citations to identify Pi sessions.
+- [x] Add Pi session discovery and parsing through `agent-reader`'s normalized index and transcript commands.
+- [x] Remove the assumption that work spans only Claude Code and Copilot CLI; discover supported harnesses from the local index.
+- [x] Make shared-record integrations optional capabilities rather than hard MCP assumptions.
+- [x] Update citations to identify Pi, Claude, or Copilot sessions explicitly.
 
 #### `summarize`
 
@@ -240,7 +240,8 @@ For each moved skill:
 - [x] Update `recall` to discover available harnesses from agent-reader rather than assuming a fixed pair.
 - [x] Add synthetic schema-faithful fixtures and extractor tests for all retained session formats.
 - [x] Retain old Claude/Copilot parsing while their historical records remain useful; reassess only when those records are intentionally retired.
-- [x] Expose a normalized JSON session index and transcript command for recall and other local consumers (`6105b5c`).
+- [x] Expose a normalized JSON session index and transcript command for recall and other local consumers (`6105b5c`). JSON indexing defaults to all sessions, the human table remains bounded to 20, `--limit 0` means all, and invalid negative limits fail instead of silently narrowing history.
+- [x] Make the unpublished changes reconstructible without modifying their remote: setup verifies an exact public base plus a checksummed source/test overlay, runs 50 synthetic tests under pinned constraints, and installs a locally manifested wheel from a stable private cache.
 
 ## Phase 6: reassess completion and comment gates
 
@@ -335,7 +336,7 @@ The usage audit retains both legacy harnesses as thin adapters. As of 2026-08-25
 
 ## Phase 9: final validation and documentation
 
-- [ ] Run setup in a clean or isolated home directory. A temporary `HOME` is not a safe sandbox because setup still changes shared Homebrew, sudo/PAM, launchd, defaults, and services; use a disposable macOS VM or new-machine snapshot after the `agent-reader` pin is publishable.
+- [ ] Run setup in a clean or isolated home directory. A temporary `HOME` is not a safe sandbox because setup still changes shared Homebrew, sudo/PAM, launchd, defaults, and services; use a disposable macOS VM or new-machine snapshot. The isolated `agent-reader` install and other component-level setup tests pass.
 - [x] Verify Stow creates only intended links and prunes deleted ones. A clean archived tree created 173 links whose targets all remained inside the tree, and a disposable-package restow removed a deleted source link.
 - [x] Verify no secrets or generated runtime state are tracked. Full tracked-history Betterleaks, forbidden runtime filename checks, the Pi tracked-file allowlist, and work-package isolation all pass.
 - [x] Verify OpenAI, Copilot, and oMLX model selection. Pi's cached catalog resolves every configured route, the live merged settings match the tracked fragment, and an offline RPC cycle returns to the start after the four configured routes across those three providers.
@@ -354,9 +355,9 @@ Phases 1–8 are complete. Pi is the normal entry point, while current evidence 
 
 Next:
 
-- [ ] Make `agent-reader` reproducible on a clean machine. The required local commits `429868b` and `6105b5c` are not reachable from its public remote, so setup cannot reproducibly pin them from the public remote until they are published; do not push that separate repository from this migration.
-- [ ] Complete the safe automated Phase 9 checks, then record the manual/interactive checks that require a disposable macOS VM, live provider state, Pi TUI history, or physical battery transition.
-- [ ] Update final documentation and close the migration only when every definition-of-done item has evidence or an explicitly retained consumer.
+- [x] Make `agent-reader` reconstructible without publishing or pushing its separate repository. The exact-base overlay, synthetic tests, pinned constraints, stable wheel receipt, complete JSON index semantics, and help-only privacy probes pass in an isolated home; replace the overlay with an exact public commit when equivalent upstream code is reachable.
+- [ ] Run the complete setup in a disposable macOS VM or new-machine snapshot; component-level isolated tests cannot safely emulate its shared system mutations.
+- [ ] Complete deliberate end-to-end skill and Pi TUI checks, then close the migration only when every definition-of-done item has evidence or an explicitly retained consumer.
 
 The working tree may contain changes from parallel sessions. Keep unrelated changes out of migration commits.
 

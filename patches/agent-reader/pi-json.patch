@@ -1,0 +1,722 @@
+diff --git a/README.md b/README.md
+index 5209fd121f24e3652fae8ebbac4c5da68a443e11..cdb57fc94b1fca52489abbc470bb6528da2dd6f6 100644
+--- a/README.md
++++ b/README.md
+@@ -1,9 +1,9 @@
+ # agent-reader
+ 
+-Readable, typeset pages for Claude Code and Copilot CLI agent responses.
++Readable, typeset pages for Pi, Claude Code, and Copilot CLI agent responses.
+ 
+ Terminals render prose badly — full-window line length, monospace type, code-tuned
+-contrast. agent-reader reads the transcript files both CLIs already write, extracts
++contrast. agent-reader reads the transcript files these harnesses already write, extracts
+ the agent's turns, and renders them as self-contained HTML pages with real
+ typography: a ~68ch measure, a serif face, and paper/soft-dark themes. No changes
+ to either CLI are required, and it works retroactively on any past session.
+@@ -17,9 +17,10 @@ to either CLI are required, and it works retroactively on any past session.
+ 
+ - Python 3.12+
+ - macOS or Linux (developed and daily-driven on macOS)
+-- [Claude Code](https://claude.com/claude-code) and/or
+-  [Copilot CLI](https://github.com/github/copilot-cli) with local transcripts
+-  (`~/.claude/projects/`, `~/.copilot/session-state/`)
++- At least one supported harness with local transcripts:
++  [Pi](https://github.com/badlogic/pi-mono) (`~/.pi/agent/sessions/`),
++  [Claude Code](https://claude.com/claude-code) (`~/.claude/projects/`), or
++  [Copilot CLI](https://github.com/github/copilot-cli) (`~/.copilot/session-state/`)
+ 
+ ## Install
+ 
+@@ -37,19 +38,30 @@ its alias `aread`.
+ ## Usage
+ 
+ ```sh
+-aread              # render recent turns of this directory's latest session, open in browser
+-aread list         # table of recent sessions across both CLIs
++aread                              # render this directory's latest session
++aread list                         # table of recent sessions across all harnesses
++agent-read list --json             # machine-readable session index
++agent-read transcript --session ID # normalized turns for one session as JSON
+ ```
+ 
+ `aread` scopes to the session whose working directory is the current directory
+ and falls back to the newest session anywhere. From inside a Claude Code
+ session, type `! aread` to pop the turn you're looking at into a readable page.
+ 
++The table form of `agent-read list` shows the newest 20 sessions by default.
++`--limit N` sets a positive bound, and `--limit 0` means all. JSON mode defaults to all
++sessions so local consumers do not silently lose older history.
++
++`agent-read list --json` includes each session's harness, ID, path, cwd, optional
++name, and activity time. `agent-read transcript --session ID` emits normalized prompts
++and assistant blocks with timestamps, provider, and model. Both JSON outputs are private
++and intended for local tools; redirect them only to private storage.
++
+ `aread render` accepts:
+ 
+ | Flag | Meaning |
+ | --- | --- |
+-| `--cli claude\|copilot` | Limit to one CLI |
++| `--cli claude\|copilot\|pi` | Limit to one harness |
+ | `--session ID` | Session id or unique prefix (see `aread list`) |
+ | `-n, --turns N` | How many recent turns to include (0 = all; default 10) |
+ | `--turn N` | Render a single turn by 0-based index |
+@@ -59,7 +71,7 @@ session, type `! aread` to pop the turn you're looking at into a readable page.
+ 
+ ## Design
+ 
+-- **Transcripts are the store of truth.** Both CLIs persist every turn to
++- **Transcripts are the store of truth.** Each harness persists every turn to
+   disk; agent-reader only ever reads those files. Nothing is persisted but the
+   rendered page itself.
+ - **Private by construction.** Rendered pages are fully self-contained and make
+diff --git a/fixtures/pi-session.jsonl b/fixtures/pi-session.jsonl
+new file mode 100644
+index 0000000000000000000000000000000000000000..233aac5cda38d1f26c7dc4efbb351c9e51633e2a
+--- /dev/null
++++ b/fixtures/pi-session.jsonl
+@@ -0,0 +1,13 @@
++{"type":"session","version":3,"id":"f1x70000-0000-4000-8000-0000000000p1","timestamp":"2026-07-24T18:00:00.000Z","cwd":"/Users/example/projects/widgetapp"}
++{"type":"model_change","id":"model-1","parentId":null,"timestamp":"2026-07-24T18:00:00.010Z","provider":"openai-codex","modelId":"gpt-5.6-sol"}
++{"type":"session_info","id":"info-1","parentId":"model-1","timestamp":"2026-07-24T18:00:00.020Z","name":"Widget launch review"}
++{"type":"message","id":"user-1","parentId":"info-1","timestamp":"2026-07-24T18:00:01.000Z","message":{"role":"user","content":[{"type":"text","text":"Review the widget launch path."}],"timestamp":1753380001000}}
++{"type":"message","id":"assistant-old","parentId":"user-1","timestamp":"2026-07-24T18:00:02.000Z","message":{"role":"assistant","content":[{"type":"text","text":"This response belongs to an abandoned branch."}],"provider":"github-copilot","model":"claude-opus-5","timestamp":1753380002000}}
++this is malformed json
++{"type":"message","id":"assistant-1","parentId":"user-1","timestamp":"2026-07-24T18:00:03.000Z","message":{"role":"assistant","content":[{"type":"thinking","thinking":"Private reasoning is not rendered."},{"type":"text","text":"I am tracing registration through first render."}],"provider":"openai-codex","model":"gpt-5.6-sol","timestamp":1753380003000}}
++{"type":"message","id":"assistant-tools","parentId":"assistant-1","timestamp":"2026-07-24T18:00:04.000Z","message":{"role":"assistant","content":[{"type":"toolCall","id":"call-1","name":"read","arguments":{"path":"src/widgets.py"}}],"provider":"openai-codex","model":"gpt-5.6-sol","timestamp":1753380004000}}
++{"type":"message","id":"tool-1","parentId":"assistant-tools","timestamp":"2026-07-24T18:00:05.000Z","message":{"role":"toolResult","toolCallId":"call-1","toolName":"read","content":[{"type":"text","text":"Synthetic tool output that is not an assistant response."}],"isError":false,"timestamp":1753380005000}}
++{"type":"message","id":"assistant-2","parentId":"tool-1","timestamp":"2026-07-24T18:00:06.000Z","message":{"role":"assistant","content":[{"type":"text","text":"The launch path now initializes only the requested widget."}],"provider":"openai-codex","model":"gpt-5.6-sol","timestamp":1753380006000}}
++{"type":"unknown_entry","id":"unknown-1","parentId":"assistant-2","timestamp":"2026-07-24T18:00:07.000Z","data":{"ignored":true}}
++{"type":"message","id":"user-2","parentId":"unknown-1","timestamp":"2026-07-24T18:01:00.000Z","message":{"role":"user","content":[{"type":"text","text":"Which provider handled that review?"}],"timestamp":1753380060000}}
++{"type":"message","id":"assistant-3","parentId":"user-2","timestamp":"2026-07-24T18:01:01.000Z","message":{"role":"assistant","content":[{"type":"text","text":"OpenAI Codex handled both turns."}],"provider":"openai-codex","model":"gpt-5.6-sol","timestamp":1753380061000}}
+diff --git a/pyproject.toml b/pyproject.toml
+index 9ebef0ad0f9547452ed53507c1a3e93ab5814fbb..2d94cb89131551dc8f12bcb93223b674973a1320 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -1,7 +1,7 @@
+ [project]
+ name = "agent-reader"
+ version = "0.1.0"
+-description = "Readable, typeset pages for Claude Code and Copilot CLI agent responses."
++description = "Readable, typeset pages for Pi, Claude Code, and Copilot CLI agent responses."
+ readme = "README.md"
+ license = "MIT"
+ license-files = ["LICENSE"]
+diff --git a/src/agent_reader/cli.py b/src/agent_reader/cli.py
+index 144824c725cb2c9b7f5ab2725bfa734872bb4645..d63aa6bc4d32d23d2cfb4e95a90693b9599ccfef 100644
+--- a/src/agent_reader/cli.py
++++ b/src/agent_reader/cli.py
+@@ -1,6 +1,7 @@
+ from __future__ import annotations
+ 
+ import argparse
++import json
+ import subprocess
+ import sys
+ import webbrowser
+@@ -16,6 +17,16 @@ class _AmbiguousSession(Exception):
+         self.matches = matches
+ 
+ 
++def _non_negative_int(value: str) -> int:
++    try:
++        result = int(value)
++    except ValueError as exc:
++        raise argparse.ArgumentTypeError("must be an integer") from exc
++    if result < 0:
++        raise argparse.ArgumentTypeError("must be non-negative")
++    return result
++
++
+ def main(argv: list[str] | None = None) -> int:
+     parser = _build_parser()
+     args = parser.parse_args(argv)
+@@ -44,7 +55,7 @@ def _build_parser() -> argparse.ArgumentParser:
+     render_cmd = sub.add_parser(
+         "render", help="Render a turn to a static HTML file and open it."
+     )
+-    render_cmd.add_argument("--cli", choices=["claude", "copilot"])
++    render_cmd.add_argument("--cli", choices=["claude", "copilot", "pi"])
+     render_cmd.add_argument("--session", help="Session id or unique prefix.")
+     render_cmd.add_argument(
+         "--turn", type=int, help="Render a single turn by 0-based index."
+@@ -73,10 +84,23 @@ def _build_parser() -> argparse.ArgumentParser:
+     render_cmd.set_defaults(func=_cmd_render)
+ 
+     list_cmd = sub.add_parser("list", help="List recent sessions.")
+-    list_cmd.add_argument("--cli", choices=["claude", "copilot"])
+-    list_cmd.add_argument("--limit", type=int, default=20)
++    list_cmd.add_argument("--cli", choices=["claude", "copilot", "pi"])
++    list_cmd.add_argument(
++        "--limit",
++        type=_non_negative_int,
++        default=None,
++        help="Maximum sessions (0 = all; default: 20 for table, all for JSON).",
++    )
++    list_cmd.add_argument("--json", action="store_true", help="Print the session index as JSON.")
+     list_cmd.set_defaults(func=_cmd_list)
+ 
++    transcript_cmd = sub.add_parser(
++        "transcript", help="Print one normalized session transcript as JSON."
++    )
++    transcript_cmd.add_argument("--cli", choices=["claude", "copilot", "pi"])
++    transcript_cmd.add_argument("--session", required=True, help="Session id or unique prefix.")
++    transcript_cmd.set_defaults(func=_cmd_transcript)
++
+     return parser
+ 
+ 
+@@ -137,17 +161,66 @@ def _cmd_list(args: argparse.Namespace) -> int:
+     sessions = discover_sessions()
+     if args.cli:
+         sessions = [s for s in sessions if s.cli == args.cli]
++    limit = args.limit if args.limit is not None else (0 if args.json else 20)
++    if limit:
++        sessions = sessions[:limit]
++    if args.json:
++        print(json.dumps([_session_dict(session) for session in sessions], indent=2))
++        return 0
+     if not sessions:
+         print("No sessions found.")
+         return 0
+     print(f"{'CLI':7}  {'SESSION':24}  {'ID':8}  LAST ACTIVITY")
+-    for session in sessions[: args.limit]:
++    for session in sessions:
+         when = session.last_activity.astimezone().strftime("%Y-%m-%d %H:%M")
+         label = (session.label or "")[:24]
+         print(f"{session.cli:7}  {label:24}  {session.id[:8]:8}  {when}")
+     return 0
+ 
+ 
++def _cmd_transcript(args: argparse.Namespace) -> int:
++    try:
++        selection = _select_session(args.cli, args.session)
++    except _AmbiguousSession as exc:
++        print("Ambiguous --session prefix matches:", file=sys.stderr)
++        for session_id in exc.matches:
++            print(f"  {session_id}", file=sys.stderr)
++        return 1
++    if selection is None:
++        print("No matching turn found.", file=sys.stderr)
++        return 1
++    session, turns = selection
++    payload = {
++        "session": _session_dict(session),
++        "turns": [_turn_dict(turn) for turn in turns],
++    }
++    print(json.dumps(payload, ensure_ascii=False, indent=2))
++    return 0
++
++
++def _session_dict(session: Session) -> dict[str, object]:
++    return {
++        "cli": session.cli,
++        "id": session.id,
++        "path": str(session.path),
++        "cwd": session.cwd,
++        "name": session.name,
++        "label": session.label,
++        "last_activity": session.last_activity.isoformat(),
++    }
++
++
++def _turn_dict(turn: Turn) -> dict[str, object]:
++    return {
++        "index": turn.index,
++        "prompt": turn.prompt,
++        "blocks": turn.blocks,
++        "timestamp": turn.timestamp.isoformat() if turn.timestamp else None,
++        "provider": turn.provider,
++        "model": turn.model,
++    }
++
++
+ def _select_session(
+     cli: str | None,
+     session_ref: str | None,
+diff --git a/src/agent_reader/extractors/pi.py b/src/agent_reader/extractors/pi.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..ef4756b6fe9a61fdd0418a87e01a6f80372ad63f
+--- /dev/null
++++ b/src/agent_reader/extractors/pi.py
+@@ -0,0 +1,135 @@
++from __future__ import annotations
++
++import json
++from collections.abc import Iterator
++from datetime import datetime, timezone
++from pathlib import Path
++
++from ..models import Session, Turn, parse_ts
++
++DEFAULT = Path.home() / ".pi" / "agent" / "sessions"
++
++
++def discover(root: Path = DEFAULT) -> list[Session]:
++    sessions: list[Session] = []
++    if not root.exists():
++        return sessions
++    for path in sorted(root.rglob("*.jsonl")):
++        session = _session_from_file(path)
++        if session is not None:
++            sessions.append(session)
++    return sessions
++
++
++def turns(session: Session) -> list[Turn]:
++    result: list[Turn] = []
++    current: Turn | None = None
++    for entry in _active_branch(session.path):
++        if entry.get("type") != "message":
++            continue
++        message = entry.get("message") or {}
++        role = message.get("role")
++        if role == "user":
++            prompt = _text_content(message.get("content"))
++            if not prompt:
++                continue
++            current = Turn(
++                index=len(result),
++                prompt=prompt,
++                blocks=[],
++                timestamp=parse_ts(entry.get("timestamp")),
++            )
++            result.append(current)
++        elif role == "assistant" and current is not None:
++            for block in message.get("content") or []:
++                if isinstance(block, dict) and block.get("type") == "text":
++                    text = block.get("text")
++                    if text:
++                        current.blocks.append(text)
++            if current.model is None and message.get("model"):
++                current.model = message["model"]
++            if current.provider is None and message.get("provider"):
++                current.provider = message["provider"]
++    return result
++
++
++def _session_from_file(path: Path) -> Session | None:
++    entries = list(_load(path))
++    header = next((entry for entry in entries if entry.get("type") == "session"), None)
++    if header is None or not header.get("id"):
++        return None
++    cwd = header.get("cwd")
++    name = None
++    for entry in _active_branch_entries(entries):
++        if entry.get("type") == "session_info" and entry.get("name"):
++            name = entry["name"]
++    return Session(
++        cli="pi",
++        id=header["id"],
++        path=path,
++        cwd=cwd,
++        last_activity=datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc),
++        label=name or (Path(cwd).name if cwd else header["id"]),
++        name=name,
++    )
++
++
++def _text_content(content: object) -> str:
++    if isinstance(content, str):
++        return content
++    if not isinstance(content, list):
++        return ""
++    parts = [
++        block.get("text", "")
++        for block in content
++        if isinstance(block, dict) and block.get("type") == "text"
++    ]
++    return "\n".join(part for part in parts if part)
++
++
++def _active_branch(path: Path) -> list[dict]:
++    return _active_branch_entries(list(_load(path)))
++
++
++def _active_branch_entries(entries: list[dict]) -> list[dict]:
++    by_id = {
++        entry["id"]: entry
++        for entry in entries
++        if entry.get("type") != "session" and isinstance(entry.get("id"), str)
++    }
++    if not by_id:
++        return []
++    current = next(
++        (
++            entry
++            for entry in reversed(entries)
++            if entry.get("type") != "session" and entry.get("id") in by_id
++        ),
++        None,
++    )
++    branch: list[dict] = []
++    seen: set[str] = set()
++    while current is not None and current["id"] not in seen:
++        branch.append(current)
++        seen.add(current["id"])
++        current = by_id.get(current.get("parentId"))
++    branch.reverse()
++    return branch
++
++
++def _load(path: Path) -> Iterator[dict]:
++    try:
++        handle = path.open("r", encoding="utf-8")
++    except OSError:
++        return
++    with handle:
++        for line in handle:
++            line = line.strip()
++            if not line:
++                continue
++            try:
++                obj = json.loads(line)
++            except ValueError:
++                continue
++            if isinstance(obj, dict):
++                yield obj
+diff --git a/src/agent_reader/models.py b/src/agent_reader/models.py
+index 2288075cb8a434b596863d1797565907c7528136..0dc9d2b6a7d750be8ab47a9bac402b867978f67c 100644
+--- a/src/agent_reader/models.py
++++ b/src/agent_reader/models.py
+@@ -12,6 +12,7 @@ class Turn:
+     blocks: list[str] = field(default_factory=list)
+     timestamp: datetime | None = None
+     model: str | None = None
++    provider: str | None = None
+ 
+     @property
+     def final_block(self) -> str | None:
+@@ -26,6 +27,7 @@ class Session:
+     cwd: str | None
+     last_activity: datetime
+     label: str
++    name: str | None = None
+ 
+ 
+ def parse_ts(value: str | None) -> datetime | None:
+@@ -38,29 +40,37 @@ def parse_ts(value: str | None) -> datetime | None:
+ 
+ 
+ def turns_for(session: Session) -> list[Turn]:
+-    from .extractors import claude_code, copilot
++    from .extractors import claude_code, copilot, pi
+ 
+-    if session.cli == "claude":
+-        return claude_code.turns(session)
+-    return copilot.turns(session)
++    extractors = {"claude": claude_code, "copilot": copilot, "pi": pi}
++    return extractors[session.cli].turns(session)
+ 
+ 
+ def discover_sessions(
+-    *, claude_root: Path | None = None, copilot_root: Path | None = None
++    *,
++    claude_root: Path | None = None,
++    copilot_root: Path | None = None,
++    pi_root: Path | None = None,
+ ) -> list[Session]:
+-    from .extractors import claude_code, copilot
++    from .extractors import claude_code, copilot, pi
+ 
+     sessions: list[Session] = []
+     sessions += claude_code.discover(claude_root or claude_code.DEFAULT)
+     sessions += copilot.discover(copilot_root or copilot.DEFAULT)
++    sessions += pi.discover(pi_root or pi.DEFAULT)
+     sessions.sort(key=lambda s: s.last_activity, reverse=True)
+     return sessions
+ 
+ 
+ def latest_turn(
+-    *, claude_root: Path | None = None, copilot_root: Path | None = None
++    *,
++    claude_root: Path | None = None,
++    copilot_root: Path | None = None,
++    pi_root: Path | None = None,
+ ) -> tuple[Session, Turn] | None:
+-    for session in discover_sessions(claude_root=claude_root, copilot_root=copilot_root):
++    for session in discover_sessions(
++        claude_root=claude_root, copilot_root=copilot_root, pi_root=pi_root
++    ):
+         session_turns = turns_for(session)
+         if session_turns:
+             return session, session_turns[-1]
+diff --git a/src/agent_reader/render.py b/src/agent_reader/render.py
+index 780b4a4e9939c6916c99cdc47334900465193b50..3ebff2e2d402b8b55ec49b244d078e6e05dada78 100644
+--- a/src/agent_reader/render.py
++++ b/src/agent_reader/render.py
+@@ -94,7 +94,7 @@ def _session_header(session: Session, turns: list[Turn]) -> str:
+         parts.append(f'<span class="label">{html.escape(session.label)}</span>')
+     if session.id:
+         parts.append(f'<span class="sid">{html.escape(session.id[:8])}</span>')
+-    model = next((t.model for t in reversed(turns) if t.model), None)
++    model = next((_model_label(t) for t in reversed(turns) if t.model), None)
+     if model:
+         parts.append(f'<span class="model">{html.escape(model)}</span>')
+     parts.append('<button class="theme-toggle" type="button">theme</button>')
+@@ -122,13 +122,17 @@ def _header(session: Session, turn: Turn) -> str:
+         stamp = turn.timestamp.astimezone().strftime("%Y-%m-%d %H:%M")
+         parts.append(f'<time class="ts">{html.escape(stamp)}</time>')
+     if turn.model:
+-        parts.append(f'<span class="model">{html.escape(turn.model)}</span>')
++        parts.append(f'<span class="model">{html.escape(_model_label(turn))}</span>')
+     parts.append(_prompt_details(turn.prompt))
+     parts.append(COPY_BUTTON)
+     parts.append('<button class="theme-toggle" type="button">theme</button>')
+     return '<header class="bar">\n' + "\n".join(p for p in parts if p) + "\n</header>"
+ 
+ 
++def _model_label(turn: Turn) -> str:
++    return f"{turn.provider}/{turn.model}" if turn.provider else turn.model or ""
++
++
+ def _prompt_details(prompt: str | None) -> str:
+     if not prompt or not prompt.strip():
+         return ""
+diff --git a/tests/conftest.py b/tests/conftest.py
+index 303b656498171b1e9919a5ceff43d959b35d3598..5af84fd5a0c3e5d76ddffec1348262a07e56b2e2 100644
+--- a/tests/conftest.py
++++ b/tests/conftest.py
+@@ -8,6 +8,7 @@ import pytest
+ FIXTURES = Path(__file__).resolve().parent.parent / "fixtures"
+ CLAUDE_SESSION_ID = "f1x70000-0000-4000-8000-000000000001"
+ COPILOT_SESSION_ID = "f1x70000-0000-4000-8000-0000000000c0"
++PI_SESSION_ID = "f1x70000-0000-4000-8000-0000000000p1"
+ 
+ 
+ @pytest.fixture
+@@ -28,3 +29,12 @@ def copilot_root(tmp_path: Path) -> Path:
+     session_dir.mkdir(parents=True)
+     shutil.copy(FIXTURES / "copilot-events.jsonl", session_dir / "events.jsonl")
+     return root
++
++
++@pytest.fixture
++def pi_root(tmp_path: Path) -> Path:
++    root = tmp_path / "sessions"
++    project_dir = root / "--Users-example-projects-widgetapp--"
++    project_dir.mkdir(parents=True)
++    shutil.copy(FIXTURES / "pi-session.jsonl", project_dir / "pi-session.jsonl")
++    return root
+diff --git a/tests/test_cli.py b/tests/test_cli.py
+index 5be73d9e307295498b5e9f0245234a25fbb48967..9bc046440f5b7a609bca5572e0396b0d3df193cc 100644
+--- a/tests/test_cli.py
++++ b/tests/test_cli.py
+@@ -1,35 +1,107 @@
+ from __future__ import annotations
+ 
++import json
+ import stat
++from datetime import datetime, timezone
+ from pathlib import Path
+ 
+ import pytest
+ 
+ from agent_reader import cli, state
+-from agent_reader.extractors import claude_code, copilot
++from agent_reader.extractors import claude_code, copilot, pi
++from agent_reader.models import Session
+ 
+ 
+ @pytest.fixture
+-def wired(monkeypatch, claude_root, copilot_root):
++def wired(monkeypatch, claude_root, copilot_root, pi_root):
+     monkeypatch.setattr(claude_code, "DEFAULT", claude_root)
+     monkeypatch.setattr(copilot, "DEFAULT", copilot_root)
++    monkeypatch.setattr(pi, "DEFAULT", pi_root)
+ 
+ 
+-def test_list_shows_both_clis(wired, capsys):
++def many_sessions(count: int = 25) -> list[Session]:
++    timestamp = datetime(2026, 8, 25, tzinfo=timezone.utc)
++    return [
++        Session(
++            cli="pi",
++            id=f"{index:08d}-0000-4000-8000-000000000000",
++            path=Path(f"/tmp/synthetic-{index}.jsonl"),
++            cwd="/tmp/synthetic-project",
++            last_activity=timestamp,
++            label=f"synthetic-{index}",
++        )
++        for index in range(count)
++    ]
++
++
++def test_list_json_defaults_to_every_session(monkeypatch, capsys):
++    monkeypatch.setattr(cli, "discover_sessions", many_sessions)
++    assert cli.main(["list", "--json"]) == 0
++    assert len(json.loads(capsys.readouterr().out)) == 25
++
++
++def test_list_table_defaults_to_twenty(monkeypatch, capsys):
++    monkeypatch.setattr(cli, "discover_sessions", many_sessions)
++    assert cli.main(["list"]) == 0
++    assert len(capsys.readouterr().out.splitlines()) == 21
++
++
++def test_list_limit_zero_means_all(monkeypatch, capsys):
++    monkeypatch.setattr(cli, "discover_sessions", many_sessions)
++    assert cli.main(["list", "--limit", "0", "--json"]) == 0
++    assert len(json.loads(capsys.readouterr().out)) == 25
++
++
++def test_list_positive_limit_slices(monkeypatch, capsys):
++    monkeypatch.setattr(cli, "discover_sessions", many_sessions)
++    assert cli.main(["list", "--limit", "5", "--json"]) == 0
++    assert len(json.loads(capsys.readouterr().out)) == 5
++
++
++def test_list_rejects_negative_limit(capsys):
++    with pytest.raises(SystemExit) as excinfo:
++        cli.main(["list", "--limit", "-1"])
++    assert excinfo.value.code == 2
++    assert "must be non-negative" in capsys.readouterr().err
++
++
++def test_list_shows_all_clis(wired, capsys):
+     assert cli.main(["list"]) == 0
+     out = capsys.readouterr().out
+     assert "claude" in out
+     assert "copilot" in out
+-    assert "widgetapp" in out
++    assert "pi" in out
++    assert "Widget launch review" in out
+ 
+ 
+ def test_list_cli_filter(wired, capsys):
+-    assert cli.main(["list", "--cli", "copilot"]) == 0
++    assert cli.main(["list", "--cli", "pi"]) == 0
+     out = capsys.readouterr().out
+-    assert "copilot" in out
++    assert "pi" in out
++    assert "copilot" not in out
+     assert "claude " not in out
+ 
+ 
++def test_list_json_exposes_session_index(wired, capsys):
++    assert cli.main(["list", "--cli", "pi", "--json"]) == 0
++    sessions = json.loads(capsys.readouterr().out)
++    assert len(sessions) == 1
++    assert sessions[0]["cli"] == "pi"
++    assert sessions[0]["name"] == "Widget launch review"
++    assert sessions[0]["cwd"] == "/Users/example/projects/widgetapp"
++    assert sessions[0]["path"].endswith("pi-session.jsonl")
++
++
++def test_transcript_json_normalizes_turns(wired, capsys):
++    assert cli.main(["transcript", "--cli", "pi", "--session", "f1x70000"]) == 0
++    payload = json.loads(capsys.readouterr().out)
++    assert payload["session"]["cli"] == "pi"
++    assert len(payload["turns"]) == 2
++    assert payload["turns"][0]["prompt"] == "Review the widget launch path."
++    assert payload["turns"][0]["provider"] == "openai-codex"
++    assert "abandoned branch" not in json.dumps(payload)
++
++
+ def test_render_writes_static_file(wired, tmp_path):
+     out = tmp_path / "out.html"
+     assert cli.main(["render", "--cli", "claude", "-o", str(out), "--no-open"]) == 0
+@@ -41,10 +113,12 @@ def test_render_writes_static_file(wired, tmp_path):
+ def test_render_specific_turn(wired, tmp_path):
+     out = tmp_path / "t0.html"
+     assert (
+-        cli.main(["render", "--cli", "claude", "--turn", "0", "-o", str(out), "--no-open"])
++        cli.main(["render", "--cli", "pi", "--turn", "0", "-o", str(out), "--no-open"])
+         == 0
+     )
+-    assert "lazy pattern" in out.read_text()
++    html = out.read_text()
++    assert "requested widget" in html
++    assert "openai-codex/gpt-5.6-sol" in html
+ 
+ 
+ def test_render_no_match_returns_1(wired, tmp_path, capsys):
+diff --git a/tests/test_discovery.py b/tests/test_discovery.py
+index 2e197a3f935ee605701d2470fb7c2627d6b6b5dc..467c3d5374ded81ea9620311589dd9868b22a7ff 100644
+--- a/tests/test_discovery.py
++++ b/tests/test_discovery.py
+@@ -3,14 +3,18 @@ from __future__ import annotations
+ from agent_reader.models import discover_sessions, latest_turn
+ 
+ 
+-def test_discover_merges_both_clis(claude_root, copilot_root):
+-    sessions = discover_sessions(claude_root=claude_root, copilot_root=copilot_root)
+-    assert {s.cli for s in sessions} == {"claude", "copilot"}
+-    assert len(sessions) == 2
++def test_discover_merges_all_clis(claude_root, copilot_root, pi_root):
++    sessions = discover_sessions(
++        claude_root=claude_root, copilot_root=copilot_root, pi_root=pi_root
++    )
++    assert {s.cli for s in sessions} == {"claude", "copilot", "pi"}
++    assert len(sessions) == 3
+ 
+ 
+-def test_latest_turn_returns_a_turn(claude_root, copilot_root):
+-    result = latest_turn(claude_root=claude_root, copilot_root=copilot_root)
++def test_latest_turn_returns_a_turn(claude_root, copilot_root, pi_root):
++    result = latest_turn(
++        claude_root=claude_root, copilot_root=copilot_root, pi_root=pi_root
++    )
+     assert result is not None
+     session, turn = result
+     assert turn.final_block
+diff --git a/tests/test_pi_extractor.py b/tests/test_pi_extractor.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..ac374cae045d621a0a3c741696262b553b9b81cb
+--- /dev/null
++++ b/tests/test_pi_extractor.py
+@@ -0,0 +1,53 @@
++from __future__ import annotations
++
++from agent_reader.extractors import pi
++
++from .conftest import PI_SESSION_ID
++
++
++def test_discover_one_session(pi_root):
++    sessions = pi.discover(pi_root)
++    assert len(sessions) == 1
++    session = sessions[0]
++    assert session.cli == "pi"
++    assert session.id == PI_SESSION_ID
++    assert session.cwd == "/Users/example/projects/widgetapp"
++    assert session.name == "Widget launch review"
++    assert session.label == "Widget launch review"
++
++
++def test_turn_segmentation_and_metadata(pi_root):
++    session = pi.discover(pi_root)[0]
++    turns = pi.turns(session)
++    assert len(turns) == 2
++
++    first, second = turns
++    assert first.prompt == "Review the widget launch path."
++    assert first.blocks == [
++        "I am tracing registration through first render.",
++        "The launch path now initializes only the requested widget.",
++    ]
++    assert first.provider == "openai-codex"
++    assert first.model == "gpt-5.6-sol"
++    assert first.timestamp is not None
++
++    assert second.prompt == "Which provider handled that review?"
++    assert second.final_block == "OpenAI Codex handled both turns."
++    assert second.provider == "openai-codex"
++
++
++def test_abandoned_branch_and_nonprose_blocks_excluded(pi_root):
++    session = pi.discover(pi_root)[0]
++    all_text = "\n".join(block for turn in pi.turns(session) for block in turn.blocks)
++    assert "abandoned branch" not in all_text
++    assert "Private reasoning" not in all_text
++    assert "Synthetic tool output" not in all_text
++
++
++def test_malformed_line_tolerated(pi_root):
++    session = pi.discover(pi_root)[0]
++    assert len(pi.turns(session)) == 2
++
++
++def test_missing_root_is_empty(tmp_path):
++    assert pi.discover(tmp_path / "nope") == []

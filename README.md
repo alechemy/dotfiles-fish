@@ -36,6 +36,7 @@ This installs Homebrew + all dependencies from `Brewfile`, builds generated conf
 ├── docs/                    # Detailed architecture loaded on demand by agents
 ├── drafts/                  # Drafts action scripts (repo is canonical)
 ├── keyboard-maestro/        # Scripts referenced by KM macros
+├── patches/                 # Reviewed downstream source overlays
 ├── hrm/                     # Glove80 keyboard layout + README
 ├── firmware/                # Keyboard/device firmware + layouts
 │   ├── ploopy-knob/         # Ploopy Knob QMK keymap + build recipe
@@ -50,6 +51,7 @@ This installs Homebrew + all dependencies from `Brewfile`, builds generated conf
 │   ├── build-things-config.sh    # op read → ~/.zshenv Things auth token
 │   ├── build-vscode-config.sh    # Expand ${HOME} in VSCodium settings.json
 │   ├── merge-pi-settings.sh      # Merge portable preferences into Pi-owned settings
+│   ├── install-agent-reader.sh   # Build/install the pinned recall parser overlay
 │   ├── build-launchd-plists.sh   # Expand __HOME__ in launch-agent plist templates
 │   ├── lint-launchd-plists.sh    # Enforce TCC-stable interpreters in launch agents
 │   ├── seed-devonthink-config.sh # Copy-if-absent DEVONthink seed plists
