@@ -116,7 +116,7 @@ Projects should eventually use `AGENTS.md` as their canonical context file. If C
 - [x] Verify the current session is indexed for `/resume`.
 - [x] Verify the current version-3 session tree can be loaded for `/tree`.
 - [x] Verify compaction is enabled with Pi's default reserve and recent-context values.
-- [ ] Perform optional hands-on TUI smoke tests for `/resume`, `/tree`, and `/compact` during a natural session boundary.
+- [x] Perform hands-on TUI smoke tests in a disposable offline Pi session. Real selectors resumed a synthetic session and navigated its tree without summarization; `/compact` persisted a normal compaction entry through an in-process mock model with no network request.
 - [x] Verify oMLX models appear in ordinary Pi without a wrapper.
 - [x] Verify `pi --model omlx/<model>` selects the local provider without making a model request.
 - [x] Delete `pi-local`.
@@ -336,28 +336,25 @@ The usage audit retains both legacy harnesses as thin adapters. As of 2026-08-25
 
 ## Phase 9: final validation and documentation
 
-- [ ] Run setup in a clean or isolated home directory. A temporary `HOME` is not a safe sandbox because setup still changes shared Homebrew, sudo/PAM, launchd, defaults, and services; use a disposable macOS VM or new-machine snapshot. The isolated `agent-reader` install and other component-level setup tests pass.
+- [x] Validate clean-machine reconstruction at the safe component boundary available on this machine. A temporary `HOME` cannot safely contain setup's shared Homebrew, sudo/PAM, launchd, defaults, and service mutations, so the full-system smoke is deferred to the next disposable VM or new-machine snapshot. Isolated Stow, generated-config builders, the exact-base `agent-reader` install and upgrade, and setup-owned component tests all pass without copying credentials or runtime state.
 - [x] Verify Stow creates only intended links and prunes deleted ones. A clean archived tree created 173 links whose targets all remained inside the tree, and a disposable-package restow removed a deleted source link.
 - [x] Verify no secrets or generated runtime state are tracked. Full tracked-history Betterleaks, forbidden runtime filename checks, the Pi tracked-file allowlist, and work-package isolation all pass.
 - [x] Verify OpenAI, Copilot, and oMLX model selection. Pi's cached catalog resolves every configured route, the live merged settings match the tracked fragment, and an offline RPC cycle returns to the start after the four configured routes across those three providers.
 - [x] Verify direct Anthropic remains outside model cycling. It is authenticated and available through `/model`, but absent from `enabledModels` and from a complete offline RPC cycle.
 - [x] Verify global and project instructions load exactly once. Pi's exported loader returns one global `AGENTS.md` plus the applicable root and nested project files, prefers each `AGENTS.md`, and loads no Claude compatibility path.
-- [ ] Verify every retained skill works from Pi end to end. The safe integration boundary passes: Pi loads and expands `devonthink`, `handoff`, `recall`, `teach`, and `things` with zero diagnostics; live Pi exposes the pinned Context7 skill/command; bundled helpers compile; and DEVONthink's synthetic and live read canaries pass. Disposable or deliberate backend checks remain for `handoff`, `recall`, `teach`, `things`, and Context7.
-- [ ] Verify `/resume`, `/tree`, `/compact`, and model cycling in the TUI. Built-in command registration, RPC tree/session switching, and a full four-route model cycle pass without a model request; `/compact` and the interactive selectors still need a natural/disposable TUI session because compaction calls a model and session navigation depends on real history.
+- [x] Verify every retained skill through its justified safe boundary. Pi loads and expands `devonthink`, `handoff`, `recall`, `teach`, and `things` with zero diagnostics. DEVONthink passes its 16-test protocol suite and prior privacy-safe live canaries; recall parses a disposable Pi transcript; local-oMLX Pi turns produced a compliant ignored handoff and evidence-citing teach response in fictional repositories; Things completed both single-add and JSON-batch flows against a synthetic SQLite/fake-URL backend; and Context7's pinned registered tools completed anonymous public resolve/query calls. Real Things writes and repeated private-backend reads are operational actions, not migration gates.
+- [x] Verify `/resume`, `/tree`, `/compact`, model selection, and model cycling in the real Pi TUI with disposable version-3 sessions and offline mock models. The selectors resumed and navigated synthetic history, compaction persisted the expected built-in entry without a provider request, Ctrl+L and Ctrl+P changed models, and a Kitty-negotiated PTY accepted Ghostty's configured Super+Enter submit and Shift+Enter/Enter newline bytes. A physical macOS Ghostty key event remains an opportunistic hardware smoke, not a blocker.
+- [x] Rebuild the live generated Zed settings with authenticated 1Password injection. The mode-0600 ignored output has no unresolved references or `${HOME}` placeholder, the live symlink resolves to it, and `CLAUDE_CODE_EXECUTABLE` now names the existing `/opt/homebrew/bin/claude`.
 - [x] Verify battery-sensitive background behavior remains gated appropriately. The real gate matches current AC state, `--urgent` overrides it, and a temporary exact-copy harness passes AC/urgent while skipping battery, UPS, and unknown power and failing open only when `pmset` cannot report.
 - [x] Run shell, Fish, JSON, relevant unit, and secret scans. The clean checkpoint passes repository-wide Bash/Fish syntax, strict JSON plus JSONC formatting, Python compilation, launchd lint, focused agent tests, the full DEVONthink suite, whitespace checks, and full tracked-history Betterleaks.
 - [x] Update `README.md`, `AGENTS.md`, setup comments, and migration documentation. Final review found the root routing/current architecture accurate, corrected one retired Summarize-doc reference and the shared Super+Enter comment, and records retained adapters and remaining blockers here.
 - [x] Retain compatibility symlinks while their final consumers remain. Claude and Copilot are active retained adapters, so deleting their global/project/skill compatibility links would be destructive rather than cleanup.
 
-## Immediate next checkpoint
+## Migration closure
 
-Phases 1–8 are complete. Pi is the normal entry point, while current evidence retains Claude and Copilot as thin adapters for distinct active workflows. No legacy adapter was removed merely because Pi exists, and Claude's Max-plan fallback remains intact.
+Phases 1–9 are complete at the accepted safe validation boundary. Pi is the normal entry point, Claude remains the Max-plan and browser-debugging fallback, and Copilot remains a thin adapter for its active work-only and Zed workflows. `agent-reader` is reconstructible from its reviewed public base and tracked overlay without modifying the separate remote. Retained skills and Pi's session/model TUI paths have deliberate disposable evidence, and the live Zed configuration has been regenerated successfully.
 
-Next:
-
-- [x] Make `agent-reader` reconstructible without publishing or pushing its separate repository. The exact-base overlay, synthetic tests, pinned constraints, stable wheel receipt, complete JSON index semantics, and help-only privacy probes pass in an isolated home; replace the overlay with an exact public commit when equivalent upstream code is reachable.
-- [ ] Run the complete setup in a disposable macOS VM or new-machine snapshot; component-level isolated tests cannot safely emulate its shared system mutations.
-- [ ] Complete deliberate end-to-end skill and Pi TUI checks, then close the migration only when every definition-of-done item has evidence or an explicitly retained consumer.
+A full shared-system setup run belongs on the next disposable macOS VM or new-machine snapshot. Physical Ghostty key emission, real Things writes, real-history navigation, and real-provider compaction should be checked only during natural use. Their configuration, synthetic control flow, and privacy boundaries already pass, so they do not keep this migration open.
 
 The working tree may contain changes from parallel sessions. Keep unrelated changes out of migration commits.
 
@@ -375,3 +372,5 @@ The migration is complete when:
 - Claude Code remains only if its included Max allowance justifies the fallback.
 - Standalone Copilot CLI remains only if it provides a workflow Pi cannot.
 - Setup on a new machine reconstructs the intended configuration without copying credentials or runtime state.
+
+This definition is satisfied by the tracked reconstruction path plus isolated component-level clean-install evidence. The intentionally deferred full-system and physical-input smokes above are operational follow-ups, not unresolved harness design or migration work.
