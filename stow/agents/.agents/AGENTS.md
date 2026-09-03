@@ -30,6 +30,7 @@
 
 - Before reporting a multi-step task as done, reread the original request and confirm that the result meets its goal. Check the outcome, not the checklist.
 - When practical, reproduce a bug with a failing test before fixing it and keep the test. A failing test may not be practical for races, visual bugs, or environment-dependent failures. Update existing tests to cover changed behavior. Follow the project's testing conventions rather than imposing a new framework or coverage target.
+- Do not mention routine formatting, lint, typecheck, or test results unless a check fails, the user asks, or the result materially affects the outcome. Routine successes are silent. For example, after a small documentation edit, do not append "Prettier passes." Report only the actual change.
 
 ## External integrations
 
