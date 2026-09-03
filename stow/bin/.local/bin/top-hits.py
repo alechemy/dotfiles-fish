@@ -988,6 +988,36 @@ def make_cover(year, path, size=1400):
         return f.read()
 
 
+NOISE_WORDS = re.compile(r"\b(?:album|main|original|version|mix|explicit|clean|final)\b", re.I)
+NOISE_PHRASES = re.compile(r"\b(?:(?:us |uk )?album version|main version|original version|original mix|album mix|explicit|clean|final)\b", re.I)
+
+
+def _noise_only(text):
+    return not re.sub(r"[\s\-/()\[\]]+", "", NOISE_WORDS.sub("", NOISE_PHRASES.sub("", text)))
+
+
+def _tidy(text):
+    text = re.sub(r"\(\s*\)|\[\s*\]", "", text)
+    return re.sub(r"\s+", " ", text).strip(" -/")
+
+
+def clean_title(title, version):
+    """Title as shown in the library: Qobuz title minus noise parentheticals, plus any meaningful version."""
+    title = (title or "").strip()
+    while True:
+        cleaned = re.sub(r"\s*\(([^()]*)\)", lambda m: "" if _noise_only(m.group(1)) else m.group(0), title)
+        cleaned = re.sub(r"\s*\[([^\[\]]*)\]", lambda m: "" if _noise_only(m.group(1)) else m.group(0), cleaned)
+        if cleaned == title:
+            break
+        title = cleaned
+    title = _tidy(title)
+    version = version or ""
+    version = "" if _noise_only(version) else _tidy(NOISE_PHRASES.sub("", version))
+    if version and norm(version) not in norm(title):
+        return f"{title} ({version})"
+    return title
+
+
 def artist_override(file_artist, chart_artist):
     """The chart credit when the file's artist tag names none of the charted main artists, else None."""
     main_names, _ = split_credit(chart_artist)
@@ -1002,6 +1032,7 @@ def tag_file(path, row, manifest, cover_bytes):
     fixed = artist_override((audio.get("\xa9ART") or [""])[0], row["chart_artist"])
     if fixed:
         audio["\xa9ART"] = [fixed]
+    audio["\xa9nam"] = [clean_title(row["qobuz"]["title"], row["qobuz"].get("version"))]
     audio["\xa9alb"] = [manifest["album"]]
     audio["aART"] = [manifest["album_artist"]]
     audio["cpil"] = True
@@ -1122,6 +1153,38 @@ def cmd_assemble(args):
         raise SystemExit(4)
 
 
+# ----------------------------------------------------------------- stage: retag
+def cmd_retag(args):
+    """Re-apply the compilation tags (and cleaned titles) to an already-filed year, renaming files to match."""
+    import tempfile
+    from mutagen.mp4 import MP4
+    year = args.year
+    manifest = load_manifest(year)
+    progress = load_progress(year)
+    library_dir = progress.get("library_dir")
+    if not progress.get("assembled_at") or not library_dir or not os.path.isdir(library_dir):
+        raise SystemExit(f"ERROR: {year} is not assembled (or {library_dir} is missing).")
+    by_rank = {r["rank"]: r for r in manifest["entries"]}
+    with tempfile.TemporaryDirectory() as tmp:
+        cover_bytes = make_cover(year, os.path.join(tmp, "cover.jpg"))
+        shutil.copy2(os.path.join(tmp, "cover.jpg"), os.path.join(library_dir, "cover.jpg"))
+    renamed = 0
+    for path in find_audio(library_dir):
+        rank = MP4(path).get("trkn", [(0, 0)])[0][0]
+        row = by_rank.get(rank)
+        if not row or not row["qobuz"]:
+            print(f"  skipping {os.path.basename(path)}: no manifest row for track {rank}")
+            continue
+        tag_file(path, row, manifest, cover_bytes)
+        title = clean_title(row["qobuz"]["title"], row["qobuz"].get("version"))
+        dest = os.path.join(library_dir, f"{rank:02d} {safe_filename(title)}.m4a")
+        if dest != path:
+            os.rename(path, dest)
+            renamed += 1
+        print(f"  {rank:>2}. {title}")
+    print(f"\n{year}: retagged {len(by_rank)} tracks, renamed {renamed} files in {library_dir}")
+
+
 # ---------------------------------------------------------------- stage: status
 def parse_years(spec):
     years = []
@@ -1188,6 +1251,9 @@ def main(argv=None):
     p.add_argument("year", type=int)
     p.add_argument("--force", action="store_true", help="Redo an already-assembled year.")
     p.set_defaults(func=cmd_assemble)
+    p = sub.add_parser("retag", help="Re-apply tags and cleaned titles to an assembled year in place.")
+    p.add_argument("year", type=int)
+    p.set_defaults(func=cmd_retag)
     p = sub.add_parser("status", help="Per-year progress; exit 1 unless every year meets --require.")
     p.add_argument("--years", required=True, help="e.g. 2008-2025 or 2008,2010")
     p.add_argument("--require", choices=["resolved", "downloaded", "assembled"])

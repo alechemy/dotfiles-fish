@@ -238,6 +238,24 @@ class AssembleTests(unittest.TestCase):
         self.assertIsNone(th.artist_override("P!nk", "Pink"))
 
 
+class TitleCleanupTests(unittest.TestCase):
+    def test_noise_versions_are_dropped(self):
+        self.assertEqual(th.clean_title("Bleeding Love", "Album Version"), "Bleeding Love")
+        self.assertEqual(th.clean_title("No Air", "Main Version"), "No Air")
+        self.assertEqual(th.clean_title("Lollipop", "Album Version (Explicit)"), "Lollipop")
+        self.assertEqual(th.clean_title("Sexual Eruption", "Album Version (Explicit) FINAL"), "Sexual Eruption")
+        self.assertEqual(th.clean_title("Like You'll Never See Me Again", "Main"), "Like You'll Never See Me Again")
+        self.assertEqual(th.clean_title("Right Round", "US Album Version"), "Right Round")
+        self.assertEqual(th.clean_title("Bust It Baby, Pt. 2 (feat. Ne-Yo) (Explicit Album Version)", None), "Bust It Baby, Pt. 2 (feat. Ne-Yo)")
+
+    def test_meaningful_versions_are_kept(self):
+        self.assertEqual(th.clean_title("Teardrops On My Guitar", "Pop Version"), "Teardrops On My Guitar (Pop Version)")
+        self.assertEqual(th.clean_title("Old Town Road", "Remix"), "Old Town Road (Remix)")
+        self.assertEqual(th.clean_title("Carry Out", "Featuring Justin Timberlake"), "Carry Out (Featuring Justin Timberlake)")
+        self.assertEqual(th.clean_title("Low (feat. T-Pain)", "Feat T-Pain   Album Version"), "Low (feat. T-Pain)")
+        self.assertEqual(th.clean_title("Is It Over Now? (Taylor's Version) (From The Vault)", None), "Is It Over Now? (Taylor's Version) (From The Vault)")
+
+
 class GenreTests(unittest.TestCase):
     def test_mapping(self):
         self.assertEqual(th.map_genre("Hip-Hop/Rap"), ("Hip-Hop", True))
