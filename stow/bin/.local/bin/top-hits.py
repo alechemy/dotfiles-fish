@@ -16,6 +16,8 @@ previous stage's output, so any stage can be rerun:
     top-hits.py approve  <year>  pin every review-status pick (or --rank N ...) into overrides, then re-resolve
     top-hits.py download <year>  one rip per rank into ~/StreamripDownloads/top-hits/<year>/<rank>/,
                                  verified by tag title + duration -> progress/<year>.json
+                                 exit 0 complete, 1 ranks still missing, 2 ABORT (auth/rate limit: stop
+                                 the whole run), 3 HALT (3 consecutive failures: wait, then rerun)
     top-hits.py assemble <year>  tag as one compilation, generated cover, music-organize into the
                                  library, NAS chmod, runnability scoring
     top-hits.py status --years 2008-2025 [--require resolved|downloaded|assembled]
@@ -925,7 +927,8 @@ def cmd_download(args):
             progress["ranks"][str(rank)] = rec
             save_progress(progress)
             print("FATAL")
-            raise SystemExit(f"ABORT: rip reported an auth/rate-limit condition on rank {rank}; see {dest}/rip.log. Stop the run.")
+            print(f"ABORT: rip reported an auth/rate-limit condition on rank {rank}; see {dest}/rip.log. Stop the run.")
+            raise SystemExit(2)
         files = find_audio(dest)
         ok, detail = verify_file(files[0], row) if files else (False, f"rip exit {code}, no audio file")
         if ok:
@@ -941,7 +944,8 @@ def cmd_download(args):
         progress["ranks"][str(rank)] = rec
         save_progress(progress)
         if consecutive >= 3:
-            raise SystemExit(f"ABORT: {consecutive} consecutive failures in {year}; rerun `top-hits.py download {year}` after checking {staging}/*/rip.log.")
+            print(f"HALT: {consecutive} consecutive failures in {year}; wait a few minutes and rerun `top-hits.py download {year}` (see {staging}/*/rip.log).")
+            raise SystemExit(3)
         time.sleep(2)
     wanted = sum(1 for r in manifest["entries"] if r["status"] != "skip")
     print(f"\n{year}: {done}/{wanted} verified, {skipped} skipped, {failed} failed this run.")
