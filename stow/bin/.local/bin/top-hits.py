@@ -3,6 +3,7 @@
 # requires-python = ">=3.11"
 # dependencies = [
 #   "mutagen",
+#   "pillow",
 # ]
 # ///
 """Build one "Top 50 Hits of <year>" compilation per Billboard year-end chart.
@@ -10,8 +11,15 @@
 Stages write state under ~/.local/state/top-hits/ and each rereads the
 previous stage's output, so any stage can be rerun:
 
-    top-hits.py chart   <year>   Wikipedia year-end Hot 100 -> charts/<year>.json
-    top-hits.py resolve <year>   Qobuz candidates, scored    -> manifests/<year>.json, review/<year>.md
+    top-hits.py chart    <year>  Wikipedia year-end Hot 100 -> charts/<year>.json
+    top-hits.py resolve  <year>  Qobuz candidates, scored    -> manifests/<year>.json, review/<year>.md
+    top-hits.py approve  <year>  pin every review-status pick (or --rank N ...) into overrides, then re-resolve
+    top-hits.py download <year>  one rip per rank into ~/StreamripDownloads/top-hits/<year>/<rank>/,
+                                 verified by tag title + duration -> progress/<year>.json
+    top-hits.py assemble <year>  tag as one compilation, generated cover, music-organize into the
+                                 library, NAS chmod, runnability scoring
+    top-hits.py status --years 2008-2025 [--require resolved|downloaded|assembled]
+                                 exit 0 only when every year meets the requirement
 
 Overrides (applied by resolve, survive re-resolves):
     overrides/<year>.json   {"<rank>": {"qobuz_id": "123"} | {"skip": "reason"}}
@@ -29,7 +37,9 @@ import html
 import json
 import os
 import re
+import shutil
 import statistics
+import subprocess
 import sys
 import time
 import tomllib
@@ -44,6 +54,16 @@ QOBUZ_BASE_URL = "https://www.qobuz.com/api.json/0.2"
 WIKI_API = "https://en.wikipedia.org/w/api.php"
 USER_AGENT = "top-hits/0.1 (personal music library tooling)"
 TOP_N = 50
+DOWNLOADS_DIR = os.path.expanduser(os.environ.get("TOP_HITS_DOWNLOADS", "~/StreamripDownloads/top-hits"))
+LOCAL_RIP = os.path.expanduser("~/Developer/streamrip/.venv/bin/rip")
+LIBRARY_ROOT = "/Volumes/Media/Music"
+ORGANIZER = os.path.expanduser("~/.local/bin/music-organize.py")
+RUNNABILITY = os.path.expanduser("~/.local/bin/runnability.py")
+NAS_HOSTS = ("admin@192.168.50.54", "admin@100.89.43.9")
+COVER_FONTS = (
+    "/System/Library/Fonts/Supplemental/DIN Condensed Bold.ttf",
+    "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
+)
 
 ALLOWED_GENRES = (
     "Ambient", "Bluegrass", "Classical", "Country", "Electronic",
@@ -126,7 +146,7 @@ def http_get_json(url, params, headers=None, retries=3):
 _APOS = str.maketrans({"’": "'", "‘": "'", "“": '"', "”": '"', "‐": "-", "–": "-", "—": "-"})
 _FEAT_SPLIT = re.compile(r"\s+(?:featuring|feat\.?|ft\.?|with|x)\s+", re.I)
 _CREDIT_SPLIT = re.compile(r"\s*(?:,|&|\band\b|\+|\bvs\.?\b|\bx\b)\s*", re.I)
-_PAREN = re.compile(r"\s*[\(\[][^\)\]]*[\)\]]")
+_PAREN = re.compile(r"\s*(?:\([^()]*\)|\[[^\[\]]*\])")
 _DASH_TAIL = re.compile(r"\s+-\s+.*$")
 
 
@@ -141,9 +161,17 @@ def norm(s):
     return re.sub(r"\s+", " ", s).strip()
 
 
+def strip_parens(s):
+    while True:
+        stripped = _PAREN.sub("", s)
+        if stripped == s:
+            return re.sub(r"\s*[\(\[].*$", "", s)
+        s = stripped
+
+
 def base_title(s):
     s = html.unescape(str(s or "")).translate(_APOS)
-    s = _PAREN.sub("", s)
+    s = strip_parens(s)
     s = _DASH_TAIL.sub("", s)
     return norm(s)
 
@@ -409,7 +437,7 @@ def score_candidate(cand, entry_ctx, any_explicit, median_duration):
         return 0, [], "title_mismatch"
 
     penalties = []
-    title_extras = " ".join(_PAREN.findall(cand["title"])) + " " + (cand["title"].split(" - ", 1)[1] if " - " in cand["title"] else "")
+    title_extras = cand["title"].replace(strip_parens(cand["title"]), "", 1)
     version_blob = f"{title_extras} {cand['version']}"
     album_blob = f"{cand['album']} {cand['album_version']}"
     if EDIT.search(version_blob):
@@ -432,6 +460,9 @@ def score_candidate(cand, entry_ctx, any_explicit, median_duration):
         penalties.append(("missing_feature", 25))
     if cand["version"] and not any(rx.search(cand["version"]) for rx in (NEUTRAL_VERSION, EDIT, LIVE, SPEED, REMIX, REMASTER)):
         penalties.append(("unknown_version", 20))
+    elif re.search(r"\bversion\b|\bmix\b", version_blob, re.I) and not ALBUM_VERSION.search(version_blob) \
+            and not any(rx.search(version_blob) for rx in (EDIT, LIVE, SPEED, REMIX, REMASTER)):
+        penalties.append(("alt_version", 15))
 
     if any_explicit and not cand["explicit"]:
         penalties.append(("clean_when_explicit_exists", 20))
@@ -475,8 +506,8 @@ def title_similarity(entry_ctx, cand_title):
     return max(similarity(a, b) for a in chart_forms for b in cand_forms)
 
 
-REVIEW_PENALTIES = {"edit", "live", "speed", "live_album", "remix", "remix_album", "missing_feature", "compilation", "other_artist_album", "unknown_version"}
-VERSION_PENALTIES = {"edit", "live", "speed", "live_album", "remix", "remix_album", "unknown_version"}
+REVIEW_PENALTIES = {"edit", "live", "speed", "live_album", "remix", "remix_album", "missing_feature", "compilation", "other_artist_album", "unknown_version", "alt_version"}
+VERSION_PENALTIES = {"edit", "live", "speed", "live_album", "remix", "remix_album", "unknown_version", "alt_version"}
 
 
 def resolve_entry(entry, year, candidates):
@@ -601,7 +632,7 @@ def build_queries(entry):
     main = html.unescape(entry["artist"]).translate(_APOS)
     main = _FEAT_SPLIT.split(main, maxsplit=1)[0]
     first = _CREDIT_SPLIT.split(main)[0].strip() or main
-    title = _PAREN.sub("", html.unescape(entry["title"]).translate(_APOS)).strip()
+    title = strip_parens(html.unescape(entry["title"]).translate(_APOS)).strip()
     queries = [f"{first} {title}"]
     if first != main.strip():
         queries.append(f"{main.strip()} {title}")
@@ -612,13 +643,18 @@ def build_queries(entry):
 def search_entry(qb, entry, year, min_accepted=3):
     """Run successive queries until enough non-rejected candidates exist; return (query_used, items)."""
     items, used = [], []
-    for q in build_queries(entry):
+    queries = build_queries(entry)
+    for q in queries:
         items.extend(qb.search_tracks(q))
         used.append(q)
         probe = resolve_entry(entry, year, items)
         accepted = 1 + len(probe["alternatives"]) if probe["qobuz"] else 0
         if accepted >= min_accepted:
             break
+    probe = resolve_entry(entry, year, items)
+    if probe["qobuz"] and {n for n, _ in probe.get("penalties", [])} & VERSION_PENALTIES:
+        items.extend(qb.search_tracks(queries[0], limit=200))
+        used.append(f"{queries[0]} (wide)")
     return " | ".join(used), items
 
 
@@ -708,6 +744,379 @@ def write_review(manifest):
     return path
 
 
+
+# --------------------------------------------------------------- stage: approve
+def cmd_approve(args):
+    year = args.year
+    manifest = load_manifest(year)
+    path = state_path("overrides", f"{year}.json")
+    overrides = read_json(path, default={})
+    pinned = []
+    for row in manifest["entries"]:
+        if row["status"] != "review" or (args.rank and row["rank"] not in args.rank) or not row["qobuz"]:
+            continue
+        overrides[str(row["rank"])] = {"qobuz_id": row["qobuz"]["id"], "approved_from": row["flags"]}
+        pinned.append(row["rank"])
+    if not pinned:
+        print(f"{year}: nothing to approve.")
+        return
+    write_json(path, overrides)
+    print(f"{year}: pinned ranks {pinned} in {path}; re-resolving.")
+    cmd_resolve(argparse.Namespace(year=year, rank=None))
+
+
+# -------------------------------------------------------------- stage: download
+FATAL_RIP = re.compile(r"\b(?:401|403|429)\b|unauthori|authenticat|invalid app|rate limit|too many requests|login failed", re.I)
+READY_STATUSES = {"auto", "manual", "skip"}
+
+
+def load_manifest(year):
+    manifest = read_json(state_path("manifests", f"{year}.json"))
+    if not manifest:
+        raise SystemExit(f"ERROR: no manifest for {year}; run `top-hits.py resolve {year}` first.")
+    return manifest
+
+
+def load_progress(year):
+    return read_json(state_path("progress", f"{year}.json"), default={"year": year, "ranks": {}})
+
+
+def save_progress(progress):
+    write_json(state_path("progress", f"{progress['year']}.json"), progress)
+
+
+def not_ready_rows(manifest):
+    return [r for r in manifest["entries"] if r["status"] not in READY_STATUSES]
+
+
+def find_audio(folder):
+    hits = []
+    for root, _dirs, files in os.walk(folder):
+        for fn in files:
+            if fn.lower().endswith(".m4a"):
+                hits.append(os.path.join(root, fn))
+    return sorted(hits)
+
+
+def read_audio(path):
+    from mutagen.mp4 import MP4
+    audio = MP4(path)
+    title = (audio.get("\xa9nam") or [""])[0]
+    artist = (audio.get("\xa9ART") or [""])[0]
+    return title, artist, audio.info.length
+
+
+def verify_file(path, row):
+    """Check a downloaded file against the manifest pick by title and duration."""
+    q = row["qobuz"]
+    try:
+        title, _artist, length = read_audio(path)
+    except Exception as e:
+        return False, f"unreadable: {e}"
+    sim = max(similarity(base_title(q["title"]), base_title(title)), similarity(norm(q["title"]), norm(title)))
+    if sim < 0.85:
+        return False, f"title mismatch: file={title!r} expected={q['title']!r}"
+    if q["duration"] and abs(length - q["duration"]) > 4:
+        return False, f"duration mismatch: file={length:.0f}s expected={q['duration']}s"
+    return True, f"{title!r} {length:.0f}s"
+
+
+def rip_track(dest, url):
+    os.makedirs(dest, exist_ok=True)
+    proc = subprocess.run([LOCAL_RIP, "-f", dest, "url", url], capture_output=True, text=True, timeout=900)
+    out = (proc.stdout or "") + (proc.stderr or "")
+    with open(os.path.join(dest, "rip.log"), "w", encoding="utf-8") as f:
+        f.write(out)
+    return proc.returncode, out
+
+
+def cmd_download(args):
+    year = args.year
+    manifest = load_manifest(year)
+    blocked = not_ready_rows(manifest)
+    if blocked:
+        ranks = ", ".join(f"{r['rank']}({r['status']})" for r in blocked)
+        raise SystemExit(f"ERROR: {year} has rows needing a decision: {ranks}. Fix overrides/{year}.json and re-resolve.")
+    progress = load_progress(year)
+    if progress.get("assembled_at"):
+        print(f"{year}: already assembled at {progress['assembled_at']}; nothing to download.")
+        return
+    staging = os.path.join(DOWNLOADS_DIR, str(year))
+    consecutive = 0
+    done = skipped = failed = 0
+    for row in manifest["entries"]:
+        rank = row["rank"]
+        if row["status"] == "skip":
+            skipped += 1
+            continue
+        rec = progress["ranks"].get(str(rank), {})
+        if rec.get("verified") and os.path.exists(rec.get("path", "")):
+            done += 1
+            continue
+        dest = os.path.join(staging, f"{rank:02d}")
+        existing = find_audio(dest)
+        if existing:
+            ok, detail = verify_file(existing[0], row)
+            if ok:
+                rec.update({"verified": True, "path": existing[0], "error": None, "verified_at": now_iso()})
+                progress["ranks"][str(rank)] = rec
+                save_progress(progress)
+                done += 1
+                print(f"  {rank:>2}. re-verified existing file: {detail}")
+                continue
+        shutil.rmtree(dest, ignore_errors=True)
+        print(f"  {rank:>2}. {row['qobuz']['title']} — {row['qobuz']['performer']} ... ", end="", flush=True)
+        try:
+            code, out = rip_track(dest, row["qobuz"]["url"])
+        except subprocess.TimeoutExpired:
+            code, out = -1, "timeout"
+        rec = {"attempts": rec.get("attempts", 0) + 1, "verified": False, "path": None, "last_attempt": now_iso()}
+        if FATAL_RIP.search(out):
+            rec["error"] = "fatal: " + FATAL_RIP.search(out).group(0)
+            progress["ranks"][str(rank)] = rec
+            save_progress(progress)
+            print("FATAL")
+            raise SystemExit(f"ABORT: rip reported an auth/rate-limit condition on rank {rank}; see {dest}/rip.log. Stop the run.")
+        files = find_audio(dest)
+        if code != 0 or not files:
+            rec["error"] = f"rip exit {code}, {len(files)} audio files"
+            consecutive += 1
+            failed += 1
+            print(f"FAILED ({rec['error']})")
+        else:
+            ok, detail = verify_file(files[0], row)
+            if ok:
+                rec.update({"verified": True, "path": files[0], "error": None, "verified_at": now_iso()})
+                consecutive = 0
+                done += 1
+                print(f"ok {detail}")
+            else:
+                rec["error"] = detail
+                consecutive += 1
+                failed += 1
+                print(f"MISMATCH ({detail})")
+        progress["ranks"][str(rank)] = rec
+        save_progress(progress)
+        if consecutive >= 3:
+            raise SystemExit(f"ABORT: {consecutive} consecutive failures in {year}; rerun `top-hits.py download {year}` after checking {staging}/*/rip.log.")
+        time.sleep(2)
+    wanted = sum(1 for r in manifest["entries"] if r["status"] != "skip")
+    print(f"\n{year}: {done}/{wanted} verified, {skipped} skipped, {failed} failed this run.")
+    if done < wanted:
+        raise SystemExit(1)
+
+
+# -------------------------------------------------------------- stage: assemble
+def load_font(size):
+    from PIL import ImageFont
+    for path in COVER_FONTS:
+        if os.path.exists(path):
+            return ImageFont.truetype(path, size)
+    return ImageFont.load_default(size=size)
+
+
+def make_cover(year, path, size=1400):
+    import colorsys
+    from PIL import Image, ImageDraw
+    hue = ((year - 2000) * 37 % 360) / 360
+    bg = tuple(int(255 * c) for c in colorsys.hsv_to_rgb(hue, 0.55, 0.26))
+    fg = tuple(int(255 * c) for c in colorsys.hsv_to_rgb(hue, 0.18, 0.97))
+    img = Image.new("RGB", (size, size), bg)
+    draw = ImageDraw.Draw(img)
+    small, big = load_font(int(size * 0.13)), load_font(int(size * 0.50))
+
+    def place(text, font, ink_top):
+        left, top, right, bottom = draw.textbbox((0, 0), text, font=font, anchor="lt")
+        draw.text(((size - (right - left)) / 2 - left, ink_top - top), text, font=font, fill=fg, anchor="lt")
+        return ink_top + (bottom - top)
+
+    label_bottom = place("TOP 50 HITS", small, size * 0.20)
+    rule_y = label_bottom + size * 0.05
+    draw.rectangle([size * 0.30, rule_y, size * 0.70, rule_y + 6], fill=fg)
+    place(str(year), big, rule_y + size * 0.06)
+    img.save(path, "JPEG", quality=92)
+    with open(path, "rb") as f:
+        return f.read()
+
+
+def artist_override(file_artist, chart_artist):
+    """The chart credit when the file's artist tag names none of the charted main artists, else None."""
+    main_names, _ = split_credit(chart_artist)
+    if any(name_in(n, norm(file_artist)) for n in main_names):
+        return None
+    return chart_artist
+
+
+def tag_file(path, row, manifest, cover_bytes):
+    from mutagen.mp4 import MP4, MP4Cover, MP4FreeForm
+    audio = MP4(path)
+    fixed = artist_override((audio.get("\xa9ART") or [""])[0], row["chart_artist"])
+    if fixed:
+        audio["\xa9ART"] = [fixed]
+    audio["\xa9alb"] = [manifest["album"]]
+    audio["aART"] = [manifest["album_artist"]]
+    audio["cpil"] = True
+    audio["\xa9day"] = [str(manifest["year"])]
+    audio["trkn"] = [(row["rank"], TOP_N)]
+    audio["disk"] = [(1, 1)]
+    audio["\xa9gen"] = [row["genre"] or "Pop"]
+    source_genre = (row["qobuz"] or {}).get("genre")
+    if source_genre:
+        audio["----:com.apple.iTunes:SOURCE_GENRE"] = [MP4FreeForm(source_genre.encode("utf-8"))]
+    audio["covr"] = [MP4Cover(cover_bytes, imageformat=MP4Cover.FORMAT_JPEG)]
+    for key in ("\xa9cmt", "cprt"):
+        audio.pop(key, None)
+    audio.save()
+    return fixed
+
+
+def safe_filename(name):
+    return "".join("_" if c in '/\\:*?"<>|' else c for c in name).strip().rstrip(".") or "track"
+
+
+def nas_chmod(library_dirs):
+    host = None
+    for candidate in NAS_HOSTS:
+        if subprocess.run(["ssh", "-n", "-o", "ConnectTimeout=5", "-o", "BatchMode=yes", candidate, "true"],
+                          capture_output=True).returncode == 0:
+            host = candidate
+            break
+    if not host:
+        return [f"ssh <nas> \"chmod 775 '{os.path.dirname(d)}'; chmod -R 775 '{d}'\"" for d in library_dirs]
+    failed = []
+    for d in library_dirs:
+        nas_dir = d.replace("/Volumes/Media", "/share/Media", 1)
+        esc = lambda p: p.replace("'", "'\\''")
+        cmd = f"chmod 775 '{esc(os.path.dirname(nas_dir))}'; chmod -R 775 '{esc(nas_dir)}'"
+        ok = False
+        for _ in range(2):
+            if subprocess.run(["ssh", "-n", "-o", "ConnectTimeout=10", host, cmd], capture_output=True).returncode == 0:
+                ok = True
+                break
+            time.sleep(3)
+        if not ok:
+            failed.append(f"ssh {host} \"{cmd}\"")
+    return failed
+
+
+def score_runnability(library_dir):
+    for verb in ("analyze", "write"):
+        proc = subprocess.run([RUNNABILITY, verb, "--force", library_dir], capture_output=True, text=True)
+        if proc.returncode != 0:
+            return False, (proc.stderr or proc.stdout or "")[-400:]
+    return True, ""
+
+
+def cmd_assemble(args):
+    year = args.year
+    manifest = load_manifest(year)
+    progress = load_progress(year)
+    if progress.get("assembled_at") and not args.force:
+        raise SystemExit(f"{year}: already assembled at {progress['assembled_at']} ({progress.get('library_dir')}). Use --force to redo.")
+    rows = [r for r in manifest["entries"] if r["status"] != "skip"]
+    missing = [r["rank"] for r in rows
+               if not progress["ranks"].get(str(r["rank"]), {}).get("verified")
+               or not os.path.exists(progress["ranks"][str(r["rank"])]["path"])]
+    if missing:
+        raise SystemExit(f"ERROR: {year} is missing verified files for ranks {missing}; run `top-hits.py download {year}`.")
+    if not os.path.isdir(LIBRARY_ROOT) or not os.listdir(LIBRARY_ROOT):
+        raise SystemExit(f"ERROR: library root {LIBRARY_ROOT} is not mounted.")
+
+    staging = os.path.join(DOWNLOADS_DIR, str(year))
+    album_dir = os.path.join(staging, safe_filename(manifest["album"]))
+    shutil.rmtree(album_dir, ignore_errors=True)
+    os.makedirs(album_dir)
+    cover_bytes = make_cover(year, os.path.join(album_dir, "cover.jpg"))
+    print(f"--> Tagging {len(rows)} tracks as '{manifest['album']}'")
+    for row in rows:
+        rec = progress["ranks"][str(row["rank"])]
+        dst = os.path.join(album_dir, f"{row['rank']:02d} {safe_filename(row['qobuz']['title'])}.m4a")
+        shutil.move(rec["path"], dst)
+        fixed = tag_file(dst, row, manifest, cover_bytes)
+        if fixed:
+            print(f"    {row['rank']:>2}. artist tag replaced with chart credit: {fixed!r}")
+        rec["path"] = dst
+    save_progress(progress)
+
+    print("--> Organizing into the library")
+    organize_manifest = os.path.join(staging, "organize-manifest.txt")
+    proc = subprocess.run([ORGANIZER, "--library-root", LIBRARY_ROOT, "--on-collision", "replace",
+                           "--manifest", organize_manifest, album_dir], text=True)
+    if proc.returncode != 0:
+        raise SystemExit(f"ERROR: music-organize exited {proc.returncode}; tagged files remain at {album_dir}.")
+    with open(organize_manifest, encoding="utf-8") as f:
+        library_dirs = [l.strip() for l in f if l.strip()]
+    os.remove(organize_manifest)
+    if not library_dirs:
+        raise SystemExit("ERROR: organizer reported no destination folders.")
+
+    print("--> Setting permissions on the NAS")
+    perm_failures = nas_chmod(library_dirs)
+    print("--> Scoring runnability")
+    run_ok, run_err = score_runnability(library_dirs[0])
+
+    progress.update({"assembled_at": now_iso(), "library_dir": library_dirs[0],
+                     "perm_failures": perm_failures, "runnability_scored": run_ok})
+    for row in rows:
+        rank_dir = os.path.join(staging, f"{row['rank']:02d}")
+        shutil.rmtree(rank_dir, ignore_errors=True)
+    save_progress(progress)
+
+    print(f"\n{year}: {len(rows)} tracks filed at {library_dirs[0]}")
+    if perm_failures:
+        print("WARNING: NAS permissions not set; once the NAS is reachable run:")
+        for cmd in perm_failures:
+            print(f"  {cmd}")
+    if not run_ok:
+        print(f"WARNING: runnability scoring failed (nightly sync will retry): {run_err.strip()}")
+    if perm_failures:
+        raise SystemExit(4)
+
+
+# ---------------------------------------------------------------- stage: status
+def parse_years(spec):
+    years = []
+    for part in spec.split(","):
+        part = part.strip()
+        if "-" in part:
+            a, b = part.split("-", 1)
+            years.extend(range(int(a), int(b) + 1))
+        elif part:
+            years.append(int(part))
+    return years
+
+
+def year_status(year):
+    manifest = read_json(state_path("manifests", f"{year}.json"))
+    progress = read_json(state_path("progress", f"{year}.json"), default={"ranks": {}})
+    info = {"year": year, "chart": os.path.exists(state_path("charts", f"{year}.json")),
+            "resolved": False, "counts": {}, "wanted": 0, "verified": 0,
+            "assembled": bool(progress.get("assembled_at")), "library_dir": progress.get("library_dir")}
+    if manifest:
+        for r in manifest["entries"]:
+            info["counts"][r["status"]] = info["counts"].get(r["status"], 0) + 1
+        info["resolved"] = not not_ready_rows(manifest)
+        info["wanted"] = sum(1 for r in manifest["entries"] if r["status"] != "skip")
+        info["verified"] = sum(1 for r in manifest["entries"] if r["status"] != "skip"
+                               and progress["ranks"].get(str(r["rank"]), {}).get("verified"))
+    info["downloaded"] = info["resolved"] and info["wanted"] > 0 and info["verified"] == info["wanted"]
+    return info
+
+
+def cmd_status(args):
+    all_ok = True
+    for year in parse_years(args.years):
+        info = year_status(year)
+        ok = info[args.require] if args.require else True
+        all_ok &= bool(ok)
+        counts = " ".join(f"{k}={v}" for k, v in sorted(info["counts"].items())) or "-"
+        stage = "assembled" if info["assembled"] else "downloaded" if info["downloaded"] else "resolved" if info["resolved"] else "manifest" if info["counts"] else "chart" if info["chart"] else "none"
+        print(f"{year}: {stage:<10} {info['verified']:>2}/{info['wanted']:<2} files  [{counts}]"
+              + (f"  {info['library_dir']}" if info["library_dir"] else ""))
+    if not all_ok:
+        raise SystemExit(1)
+
+
 # ------------------------------------------------------------------------ main
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -719,6 +1128,21 @@ def main(argv=None):
     p.add_argument("year", type=int)
     p.add_argument("--rank", type=int, nargs="*", help="Only re-resolve these ranks (merged into the manifest).")
     p.set_defaults(func=cmd_resolve)
+    p = sub.add_parser("approve", help="Accept the current pick for review-status rows.")
+    p.add_argument("year", type=int)
+    p.add_argument("--rank", type=int, nargs="*")
+    p.set_defaults(func=cmd_approve)
+    p = sub.add_parser("download", help="Download every non-skipped rank into per-rank staging folders.")
+    p.add_argument("year", type=int)
+    p.set_defaults(func=cmd_download)
+    p = sub.add_parser("assemble", help="Tag, cover, and file the year as one compilation.")
+    p.add_argument("year", type=int)
+    p.add_argument("--force", action="store_true", help="Redo an already-assembled year.")
+    p.set_defaults(func=cmd_assemble)
+    p = sub.add_parser("status", help="Per-year progress; exit 1 unless every year meets --require.")
+    p.add_argument("--years", required=True, help="e.g. 2008-2025 or 2008,2010")
+    p.add_argument("--require", choices=["resolved", "downloaded", "assembled"])
+    p.set_defaults(func=cmd_status)
     args = parser.parse_args(argv)
     args.func(args)
 

@@ -73,6 +73,12 @@ class CreditTests(unittest.TestCase):
         self.assertEqual(th.norm("Wire Garden Pt. 2"), "wire garden part 2")
         self.assertEqual(th.norm("Beyoncé"), "beyonce")
 
+    def test_base_title_strips_nested_parentheticals(self):
+        self.assertEqual(th.base_title("Glass Harbor (Album Version (Explicit) FINAL)"), "glass harbor")
+        self.assertEqual(th.base_title("Glass Harbor (feat. Tessa Quill) [Remastered]"), "glass harbor")
+        self.assertEqual(th.base_title("Glass Harbor - Radio Edit"), "glass harbor")
+        self.assertEqual(th.base_title("Glass Harbor (unclosed"), "glass harbor")
+
     def test_credited_artists_ignores_writers(self):
         performers = "Cover Kid, MainArtist - Marlow Vane, Composer, Lyricist - Guest Star, FeaturedArtist"
         self.assertEqual(th.credited_artists(performers), ["Cover Kid", "Guest Star"])
@@ -176,12 +182,30 @@ class ScoringTests(unittest.TestCase):
         ]
         self.assertNotIn("close_call", resolve("Glass Harbor", "Marlow Vane", items)["flags"])
 
+    def test_named_alternate_version_loses_to_plain_cut(self):
+        items = [
+            item(1, "Glass Harbor", "Marlow Vane", "Harbor Lights (Deluxe)", "Marlow Vane", version="Pop Version", tracks_count=30, duration=178),
+            item(2, "Glass Harbor", "Marlow Vane", "Harbor Lights", "Marlow Vane", duration=215),
+        ]
+        row = resolve("Glass Harbor", "Marlow Vane", items)
+        self.assertEqual(row["qobuz"]["id"], "2")
+        self.assertEqual(row["status"], "auto")
+        self.assertIn("alt_version", resolve("Glass Harbor", "Marlow Vane", items[:1])["flags"])
+
     def test_unknown_version_string_is_flagged(self):
         items = [item(1, "Glass Harbor", "Marlow Vane", "Harbor Lights: The Remixes", "Marlow Vane", version="Somebody & Someone")]
         row = resolve("Glass Harbor", "Marlow Vane", items)
         self.assertEqual(row["status"], "review")
         self.assertIn("unknown_version", row["flags"])
         self.assertIn("remix_album", row["flags"])
+
+
+class AssembleTests(unittest.TestCase):
+    def test_artist_override_only_when_main_artist_missing(self):
+        self.assertIsNone(th.artist_override("Marlow Vane", "Marlow Vane featuring Tessa Quill"))
+        self.assertIsNone(th.artist_override("Marlow Vane feat. Tessa Quill", "Marlow Vane featuring Tessa Quill"))
+        self.assertEqual(th.artist_override("Tessa Quill", "Marlow Vane featuring Tessa Quill"), "Marlow Vane featuring Tessa Quill")
+        self.assertIsNone(th.artist_override("P!nk", "Pink"))
 
 
 class GenreTests(unittest.TestCase):
