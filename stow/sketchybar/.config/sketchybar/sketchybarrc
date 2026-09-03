@@ -159,7 +159,7 @@ sketchybar --add item aerospace_gaps left \
   --set aerospace_gaps drawing=off script="$PLUGIN_DIR/aerospace_gaps.sh" \
   --subscribe aerospace_gaps front_app_switched display_change system_woke
 
-# Feishin Now Playing — leftmost
+# Now Playing (Feishin or Qobuz) — leftmost
 sketchybar --add item feishin right \
   --set feishin update_freq=5 \
   icon.font="Helvetica Neue:Regular:14.0" \

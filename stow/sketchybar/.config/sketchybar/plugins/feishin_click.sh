@@ -6,8 +6,12 @@ if [ "$BUTTON" = "right" ]; then
   exit 0
 fi
 
-# Default (left / other): toggle play/pause, launching Feishin if it's not running.
-if pgrep -xq Feishin; then
+# Default (left / other): toggle the player represented by the item.
+ACTIVE_SOURCE=$(head -n 1 "$HOME/.cache/now-playing-source" 2>/dev/null)
+if [ "$ACTIVE_SOURCE" = "qobuz" ] && pgrep -xq Qobuz; then
+  /usr/bin/osascript "$HOME/.config/sketchybar/plugins/qobuz_toggle.applescript" \
+    || /usr/bin/logger -t sketchybar-qobuz "play/pause control not found; Qobuz UI may have changed"
+elif pgrep -xq Feishin; then
   /opt/homebrew/bin/nowplaying-cli togglePlayPause
 else
   open -a Feishin

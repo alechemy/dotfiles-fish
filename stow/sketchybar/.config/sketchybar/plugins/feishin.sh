@@ -1,33 +1,175 @@
 #!/usr/bin/env bash
 
-# If Feishin is not running, show "nothing playing"
-if ! pgrep -xq "Feishin"; then
+mkdir -p "$HOME/.cache"
+LAST_SONG_FILE="$HOME/.cache/now-playing-last-song"
+QOBUZ_SONG_FILE="$HOME/.cache/qobuz-now-playing"
+ACTIVE_SOURCE_FILE="$HOME/.cache/now-playing-source"
+AUTH_CACHE="$HOME/.cache/navidrome-auth"
+AUTH_MAX_AGE=300
+
+set_track() {
+  local icon_prefix="$1" artist="$2" title="$3"
+  sketchybar --set "$NAME" \
+    icon="$icon_prefix $artist –" label=" $title" \
+    label.font="Helvetica Neue:Bold:14.0" \
+    icon.color="$TEXT_COLOR" label.color="$TEXT_COLOR"
+}
+
+FEISHIN_RUNNING=0
+QOBUZ_RUNNING=0
+pgrep -xq "Feishin" && FEISHIN_RUNNING=1
+pgrep -xq "Qobuz" && QOBUZ_RUNNING=1
+
+if (( ! FEISHIN_RUNNING && ! QOBUZ_RUNNING )); then
+  rm -f "$ACTIVE_SOURCE_FILE"
   sketchybar --set "$NAME" icon="" label=" Nothing playing" \
     label.font="Helvetica Neue:Regular:14.0" \
     icon.color="0xffffffff" label.color="0xffffffff"
   exit 0
 fi
 
-# Cache paths — defined before any expensive work so the battery gate below
-# can short-circuit with a dimmed last-known-song readout without touching
-# the keychain, sourcing the env file, or opening any sockets.
-mkdir -p "$HOME/.cache"
-LAST_SONG_FILE="$HOME/.cache/navidrome-last-song"
-AUTH_CACHE="$HOME/.cache/navidrome-auth"
-AUTH_MAX_AGE=300 # re-auth every 5 minutes
+# Qobuz does not reliably claim macOS's global media session. Its local player
+# state identifies an active stream, and its cache database holds the metadata.
+ACTIVE_SOURCE=$(head -n 1 "$ACTIVE_SOURCE_FILE" 2>/dev/null)
+QOBUZ_CURRENT_TRACK_ID=""
+QOBUZ_PLAYING_TRACK_ID=""
+QOBUZ_POSITION_RECENT=0
+QOBUZ_TRACK_CHANGED=0
+QOBUZ_ARTIST=""
+QOBUZ_TITLE=""
+CACHE_TRACK_ID=""
+CACHE_ARTIST=""
+CACHE_TITLE=""
+if (( QOBUZ_RUNNING )); then
+  QOBUZ_DIR="$HOME/Library/Application Support/Qobuz"
+  QOBUZ_PLAYER="$QOBUZ_DIR/player-0.json"
+  QOBUZ_REPORT="$QOBUZ_DIR/reportingQueue.json"
+  QOBUZ_DB="$QOBUZ_DIR/qobuz.db"
 
-# Battery gate: on battery, skip the keychain lookup, the `nc` reachability
-# probe (would wake Wi-Fi every 5s), and the curl auth + getNowPlaying calls.
-# Must come before any of those — sketchybar fires this plugin under
-# `update_freq=5`, so anything above this line is paid 12 times a minute.
+  if [ -f "$QOBUZ_PLAYER" ] && [ -f "$QOBUZ_DB" ]; then
+    IFS=$'\034' read -r QOBUZ_CURRENT_TRACK_ID QOBUZ_POSITION_TIME < <(
+      jq -jr '
+        .playqueue.data as $queue
+        | ($queue.items[$queue.currentIndex].trackId // ""), "\u001c",
+          ((.player.data.position.timestamp // 0) / 1000 | floor), "\n"
+      ' "$QOBUZ_PLAYER" 2>/dev/null
+    )
+    if [[ "$QOBUZ_POSITION_TIME" =~ ^[0-9]+$ ]] \
+        && (( $(date +%s) - QOBUZ_POSITION_TIME < 30 )); then
+      QOBUZ_POSITION_RECENT=1
+    fi
+
+    QOBUZ_REPORT_TRACK_ID=$(jq -r '.currentEvent.trackId // empty' "$QOBUZ_REPORT" 2>/dev/null)
+    if [ "$QOBUZ_REPORT_TRACK_ID" = "$QOBUZ_CURRENT_TRACK_ID" ] \
+        && (( QOBUZ_POSITION_RECENT )); then
+      QOBUZ_PLAYING_TRACK_ID="$QOBUZ_CURRENT_TRACK_ID"
+    fi
+
+    if [[ "$QOBUZ_CURRENT_TRACK_ID" =~ ^[0-9]+$ ]]; then
+      if [ -f "$QOBUZ_SONG_FILE" ]; then
+        IFS=$'\034' read -r CACHE_TRACK_ID CACHE_ARTIST CACHE_TITLE < "$QOBUZ_SONG_FILE"
+      fi
+
+      if [ "$CACHE_TRACK_ID" = "$QOBUZ_CURRENT_TRACK_ID" ]; then
+        QOBUZ_ARTIST="$CACHE_ARTIST"
+        QOBUZ_TITLE="$CACHE_TITLE"
+      else
+        QOBUZ_METADATA=$(/usr/bin/sqlite3 -readonly -noheader -separator $'\034' -cmd '.timeout 250' "$QOBUZ_DB" "
+          SELECT
+            coalesce(json_extract(data, '$.performer.name'), json_extract(data, '$.album.artist.name'), ''),
+            coalesce(title, json_extract(data, '$.title'), '')
+          FROM L_Track
+          WHERE track_id = '$QOBUZ_CURRENT_TRACK_ID'
+          LIMIT 1;
+        " 2>/dev/null)
+        IFS=$'\034' read -r QOBUZ_ARTIST QOBUZ_TITLE <<< "$QOBUZ_METADATA"
+
+        if [ -n "$QOBUZ_ARTIST" ] || [ -n "$QOBUZ_TITLE" ]; then
+          QOBUZ_ARTIST=${QOBUZ_ARTIST:-Unknown}
+          QOBUZ_TITLE=${QOBUZ_TITLE:-Unknown}
+          CACHE_TRACK_ID="$QOBUZ_CURRENT_TRACK_ID"
+          CACHE_ARTIST="$QOBUZ_ARTIST"
+          CACHE_TITLE="$QOBUZ_TITLE"
+          QOBUZ_TRACK_CHANGED=1
+          printf '%s\034%s\034%s\n' "$CACHE_TRACK_ID" "$CACHE_ARTIST" "$CACHE_TITLE" > "$QOBUZ_SONG_FILE"
+        fi
+      fi
+
+      if [ -n "$QOBUZ_PLAYING_TRACK_ID" ] && { [ -n "$QOBUZ_ARTIST" ] || [ -n "$QOBUZ_TITLE" ]; }; then
+        QOBUZ_ARTIST=${QOBUZ_ARTIST:-Unknown}
+        QOBUZ_TITLE=${QOBUZ_TITLE:-Unknown}
+        printf '%s\t%s\n' "$QOBUZ_ARTIST" "$QOBUZ_TITLE" > "$LAST_SONG_FILE"
+        printf 'qobuz\n' > "$ACTIVE_SOURCE_FILE"
+        TEXT_COLOR="0xffffffff"
+        set_track "" "$QOBUZ_ARTIST" "$QOBUZ_TITLE"
+        exit 0
+      fi
+
+      if [ "$ACTIVE_SOURCE" = "qobuz" ] && (( QOBUZ_POSITION_RECENT )) \
+          && (( QOBUZ_TRACK_CHANGED )) \
+          && { [ -n "$QOBUZ_ARTIST" ] || [ -n "$QOBUZ_TITLE" ]; }; then
+        printf '%s\t%s\n' "$QOBUZ_ARTIST" "$QOBUZ_TITLE" > "$LAST_SONG_FILE"
+        TEXT_COLOR="0xffffffff"
+        set_track "" "$QOBUZ_ARTIST" "$QOBUZ_TITLE"
+        exit 0
+      fi
+
+      if [ "$ACTIVE_SOURCE" = "qobuz" ] && (( QOBUZ_POSITION_RECENT )) \
+          && [ "$CACHE_TRACK_ID" != "$QOBUZ_CURRENT_TRACK_ID" ] \
+          && { [ -n "$CACHE_ARTIST" ] || [ -n "$CACHE_TITLE" ]; }; then
+        TEXT_COLOR="0xffffffff"
+        set_track "" "${CACHE_ARTIST:-Unknown}" "${CACHE_TITLE:-Unknown}"
+        exit 0
+      fi
+    fi
+  fi
+fi
+
+NOW_PLAYING=$(/opt/homebrew/bin/nowplaying-cli get --json title artist playbackRate 2>/dev/null)
+IFS=$'\034' read -r PLAYBACK_RATE MEDIA_ARTIST MEDIA_TITLE < <(
+  printf '%s' "$NOW_PLAYING" | jq -jr \
+    '(.playbackRate // ""), "\u001c", (.artist // ""), "\u001c", (.title // ""), "\n"' 2>/dev/null
+)
+
+if [ "$PLAYBACK_RATE" = "0" ]; then
+  TEXT_COLOR="0x80ffffff"
+else
+  TEXT_COLOR="0xffffffff"
+fi
+
+if { [ -z "$PLAYBACK_RATE" ] || [ "$PLAYBACK_RATE" = "0" ]; } \
+    && [ "$ACTIVE_SOURCE" = "qobuz" ] \
+    && [ "$CACHE_TRACK_ID" = "$QOBUZ_CURRENT_TRACK_ID" ] \
+    && { [ -n "$QOBUZ_ARTIST" ] || [ -n "$QOBUZ_TITLE" ]; }; then
+  QOBUZ_ARTIST=${QOBUZ_ARTIST:-Unknown}
+  QOBUZ_TITLE=${QOBUZ_TITLE:-Unknown}
+  TEXT_COLOR="0x80ffffff"
+  set_track "" "$QOBUZ_ARTIST" "$QOBUZ_TITLE"
+  exit 0
+fi
+
+if [ -n "$MEDIA_ARTIST" ] || [ -n "$MEDIA_TITLE" ]; then
+  ARTIST=${MEDIA_ARTIST:-Unknown}
+  TITLE=${MEDIA_TITLE:-Unknown}
+  printf '%s\t%s\n' "$ARTIST" "$TITLE" > "$LAST_SONG_FILE"
+  printf 'feishin\n' > "$ACTIVE_SOURCE_FILE"
+  set_track "" "$ARTIST" "$TITLE"
+  exit 0
+fi
+
+if (( ! FEISHIN_RUNNING )); then
+  sketchybar --set "$NAME" icon=" Not playing" label="" icon.color="0xffffffff" label.color="0xffffffff"
+  exit 0
+fi
+
+# Feishin normally publishes metadata through macOS Now Playing. Fall back to
+# Navidrome for versions that fail to do so, but keep network work off battery.
 if ! "$HOME/.local/bin/should-run-background-job" >/dev/null 2>&1; then
   if [ -f "$LAST_SONG_FILE" ]; then
     ARTIST=$(cut -f1 "$LAST_SONG_FILE")
     TITLE=$(cut -f2 "$LAST_SONG_FILE")
-    sketchybar --set "$NAME" \
-      icon=" $ARTIST –" label=" $TITLE" \
-      label.font="Helvetica Neue:Bold:14.0" \
-      icon.color="0x80ffffff" label.color="0x80ffffff"
+    TEXT_COLOR="0x80ffffff"
+    set_track "" "$ARTIST" "$TITLE"
   else
     sketchybar --set "$NAME" icon=" Battery" label="" icon.color="0xffffffff" label.color="0xffffffff"
   fi
@@ -110,21 +252,6 @@ CURRENT_SONG=$(printf 'u=%s&t=%s&s=%s&v=1.8.0&c=SketchyBar&f=json' \
     "$USERNAME" "$SUBSONIC_TOKEN" "$SUBSONIC_SALT" |
   curl -s --max-time 3 "$NAVIDROME_URL/rest/getNowPlaying" --data @- 2>/dev/null |
   jq -r '.["subsonic-response"].nowPlaying.entry[0] // empty' 2>/dev/null)
-
-PLAYBACK_RATE=$(/opt/homebrew/bin/nowplaying-cli get playbackRate 2>/dev/null)
-if [ "$PLAYBACK_RATE" = "0" ]; then
-  TEXT_COLOR="0x80ffffff"
-else
-  TEXT_COLOR="0xffffffff"
-fi
-
-set_track() {
-  local icon_prefix="$1" artist="$2" title="$3"
-  sketchybar --set "$NAME" \
-    icon="$icon_prefix $artist –" label=" $title" \
-    label.font="Helvetica Neue:Bold:14.0" \
-    icon.color="$TEXT_COLOR" label.color="$TEXT_COLOR"
-}
 
 if [ -n "$CURRENT_SONG" ] && [ "$CURRENT_SONG" != "null" ]; then
   ARTIST=$(echo "$CURRENT_SONG" | jq -r '.artist // "Unknown"')
