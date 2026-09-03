@@ -927,23 +927,17 @@ def cmd_download(args):
             print("FATAL")
             raise SystemExit(f"ABORT: rip reported an auth/rate-limit condition on rank {rank}; see {dest}/rip.log. Stop the run.")
         files = find_audio(dest)
-        if code != 0 or not files:
-            rec["error"] = f"rip exit {code}, {len(files)} audio files"
+        ok, detail = verify_file(files[0], row) if files else (False, f"rip exit {code}, no audio file")
+        if ok:
+            rec.update({"verified": True, "path": files[0], "error": None, "verified_at": now_iso()})
+            consecutive = 0
+            done += 1
+            print(f"ok {detail}" + (f" (rip exited {code} after the download; see rip.log)" if code != 0 else ""))
+        else:
+            rec["error"] = detail if files else detail
             consecutive += 1
             failed += 1
-            print(f"FAILED ({rec['error']})")
-        else:
-            ok, detail = verify_file(files[0], row)
-            if ok:
-                rec.update({"verified": True, "path": files[0], "error": None, "verified_at": now_iso()})
-                consecutive = 0
-                done += 1
-                print(f"ok {detail}")
-            else:
-                rec["error"] = detail
-                consecutive += 1
-                failed += 1
-                print(f"MISMATCH ({detail})")
+            print(f"FAILED ({detail})")
         progress["ranks"][str(rank)] = rec
         save_progress(progress)
         if consecutive >= 3:
