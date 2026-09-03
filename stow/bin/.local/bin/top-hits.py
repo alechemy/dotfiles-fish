@@ -668,7 +668,7 @@ def enrich_from_track_get(row, qb):
 
 def apply_override(row, override, qb):
     if "skip" in override:
-        row.update({"status": "skip", "skip_reason": override["skip"], "qobuz": None, "genre": None})
+        row.update({"status": "skip", "skip_reason": override["skip"], "qobuz": None, "genre": None, "flags": []})
         return
     if "qobuz_id" in override:
         row["qobuz"] = {"id": str(override["qobuz_id"]), "url": f"https://open.qobuz.com/track/{override['qobuz_id']}"}
