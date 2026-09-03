@@ -72,9 +72,13 @@ class CreditTests(unittest.TestCase):
         self.assertEqual(th.split_credit("Lil Nas X featuring Billy Ray Cyrus"), (["lil nas x"], ["billy ray cyrus"]))
 
     def test_name_in_aliases_and_word_prefixes(self):
-        self.assertTrue(th.name_in("machine gun kelly", "mgk , blackbear"))
-        self.assertTrue(th.name_in("soulja boy tell em", "soulja boy"))
-        self.assertFalse(th.name_in("soulja boy tell em", "soulja"))
+        self.assertTrue(th.name_in("machine gun kelly", th.join_credits(["mgk", "blackbear"])))
+        self.assertTrue(th.name_in("soulja boy tell em", th.join_credits(["Soulja Boy"])))
+        self.assertFalse(th.name_in("soulja boy tell em", th.join_credits(["Soulja"])))
+        self.assertTrue(th.name_in("florence and the machine", th.join_credits(["Florence + The Machine"])))
+        self.assertTrue(th.name_in("bruno mars", th.join_credits(["Bruno Mars Cover Band", "Bruno Mars"])))
+        self.assertFalse(th.name_in("bruno mars", th.join_credits(["Bruno Mars Cover Band"])))
+        self.assertFalse(th.name_in("pink", th.join_credits(["Pink Piano"])))
 
     def test_norm_handles_stylized_spellings(self):
         self.assertEqual(th.norm("P!nk"), "pink")
@@ -155,8 +159,8 @@ class ScoringTests(unittest.TestCase):
 
     def test_cover_by_writer_credit_is_rejected(self):
         items = [
-            item(1, "Glass Harbor", "Cover Kid", "Cover Kid", "Cover Kid", tracks_count=1, released="2025-01-01",
-                 performers="Cover Kid, MainArtist - Marlow Vane, Composer, Lyricist"),
+            item(1, "Glass Harbor", "Kid Nobody", "Kid Nobody", "Kid Nobody", tracks_count=1, released="2025-01-01",
+                 performers="Kid Nobody, MainArtist - Marlow Vane, Composer, Lyricist"),
             item(2, "Glass Harbor", "Kidz Choir Kids", "Kidz Bop 14", "Kidz Choir Kids",
                  performers="Kidz Choir Kids, MainArtist - Marlow Vane, FeaturedArtist"),
         ]
@@ -164,6 +168,17 @@ class ScoringTests(unittest.TestCase):
         self.assertIsNone(row["qobuz"])
         self.assertEqual(row["status"], "unresolved")
         self.assertEqual(row["rejected"], {"artist_mismatch": 1, "junk": 1})
+
+    def test_longer_performer_name_containing_the_artist_is_not_a_match(self):
+        items = [
+            item(1, "Glass Harbor", "Marlow Vane Cover Band", "Glass Harbor", "Marlow Vane Cover Band", tracks_count=1),
+            item(2, "Glass Harbor", "Marlow Piano", "Piano Pop Lounge", "Marlow Piano"),
+            item(3, "Glass Harbor", "Marlow Vane Trio", "Trio Sessions", "Marlow Vane Trio"),
+        ]
+        row = resolve("Glass Harbor", "Marlow Vane", items)
+        self.assertIsNone(row["qobuz"])
+        items = [item(4, "Glass Harbor", "Marlow Vane featuring Tessa Quill", "Harbor Lights", "Marlow Vane")]
+        self.assertEqual(resolve("Glass Harbor", "Marlow Vane featuring Tessa Quill", items)["status"], "auto")
 
     def test_charted_feature_selects_remix(self):
         items = [

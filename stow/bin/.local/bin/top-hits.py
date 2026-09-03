@@ -210,20 +210,36 @@ def artist_variants(name):
     return (name, *ARTIST_ALIASES.get(name, ()))
 
 
+CREDIT_SEP = " zzsep "
+
+
+def join_credits(values):
+    """Normalized credit fields joined by a separator that survives norm()."""
+    return CREDIT_SEP.join(norm(v) for v in values if v and norm(v))
+
+
 def name_in(name, haystack):
-    """True when artist `name` appears in normalized text `haystack`, fuzzily."""
+    """True when artist `name` is one whole credit in `haystack` (a join_credits string), fuzzily.
+
+    A credit that merely contains the name inside a longer one ("X Cover Band", "X Piano") is not a match.
+    """
     if not name or not haystack:
         return False
     for variant in artist_variants(name):
-        if f" {variant} " in f" {haystack} ":
-            return True
         words = variant.split()
-        for chunk in re.split(r"\b(?:and|featuring|feat|ft|with|vs)\b|,", haystack):
-            chunk = chunk.strip()
-            if similarity(variant, chunk) >= 0.85:
-                return True
-            if len(words) >= 3 and chunk and chunk.split() == words[: len(chunk.split())] and len(chunk.split()) >= 2:
-                return True
+        for field in haystack.split(CREDIT_SEP.strip()):
+            field = field.strip()
+            if not field:
+                continue
+            candidates = [field, *re.split(r"\b(?:and|featuring|feat|ft|with|vs)\b", field)]
+            for chunk in candidates:
+                chunk = chunk.strip()
+                if not chunk:
+                    continue
+                if chunk == variant or similarity(variant, chunk) >= 0.85:
+                    return True
+                if len(words) >= 3 and chunk.split() == words[: len(chunk.split())] and len(chunk.split()) >= 2:
+                    return True
     return False
 
 
@@ -431,7 +447,7 @@ def credited_artists(performers):
 
 
 # --------------------------------------------------------------- stage: resolve
-JUNK = re.compile(r"karaoke|tribute|made famous|in the style of|originally performed|instrumental|cover version|as performed by|8[- ]bit|lullab|music box|ringtone|kidz bop|glee cast|spieluhr|for babies|sleep|workout|fitness|parody", re.I)
+JUNK = re.compile(r"karaoke|tribute|made famous|made popular|in the style of|originally performed|originally by|instrumental|\bcovers?\b|cover band|as performed by|8[- ]bit|lullab|music box|ringtone|kidz bop|glee cast|spieluhr|for babies|sleep|workout|fitness|parody|piano (?:pop|lounge|version)|lounge|string quartet|orchestra", re.I)
 EDIT = re.compile(r"radio (?:edit|version|mix)|\bclean\b|\bedited\b|single (?:version|edit|mix)|\bedit\b", re.I)
 LIVE = re.compile(r"\blive\b|acoustic|unplugged|\bdemo\b|a ?cappella|acapella|orchestral|piano version|stripped|symphonic", re.I)
 SPEED = re.compile(r"sped[- ]up|slowed|nightcore|reverb", re.I)
@@ -454,7 +470,7 @@ def score_candidate(cand, entry_ctx, any_explicit, median_duration):
     if JUNK.search(blob):
         return 0, [], "junk"
 
-    artist_credits = norm(" , ".join([cand["performer"], cand["album_artist"], *credited_artists(cand["performers"])]))
+    artist_credits = join_credits([cand["performer"], cand["album_artist"], *credited_artists(cand["performers"])])
     if not any(name_in(n, artist_credits) for n in main_names):
         return 0, [], "artist_mismatch"
 
@@ -475,7 +491,7 @@ def score_candidate(cand, entry_ctx, any_explicit, median_duration):
         penalties.append(("speed", 60))
     if LIVE.search(album_blob) or SPEED.search(album_blob):
         penalties.append(("live_album", 30))
-    feature_credits = norm(" , ".join([artist_credits, cand["title"], cand["version"]]))
+    feature_credits = CREDIT_SEP.join([artist_credits, join_credits([cand["title"], cand["version"]])])
     missing_feats = [n for n in feat_names if not name_in(n, feature_credits)]
     covers_all_feats = bool(feat_names) and not missing_feats
     remix_waived = chart_is_remix or (entry_ctx.get("remix_needed") and covers_all_feats)
@@ -1219,6 +1235,69 @@ def cmd_adopt(args):
     print(f"{year}: adopted {len(found)} tracks at {filed}; staging cleared" + (f"; perm fixes pending: {progress['perm_failures']}" if progress["perm_failures"] else ""))
 
 
+# ------------------------------------------------------------------ stage: redo
+def cmd_redo(args):
+    """Replace specific ranks of an already-filed year with the manifest's current pick."""
+    from mutagen.mp4 import MP4
+    year = args.year
+    manifest = load_manifest(year)
+    progress = load_progress(year)
+    library_dir = progress.get("library_dir")
+    if not progress.get("assembled_at") or not library_dir or not os.path.isdir(library_dir):
+        raise SystemExit(f"ERROR: {year} is not assembled; use download/assemble instead.")
+    lock = year_lock(year, "redo")
+    by_rank = {r["rank"]: r for r in manifest["entries"]}
+    existing = {}
+    for path in find_audio(library_dir):
+        existing.setdefault(MP4(path).get("trkn", [(0, 0)])[0][0], []).append(path)
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        cover_bytes = make_cover(year, os.path.join(tmp, "cover.jpg"))
+    staging = os.path.join(DOWNLOADS_DIR, str(year))
+    failures = []
+    for rank in args.rank:
+        row = by_rank.get(rank)
+        if not row or not row["qobuz"]:
+            failures.append((rank, "no pick in manifest"))
+            continue
+        dest = os.path.join(staging, f"{rank:02d}")
+        shutil.rmtree(dest, ignore_errors=True)
+        print(f"  {rank:>2}. {row['qobuz']['title']} — {row['qobuz']['performer']} ... ", end="", flush=True)
+        try:
+            code, out = rip_track(dest, row["qobuz"]["url"])
+        except subprocess.TimeoutExpired:
+            code, out = -1, "timeout"
+        files = find_audio(dest)
+        ok, detail = verify_file(files[0], row) if files else (False, f"rip exit {code}, no audio file")
+        if not ok:
+            failures.append((rank, detail))
+            print(f"FAILED ({detail})")
+            continue
+        title = clean_title(row["qobuz"]["title"], row["qobuz"].get("version"))
+        target = os.path.join(library_dir, f"{rank:02d} {safe_filename(title)}.m4a")
+        tag_file(files[0], row, manifest, cover_bytes)
+        for old in existing.get(rank, []):
+            if os.path.abspath(old) != os.path.abspath(target):
+                os.remove(old)
+        shutil.move(files[0], target)
+        shutil.rmtree(dest, ignore_errors=True)
+        progress["ranks"][str(rank)] = {"attempts": 1, "verified": True, "path": target, "error": None,
+                                        "verified_at": now_iso(), "redone_at": now_iso()}
+        save_progress(progress)
+        print(f"ok -> {os.path.basename(target)}")
+    perm_failures = nas_chmod([library_dir])
+    run_ok, run_err = score_runnability(library_dir)
+    progress["perm_failures"] = perm_failures
+    save_progress(progress)
+    if perm_failures:
+        print("WARNING: NAS permissions not set:\n  " + "\n  ".join(perm_failures))
+    if not run_ok:
+        print(f"WARNING: runnability scoring failed: {run_err.strip()}")
+    if failures:
+        print("FAILED ranks: " + ", ".join(f"{r} ({d})" for r, d in failures))
+        raise SystemExit(1)
+
+
 # ----------------------------------------------------------------- stage: retag
 def cmd_retag(args):
     """Re-apply the compilation tags (and cleaned titles) to an already-filed year, renaming files to match."""
@@ -1396,6 +1475,10 @@ def main(argv=None):
     p = sub.add_parser("adopt", help="Reconcile progress with an album already filed in the library.")
     p.add_argument("year", type=int)
     p.set_defaults(func=cmd_adopt)
+    p = sub.add_parser("redo", help="Re-download and replace given ranks of an assembled year.")
+    p.add_argument("year", type=int)
+    p.add_argument("--rank", type=int, nargs="+", required=True)
+    p.set_defaults(func=cmd_redo)
     p = sub.add_parser("retag", help="Re-apply tags and cleaned titles to an assembled year in place.")
     p.add_argument("year", type=int)
     p.set_defaults(func=cmd_retag)
