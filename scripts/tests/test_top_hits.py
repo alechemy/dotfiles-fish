@@ -253,6 +253,9 @@ class AssembleTests(unittest.TestCase):
         self.assertIsNone(th.artist_override("Marlow Vane feat. Tessa Quill", "Marlow Vane featuring Tessa Quill"))
         self.assertEqual(th.artist_override("Tessa Quill", "Marlow Vane featuring Tessa Quill"), "Marlow Vane featuring Tessa Quill")
         self.assertIsNone(th.artist_override("P!nk", "Pink"))
+        self.assertIsNone(th.artist_override("Silk Sonic", "Silk Sonic (Marlow Vane and Ivo Rask)"))
+        self.assertIsNone(th.artist_override("Marlow Vane", "Silk Sonic (Marlow Vane and Ivo Rask)"))
+        self.assertEqual(th.artist_override("Someone Else", "Silk Sonic (Marlow Vane and Ivo Rask) featuring Tessa Quill"), "Silk Sonic featuring Tessa Quill")
 
 
 class TitleCleanupTests(unittest.TestCase):

@@ -201,9 +201,12 @@ def split_credit(credit):
     credit = html.unescape(str(credit or "")).translate(_APOS)
     parts = _FEAT_SPLIT.split(credit, maxsplit=1)
     main, feats = parts[0], parts[1] if len(parts) > 1 else ""
+    inner = " , ".join(re.findall(r"\(([^()]*)\)", main))
+    main = strip_parens(main)
     main_names = [norm(p) for p in _CREDIT_SPLIT.split(main) if norm(p)]
     if len(main_names) > 1 and norm(main) not in main_names:
         main_names.insert(0, norm(main))
+    main_names += [norm(p) for p in _CREDIT_SPLIT.split(inner) if norm(p) and norm(p) not in main_names]
     feat_names = [norm(p) for p in _CREDIT_SPLIT.split(feats) if norm(p)]
     return main_names, feat_names
 
@@ -1087,9 +1090,9 @@ def clean_title(title, version):
 def artist_override(file_artist, chart_artist):
     """The chart credit when the file's artist tag names none of the charted main artists, else None."""
     main_names, _ = split_credit(chart_artist)
-    if any(name_in(n, norm(file_artist)) for n in main_names):
+    if any(name_in(n, join_credits([file_artist])) for n in main_names):
         return None
-    return chart_artist
+    return re.sub(r"\s+", " ", strip_parens(chart_artist)).strip()
 
 
 def tag_file(path, row, manifest, cover_bytes):
