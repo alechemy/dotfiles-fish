@@ -34,6 +34,8 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import difflib
+import fcntl
+import glob
 import hashlib
 import html
 import json
@@ -821,6 +823,26 @@ FATAL_RIP = re.compile(r"\b(?:401|403|429)\b|unauthori|authenticat|invalid app|r
 READY_STATUSES = {"auto", "manual", "skip"}
 
 
+def year_lock(year, stage):
+    """Exclusive per-year lock; a second download/assemble for the same year exits instead of racing."""
+    handle = open(state_path("locks", f"{year}.lock"), "a+")
+    try:
+        fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        handle.seek(0)
+        holder = handle.read().strip()
+        raise SystemExit(f"ERROR: another top-hits process holds {year} ({holder or 'unknown'}); refusing to run {stage} concurrently.")
+    handle.seek(0)
+    handle.truncate()
+    handle.write(f"{stage} pid {os.getpid()} since {now_iso()}")
+    handle.flush()
+    return handle
+
+
+def library_album_dir(manifest):
+    return os.path.join(LIBRARY_ROOT, "Compilations", safe_filename(manifest["album"]))
+
+
 def load_manifest(year):
     manifest = read_json(state_path("manifests", f"{year}.json"))
     if not manifest:
@@ -892,6 +914,11 @@ def cmd_download(args):
     if progress.get("assembled_at"):
         print(f"{year}: already assembled at {progress['assembled_at']}; nothing to download.")
         return
+    filed = library_album_dir(manifest)
+    if os.path.isdir(filed) and find_audio(filed):
+        raise SystemExit(f"ERROR: {filed} already holds {len(find_audio(filed))} tracks but progress/{year}.json is not marked assembled; "
+                         f"run `top-hits.py adopt {year}` to reconcile instead of re-downloading.")
+    lock = year_lock(year, "download")
     staging = os.path.join(DOWNLOADS_DIR, str(year))
     consecutive = 0
     done = skipped = failed = 0
@@ -1092,7 +1119,17 @@ def cmd_assemble(args):
     if progress.get("assembled_at") and not args.force:
         print(f"{year}: already assembled at {progress['assembled_at']} ({progress.get('library_dir')}); nothing to do (use --force to redo).")
         return
+    lock = year_lock(year, "assemble")
     rows = [r for r in manifest["entries"] if r["status"] != "skip"]
+    staging = os.path.join(DOWNLOADS_DIR, str(year))
+    album_dir = os.path.join(staging, safe_filename(manifest["album"]))
+    os.makedirs(album_dir, exist_ok=True)
+    for row in rows:
+        rec = progress["ranks"].get(str(row["rank"]), {})
+        if rec.get("verified") and not os.path.exists(rec.get("path") or ""):
+            moved = glob.glob(os.path.join(album_dir, f"{row['rank']:02d} *.m4a"))
+            if moved:
+                rec["path"] = moved[0]
     missing = [r["rank"] for r in rows
                if not progress["ranks"].get(str(r["rank"]), {}).get("verified")
                or not os.path.exists(progress["ranks"][str(r["rank"])]["path"])]
@@ -1101,21 +1138,18 @@ def cmd_assemble(args):
     if not os.path.isdir(LIBRARY_ROOT) or not os.listdir(LIBRARY_ROOT):
         raise SystemExit(f"ERROR: library root {LIBRARY_ROOT} is not mounted.")
 
-    staging = os.path.join(DOWNLOADS_DIR, str(year))
-    album_dir = os.path.join(staging, safe_filename(manifest["album"]))
-    shutil.rmtree(album_dir, ignore_errors=True)
-    os.makedirs(album_dir)
     cover_bytes = make_cover(year, os.path.join(album_dir, "cover.jpg"))
     print(f"--> Tagging {len(rows)} tracks as '{manifest['album']}'")
     for row in rows:
         rec = progress["ranks"][str(row["rank"])]
         dst = os.path.join(album_dir, f"{row['rank']:02d} {safe_filename(row['qobuz']['title'])}.m4a")
-        shutil.move(rec["path"], dst)
+        if os.path.abspath(rec["path"]) != os.path.abspath(dst):
+            shutil.move(rec["path"], dst)
+            rec["path"] = dst
+            save_progress(progress)
         fixed = tag_file(dst, row, manifest, cover_bytes)
         if fixed:
             print(f"    {row['rank']:>2}. artist tag replaced with chart credit: {fixed!r}")
-        rec["path"] = dst
-    save_progress(progress)
 
     print("--> Organizing into the library")
     organize_manifest = os.path.join(staging, "organize-manifest.txt")
@@ -1150,6 +1184,36 @@ def cmd_assemble(args):
         print(f"WARNING: runnability scoring failed (nightly sync will retry): {run_err.strip()}")
     if perm_failures:
         raise SystemExit(4)
+
+
+# ----------------------------------------------------------------- stage: adopt
+def cmd_adopt(args):
+    """Mark a year assembled from the album already filed in the library (repairs a clobbered progress record)."""
+    from mutagen.mp4 import MP4
+    year = args.year
+    manifest = load_manifest(year)
+    progress = load_progress(year)
+    filed = library_album_dir(manifest)
+    files = find_audio(filed) if os.path.isdir(filed) else []
+    wanted = {r["rank"]: r for r in manifest["entries"] if r["status"] != "skip"}
+    found = {}
+    for path in files:
+        rank = MP4(path).get("trkn", [(0, 0)])[0][0]
+        if rank in wanted:
+            found[rank] = path
+    missing = sorted(set(wanted) - set(found))
+    if missing:
+        raise SystemExit(f"ERROR: {filed} lacks ranks {missing}; cannot adopt.")
+    for rank, path in found.items():
+        rec = progress["ranks"].setdefault(str(rank), {"attempts": 0})
+        rec.update({"verified": True, "path": path, "error": None, "verified_at": rec.get("verified_at") or now_iso()})
+    progress.update({"assembled_at": progress.get("assembled_at") or now_iso(), "library_dir": filed,
+                     "perm_failures": nas_chmod([filed]), "runnability_scored": score_runnability(filed)[0]})
+    save_progress(progress)
+    staging = os.path.join(DOWNLOADS_DIR, str(year))
+    if os.path.isdir(staging):
+        shutil.rmtree(staging, ignore_errors=True)
+    print(f"{year}: adopted {len(found)} tracks at {filed}; staging cleared" + (f"; perm fixes pending: {progress['perm_failures']}" if progress["perm_failures"] else ""))
 
 
 # ----------------------------------------------------------------- stage: retag
@@ -1250,6 +1314,9 @@ def main(argv=None):
     p.add_argument("year", type=int)
     p.add_argument("--force", action="store_true", help="Redo an already-assembled year.")
     p.set_defaults(func=cmd_assemble)
+    p = sub.add_parser("adopt", help="Reconcile progress with an album already filed in the library.")
+    p.add_argument("year", type=int)
+    p.set_defaults(func=cmd_adopt)
     p = sub.add_parser("retag", help="Re-apply tags and cleaned titles to an assembled year in place.")
     p.add_argument("year", type=int)
     p.set_defaults(func=cmd_retag)
