@@ -1058,6 +1058,15 @@ def _tidy(text):
     return re.sub(r"\s+", " ", text).strip(" -/")
 
 
+def display_title(row):
+    """Library title for a manifest row: the chart title when Qobuz's is asterisk-censored, else the cleaned Qobuz title."""
+    q = row["qobuz"]
+    ctx = {"chart_title": row["chart_title"]}
+    if "*" in (q.get("title") or "") and censored_match(ctx, q["title"]):
+        return clean_title(row["chart_title"], q.get("version"))
+    return clean_title(q["title"], q.get("version"))
+
+
 def clean_title(title, version):
     """Title as shown in the library: Qobuz title minus noise parentheticals, plus any meaningful version."""
     title = (title or "").strip()
@@ -1089,7 +1098,7 @@ def tag_file(path, row, manifest, cover_bytes):
     fixed = artist_override((audio.get("\xa9ART") or [""])[0], row["chart_artist"])
     if fixed:
         audio["\xa9ART"] = [fixed]
-    audio["\xa9nam"] = [clean_title(row["qobuz"]["title"], row["qobuz"].get("version"))]
+    audio["\xa9nam"] = [display_title(row)]
     audio["\xa9alb"] = [manifest["album"]]
     audio["aART"] = [manifest["album_artist"]]
     audio["cpil"] = True
@@ -1174,7 +1183,7 @@ def cmd_assemble(args):
     print(f"--> Tagging {len(rows)} tracks as '{manifest['album']}'")
     for row in rows:
         rec = progress["ranks"][str(row["rank"])]
-        dst = os.path.join(album_dir, f"{row['rank']:02d} {safe_filename(row['qobuz']['title'])}.m4a")
+        dst = os.path.join(album_dir, f"{row['rank']:02d} {safe_filename(display_title(row))}.m4a")
         if os.path.abspath(rec["path"]) != os.path.abspath(dst):
             shutil.move(rec["path"], dst)
             rec["path"] = dst
@@ -1286,7 +1295,7 @@ def cmd_redo(args):
             failures.append((rank, detail))
             print(f"FAILED ({detail})")
             continue
-        title = clean_title(row["qobuz"]["title"], row["qobuz"].get("version"))
+        title = display_title(row)
         target = os.path.join(library_dir, f"{rank:02d} {safe_filename(title)}.m4a")
         tag_file(files[0], row, manifest, cover_bytes)
         for old in existing.get(rank, []):
@@ -1334,7 +1343,7 @@ def cmd_retag(args):
             print(f"  skipping {os.path.basename(path)}: no manifest row for track {rank}")
             continue
         tag_file(path, row, manifest, cover_bytes)
-        title = clean_title(row["qobuz"]["title"], row["qobuz"].get("version"))
+        title = display_title(row)
         dest = os.path.join(library_dir, f"{rank:02d} {safe_filename(title)}.m4a")
         if dest != path:
             os.rename(path, dest)

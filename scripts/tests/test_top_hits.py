@@ -265,6 +265,12 @@ class TitleCleanupTests(unittest.TestCase):
         self.assertEqual(th.clean_title("Right Round", "US Album Version"), "Right Round")
         self.assertEqual(th.clean_title("Bust It Baby, Pt. 2 (feat. Ne-Yo) (Explicit Album Version)", None), "Bust It Baby, Pt. 2 (feat. Ne-Yo)")
 
+    def test_censored_qobuz_title_uses_chart_title(self):
+        row = {"chart_title": "Glass Harbor", "qobuz": {"title": "Gl**s Harbor", "version": "Album Version"}}
+        self.assertEqual(th.display_title(row), "Glass Harbor")
+        row = {"chart_title": "Glass Harbor", "qobuz": {"title": "Glass Harbor (Live)", "version": None}}
+        self.assertEqual(th.display_title(row), "Glass Harbor (Live)")
+
     def test_meaningful_versions_are_kept(self):
         self.assertEqual(th.clean_title("Teardrops On My Guitar", "Pop Version"), "Teardrops On My Guitar (Pop Version)")
         self.assertEqual(th.clean_title("Old Town Road", "Remix"), "Old Town Road (Remix)")
