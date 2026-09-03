@@ -1090,7 +1090,8 @@ def cmd_assemble(args):
     manifest = load_manifest(year)
     progress = load_progress(year)
     if progress.get("assembled_at") and not args.force:
-        raise SystemExit(f"{year}: already assembled at {progress['assembled_at']} ({progress.get('library_dir')}). Use --force to redo.")
+        print(f"{year}: already assembled at {progress['assembled_at']} ({progress.get('library_dir')}); nothing to do (use --force to redo).")
+        return
     rows = [r for r in manifest["entries"] if r["status"] != "skip"]
     missing = [r["rank"] for r in rows
                if not progress["ranks"].get(str(r["rank"]), {}).get("verified")
