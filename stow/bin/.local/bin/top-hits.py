@@ -152,7 +152,7 @@ def http_get_json(url, params, headers=None, retries=3):
 # ------------------------------------------------------------ text normalizing
 _APOS = str.maketrans({"’": "'", "‘": "'", "“": '"', "”": '"', "‐": "-", "–": "-", "—": "-"})
 _FEAT_SPLIT = re.compile(r"\s+(?:featuring|feat\.?|ft\.?|with)\s+", re.I)
-_CREDIT_SPLIT = re.compile(r"\s*(?:,|&|\band\b|\+|\bvs\.?\b)\s*", re.I)
+_CREDIT_SPLIT = re.compile(r"\s*(?:,|&|\band\b|\bvs\.?\b)\s*", re.I)
 _ACRONYM = re.compile(r"(?<![\w.])((?:\w\.){2,})")
 ARTIST_ALIASES = {
     "machine gun kelly": ("mgk",),
@@ -202,6 +202,8 @@ def split_credit(credit):
     parts = _FEAT_SPLIT.split(credit, maxsplit=1)
     main, feats = parts[0], parts[1] if len(parts) > 1 else ""
     main_names = [norm(p) for p in _CREDIT_SPLIT.split(main) if norm(p)]
+    if len(main_names) > 1 and norm(main) not in main_names:
+        main_names.insert(0, norm(main))
     feat_names = [norm(p) for p in _CREDIT_SPLIT.split(feats) if norm(p)]
     return main_names, feat_names
 
@@ -913,13 +915,24 @@ def verify_file(path, row):
     return True, f"{title!r} {length:.0f}s"
 
 
+TRANSFER_ERROR = re.compile(r"IncompleteRead|Connection broken|Persistent error downloading", re.I)
+
+
 def rip_track(dest, url):
+    """Rip one track; if the transfer itself keeps breaking, fall back to lower quality tiers (different CDN files)."""
     os.makedirs(dest, exist_ok=True)
-    proc = subprocess.run([LOCAL_RIP, "-f", dest, "url", url], capture_output=True, text=True, timeout=900)
-    out = (proc.stdout or "") + (proc.stderr or "")
-    with open(os.path.join(dest, "rip.log"), "w", encoding="utf-8") as f:
-        f.write(out)
-    return proc.returncode, out
+    log_path = os.path.join(dest, "rip.log")
+    out_all = ""
+    for quality in (None, 2, 1):
+        cmd = [LOCAL_RIP] + (["-q", str(quality)] if quality else []) + ["-f", dest, "url", url]
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=900)
+        out = (proc.stdout or "") + (proc.stderr or "")
+        out_all += f"\n===== quality={quality or 'config'} exit={proc.returncode} =====\n{out}"
+        with open(log_path, "w", encoding="utf-8") as f:
+            f.write(out_all)
+        if find_audio(dest) or FATAL_RIP.search(out) or not TRANSFER_ERROR.search(out):
+            return proc.returncode, out_all
+    return proc.returncode, out_all
 
 
 def cmd_download(args):

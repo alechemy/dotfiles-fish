@@ -67,9 +67,11 @@ class CreditTests(unittest.TestCase):
     def test_split_credit(self):
         self.assertEqual(th.split_credit("Marlow Vane featuring Tessa Quill"), (["marlow vane"], ["tessa quill"]))
         self.assertEqual(th.split_credit("Iris Halloway and Dorian Feld featuring A & B"),
-                         (["iris halloway", "dorian feld"], ["a", "b"]))
+                         (["iris halloway and dorian feld", "iris halloway", "dorian feld"], ["a", "b"]))
         self.assertEqual(th.split_credit("Solo Act"), (["solo act"], []))
         self.assertEqual(th.split_credit("Lil Nas X featuring Billy Ray Cyrus"), (["lil nas x"], ["billy ray cyrus"]))
+        self.assertEqual(th.split_credit("Dan + Shay and Justin Bieber")[0], ["dan shay and justin bieber", "dan shay", "justin bieber"])
+        self.assertEqual(th.split_credit("Tyler, the Creator")[0], ["tyler the creator", "tyler", "the creator"])
 
     def test_name_in_aliases_and_word_prefixes(self):
         self.assertTrue(th.name_in("machine gun kelly", th.join_credits(["mgk", "blackbear"])))
