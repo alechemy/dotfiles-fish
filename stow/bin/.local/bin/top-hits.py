@@ -144,8 +144,14 @@ def http_get_json(url, params, headers=None, retries=3):
 
 # ------------------------------------------------------------ text normalizing
 _APOS = str.maketrans({"’": "'", "‘": "'", "“": '"', "”": '"', "‐": "-", "–": "-", "—": "-"})
-_FEAT_SPLIT = re.compile(r"\s+(?:featuring|feat\.?|ft\.?|with|x)\s+", re.I)
-_CREDIT_SPLIT = re.compile(r"\s*(?:,|&|\band\b|\+|\bvs\.?\b|\bx\b)\s*", re.I)
+_FEAT_SPLIT = re.compile(r"\s+(?:featuring|feat\.?|ft\.?|with)\s+", re.I)
+_CREDIT_SPLIT = re.compile(r"\s*(?:,|&|\band\b|\+|\bvs\.?\b)\s*", re.I)
+_ACRONYM = re.compile(r"(?<![\w.])((?:\w\.){2,})")
+ARTIST_ALIASES = {
+    "machine gun kelly": ("mgk",),
+    "puff daddy": ("p diddy", "diddy"),
+    "p diddy": ("diddy", "puff daddy"),
+}
 _PAREN = re.compile(r"\s*(?:\([^()]*\)|\[[^\[\]]*\])")
 _DASH_TAIL = re.compile(r"\s+-\s+.*$")
 
@@ -154,6 +160,7 @@ def norm(s):
     s = html.unescape(str(s or "")).translate(_APOS)
     s = unicodedata.normalize("NFKD", s)
     s = "".join(ch for ch in s if not unicodedata.combining(ch))
+    s = _ACRONYM.sub(lambda m: m.group(1).replace(".", ""), s)
     s = s.lower().replace("&", " and ").replace("$", "s")
     s = re.sub(r"(?<=[a-z])!(?=[a-z])", "i", s)
     s = re.sub(r"[^a-z0-9]+", " ", s)
@@ -192,15 +199,24 @@ def split_credit(credit):
     return main_names, feat_names
 
 
+def artist_variants(name):
+    return (name, *ARTIST_ALIASES.get(name, ()))
+
+
 def name_in(name, haystack):
     """True when artist `name` appears in normalized text `haystack`, fuzzily."""
     if not name or not haystack:
         return False
-    if f" {name} " in f" {haystack} ":
-        return True
-    for chunk in re.split(r"\b(?:and|featuring|feat|ft|with|x|vs)\b|,", haystack):
-        if similarity(name, chunk.strip()) >= 0.85:
+    for variant in artist_variants(name):
+        if f" {variant} " in f" {haystack} ":
             return True
+        words = variant.split()
+        for chunk in re.split(r"\b(?:and|featuring|feat|ft|with|vs)\b|,", haystack):
+            chunk = chunk.strip()
+            if similarity(variant, chunk) >= 0.85:
+                return True
+            if len(words) >= 3 and chunk and chunk.split() == words[: len(chunk.split())] and len(chunk.split()) >= 2:
+                return True
     return False
 
 
@@ -301,6 +317,9 @@ def parse_chart(wikitext, top_n=TOP_N):
             m = re.match(r"\s*(\d+)", rank_text)
             if not m:
                 continue
+            if '" / "' in title:
+                title = title.split('" / "')[0]
+                artist = artist.split(" / ")[0]
             entries.append({"rank": int(m.group(1)), "title": title.strip('"').strip(), "artist": artist})
         if entries:
             entries = [e for e in entries if e["rank"] <= top_n]
@@ -413,7 +432,7 @@ REMIX = re.compile(r"remix|rework|re-?edit|\b(?:club|dub|extended|radio|dance) m
 REMASTER = re.compile(r"remaster", re.I)
 NEUTRAL_VERSION = re.compile(r"album version|\bmain\b|original|explicit|clean|feat|featuring|with |duet|stereo|mono|bonus|deluxe|single|edition|version", re.I)
 ALBUM_VERSION = re.compile(r"album version|main version|original version|original mix", re.I)
-COMPILATION_TITLE = re.compile(r"greatest hits|best of|the hits|hits\b|collection|anthology|essential|now that|the very best|number ones|#1s|playlist|ultimate|complete|years of|decade|classics", re.I)
+COMPILATION_TITLE = re.compile(r"greatest hits|best of|the hits|hits\b|collection|anthology|essential|now that|the very best|number ones|#1s|playlist|ultimate|years of|decade|classics|throwbacks|bangers", re.I)
 
 
 def score_candidate(cand, entry_ctx, any_explicit, median_duration):
@@ -437,7 +456,8 @@ def score_candidate(cand, entry_ctx, any_explicit, median_duration):
         return 0, [], "title_mismatch"
 
     penalties = []
-    title_extras = cand["title"].replace(strip_parens(cand["title"]), "", 1)
+    leftover = title_leftover(entry_ctx, cand["title"])
+    title_extras = leftover if leftover is not None else cand["title"].replace(strip_parens(cand["title"]), "", 1)
     version_blob = f"{title_extras} {cand['version']}"
     album_blob = f"{cand['album']} {cand['album_version']}"
     if EDIT.search(version_blob):
@@ -500,10 +520,39 @@ def score_candidate(cand, entry_ctx, any_explicit, median_duration):
     return score, penalties, None
 
 
+MARKER_LEFTOVER = re.compile(r"^(?:(?:feat|featuring|ft|with)\b.*|(?:\S+\s+){0,2}?(?:remix|remixes|version|edit|mix|live|acoustic|remaster(?:ed)?|explicit|clean)\b.*)$")
+
+
+def title_leftover(entry_ctx, cand_title):
+    """What remains of the candidate title once the charted title is removed from its start, or None."""
+    for chart_form in (entry_ctx["chart_full"], entry_ctx["chart_base"]):
+        for cand_form in (norm(cand_title), base_title(cand_title)):
+            if cand_form == chart_form:
+                return ""
+            if cand_form.startswith(chart_form + " "):
+                return cand_form[len(chart_form) + 1:]
+    return None
+
+
+def censored_match(entry_ctx, cand_title):
+    """True when an asterisk-censored candidate title matches the charted title."""
+    if "*" not in cand_title:
+        return False
+    pattern = re.escape(strip_parens(cand_title).lower()).replace(r"\*", "*")
+    pattern = re.sub(r"\*+", r"[a-z]+", pattern)
+    return re.fullmatch(pattern, strip_parens(entry_ctx["chart_title"]).lower()) is not None
+
+
 def title_similarity(entry_ctx, cand_title):
     chart_forms = (entry_ctx["chart_base"], entry_ctx["chart_full"])
     cand_forms = (base_title(cand_title), norm(cand_title))
-    return max(similarity(a, b) for a in chart_forms for b in cand_forms)
+    best = max(similarity(a, b) for a in chart_forms for b in cand_forms)
+    if censored_match(entry_ctx, cand_title):
+        best = max(best, 0.99)
+    leftover = title_leftover(entry_ctx, cand_title)
+    if leftover and MARKER_LEFTOVER.match(leftover):
+        best = max(best, 0.97)
+    return best
 
 
 REVIEW_PENALTIES = {"edit", "live", "speed", "live_album", "remix", "remix_album", "missing_feature", "compilation", "other_artist_album", "unknown_version", "alt_version"}
@@ -652,7 +701,7 @@ def search_entry(qb, entry, year, min_accepted=3):
         if accepted >= min_accepted:
             break
     probe = resolve_entry(entry, year, items)
-    if probe["qobuz"] and {n for n, _ in probe.get("penalties", [])} & VERSION_PENALTIES:
+    if probe["qobuz"] and {n for n, _ in probe.get("penalties", [])} & (VERSION_PENALTIES | {"compilation", "other_artist_album", "missing_feature"}):
         items.extend(qb.search_tracks(queries[0], limit=200))
         used.append(f"{queries[0]} (wide)")
     return " | ".join(used), items

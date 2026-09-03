@@ -37,6 +37,8 @@ Intro text.
 |5
 | "[[Wire Garden (Pt. 2)|Wire Garden (Part 2)]]"
 | [[Otto Brann]]
+|-
+|6 || "[[Beat Drop 2]]" / "[[Beat Drop 3]]" || [[Otto Brann]] featuring [[Ivo Rask]] / [[Otto Brann]] featuring [[Tessa Quill]]
 |}
 Outro text.
 """
@@ -45,12 +47,13 @@ Outro text.
 class ChartParserTests(unittest.TestCase):
     def test_parses_links_rowspan_templates_and_refs(self):
         entries = th.parse_chart(WIKITEXT, top_n=50)
-        self.assertEqual([e["rank"] for e in entries], [1, 2, 3, 4, 5])
+        self.assertEqual([e["rank"] for e in entries], [1, 2, 3, 4, 5, 6])
         self.assertEqual(entries[0], {"rank": 1, "title": "Glass Harbor", "artist": "Marlow Vane featuring Tessa Quill"})
         self.assertEqual(entries[1]["artist"], "The Lantern Club")
         self.assertEqual(entries[2], {"rank": 3, "title": "Paper Comet", "artist": "The Lantern Club"})
         self.assertEqual(entries[3], {"rank": 4, "title": "Salt & Static", "artist": "Iris Halloway and Dorian Feld"})
         self.assertEqual(entries[4], {"rank": 5, "title": "Wire Garden (Part 2)", "artist": "Otto Brann"})
+        self.assertEqual(entries[5], {"rank": 6, "title": "Beat Drop 2", "artist": "Otto Brann featuring Ivo Rask"})
 
     def test_top_n_truncates(self):
         self.assertEqual(len(th.parse_chart(WIKITEXT, top_n=2)), 2)
@@ -66,12 +69,20 @@ class CreditTests(unittest.TestCase):
         self.assertEqual(th.split_credit("Iris Halloway and Dorian Feld featuring A & B"),
                          (["iris halloway", "dorian feld"], ["a", "b"]))
         self.assertEqual(th.split_credit("Solo Act"), (["solo act"], []))
+        self.assertEqual(th.split_credit("Lil Nas X featuring Billy Ray Cyrus"), (["lil nas x"], ["billy ray cyrus"]))
+
+    def test_name_in_aliases_and_word_prefixes(self):
+        self.assertTrue(th.name_in("machine gun kelly", "mgk , blackbear"))
+        self.assertTrue(th.name_in("soulja boy tell em", "soulja boy"))
+        self.assertFalse(th.name_in("soulja boy tell em", "soulja"))
 
     def test_norm_handles_stylized_spellings(self):
         self.assertEqual(th.norm("P!nk"), "pink")
         self.assertEqual(th.norm("Ke$ha"), "kesha")
         self.assertEqual(th.norm("Wire Garden Pt. 2"), "wire garden part 2")
         self.assertEqual(th.norm("Beyoncé"), "beyonce")
+        self.assertEqual(th.norm("G.D.F.R."), "gdfr")
+        self.assertEqual(th.norm("T.I."), "ti")
 
     def test_base_title_strips_nested_parentheticals(self):
         self.assertEqual(th.base_title("Glass Harbor (Album Version (Explicit) FINAL)"), "glass harbor")
@@ -162,6 +173,25 @@ class ScoringTests(unittest.TestCase):
         ]
         row = resolve("Salt & Static", "Iris Halloway featuring Dorian Feld", items)
         self.assertEqual(row["qobuz"]["id"], "2")
+
+    def test_remix_word_in_title_with_charted_feature(self):
+        items = [
+            item(1, "Glass Harbor", "Marlow Vane", "Harbor Lights", "Marlow Vane", explicit=True),
+            item(2, "Glass Harbor Remix (feat. Tessa Quill)", "Marlow Vane", "Harbor Lights (Deluxe)", "Marlow Vane", explicit=True),
+        ]
+        row = resolve("Glass Harbor", "Marlow Vane featuring Tessa Quill", items)
+        self.assertEqual(row["qobuz"]["id"], "2")
+        self.assertEqual(row["status"], "auto")
+
+    def test_longer_title_sharing_a_prefix_is_not_a_match(self):
+        items = [item(1, "Glass Harbor To The Edge", "Marlow Vane", "Harbor Lights", "Marlow Vane")]
+        self.assertEqual(resolve("Glass Harbor", "Marlow Vane", items)["status"], "unresolved")
+
+    def test_censored_title_matches(self):
+        items = [item(1, "Gl**s Harbor", "Marlow Vane", "Harbor Lights", "Marlow Vane")]
+        self.assertEqual(resolve("Glass Harbor", "Marlow Vane", items)["status"], "auto")
+        items = [item(1, "Gl**s Harbor Nights", "Marlow Vane", "Harbor Lights", "Marlow Vane")]
+        self.assertEqual(resolve("Glass Harbor", "Marlow Vane", items)["status"], "unresolved")
 
     def test_stylized_artist_and_part_title_match(self):
         items = [item(1, "Wire Garden Pt. 2 (feat. Otto Brann)", "P!nk", "Funhouse", "P!nk")]
