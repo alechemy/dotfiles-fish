@@ -1097,6 +1097,11 @@ def artist_and_title(row, file_artist):
     credit = artist_override(file_artist, row["chart_artist"]) or file_artist
     parts = _FEAT_SPLIT.split(credit, maxsplit=1)
     artist = re.sub(r"\s+", " ", parts[0]).strip()
+    # The chart writes a standing duo with "&" and a one-off collaboration with "and", so an
+    # "&" credit names one act: keep it whole rather than whichever half the source credited.
+    chart_main = re.sub(r"\s+", " ", _FEAT_SPLIT.split(row["chart_artist"], maxsplit=1)[0]).strip()
+    if "&" in chart_main and norm(artist) != norm(chart_main) and name_in(norm(artist), join_credits([chart_main])):
+        artist = chart_main
     title = display_title(row)
     if len(parts) > 1:
         feat = re.sub(r"\s+", " ", parts[1]).strip(" ,")

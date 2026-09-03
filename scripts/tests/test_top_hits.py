@@ -302,6 +302,15 @@ class ArtistTagTests(unittest.TestCase):
         self.assertEqual(th.artist_and_title(r, "Iris Halloway and Dorian Feld"),
                          ("Iris Halloway and Dorian Feld", "Salt & Static"))
 
+    def test_ampersand_duo_keeps_its_full_name(self):
+        r = self.row("Vane & Rask featuring Tessa Quill", "Glass Harbor")
+        self.assertEqual(th.artist_and_title(r, "Vane")[0], "Vane & Rask")
+        self.assertEqual(th.artist_and_title(r, "Vane & Rask")[0], "Vane & Rask")
+
+    def test_and_collaboration_is_not_expanded(self):
+        r = self.row("Iris Halloway and Dorian Feld", "Salt & Static")
+        self.assertEqual(th.artist_and_title(r, "Iris Halloway")[0], "Iris Halloway")
+
     def test_wrong_performer_is_replaced_by_the_chart_act(self):
         r = self.row("Marlow Vane featuring Tessa Quill", "Glass Harbor")
         self.assertEqual(th.artist_and_title(r, "Tessa Quill"),
