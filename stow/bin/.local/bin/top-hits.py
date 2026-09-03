@@ -22,6 +22,9 @@ previous stage's output, so any stage can be rerun:
                                  library, NAS chmod, runnability scoring
     top-hits.py status --years 2008-2025 [--require resolved|downloaded|assembled]
                                  exit 0 only when every year meets the requirement
+    top-hits.py run --years 2012-2025
+                                 unattended driver: per year download (retrying transient halts) then
+                                 assemble; stops the whole run on ABORT; writes run-report.md
 
 Overrides (applied by resolve, survive re-resolves):
     overrides/<year>.json   {"<rank>": {"qobuz_id": "123"} | {"skip": "reason"}}
@@ -1248,6 +1251,82 @@ def cmd_retag(args):
     print(f"\n{year}: retagged {len(by_rank)} tracks, renamed {renamed} files in {library_dir}")
 
 
+# ------------------------------------------------------------------- stage: run
+def _run_stage(args_list, log):
+    cmd = [os.path.abspath(__file__), *args_list]
+    log.write(f"\n[{now_iso()}] $ top-hits.py {' '.join(args_list)}\n")
+    log.flush()
+    proc = subprocess.run(cmd, stdout=log, stderr=subprocess.STDOUT, text=True)
+    log.write(f"[{now_iso()}] exit {proc.returncode}\n")
+    log.flush()
+    return proc.returncode
+
+
+def write_run_report(lines):
+    path = state_path("run-report.md")
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(f"# Top 50 Hits run report\n\nUpdated {now_iso()}\n\n" + "\n".join(lines) + "\n")
+    return path
+
+
+def cmd_run(args):
+    years = parse_years(args.years)
+    report = []
+    log = open(state_path("run.log"), "a", encoding="utf-8")
+    log.write(f"\n===== run {args.years} started {now_iso()} pid {os.getpid()} =====\n")
+    stop_reason = None
+    for year in years:
+        info = year_status(year)
+        if info["assembled"]:
+            report.append(f"- {year}: assembled (already) — {info['library_dir']}")
+            write_run_report(report + ([f"\nSTOPPED: {stop_reason}"] if stop_reason else []))
+            continue
+        if not info["resolved"]:
+            report.append(f"- {year}: BLOCKED, rows still need a decision ({info['counts']})")
+            write_run_report(report)
+            continue
+        code = None
+        for attempt in range(1, args.max_attempts + 1):
+            code = _run_stage(["download", str(year)], log)
+            if code == 0:
+                break
+            if code == 2:
+                stop_reason = f"{year} download reported ABORT (auth/rate limit) on attempt {attempt}"
+                break
+            log.write(f"[{now_iso()}] {year}: download exit {code} on attempt {attempt}; waiting {args.retry_wait}s\n")
+            log.flush()
+            time.sleep(args.retry_wait)
+        if stop_reason:
+            report.append(f"- {year}: STOPPED during download — {stop_reason}; resume: `top-hits.py run --years {year}-{years[-1]}`")
+            write_run_report(report + [f"\nSTOPPED: {stop_reason}"])
+            break
+        if code != 0:
+            info = year_status(year)
+            report.append(f"- {year}: INCOMPLETE after {args.max_attempts} download attempts ({info['verified']}/{info['wanted']} files); moving on; resume: `top-hits.py run --years {year}`")
+            write_run_report(report)
+            time.sleep(args.cooldown)
+            continue
+        code = _run_stage(["assemble", str(year)], log)
+        info = year_status(year)
+        if code == 0:
+            report.append(f"- {year}: assembled {info['verified']}/{info['wanted']} — {info['library_dir']}")
+        elif code == 4:
+            report.append(f"- {year}: assembled {info['verified']}/{info['wanted']} but NAS permissions failed; see run.log for the chmod commands")
+        else:
+            report.append(f"- {year}: ASSEMBLE FAILED (exit {code}); see run.log; resume: `top-hits.py run --years {year}-{years[-1]}`")
+            write_run_report(report)
+            stop_reason = f"{year} assemble exit {code}"
+            break
+        write_run_report(report)
+        time.sleep(args.cooldown)
+    path = write_run_report(report + ([f"\nSTOPPED: {stop_reason}"] if stop_reason else ["\nRun finished."]))
+    log.write(f"===== run ended {now_iso()} {'STOPPED: ' + stop_reason if stop_reason else 'finished'} =====\n")
+    log.close()
+    print(f"report: {path}")
+    if stop_reason:
+        raise SystemExit(2)
+
+
 # ---------------------------------------------------------------- stage: status
 def parse_years(spec):
     years = []
@@ -1320,6 +1399,12 @@ def main(argv=None):
     p = sub.add_parser("retag", help="Re-apply tags and cleaned titles to an assembled year in place.")
     p.add_argument("year", type=int)
     p.set_defaults(func=cmd_retag)
+    p = sub.add_parser("run", help="Unattended driver over a year range.")
+    p.add_argument("--years", required=True)
+    p.add_argument("--max-attempts", type=int, default=4)
+    p.add_argument("--retry-wait", type=int, default=300)
+    p.add_argument("--cooldown", type=int, default=60)
+    p.set_defaults(func=cmd_run)
     p = sub.add_parser("status", help="Per-year progress; exit 1 unless every year meets --require.")
     p.add_argument("--years", required=True, help="e.g. 2008-2025 or 2008,2010")
     p.add_argument("--require", choices=["resolved", "downloaded", "assembled"])
