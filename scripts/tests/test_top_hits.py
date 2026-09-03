@@ -282,6 +282,32 @@ class TitleCleanupTests(unittest.TestCase):
         self.assertEqual(th.clean_title("Is It Over Now? (Taylor's Version) (From The Vault)", None), "Is It Over Now? (Taylor's Version) (From The Vault)")
 
 
+class ArtistTagTests(unittest.TestCase):
+    def row(self, chart_artist, qtitle, version=None, chart_title=None):
+        return {"chart_artist": chart_artist, "chart_title": chart_title or qtitle,
+                "qobuz": {"title": qtitle, "version": version}}
+
+    def test_feature_moves_from_artist_into_title(self):
+        r = self.row("Marlow Vane featuring Tessa Quill", "Glass Harbor")
+        self.assertEqual(th.artist_and_title(r, "Marlow Vane featuring Tessa Quill"),
+                         ("Marlow Vane", "Glass Harbor (feat. Tessa Quill)"))
+
+    def test_feature_already_in_title_is_not_duplicated(self):
+        r = self.row("Marlow Vane featuring Tessa Quill", "Glass Harbor (feat. Tessa Quill)")
+        self.assertEqual(th.artist_and_title(r, "Marlow Vane feat. Tessa Quill"),
+                         ("Marlow Vane", "Glass Harbor (feat. Tessa Quill)"))
+
+    def test_duet_credit_is_left_alone(self):
+        r = self.row("Iris Halloway and Dorian Feld", "Salt & Static")
+        self.assertEqual(th.artist_and_title(r, "Iris Halloway and Dorian Feld"),
+                         ("Iris Halloway and Dorian Feld", "Salt & Static"))
+
+    def test_wrong_performer_is_replaced_by_the_chart_act(self):
+        r = self.row("Marlow Vane featuring Tessa Quill", "Glass Harbor")
+        self.assertEqual(th.artist_and_title(r, "Tessa Quill"),
+                         ("Marlow Vane", "Glass Harbor (feat. Tessa Quill)"))
+
+
 class GenreTests(unittest.TestCase):
     def test_mapping(self):
         self.assertEqual(th.map_genre("Hip-Hop/Rap"), ("Hip-Hop", True))

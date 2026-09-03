@@ -1087,6 +1087,25 @@ def clean_title(title, version):
     return title
 
 
+def artist_and_title(row, file_artist):
+    """(artist tag, title) for one track.
+
+    The artist tag is the main act only: Navidrome groups by the raw artist string, so a
+    "X featuring Y" tag strands the track in its own artist instead of X's catalogue. A
+    feature dropped from the tag is preserved in the title when it is not already there.
+    """
+    credit = artist_override(file_artist, row["chart_artist"]) or file_artist
+    parts = _FEAT_SPLIT.split(credit, maxsplit=1)
+    artist = re.sub(r"\s+", " ", parts[0]).strip()
+    title = display_title(row)
+    if len(parts) > 1:
+        feat = re.sub(r"\s+", " ", parts[1]).strip(" ,")
+        names = [n for n in _CREDIT_SPLIT.split(feat) if n.strip()]
+        if names and not any(norm(n) and norm(n) in norm(title) for n in names):
+            title = f"{title} (feat. {feat})"
+    return artist, title
+
+
 def artist_override(file_artist, chart_artist):
     """The chart credit when the file's artist tag names none of the charted main artists, else None."""
     main_names, _ = split_credit(chart_artist)
@@ -1098,10 +1117,11 @@ def artist_override(file_artist, chart_artist):
 def tag_file(path, row, manifest, cover_bytes):
     from mutagen.mp4 import MP4, MP4Cover, MP4FreeForm
     audio = MP4(path)
-    fixed = artist_override((audio.get("\xa9ART") or [""])[0], row["chart_artist"])
-    if fixed:
-        audio["\xa9ART"] = [fixed]
-    audio["\xa9nam"] = [display_title(row)]
+    file_artist = (audio.get("\xa9ART") or [""])[0]
+    artist, title = artist_and_title(row, file_artist)
+    fixed = artist if artist != file_artist else None
+    audio["\xa9ART"] = [artist]
+    audio["\xa9nam"] = [title]
     audio["\xa9alb"] = [manifest["album"]]
     audio["aART"] = [manifest["album_artist"]]
     audio["cpil"] = True
@@ -1116,7 +1136,7 @@ def tag_file(path, row, manifest, cover_bytes):
     for key in ("\xa9cmt", "cprt"):
         audio.pop(key, None)
     audio.save()
-    return fixed
+    return fixed, title
 
 
 def safe_filename(name):
@@ -1186,14 +1206,19 @@ def cmd_assemble(args):
     print(f"--> Tagging {len(rows)} tracks as '{manifest['album']}'")
     for row in rows:
         rec = progress["ranks"][str(row["rank"])]
-        dst = os.path.join(album_dir, f"{row['rank']:02d} {safe_filename(display_title(row))}.m4a")
-        if os.path.abspath(rec["path"]) != os.path.abspath(dst):
-            shutil.move(rec["path"], dst)
+        staged = os.path.join(album_dir, f"{row['rank']:02d}.m4a")
+        if os.path.abspath(rec["path"]) != os.path.abspath(staged):
+            shutil.move(rec["path"], staged)
+            rec["path"] = staged
+            save_progress(progress)
+        fixed, title = tag_file(staged, row, manifest, cover_bytes)
+        dst = os.path.join(album_dir, f"{row['rank']:02d} {safe_filename(title)}.m4a")
+        if dst != staged:
+            os.rename(staged, dst)
             rec["path"] = dst
             save_progress(progress)
-        fixed = tag_file(dst, row, manifest, cover_bytes)
         if fixed:
-            print(f"    {row['rank']:>2}. artist tag replaced with chart credit: {fixed!r}")
+            print(f"    {row['rank']:>2}. artist tag set to {fixed!r}")
 
     print("--> Organizing into the library")
     organize_manifest = os.path.join(staging, "organize-manifest.txt")
@@ -1263,7 +1288,7 @@ def cmd_adopt(args):
 # ------------------------------------------------------------------ stage: redo
 def cmd_redo(args):
     """Replace specific ranks of an already-filed year with the manifest's current pick."""
-    from mutagen.mp4 import MP4
+    from mutagen.mp4 import MP4  # noqa: F401
     year = args.year
     manifest = load_manifest(year)
     progress = load_progress(year)
@@ -1298,9 +1323,8 @@ def cmd_redo(args):
             failures.append((rank, detail))
             print(f"FAILED ({detail})")
             continue
-        title = display_title(row)
+        _, title = tag_file(files[0], row, manifest, cover_bytes)
         target = os.path.join(library_dir, f"{rank:02d} {safe_filename(title)}.m4a")
-        tag_file(files[0], row, manifest, cover_bytes)
         for old in existing.get(rank, []):
             if os.path.abspath(old) != os.path.abspath(target):
                 os.remove(old)
@@ -1345,8 +1369,7 @@ def cmd_retag(args):
         if not row or not row["qobuz"]:
             print(f"  skipping {os.path.basename(path)}: no manifest row for track {rank}")
             continue
-        tag_file(path, row, manifest, cover_bytes)
-        title = display_title(row)
+        _, title = tag_file(path, row, manifest, cover_bytes)
         dest = os.path.join(library_dir, f"{rank:02d} {safe_filename(title)}.m4a")
         if dest != path:
             os.rename(path, dest)
