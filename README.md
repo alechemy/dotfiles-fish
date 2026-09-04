@@ -118,6 +118,8 @@ Some configs are generated from a tracked template at install time. Three flavor
 
 Each follows the same pattern: tracked `*.template.{json,toml}`, generated output gitignored, build script run before stow, and a `.stow-local-ignore` entry that excludes the template from being symlinked. See `scripts/build-zed-config.sh` as the canonical example.
 
+Pi Web Access uses its own safer supported path: the stowed `stow/pi/.pi/web-search.json` contains a command-backed 1Password reference, not the Gemini API key. The extension resolves the key only when it makes a Gemini request.
+
 ## Work Config
 
 `stow-work/` holds work-specific config (fish functions, sketchybar overlays, Copilot/Atlassian MCP setup, docs). It is gitignored apart from `.gitkeep`, so a fresh clone leaves it empty and nothing links. On a work machine, populate it by file-copy from another machine — `setup.sh` auto-stows it once it has content. To link without a full setup re-run:

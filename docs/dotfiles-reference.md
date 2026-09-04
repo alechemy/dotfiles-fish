@@ -171,7 +171,9 @@ Pi updates files under `~/.pi/agent/`. Stowing the live `settings.json` would le
 
 Keep `auth.json`, `models-store.json`, sessions, backups, and the live `models.json` out of Stow and git. `auth.json` contains OAuth credentials. oMLX generates `models.json` and timestamped backups with its local server credential, so the local integration owns those files. Fresh machines authenticate interactively with Pi's `/login`; setup only prints a reminder when the three subscription providers are missing.
 
-The settings fragment scopes model cycling to OpenAI Codex, two Copilot-backed alternatives, and oMLX, and pins reviewed global Pi packages such as `@upstash/context7-pi`. Direct Anthropic stays out of the cycle because Pi's third-party Anthropic OAuth uses paid extra usage rather than the included Claude Max allowance; it remains reachable through `/model`. Pi's keybindings preserve the agent-CLI convention of Enter for a newline and Cmd+Enter or Ctrl+S to submit.
+The settings fragment scopes model cycling to OpenAI Codex, two Copilot-backed alternatives, and oMLX, and retains global Pi packages including the pinned `@upstash/context7-pi` and unpinned `pi-web-access`. Direct Anthropic stays out of the cycle because Pi's third-party Anthropic OAuth uses paid extra usage rather than the included Claude Max allowance; it remains reachable through `/model`. Pi's keybindings preserve the agent-CLI convention of Enter for a newline and Cmd+Enter or Ctrl+S to submit.
+
+Pi Web Access reads the separately stowed `~/.pi/web-search.json`. The tracked file never contains the Gemini API key: `geminiApiKey` is a command-backed credential source that calls the absolute 1Password CLI path with the existing item's stable ID. Pi Web Access resolves it only when a Gemini request needs it. Keep future provider credentials command-backed or environment-backed rather than pasting keys into this tracked JSON.
 
 ### Local Homebrew tap (apps with no upstream cask)
 
