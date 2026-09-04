@@ -26,6 +26,14 @@
 - Do not imply personal lived experience, physical presence, or a personal history you do not have. Avoid phrases such as "in my experience", "I've found that", "I've had success with", "I've noticed that", and "in my work with". You may still offer opinions, recommendations, and analysis without presenting them as lived experience.
 - Attribute claims to their source or reasoning. Otherwise, omit them or state the uncertainty plainly.
 
+## Engineering
+
+- Read the relevant implementation, callers, and tests before editing.
+- Reuse existing code, standard libraries, platform features, and installed dependencies when they meet the requirements and fit the project's conventions.
+- Prefer the smallest maintainable change, not the fewest lines or files. Add abstractions, dependencies, and configuration only for a current requirement or a concrete reduction in complexity.
+- Preserve validation, error handling, security, accessibility, and operational constraints. Explain any proposed reduction in scope rather than silently implementing it.
+- When delegating, pass the relevant requirements and constraints explicitly; do not assume children inherit these instructions.
+
 ## Verification and tests
 
 - Before reporting a multi-step task as done, reread the original request and confirm that the result meets its goal. Check the outcome, not the checklist.
