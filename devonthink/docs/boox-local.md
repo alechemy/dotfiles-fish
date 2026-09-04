@@ -103,8 +103,9 @@ One page per day, each page starting with a handwritten date line.
   newest entry is older than a week, and scoped to `<year> Journal`
   notebooks only.
 - **On This Day** (TRMNL snapshot) picks up journal entries automatically —
-  they carry `EventDate`, which is exactly what that digest queries (bridge
-  search is not filtered by chat exclusion; verified).
+  they carry `EventDate`, which is exactly what that digest queries through
+  trusted deterministic local automation. This pipeline access does not
+  authorize interactive agents to inspect excluded records.
 - **Things**: regular notebooks get task extraction from Post-Enrich &
   Archive as always. For the journal it is opt-in (`THINGS_TASKS=on`):
   bullets under a `Tasks:`/`Action Items:` header become to-dos via the
@@ -160,9 +161,14 @@ Breakage modes to know:
   upgrade may change rendering subtly and re-OCR everything once;
   cached-text and comment comparison prevent DT churn from identical
   re-transcripts.
-- **The MCP server cannot see `/15_JOURNAL`** (chat exclusion). Verify
-  journal records through `entity-dt-bridge.js` (`get_text` /
-  `get_fields`) or the DT UI, not MCP search.
+- **The MCP server cannot see `/15_JOURNAL`** because of its chat exclusion.
+  Ask the user to verify journal records in the DEVONthink UI. Interactive
+  agents must not bypass the exclusion through `entity-dt-bridge.js`,
+  AppleScript, JXA, or direct database reads. Existing deterministic pipeline
+  operations, including journal filing and state rebuilds, retain their
+  trusted local access; they are not record-inspection fallbacks. Set
+  `PIPELINE_MANUAL=1` for authorized manual pipeline maintenance and keep
+  excluded record content out of agent output.
 - **Unnamed notebooks are deleted by the watcher.** A notebook must be
   named on the device before the two-minute grace expires or its exports
   never reach staging.

@@ -43,14 +43,14 @@ Acceptance: Setup reconstructs the intended portable configuration; rerunning th
 
 ### 2. Align recall, handoff, and privacy instructions
 
-Status: Pending. Depends on checkpoint 1.
+Status: Complete.
 
-- [ ] Distinguish content recall explicitly requested by the user from metadata-only transcript audits without weakening the global privacy rule.
-- [ ] Replace unrestricted transcript-to-tool-output examples with structured, bounded, sanitized extraction. Keep `agent-reader` responsible for session-format parsing.
-- [ ] Prefer metadata and explicit handoffs; authorize deeper transcript extraction only for gaps in the requested scope. Do not claim arbitrary secrets can be perfectly detected by a generic redactor.
-- [ ] Make recall use `~/.context/` outside repositories, matching handoff.
-- [ ] Clarify any interactive DEVONthink verification guidance that conflicts with exclusions while preserving trusted pipeline maintenance.
-- [ ] Validate with fictional handoffs and synthetic normalized transcripts containing fake secrets and irrelevant workspaces. Confirm shared skills remain usable across retained clients.
+- [x] Distinguish content recall explicitly requested by the user from metadata-only transcript audits without weakening the global privacy rule.
+- [x] Replace unrestricted transcript-to-tool-output examples with structured, bounded, sanitized extraction. Keep `agent-reader` responsible for session-format parsing.
+- [x] Prefer metadata and explicit handoffs; authorize deeper transcript extraction only for gaps in the requested scope. Do not claim arbitrary secrets can be perfectly detected by a generic redactor.
+- [x] Make recall use `~/.context/` outside repositories, matching handoff.
+- [x] Clarify any interactive DEVONthink verification guidance that conflicts with exclusions while preserving trusted pipeline maintenance.
+- [x] Validate with fictional handoffs and synthetic normalized transcripts containing fake secrets and irrelevant workspaces. Confirm shared skills remain usable across retained clients.
 
 Acceptance: Documented commands do not emit whole live transcripts; extracted evidence stays within the requested scope; non-repository handoffs are discoverable; excluded records remain excluded.
 
@@ -127,4 +127,8 @@ Acceptance: The primary Pi workflow is reproducible at every tested boundary; br
 - A field-allowlisted preflight confirmed that the current portable preferences, package identities/order, and installed versions still matched the intended capture. The live merge preserved unrelated runtime fields; its second invocation left the settings inode and modification time unchanged. The merger does not coordinate locks with Pi's own runtime saves.
 - Shellcheck was unavailable. Bash syntax checks, behavioral tests, and whitespace checks cover this slice; static shell lint remains an environment limitation.
 - Public source inspection confirmed that the agent-reader default branch remains at the overlay base. Adapter research identified published `pi-mcp-adapter@2.32.1` at source revision `10a45367e033a32026987a75d6f401e37340c86f` as a pilot candidate. Its release-specific README was reviewed, but executable source/dependency review and installation remain pending.
-- The next implementation slice is checkpoint 2, recall and handoff privacy alignment.
+- Checkpoint 2 adds one stdlib filter over agent-reader normalized JSON. Exact workspace/client/session scope, explicit date windows or all-history, metadata defaults, opt-in bounded prose, unknown-date counts, and pagination replace unrestricted transcript output. Handoff lookup now matches leading workspace/topic headers in repo-root `.context/` or nonrepo `~/.context/`, with tracing disabled. DEVONthink journal guidance requires user inspection in the UI rather than an interactive exclusion bypass.
+- Independent review found a fenced-block disclosure when shorter delimiters or delimiter lines with trailing text closed an outer fence. The parent reproduced four failures, then made closing delimiters require the opening character, sufficient length, and no non-whitespace suffix. The retained regression also checks mixed fence characters and longer valid closers. Earlier regressions cover dump continuations, quoted handoff headers, and inherited shell tracing.
+- The parent verified 85 scripts tests under managed Python and 23 focused recall tests under Apple's Python. Disposable Stow validation and the focused live `agents` restow linked the new helper. Pi's offline skill loader reports no diagnostics; recall, handoff, and simplify-review remain manual, and retained Claude paths resolve to the shared skills. Commit `3ade2da`'s instructions and simplify-review remain unchanged.
+- Recall sanitization remains heuristic, topic matching is literal, normalized dates may identify prompts rather than responses, and JSON input is held in memory. These limitations are documented; output bounds do not imply streaming input limits or a guarantee against arbitrary private prose.
+- The next implementation slice is checkpoint 3, package ownership and maintenance.
