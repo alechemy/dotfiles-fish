@@ -21,6 +21,7 @@ Also read:
 - Preserve the Stow mirror. A file destined for `~/.config/tool/config` belongs at `stow/<package>/.config/tool/config`. Restow only when files are added or removed.
 - Never treat display count as docking state. Gate ultrawide behavior on the `DELL U4025QW` name. Gate power behavior independently through `~/.local/bin/should-run-background-job`.
 - Do not stow app-owned files that are atomically rewritten. Use the repository's generated, seeded, fragment-merge, or copy-if-absent pattern.
+- Pi's settings fragment owns portable preferences and complete package/model arrays. Capture deliberate changes through the documented allowlist, never by copying live settings wholesale.
 - Before modifying launchd-driven code, read the AppleEvents and TCC sections in `docs/dotfiles-reference.md`. Interpreter identity and protected-folder staging are load-bearing.
 - Keep secrets, credentials, machine identity, runtime state, and real third-party personal data out of git.
 - Multiple agent sessions may modify this repo concurrently. Before amending, verify `HEAD` is the intended commit; otherwise create a new commit.

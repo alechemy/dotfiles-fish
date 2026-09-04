@@ -1,16 +1,24 @@
 {
   "theme": "dark",
   "defaultProvider": "openai-codex",
-  "defaultModel": "gpt-5.6-sol",
+  "defaultModel": "gpt-6-astra",
   "defaultThinkingLevel": "high",
+  "defaultProjectTrust": "ask",
+  "enableInstallTelemetry": false,
+  "hideThinkingBlock": true,
+  "tuiMode": "fullscreen",
+  "fullscreenExitOutput": "transcript",
   "packages": [
     "npm:@upstash/context7-pi@0.1.2",
-    "npm:pi-web-access"
+    "npm:pi-subagents@0.65.0",
+    "npm:pi-web-access@0.27.0"
   ],
   "enabledModels": [
-    "openai-codex/gpt-5.6-sol:high",
-    "github-copilot/claude-opus-5:high",
-    "github-copilot/gemini-3.1-pro-preview:high",
-    "omlx/*:off"
+    "openai-codex/gpt-5.6-sol",
+    "github-copilot/claude-opus-5",
+    "omlx/Qwen3.8-27B-8bit",
+    "openai-codex/gpt-6-astra",
+    "github-copilot/claude-fable-5.1",
+    "github-copilot/gemini-3.8-flash"
   ]
 }

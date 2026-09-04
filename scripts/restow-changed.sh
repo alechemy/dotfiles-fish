@@ -78,8 +78,6 @@ restow_pkg() {
 changed="$(git -C "$DOTFILES" -c core.quotePath=off diff --name-only "$OLD" "$NEW" -- stow stow-work stow-local 2>/dev/null \
     | awk -F/ 'NF >= 3 { print $1, $2 }' | sort -u)"
 
-[ -n "$changed" ] || exit 0
-
 # GNU Stow cannot discover a stale destination when the source's whole parent
 # directory disappeared. Remove links for tracked deletions explicitly before
 # restowing the surviving package contents.
