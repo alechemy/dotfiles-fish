@@ -175,5 +175,31 @@
     "url": "https://storage.googleapis.com/chrome-for-testing-public/152.0.7977.42/mac-arm64/chrome-mac-arm64.zip",
     "archiveSha256": "c9a7b6bfb57731944990ffb7cafc17ae2f2a2e25ad1f145f45584d7b799d3ce8",
     "strictBundleVerification": false
+  },
+  "signedBrowser": {
+    "source": "Homebrew google-chrome cask official Google DMG",
+    "archiveSha256": "9fe77bfc6f6e08bffba887da0730c7b513e6787ce7fc28bb681ba5e22ecee469",
+    "version": "152.0.7977.83",
+    "bundleIdentifier": "com.google.Chrome",
+    "architectures": "x86_64 arm64",
+    "signatureIdentity": [
+      "Identifier=com.google.Chrome",
+      "Authority=Developer ID Application: Google LLC (EQHXZ8M8AV)",
+      "Authority=Developer ID Certification Authority",
+      "Authority=Apple Root CA",
+      "TeamIdentifier=EQHXZ8M8AV"
+    ],
+    "strictSignaturePassed": true,
+    "gatekeeperPassed": true,
+    "gatekeeper": [
+      "source=Notarized Developer ID"
+    ]
+  },
+  "blockedHostAttempt": {
+    "piVersion": "0.85.0",
+    "piLoaderSha256": "a1393de916487a2c47107ac7239f3139dcdb938705f88ba1ea5a954b3c8bb483",
+    "registryIntegrity": "sha512-INxVkLAVfAMju5MojJpmyu/0bMP+r+ffZuS7UqVv32E2JwHBRbcHfELDfmFNvapEbgYfKN2r9OYO1p3TqDBR+g==",
+    "unbundledLoaderResult": "ERR_MODULE_NOT_FOUND: @earendil-works/pi-server",
+    "accepted": false
   }
 }

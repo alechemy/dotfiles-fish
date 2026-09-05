@@ -2,9 +2,9 @@
 
 ## Outcome
 
-Checkpoint 4 is **deferred** for browser execution and live adoption. The isolated synthetic adapter checks pass. They do not establish browser-task parity or justify changing Pi's package fragment. Keep the Claude browser fallback, native Context7, Things helper and agent-reader overlay.
+Checkpoint 4 remains **deferred** for browser execution and live adoption. The earlier isolated synthetic adapter checks passed on Pi `0.84.4`. The signed Chrome retry stopped before adapter registration because the installed Pi `0.85.0` unbundled extension loader cannot resolve an undeclared dependency. Browser-task parity remains untested. Keep the Claude browser fallback, native Context7, Things helper and agent-reader overlay.
 
-The approved official Chrome for Testing archive does not satisfy this pilot's strict bundle-signature gate. Its published mac-arm64 bundle is ad-hoc/linker-signed and lacks sealed signature resources. This is a packaging constraint, not evidence of corruption or tampering. The supervisor confirmed deferral rather than changing the signature requirement, browser version or sandbox policy.
+The separately approved standard Google Chrome `152.0.7977.83` candidate passes strict bundle-signature verification and Gatekeeper assessment. It resolves the browser acquisition gate without relaxing it. The earlier official Chrome for Testing `152.0.7977.42` archive remains rejected by that gate because its bundle is ad-hoc/linker-signed and lacks sealed signature resources. That historical packaging constraint is not evidence of corruption or tampering.
 
 No Chrome server or browser code executed. No adapter was loaded into live Pi. These opt-in test resources live under `scripts/browser-pilot/`, outside Stow discovery, setup and app-owned configuration. There is no production browser command, bridge, settings override or profile in this change.
 
@@ -16,7 +16,9 @@ No Chrome server or browser code executed. No adapter was loaded into live Pi. T
 | Node | `v24.18.0` | Installed runtime, version checked again in a cleared environment before test imports. |
 | MCP adapter | `pi-mcp-adapter@2.32.1`, Git `10a45367e033a32026987a75d6f401e37340c86f` | Published npm source, registry SHA-512 verified. |
 | Chrome server | `chrome-devtools-mcp@1.8.0`, Git `45f187b1e3202c9f32ddba913be5d68751c3caa3` | Official published source, registry SHA-512 verified. Source review only. |
-| Browser | Chrome for Testing `152.0.7977.42`, `mac-arm64` | Official exact-version metadata and Google Storage archive. Acquisition and static validation only. |
+| Earlier browser | Chrome for Testing `152.0.7977.42`, `mac-arm64` | Official exact-version metadata and Google Storage archive. Failed strict signature gate; never launched. |
+| Signed candidate | Google Chrome `152.0.7977.83`, `x86_64` + `arm64` | Official Google DMG fetched through Homebrew. Strict signature and Gatekeeper checks passed; never launched. |
+| Blocked host retry | Installed Pi `0.85.0` | Unbundled loader import failed before synthetic adapter registration. Not accepted as a replacement for the `0.84.4` execution gate. |
 
 [`provenance.json`](../scripts/browser-pilot/provenance.json) records the release identities, integrity values, source-tree digests, Pi loader digest, lock digest and browser archive digest. [`package-lock.json`](../scripts/browser-pilot/package-lock.json) pins all 56 resolved registry entries. The scripts-disabled installation omitted optional packages and installed 39 packages. Every installed package tree matched its independently integrity-verified extracted tarball tree before execution.
 
@@ -87,6 +89,46 @@ The browser was never launched, even for `--version`. No quarantine removal, sig
 
 All browser runtime tasks remain pending: actual raw catalog/schema verification, navigation, DOM fill/click, snapshot, screenshot, console/network capture and header redaction, short automatic/manual traces, URL-rule tests, server/browser shutdown and reconnect, profile cleanup and artifact cleanup. Unsupported-browser behavior has not been attributed to the adapter.
 
+## Signed Chrome retry and host blocker
+
+The user fetched the standard Google Chrome DMG through Homebrew. A read-only mount supplied `Google Chrome.app`, copied into a private temporary directory outside the repository and `/Applications`; the mount was detached before this retry. Static acquisition evidence is:
+
+```text
+Version 152.0.7977.83
+Bundle com.google.Chrome
+Architectures x86_64 arm64
+Developer ID Application: Google LLC (EQHXZ8M8AV)
+TeamIdentifier EQHXZ8M8AV
+Gatekeeper source Notarized Developer ID
+DMG SHA256 9fe77bfc6f6e08bffba887da0730c7b513e6787ce7fc28bb681ba5e22ecee469
+```
+
+Both `codesign --verify --deep --strict` and `spctl --assess --type execute` passed, including a repeat check during implementation. The app was not launched or modified. The original Homebrew DMG cache remains unchanged. [`provenance.json`](../scripts/browser-pilot/provenance.json) retains the failed CfT acquisition separately from this signed candidate.
+
+The installed `0.84.4` host path was absent; Homebrew's installed host was now `0.85.0`. A separately approved, source-only compatibility review read the installed packages, extensions, SDK and session-format documentation and relevant examples. The direct loader diff only moves the unchanged `isBundledNode` expression into `config.js`. Registration, runtime tool-list methods, aliases and explicit-path loading are unchanged. That comparison was insufficient: the transitive `main.js` imports changed too.
+
+With temporary approval to test `0.85.0`, the first synthetic mode failed during module linking:
+
+```text
+dist/core/extensions/loader.js:24 -> dist/index.js:33
+-> dist/main.js:42 -> dist/experimental/server.js:10-11
+ERR_MODULE_NOT_FOUND: @earendil-works/pi-server
+```
+
+The exact official npm `0.85.0` archive passed registry SHA-512 verification. Its manifest, shrinkwrap, loader, `main.js` and `experimental/server.js` match the installed files byte for byte. The server imports `@earendil-works/pi-server` and its `/unix` export, but the package does not declare that dependency and its shrinkwrap does not include it. `PI_EXPERIMENTAL` gates command execution, not static module linking. No documented alternate extension loader avoids this graph. The current Homebrew formula consumes the same npm artifact without a dependency correction.
+
+This establishes a defect in this pilot's unbundled loader route, not failure of the normal bundled Pi CLI. The package's `bin` points to `dist/bundle/cli.js`, not `dist/cli.js`; normal CLI behavior was not tested. No adapter, synthetic MCP fixture, Chrome server or browser started during the failed retry. The second synthetic mode did not run. Earlier successful `0.84.4` results above remain historical evidence, not `0.85.0` results.
+
+The attempted host-gate update was reverted. The runner still requires the accepted Pi `0.84.4` version and loader digest, and refuses the installed `0.85.0` host. No dependency injection, installed-source patch, stub loader or direct MCP substitute is part of this pilot. A corrected upstream distribution, separately reviewed and installed through the host's owner, is needed before rerunning both synthetic modes and implementing browser checks. No host repair was attempted.
+
+The failed runtime process exited, and the runner confirmed its owned process group had exited before removing the temporary runtime. After independent review, the parent removed the exact source, dependency, failure-diagnostic and app-extraction workspaces. Source comparisons, integrity metadata and review reports remain in the private review artifacts. The original Homebrew DMG remains intact. No browser profile or browser output was created.
+
+### Repeating signed acquisition
+
+After approval, `HOMEBREW_NO_AUTO_UPDATE=1 brew fetch --cask google-chrome` obtains the cask download without installing the app or triggering a Homebrew update. Obtain the cached DMG path with `HOMEBREW_NO_AUTO_UPDATE=1 brew --cache --cask google-chrome`. Homebrew's moving Google URL and `sha256 :no_check` do not authenticate the archive through a cask checksum. Record the downloaded SHA-256 and verify the extracted app's exact version, architecture, bundle identity, Google signing authority and Gatekeeper result on every acquisition. A changed candidate needs a new approval.
+
+Mount the cached DMG read-only with `hdiutil attach -readonly -nobrowse -noautoopen`, using a private owned mountpoint. Copy only `Google Chrome.app` with `ditto` into a separate private directory, detach the mount, then run the strict codesign and Gatekeeper checks above. Record metadata without launching the executable. Do not use `brew install`, `open`, `/Applications`, signing changes or quarantine removal for this pilot. Preserve the user's cached DMG. The acquisition owner removes only its recorded mount/extraction directories after review.
+
 ## Repeating the synthetic checks
 
 The offline suite installs and imports no downloaded code:
@@ -142,9 +184,11 @@ Do not clean shared temp directories with a wildcard. Keep retained evidence out
 
 ## Requirements to resume browser work
 
-A separate decision must resolve the strict bundle-signature gate or approve another exact official browser candidate after source/acquisition review. Do not silently turn off the gate. Then review the exact raw tool schemas before tool execution and rerun the synthetic gates.
+The exact signed candidate above has acquisition approval, but the Pi host blocker must be resolved through a separately approved corrected distribution and source review. Do not weaken the version/digest gate or repair installed imports locally. Then rerun both synthetic modes and review the exact raw tool schemas before any browser tool execution.
 
-The source-reviewed full MCP launch would use an absolute Node/server entrypoint and separately approved CfT executable, with `--headless`, `--isolated`, `--viewport=1280x720`, `--no-usage-statistics`, `--no-performance-crux`, `--no-category-emulation`, `--redact-network-headers` and one exact loopback fixture URL pattern. `CHROME_DEVTOOLS_MCP_NO_UPDATE_CHECKS=1` must be set before the entrypoint, including help/version calls. No attach flags, custom Chrome arguments, existing profile, `initScript`, uploads or `evaluate_script` belong in that finite test.
+The source-reviewed full MCP launch would use an absolute Node/server entrypoint and separately approved signed Google Chrome executable, with `--headless`, `--isolated`, `--viewport=1280x720`, `--no-usage-statistics`, `--no-performance-crux`, `--no-category-emulation`, `--redact-network-headers` and one exact loopback fixture URL pattern. `CHROME_DEVTOOLS_MCP_NO_UPDATE_CHECKS=1` must be set before the entrypoint, including help/version calls. No attach flags, custom Chrome arguments, existing profile, `initScript`, uploads or `evaluate_script` belong in that finite test.
+
+Only a separate finite fixture configuration may set `approveTools: false` for the exact 12 browser tools and fixed fictional requests. It must not change the headless-refusal tests or imply general browsing authorization. Confirm the actual browser executable, pipe transport and owned temporary `--user-data-dir` using only owned PID metadata; native macOS HOME handling is not an OS sandbox. Verify server/browser exit before removing owned profile/output trees, including failure paths. Stop for user interaction if macOS requests consent.
 
 The proposed 12-tool allowlist is `list_pages`, `navigate_page`, `take_snapshot`, `click`, `fill`, `take_screenshot`, `list_console_messages`, `get_console_message`, `list_network_requests`, `get_network_request`, `performance_start_trace` and `performance_stop_trace`. Source projects 27 raw tools with the selected flags. Raw names, capabilities, schemas and absence of resources/prompts/UI metadata still need runtime confirmation on each dispatch connection. Do not infer an application-wide permission boundary from a finite driver assertion.
 
