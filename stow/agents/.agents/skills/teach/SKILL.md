@@ -1,7 +1,6 @@
 ---
 name: teach
 description: Explain a body of work plainly so a person understands what it is, how it works, and why it was built that way. Use for "teach me this", "help me understand X", or "explain this change or subsystem to me".
-disable-model-invocation: true
 ---
 
 # Teach

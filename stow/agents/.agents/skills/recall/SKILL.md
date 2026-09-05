@@ -2,7 +2,6 @@
 name: recall
 description: Reconstruct recent working context from handoff documents, normalized local agent transcripts, live repository state, and available shared records. Use for "recall my work on X", "catch me up", "what have I been working on", or "where did I leave off".
 compatibility: Requires agent-reader with JSON transcript commands, Python 3, Bash, and git. GitHub CLI and shared-record integrations are optional.
-disable-model-invocation: true
 ---
 
 # Recall

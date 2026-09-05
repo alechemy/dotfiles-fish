@@ -76,6 +76,13 @@ class MeasureAgentToolingTests(unittest.TestCase):
         self.assertEqual((visible["characters"], visible["utf8_bytes"]), (9, 13))
         self.assertEqual(result, self.measure())
 
+    def test_shared_skill_invocation_policy(self):
+        root = HELPER.parent.parent / "stow/agents/.agents/skills"
+        for name in ("teach", "recall", "handoff", "grill-me", "simplify-review"):
+            with self.subTest(name=name):
+                _, _, manual = measurement.skill_description((root / name / "SKILL.md").read_text())
+                self.assertEqual(manual, name in ("grill-me", "simplify-review"))
+
     def test_session_start_parent_supervisor_description_is_included(self):
         tools = self.measure()["tools"]
         supervisor = next((row for row in tools if row["name"] == "subagent_supervisor"), None)

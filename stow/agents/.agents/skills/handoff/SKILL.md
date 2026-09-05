@@ -1,7 +1,6 @@
 ---
 name: handoff
 description: Compact the current conversation into a handoff document another session can pick up from. Use at a phase boundary, before clearing context, or when the user says "hand this off" or "write a handoff".
-disable-model-invocation: true
 ---
 
 Write a handoff document summarising the current conversation so a fresh session can continue the work. If the invocation includes arguments, use them as the next session's intended focus.
