@@ -69,16 +69,16 @@ Acceptance: A fresh setup and an existing setup can reach the same declared pack
 
 ### 4. Pilot Chrome DevTools through the MCP adapter
 
-Status: Pending. Depends on checkpoints 1 and 3.
+Status: Deferred. Source review and isolated synthetic adapter checks are complete; browser execution and live adoption have not met acceptance. See [the pilot record](agent-browser-pilot.md).
 
-- [ ] Review an exact published adapter version, its package dependencies, configuration precedence, command execution, tool filtering, approvals, lifecycle, and output spill behavior.
-- [ ] Review and pin an exact official Chrome DevTools server version. Compare the full MCP path with the experimental official CLI against the required browser tasks.
-- [ ] Choose a supported isolated Chrome or Chrome for Testing installation. Do not attach the pilot to the everyday browser or copy authenticated profiles.
-- [ ] Follow existing installation and Stow conventions. Keep app-owned adapter overrides and caches unstowed; store only portable declarations in tracked configuration.
-- [ ] Disable unnecessary scripting, sampling, elicitation, and automatic host-config imports for the pilot. Configure telemetry and CrUX opt-outs and deliberate lifecycle/approval behavior.
-- [ ] Test filtering and headless approval refusal with a synthetic MCP server before browser access.
+- [x] Review an exact published adapter version, its package dependencies, configuration precedence, command execution, tool filtering, approvals, lifecycle, and output spill behavior.
+- [x] Review and pin an exact official Chrome DevTools server version. Compare the full MCP path with the experimental official CLI against the required browser tasks. Adapter 2.32.1 and Chrome server 1.8.0 are pinned as test/review inputs, not live packages.
+- [ ] Choose a supported isolated Chrome or Chrome for Testing installation. Do not attach the pilot to the everyday browser or copy authenticated profiles. The official CfT 152.0.7977.42 mac-arm64 archive failed the agreed strict bundle-signature gate before execution.
+- [ ] Follow existing installation and Stow conventions. Keep app-owned adapter overrides and caches unstowed; store only portable declarations in tracked configuration. Live adoption remains deferred; opt-in test resources are outside Stow/setup.
+- [ ] Disable unnecessary scripting, sampling, elicitation, and automatic host-config imports for the pilot. Configure telemetry and CrUX opt-outs and deliberate lifecycle/approval behavior. Synthetic adapter controls are verified; Chrome opt-outs are source-reviewed but unexecuted.
+- [x] Test filtering and headless approval refusal with a synthetic MCP server before browser access.
 - [ ] Exercise navigation, DOM interaction, screenshot, console/network inspection, and a short performance trace against a local fictional fixture. Verify process shutdown, reconnect, and output cleanup behavior.
-- [ ] Record whether the pilot is accepted, deferred, or rejected. Preserve the Claude browser fallback until parity is demonstrated.
+- [x] Record whether the pilot is accepted, deferred, or rejected. Preserve the Claude browser fallback until parity is demonstrated.
 
 Acceptance: Pi performs the required browser tasks without a private profile, unexpected tool activation, or unreviewed version drift. The server and adapter can be disabled cleanly. Unsupported-browser behavior is not mistaken for adapter failure.
 
@@ -139,4 +139,8 @@ Acceptance: The primary Pi workflow is reproducible at every tested boundary; br
 - The accepted source-derived default baseline counts nine tool descriptions at 10,500 Unicode code points and 10,526 UTF-8 bytes, plus six advertised skill descriptions at 1,848 code points and 1,854 bytes. Five manual skills are excluded. It includes ordinary session-start supervisor registration and excludes schemas, prompt metadata, wrappers and provider serialization. No provider tokens were measured. Pi's official offline skill loader independently matches the skill descriptions and manual exclusions.
 - Parent and independent review corrections cover omitted supervisor registration, `.fdignore` handling, YAML non-string measured fields and helper paths. Synthetic regressions reproduced the measurement defects before correction. The parent verified 100 scripts tests, 15 focused tests under Apple's Python, and an unchanged 27-input measurement fingerprint. Earlier phases, package pins, installed sources and runtime settings remain unchanged.
 - Top-level installation convergence is supported by Pi 0.84.4 source and matching installed manifests, not a fresh-machine test. The parent accepts the bounded offline baseline and retains observed extension registration and installation checks in checkpoint 7.
-- The next implementation slice is checkpoint 4, the Chrome DevTools adapter pilot.
+- Checkpoint 4 records a deferred browser pilot in `docs/agent-browser-pilot.md`. Exact source reviews covered adapter 2.32.1 and Chrome server 1.8.0. The locked synthetic test installation used 39 packages from a 56-entry integrity-verified graph, omitted optional native/JAR packages, and ran no lifecycle hooks. The runner checks package bytes, lock, Pi loader and versions before execution.
+- Independent implementation review found a process-group exit race between probing and signaling. The parent reproduced both first-signal and later-signal cases, corrected cleanup, and reran 109 scripts tests, nine focused Apple-Python tests and both actual synthetic adapter modes. Six headless calls were refused, five separately permitted fictional calls dispatched, five fixture starts matched five exits, and ten unsolicited requests were rejected. Private spills survived adapter teardown and were removed with the owned runtime trees.
+- The official CfT archive matched its expected bundle identifier/version and arm64 architecture but could not pass the agreed strict bundle-signature gate. Its ad-hoc/linker-signed packaging lacks sealed resources; this is not evidence of tampering or browser incompatibility. The archive/app were removed after static diagnostic evidence was recorded. No Chrome server/browser code ran, and all browser tasks remain pending.
+- Adapter cold-cache startup, Apps filtering bypass and persistent-output limitations remain documented. The finite Pi-loader checks are not a model session, live TUI test or general permission boundary. Existing package/model settings and browser fallback remain unchanged.
+- The next decision is whether to revise the browser acquisition gate or review another exact official browser candidate. Browser execution and live adoption require that decision; checkpoint 5 remains pending.
