@@ -56,13 +56,13 @@ Acceptance: Documented commands do not emit whole live transcripts; extracted ev
 
 ### 3. Establish package ownership and maintenance
 
-Status: Pending. Can be researched during checkpoints 1 and 2.
+Status: Complete for bounded source review and the offline baseline. Observed extension registration and fresh/existing installation checks remain in checkpoint 7.
 
-- [ ] Add a short capability table with implementation, pinned version, source-review status, privacy constraints, update procedure, and verification coverage.
-- [ ] Review the exact installed Subagents and Web Access sources relevant to execution, credentials, child-provider routing, and output retention. Record limitations rather than implying a complete security audit.
-- [ ] Document the separate Homebrew, Mise, Pi-package, and downstream-overlay update paths. Use explicit reviewed version changes rather than unattended extension upgrades.
-- [ ] Measure registered tool descriptions and advertised skills for the current Pi package set with synthetic/offline inspection. Record characters or bytes without equating them to measured provider tokens.
-- [ ] Verify that choosing a local model is not documented as making external tools offline. Record which tools may contact cloud services.
+- [x] Add a short capability table with implementation, pinned version, source-review status, privacy constraints, update procedure, and verification coverage.
+- [x] Review the exact installed Subagents and Web Access sources relevant to execution, credentials, child-provider routing, and output retention. Record limitations rather than implying a complete security audit.
+- [x] Document the separate Homebrew, Mise, Pi-package, and downstream-overlay update paths. Use explicit reviewed version changes rather than unattended extension upgrades.
+- [x] Measure registered tool descriptions and advertised skills for the current Pi package set with synthetic/offline inspection. Record characters or bytes without equating them to measured provider tokens. The accepted baseline projects default registration from checked source without executing extensions; it is not observed runtime registration.
+- [x] Verify that choosing a local model is not documented as making external tools offline. Record which tools may contact cloud services.
 - [x] Check public agent-reader source for an overlay replacement. The public default branch still points at the overlay's base, `09080db090f0741707652535fd8be8b8df429e4c`, and its README lacks the Pi/JSON commands. Retain the overlay; no equivalent public replacement was established. Recheck when upstream changes. Any needed Git fetch or upstream publication requires user approval.
 
 Acceptance: A fresh setup and an existing setup can reach the same declared package versions, update ownership is explicit, and outstanding source-review or upstream dependencies remain visible.
@@ -112,6 +112,9 @@ Acceptance: The chosen implementation enforces the declared interface rather tha
 Status: Pending. Depends on accepted earlier checkpoints.
 
 - [ ] Run focused tests, relevant shell/JSON checks, isolated Stow verification, and the repository's required checks for changed subsystems.
+- [ ] Compare observed extension registration with the checkpoint 3 source baseline in a disposable credential-free environment that blocks external side effects. The offline skill-loader comparison is already covered.
+- [ ] Exercise fresh/existing top-level package convergence under an approved installation scope. Static source and manifest checks do not prove successful installation; host and transitive versions remain separately owned.
+- [ ] Resolve or explicitly retain the package restrictions in `docs/agent-tooling-maintenance.md` before final acceptance. Authenticated PDF use requires a reviewed upload/persistence fix; Subagents trust, fallback and cleanup claims need synthetic verification. Decide separately whether Web Access's app-rewritten config should move to a generated or fragment-merge pattern. Installed/upstream changes and publication need separate approval.
 - [ ] Confirm tracked configuration contains no credentials or runtime state and live portable fields match the accepted fragment through a redacting parser.
 - [ ] Keep full setup validation open until a disposable macOS VM or new-machine snapshot is available. Record the environment, authentication boundaries, and expected outcome before running it.
 - [ ] Check physical Ghostty keys and real-client workflows during normal use rather than synthesizing private production work for coverage.
@@ -131,4 +134,9 @@ Acceptance: The primary Pi workflow is reproducible at every tested boundary; br
 - Independent review found a fenced-block disclosure when shorter delimiters or delimiter lines with trailing text closed an outer fence. The parent reproduced four failures, then made closing delimiters require the opening character, sufficient length, and no non-whitespace suffix. The retained regression also checks mixed fence characters and longer valid closers. Earlier regressions cover dump continuations, quoted handoff headers, and inherited shell tracing.
 - The parent verified 85 scripts tests under managed Python and 23 focused recall tests under Apple's Python. Disposable Stow validation and the focused live `agents` restow linked the new helper. Pi's offline skill loader reports no diagnostics; recall, handoff, and simplify-review remain manual, and retained Claude paths resolve to the shared skills. Commit `3ade2da`'s instructions and simplify-review remain unchanged.
 - Recall sanitization remains heuristic, topic matching is literal, normalized dates may identify prompts rather than responses, and JSON input is held in memory. These limitations are documented; output bounds do not imply streaming input limits or a guarantee against arbitrary private prose.
-- The next implementation slice is checkpoint 3, package ownership and maintenance.
+- Checkpoint 3 adds `docs/agent-tooling-maintenance.md` and `scripts/measure-agent-tooling.py`. Separate source reviewers traced Subagents 0.65.0 and Web Access 0.27.0 execution, credentials, routing and retention. An independent final review covered the documentation and measurement helper. This is a bounded source review, not a full security audit or dependency certification.
+- Web Access authenticated PDF fetching remains prohibited because its extraction path can upload authenticated bytes and persist Markdown despite local-only and cache-off promises. Subagents project discovery is not demonstrably gated by Pi trust; explicit local model selection is not a locality lock, and cleanup does not cover every output/session path. The maintenance reference records restrictions and separate update owners. Documentation does not patch runtime behavior.
+- The accepted source-derived default baseline counts nine tool descriptions at 10,500 Unicode code points and 10,526 UTF-8 bytes, plus six advertised skill descriptions at 1,848 code points and 1,854 bytes. Five manual skills are excluded. It includes ordinary session-start supervisor registration and excludes schemas, prompt metadata, wrappers and provider serialization. No provider tokens were measured. Pi's official offline skill loader independently matches the skill descriptions and manual exclusions.
+- Parent and independent review corrections cover omitted supervisor registration, `.fdignore` handling, YAML non-string measured fields and helper paths. Synthetic regressions reproduced the measurement defects before correction. The parent verified 100 scripts tests, 15 focused tests under Apple's Python, and an unchanged 27-input measurement fingerprint. Earlier phases, package pins, installed sources and runtime settings remain unchanged.
+- Top-level installation convergence is supported by Pi 0.84.4 source and matching installed manifests, not a fresh-machine test. The parent accepts the bounded offline baseline and retains observed extension registration and installation checks in checkpoint 7.
+- The next implementation slice is checkpoint 4, the Chrome DevTools adapter pilot.

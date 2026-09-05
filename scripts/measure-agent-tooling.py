@@ -1,0 +1,257 @@
+#!/usr/bin/env python3
+"""Project default tool/skill description sizes from reviewed source, without executing it."""
+
+import argparse
+import hashlib
+import json
+from pathlib import Path
+import re
+import sys
+import textwrap
+
+ROOT = Path(__file__).resolve().parents[1]
+PACKAGES = {"@upstash/context7-pi": "0.1.2", "pi-subagents": "0.65.0", "pi-web-access": "0.27.0"}
+SOURCE_SHA256 = {
+    "@upstash/context7-pi/package.json": "367f6565087be5e89315d3cb171d9f391017124b598b744662c3500705adcb11",
+    "@upstash/context7-pi/extensions/context7.ts": "b8b3ae539981a1469678e19771c061e692838e8c1fde6a5a3990962a8671c8e7",
+    "@upstash/context7-pi/lib/prompts.ts": "8169441933875f0e6ffd4fb01959141f1c33921f7dea7fd6ab5a8151318e1156",
+    "@upstash/context7-pi/lib/tools/resolve-library-id.ts": "d70bcc0abdf8cd3a85be4c79e548089922f5475bfb46978a9cd2ca836e1d5d88",
+    "@upstash/context7-pi/lib/tools/query-docs.ts": "d05ace29b2267a18c396f297f07c06c5a7de68a39c034034fc03c86f013c83f3",
+    "pi-subagents/package.json": "6cf6be693b51463b000a16c5bbdced421de47ef7e5be406dbd018743341492b5",
+    "pi-subagents/index.ts": "a2f11dbe8e200bd8c590441316a9c6ab222318d2aa738670dedcf0e72592dde3",
+    "pi-subagents/src/extension/index.ts": "7611db8d751563abe1d325bad8134829e673df52b320d1f061b0b4041c180211",
+    "pi-subagents/src/extension/config.ts": "a7954adf4bc11569e8da1269139a31c0958ff79f44450664170e9594fc6e1973",
+    "pi-subagents/src/extension/tool-description.ts": "ed78d45483f85b3fae333277175f5c434c037d937e831f35440f4df746029d52",
+    "pi-subagents/src/runs/background/wait-tool.ts": "5ed1670e1c560834ca1c2a857440aa6b8152958236a183f86909b36b3d3a1e4f",
+    "pi-subagents/src/runs/background/wait-config.ts": "51a0faf216a858a6beda0c3f41cb1b48cc3975ac7d8514758fb7ec2397c42c66",
+    "pi-subagents/src/intercom/native-supervisor-channel.ts": "a679c78fdb6048849a35626ce68fb75ac3ab801b60844f16ff4c68d6302f4c55",
+    "pi-web-access/package.json": "820c77279eaa539e187191fa01deb931250be14a588667c31b96904f04b9bcb1",
+    "pi-web-access/index.ts": "a08fda14e5b37d1b18a2260e36dc7b17f154ace0db4bcaf7ca8a065bcec908cd"
+}
+
+
+def require(condition, message):
+    if not condition:
+        raise ValueError(message)
+
+
+def source_file(root, relative):
+    parts = Path(relative).parts
+    require(parts and not Path(relative).is_absolute() and ".." not in parts, "Unsafe source path")
+    path = root
+    for part in parts:
+        path = path / part
+        require(not path.is_symlink(), f"Symlinked source: {relative}")
+    require(path.is_file(), f"Missing regular source: {relative}")
+    return path
+
+
+def literal_after(text, marker, substitutions=None):
+    require(text.count(marker) == 1, f"Source marker changed: {marker}")
+    rest = text.split(marker, 1)[1].lstrip()
+    require(rest and rest[0] in '\"\'`', f"Expected string literal: {marker}")
+    quote, index, output = rest[0], 1, []
+    escapes = {"n": "\n", "r": "\r", "t": "\t", "\\": "\\", '"': '"', "'": "'", "`": "`"}
+    while index < len(rest):
+        char = rest[index]
+        if char == quote:
+            require(rest[index + 1:].lstrip().startswith((",", ";")), "Unsupported string continuation")
+            return "".join(output)
+        if char == "\\":
+            index += 1
+            require(index < len(rest) and rest[index] in escapes, "Unsupported string escape")
+            output.append(escapes[rest[index]])
+        elif quote == "`" and rest[index:index + 2] == "${":
+            end = rest.find("}", index + 2)
+            expression = rest[index + 2:end]
+            require(end != -1 and expression in (substitutions or {}), "Unsupported template expression")
+            output.append(substitutions[expression])
+            index = end
+        else:
+            require(quote == "`" or char not in "\r\n", "Multiline quoted string")
+            output.append(char)
+        index += 1
+    raise ValueError("Unterminated string literal")
+
+
+def skill_field(frontmatter, key):
+    matches = list(re.finditer(rf"^{re.escape(key)}: *(.*)$", frontmatter, re.MULTILINE))
+    require(len(matches) <= 1, f"Duplicate skill field: {key}")
+    if not matches:
+        return None
+    match = matches[0]
+    value = match.group(1).rstrip()
+    following = frontmatter[match.end():].lstrip("\n").splitlines()
+    block = []
+    for line in following:
+        if line and not line.startswith(" "):
+            break
+        block.append(line)
+    if value in ("|", ">-"):
+        body = textwrap.dedent("\n".join(block)).rstrip("\n")
+        require(body and not any(line.startswith(" ") for line in body.splitlines()), "Unsupported block indentation")
+        if value == "|":
+            return body + "\n"
+        require("\n\n\n" not in body, "Unsupported folded blank lines")
+        return "\n".join(paragraph.replace("\n", " ") for paragraph in body.split("\n\n"))
+    require(not any(line.strip() for line in block), "Unsupported scalar continuation")
+    require(value and value[0] not in "'\"!&*[{>|" and " #" not in value and ": " not in value,
+            f"Unsupported skill scalar: {key}")
+    if key in ("name", "description"):
+        require(value.lower() not in ("true", "false", "null", "~")
+                and not re.fullmatch(
+                    r"[-+]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][-+]?[0-9]+)?"
+                    r"|0o[0-7]+|0x[0-9a-fA-F]+|[-+]?\.(?:inf|Inf|INF)|\.(?:nan|NaN|NAN)", value),
+                f"Non-string skill {key}")
+    return value
+
+
+def skill_description(text):
+    require(text.startswith("---\n") and "\n---\n" in text[4:], "Missing skill frontmatter")
+    frontmatter = text[4:].split("\n---\n", 1)[0]
+    name = skill_field(frontmatter, "name")
+    description = skill_field(frontmatter, "description")
+    manual = skill_field(frontmatter, "disable-model-invocation")
+    require(name and re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", name), "Unsupported skill name")
+    require(description and description.strip(), "Missing skill description")
+    require(manual in (None, "true", "false"), "Unsupported manual skill flag")
+    return name, description, manual == "true"
+
+
+def skill_files(root, include_root_files):
+    require(root.is_dir() and not root.is_symlink(), "Missing or symlinked skill directory")
+    entries = sorted(root.iterdir())
+    require(not any(p.name in (".gitignore", ".ignore", ".fdignore") for p in entries),
+            "Skill ignore rules require review")
+    skill = root / "SKILL.md"
+    if skill.exists() or skill.is_symlink():
+        yield source_file(root, "SKILL.md")
+        return
+    for path in entries:
+        if path.name.startswith(".") or path.name == "node_modules":
+            continue
+        require(not path.is_symlink(), "Symlinked skill discovery requires review")
+        if path.is_dir():
+            yield from skill_files(path, False)
+        elif include_root_files and path.suffix == ".md":
+            yield source_file(root, path.name)
+
+
+def sizes(text):
+    return {"characters": len(text), "utf8_bytes": len(text.encode("utf-8"))}
+
+
+def measure(repo, packages_root):
+    fragment_data = source_file(repo, "stow/pi/.pi/agent/settings.fragment.json").read_bytes()
+    fragment = json.loads(fragment_data)
+    expected = [f"npm:{name}@{version}" for name, version in PACKAGES.items()]
+    require(fragment.get("packages") == expected, "Declared package set/filters changed; review the projection")
+    inputs = {"tracked/settings.fragment.json": hashlib.sha256(fragment_data).hexdigest()}
+    sources, manifests = {}, {}
+
+    def read(root, relative, label):
+        data = source_file(root, relative).read_bytes()
+        inputs[label] = hashlib.sha256(data).hexdigest()
+        return data.decode("utf-8")
+
+    for name, version in PACKAGES.items():
+        manifest = json.loads(read(packages_root, f"{name}/package.json", f"{name}/package.json"))
+        require(manifest.get("name") == name and manifest.get("version") == version, f"Installed version mismatch: {name}")
+        manifests[name] = manifest
+    for relative, digest in SOURCE_SHA256.items():
+        sources[relative] = read(packages_root, relative, relative)
+        require(inputs[relative] == digest, f"Reviewed source drift: {relative}")
+
+    tools = []
+
+    def tool(package, name, text):
+        tools.append({"package": package, "name": name, **sizes(text)})
+
+    context7 = sources["@upstash/context7-pi/lib/prompts.ts"]
+    for name, constant in (("resolve-library-id", "RESOLVE_LIBRARY_ID_DESCRIPTION"), ("query-docs", "QUERY_DOCS_DESCRIPTION")):
+        tool("@upstash/context7-pi", name, literal_after(context7, f"export const {constant} ="))
+
+    subagents = sources["pi-subagents/src/extension/tool-description.ts"]
+    constants = {}
+    for constant in ("WORKFLOW_RESOURCE_GUIDANCE", "AGENT_SELECTION_GUIDANCE", "WORKFLOW_SCRIPT_PORTABILITY_GUIDANCE",
+                     "WORKFLOW_LANES_GUIDANCE", "WORKFLOW_HOST_GUIDANCE", "EXTERNAL_CLI_RUNNER_GUIDANCE"):
+        constants[constant] = literal_after(subagents, f"const {constant} =")
+    tool("pi-subagents", "subagent", literal_after(subagents, "export const DEFAULT_SUBAGENT_TOOL_DESCRIPTION =", constants))
+    wait = sources["pi-subagents/src/runs/background/wait-tool.ts"]
+    wait_disabled = 'enabled ? "" : "\\n\\nConfigured behavior: bg_wait is disabled by config.waitTool or PI_SUBAGENT_WAIT_TOOL_ENABLED and returns immediately without blocking."'
+    tool("pi-subagents", "bg_wait", literal_after(wait, "const description =", {wait_disabled: ""}))
+    supervisor = sources["pi-subagents/src/intercom/native-supervisor-channel.ts"]
+    supervisor_name = literal_after(supervisor, "export const NATIVE_SUPERVISOR_TOOL_NAME =")
+    parent_marker = "function buildParentSupervisorTool("
+    require(supervisor.count(parent_marker) == 1, "Parent supervisor registration changed")
+    parent_definition = supervisor.split(parent_marker, 1)[1].split("parameters:", 1)[0]
+    tool("pi-subagents", supervisor_name, literal_after(parent_definition, "description:"))
+
+    web = sources["pi-web-access/index.ts"]
+    substitutions = {
+        "fetchContentStorageNote": "Full original content is stored for retrieval with get_search_content.",
+        "storedContentSources": "web_search, source_check, or fetch_content",
+    }
+    for key, name in (("webSearch", "web_search"), ("sourceCheck", "source_check"),
+                      ("fetchContent", "fetch_content"), ("getSearchContent", "get_search_content")):
+        marker = f"name: toolNames.{key},"
+        require(web.count(marker) == 1, "Web tool registration changed")
+        definition = web.split(marker, 1)[1].split("parameters:", 1)[0]
+        tool("pi-web-access", name, literal_after(definition, "description:", substitutions))
+
+    skills, manual, names = [], [], set()
+    roots = [("shared", repo / "stow/agents/.agents/skills", False)]
+    for name, manifest in manifests.items():
+        require(isinstance(manifest.get("pi"), dict), "Package manifest discovery changed")
+        paths = manifest["pi"].get("skills", [])
+        require(paths in ([], ["./skills"]), "Package skill manifest/filters require review")
+        roots.extend((name, packages_root / name / "skills", True) for _ in paths)
+    for origin, root, include_root_files in roots:
+        for path in skill_files(root, include_root_files):
+            relative = path.relative_to(root).as_posix()
+            text = read(root, relative, f"{origin}/skills/{relative}")
+            name, description, is_manual = skill_description(text)
+            require(name not in names, "Skill name collision requires review")
+            names.add(name)
+            if is_manual:
+                manual.append(name)
+            else:
+                skills.append({"package": origin, "name": name, **sizes(description)})
+
+    def total(rows):
+        return {"count": len(rows), **{key: sum(row[key] for row in rows) for key in ("characters", "utf8_bytes")}}
+
+    fingerprint = "".join(f"{digest}  {name}\n" for name, digest in sorted(inputs.items()))
+    return {
+        "method": "source-derived default-registration projection; not observed runtime registration",
+        "declared_versions": PACKAGES,
+        "tools": tools, "tool_descriptions": total(tools),
+        "skills": skills, "advertised_skill_descriptions": total(skills),
+        "manual_skills_excluded": sorted(manual),
+        "assumptions": ["Parent session after ordinary session_start; no environment or project overrides",
+                        "Default Subagents description and enabled bg_wait; all four default Web Access tools",
+                        "Only the fragment package set and tracked shared skills"],
+        "exclusions": ["Tool schemas and names/labels, promptSnippet, promptGuidelines",
+                       "Skill XML escaping/wrappers, names, locations, instructions and bodies",
+                       "Built-in tools, commands, prompts, roles, dynamic resources and runtime tool activation",
+                       "User/project config, credentials, hooks, providers, transcripts and wire serialization",
+                       "No provider token measurement"],
+        "input_sha256": dict(sorted(inputs.items())),
+        "input_set_sha256": hashlib.sha256(fingerprint.encode("utf-8")).hexdigest(),
+    }
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--packages-root", type=Path, required=True, help="Installed npm node_modules source directory")
+    args = parser.parse_args()
+    try:
+        print(json.dumps(measure(ROOT, args.packages_root), indent=2, ensure_ascii=False))
+    except (OSError, ValueError) as error:
+        print(f"measure-agent-tooling: {error}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
