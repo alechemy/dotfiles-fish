@@ -121,6 +121,8 @@ This establishes a defect in this pilot's unbundled loader route, not failure of
 
 The attempted host-gate update was reverted. The runner still requires the accepted Pi `0.84.4` version and loader digest, and refuses the installed `0.85.0` host. No dependency injection, installed-source patch, stub loader or direct MCP substitute is part of this pilot. A corrected upstream distribution, separately reviewed and installed through the host's owner, is needed before rerunning both synthetic modes and implementing browser checks. No host repair was attempted.
 
+A subsequent source-only review verified the exact official Pi `0.85.1` archive. It removes the offending experimental imports from `main.js` and excludes experimental modules from the published package. No `pi-server` imports remain in shipped unbundled JavaScript; the loader and root index are unchanged from `0.85.0`. This addresses the known import defect in source, not runtime compatibility. Both Homebrew's formula and API still offered `0.85.0` at this check. Installation and isolated import/synthetic verification remain pending Homebrew availability. The candidate's integrity and revision are recorded in provenance; the accepted execution gate remains unchanged.
+
 The failed runtime process exited, and the runner confirmed its owned process group had exited before removing the temporary runtime. After independent review, the parent removed the exact source, dependency, failure-diagnostic and app-extraction workspaces. Source comparisons, integrity metadata and review reports remain in the private review artifacts. The original Homebrew DMG remains intact. No browser profile or browser output was created.
 
 ### Repeating signed acquisition

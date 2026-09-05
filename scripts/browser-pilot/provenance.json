@@ -201,5 +201,16 @@
     "registryIntegrity": "sha512-INxVkLAVfAMju5MojJpmyu/0bMP+r+ffZuS7UqVv32E2JwHBRbcHfELDfmFNvapEbgYfKN2r9OYO1p3TqDBR+g==",
     "unbundledLoaderResult": "ERR_MODULE_NOT_FOUND: @earendil-works/pi-server",
     "accepted": false
+  },
+  "pendingHostCandidate": {
+    "piVersion": "0.85.1",
+    "revision": "d981de1229ef899957bbe968bc8dcda02a21f477",
+    "registryIntegrity": "sha512-FGRN+OHbWaefBPGaTggAdLjrIHW+s2PzLyglz/5dfLzb9of7uuXMXYC0fJIeZTw+shS32o2cuQ9jF7YSDuL/oQ==",
+    "archiveSha256": "1f498729649bdce647d1160993b4d92bf3c614cc819213bee2f91dd34f2a7af4",
+    "piLoaderSha256": "a1393de916487a2c47107ac7239f3139dcdb938705f88ba1ea5a954b3c8bb483",
+    "knownImportRemoved": true,
+    "homebrewVersionAtReview": "0.85.0",
+    "runtimeVerified": false,
+    "accepted": false
   }
 }
