@@ -1,2 +1,13 @@
+# These press_key values are reviewed source and SDK catalog SHA-256 digests.
+filter = '''
+finding["rule_id"] == "generic-api-key" &&
+get(attributes, "path", "") == "scripts/browser-pilot/browser-catalog.json" &&
+filter.matchesAny(finding["line"], [`^\s*"press_key": "[a-f0-9]{64}",?\s*$`]) &&
+finding["secret"] in [
+  "a39ff638119eb88c42ead295416426bb4d7c0995e139b0b98bde22df5d3e3ce0",
+  "d6bd2fb957e7adef6793a33edc83e06fab60063d3236f95a157fd090218052b1"
+]
+'''
+
 [extend]
 useDefault = true

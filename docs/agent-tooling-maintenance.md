@@ -19,7 +19,7 @@ The installed source manifests inspected for checkpoint 3 declare Pi `0.84.4`, C
 
 Claude/Copilot instruction and skill compatibility remain. Their CLIs stay Homebrew-owned, and the Zed Claude ACP bridge retains setup's separate clone/build path. Private work MCP remains outside tracked configuration. Work migration and DEVONthink transport replacement remain deferred checkpoints. Anki/filesystem MCP stay retired; no Pi comment stripper is added.
 
-The [Chrome DevTools pilot](agent-browser-pilot.md) records successful synthetic checks on Pi `0.84.4` and signed Google Chrome `152.0.7977.83` acquisition. Browser execution remains deferred because Pi `0.85.0`'s unbundled loader imports undeclared `@earendil-works/pi-server`. This does not establish failure of the bundled CLI. The pilot record owns acquisition, signature checks, cleanup and retry requirements. Live adoption remains pending.
+The [Chrome DevTools pilot](agent-browser-pilot.md) records both synthetic modes and finite signed Chrome `152.0.7977.83` browser checks passing on Pi `0.85.1`. The user-approved Homebrew upgrade corrected the earlier `0.85.0` unbundled-loader import defect. The pilot owns exact source/signature gates, SDK-normalized catalog limits, fictional DOM/inspection/trace evidence and verified process/profile/output cleanup. Historical `0.84.4` successes remain separate. No live Pi model/TUI session or production activation was tested; adoption and Claude fallback retirement remain pending.
 
 ## Restrictions from the source review
 

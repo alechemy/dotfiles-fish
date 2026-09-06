@@ -2,29 +2,29 @@
 
 ## Outcome
 
-Checkpoint 4 remains **deferred** for browser execution and live adoption. The earlier isolated synthetic adapter checks passed on Pi `0.84.4`. The signed Chrome retry stopped before adapter registration because the installed Pi `0.85.0` unbundled extension loader cannot resolve an undeclared dependency. Browser-task parity remains untested. Keep the Claude browser fallback, native Context7, Things helper and agent-reader overlay.
+The finite browser checks passed on Pi `0.85.1` with signed Google Chrome `152.0.7977.83`. Both synthetic adapter modes also passed. Browser calls used the published adapter's `initializeMcp` and `executeCall` through Pi's installed `loadExtensions`, with catalog assertions on the same connection. This is an isolated fictional test, not a live Pi model or TUI session. Live adoption and Claude fallback retirement remain deferred. Keep native Context7, Things and the agent-reader overlay.
 
-The separately approved standard Google Chrome `152.0.7977.83` candidate passes strict bundle-signature verification and Gatekeeper assessment. It resolves the browser acquisition gate without relaxing it. The earlier official Chrome for Testing `152.0.7977.42` archive remains rejected by that gate because its bundle is ad-hoc/linker-signed and lacks sealed signature resources. That historical packaging constraint is not evidence of corruption or tampering.
+Homebrew upgraded only Pi from `0.85.0` to `0.85.1` after user approval. The corrected release removes the transitive unbundled-loader import defect that blocked the earlier retry. Historical Pi `0.84.4` synthetic successes remain separate evidence. The earlier Chrome for Testing `152.0.7977.42` archive remains rejected because its ad-hoc/linker-signed bundle lacks sealed signature resources. That packaging constraint is not evidence of tampering.
 
-No Chrome server or browser code executed. No adapter was loaded into live Pi. These opt-in test resources live under `scripts/browser-pilot/`, outside Stow discovery, setup and app-owned configuration. There is no production browser command, bridge, settings override or profile in this change.
+These opt-in resources live under `scripts/browser-pilot/`, outside Stow discovery, setup and app-owned configuration. No adapter was activated in live Pi. There is no production browser command, settings override or reusable profile.
 
 ## Reviewed inputs
 
 | Input | Exact version or revision | Evidence and ownership |
 |---|---|---|
-| Pi | `0.84.4` | Installed official docs and extension loader. Homebrew owns the host. |
+| Pi | `0.85.1`, Git `d981de1229ef899957bbe968bc8dcda02a21f477` | Official npm integrity, installed source/docs, isolated loader import and runtime checks. Homebrew owns the host. |
 | Node | `v24.18.0` | Installed runtime, version checked again in a cleared environment before test imports. |
 | MCP adapter | `pi-mcp-adapter@2.32.1`, Git `10a45367e033a32026987a75d6f401e37340c86f` | Published npm source, registry SHA-512 verified. |
-| Chrome server | `chrome-devtools-mcp@1.8.0`, Git `45f187b1e3202c9f32ddba913be5d68751c3caa3` | Official published source, registry SHA-512 verified. Source review only. |
+| Chrome server | `chrome-devtools-mcp@1.8.0`, Git `45f187b1e3202c9f32ddba913be5d68751c3caa3` | Official published source, registry SHA-512 and source tree verified; finite runtime checks passed. |
 | Earlier browser | Chrome for Testing `152.0.7977.42`, `mac-arm64` | Official exact-version metadata and Google Storage archive. Failed strict signature gate; never launched. |
-| Signed candidate | Google Chrome `152.0.7977.83`, `x86_64` + `arm64` | Official Google DMG fetched through Homebrew. Strict signature and Gatekeeper checks passed; never launched. |
-| Blocked host retry | Installed Pi `0.85.0` | Unbundled loader import failed before synthetic adapter registration. Not accepted as a replacement for the `0.84.4` execution gate. |
+| Signed candidate | Google Chrome `152.0.7977.83`, `x86_64` + `arm64` | Official Google DMG fetched through Homebrew. Strict signature and Gatekeeper checks passed; finite headless launch checked. |
+| Blocked host retry | Installed Pi `0.85.0` | Unbundled loader import failed before synthetic adapter registration. Historical unbundled-loader defect; no browser launched in that attempt. |
 
 [`provenance.json`](../scripts/browser-pilot/provenance.json) records the release identities, integrity values, source-tree digests, Pi loader digest, lock digest and browser archive digest. [`package-lock.json`](../scripts/browser-pilot/package-lock.json) pins all 56 resolved registry entries. The scripts-disabled installation omitted optional packages and installed 39 packages. Every installed package tree matched its independently integrity-verified extracted tarball tree before execution.
 
-Tree digests hash sorted `SHA256 + two spaces + relative POSIX filename + LF` records for every regular file in a package. Symlinks fail the runtime source check. The runner requires the exact 39-package inventory, package trees, lock, Pi loader and top-level versions. It does not refresh a digest on mismatch.
+Tree digests hash sorted `SHA256 + two spaces + relative POSIX filename + LF` records for every regular file in a package. Symlinks fail the runtime source check. The runner requires the exact 39-package inventory, package trees, lock, Pi loader, root index, transitive main entrypoint and top-level versions. It does not refresh a digest on mismatch.
 
-The adapter's direct runtime resolutions were MCP client/core `2.0.0`, ext-apps `1.7.5`, keyring `1.3.0`, AJV `8.20.0`, ajv-formats `3.0.1`, cross-spawn `7.0.6`, open `10.2.0`, recheck `4.5.0`, smol-toml `1.8.0`, strip-json-comments `5.0.3` and Zod `4.5.4`. Pi supplies its own peers through the installed loader. No new Pi, TypeScript loader or test framework was installed.
+The adapter's direct runtime resolutions were MCP client/core `2.0.0`, ext-apps `1.7.5`, keyring `1.3.0`, AJV `8.20.0`, ajv-formats `3.0.1`, cross-spawn `7.0.6`, open `10.2.0`, recheck `4.5.0`, smol-toml `1.8.0`, strip-json-comments `5.0.3` and Zod `4.5.4`. Pi supplies its own peers through the installed loader. The private adapter workspace installed no Pi peer, TypeScript loader or test framework.
 
 All 56 downloaded manifests were checked for lifecycle hooks. None declared `preinstall`, `install` or `postinstall`. Ext-apps declares `prepare` and `prepack`; eventsource declares `prepare`; the adapter declares `prepack`. No hooks ran. Optional keyring native bindings and recheck native/JAR packages were omitted. Regex analysis, keyring, browser opening and Apps branches remain outside the executed scope. `--legacy-peer-deps` prevents automatic peer installation; the Pi loader supplies host peers deliberately.
 
@@ -46,21 +46,21 @@ The dependency review traced MCP 2.0.0's legacy stdio spawning, initialization, 
 
 The Chrome source review covered its entrypoints/options, browser launch and shutdown, required tools, telemetry/update/CrUX paths, output writers and CLI daemon. Relevant paths are `build/src/bin/`, `build/src/browser.js`, `build/src/config/`, `build/src/tools/`, `build/src/McpContext.js`, `build/src/McpResponse.js` and selected bundled Puppeteer code.
 
-`navigate_page.initScript` executes injected JavaScript even when adapter scripting and `evaluate_script` are excluded. A future finite driver must omit it. URL-pattern rules do not establish complete egress isolation; resource-loader redirects and suppressed Puppeteer rule-setup errors remain limits. Header redaction does not redact URLs, response bodies, console messages, screenshots or traces.
+`navigate_page.initScript` executes injected JavaScript even when adapter scripting and `evaluate_script` are excluded. The finite driver rejects it. URL-pattern rules do not establish complete egress isolation; resource-loader redirects and suppressed Puppeteer rule-setup errors remain limits. Header redaction does not redact URLs, response bodies, console messages, screenshots or traces.
 
 ## Checked synthetic behavior
 
-Run results used the unchanged published adapter through Pi's installed `loadExtensions` loader. There were no prompts, model calls, SDK agent sessions or ambient resource/package discovery. The small supplied headless context is not a full Pi session runtime.
+Both modes passed again on Pi `0.85.1`, with the same counts as the earlier `0.84.4` runs. Results used the unchanged published adapter through Pi's installed `loadExtensions` loader. There were no prompts, model calls, SDK agent sessions or ambient resource/package discovery. The small supplied headless context is not a full Pi session runtime.
 
 | Layer | Observed result |
 |---|---|
 | Finite Pi-registered test tool using adapter `initializeMcp`, `executeConnect`, `executeCall` and direct executor | One cold-cache start; zero seeded lazy starts before explicit connect; disabled server never started. |
 | Filtering and approval on that connection, repeated after reconnect | Only `allowed_echo` survived include/exclude filtering. Blocked, unexpected and hyphen/underscore names never dispatched. Six headless proxy/direct attempts returned `approval_required`. |
-| Separately permitted synthetic-only configuration | Exactly five `allowed_echo` calls, including oversized fictional output. This configuration sets server approval false only inside the finite positive test; it is not a headless approval workaround for real browsing. |
+| Separately permitted synthetic-only configuration | Exactly five `allowed_echo` calls, including oversized fictional output. This configuration sets server approval false only inside the finite positive test; it is not a general headless approval workaround. The separate browser mode permits only its fixed fictional requests. |
 | Protocol and catalog | Five tools-only fixture connections; no advertised sampling or elicitation; ten unsolicited requests received `-32601`. Catalog assertions reject resources, prompts, added tools, UI metadata and unexpected capabilities. These assertions run after discovery, not as a pre-discovery firewall. |
 | Real `createMcpAdapter` registration, separate run | Actual `mcp` and `mcp__pilot` tools refused approval-gated calls and filtered blocked calls. No scripting tool registered. Zero fixture tool calls; one fixture start/exit. |
 | Lifecycle and retention | Five fixture starts matched five exits in the seam run. Two `0600` text/JSON spill files survived adapter shutdown. The runner verified fixture PIDs had exited and removed each owned runtime tree, including spills/cache. Successful runs required no forced group cleanup. |
-| Repository regressions | Nine offline Python tests cover cleared environment, configuration, allowlist validation, source digests, version refusal, fixed fixture exchange and owned process-group cleanup, including exit between probe and signal. |
+| Repository regressions | Eighteen offline Python tests include four Node stdlib regressions. They cover cleared environment, finite launch/arguments, catalog mutation refusal, source digests, version refusal, fixed fixture exchange and owned process cleanup, including PID identity changes. |
 
 The registration test uses actual Pi registration APIs and actual adapter tool definitions. Its headless context and selected runtime tool-list methods are supplied by the finite driver. It does not test Pi's model loop, TUI approval dialog, default file discovery, persistent sessions or live extension coexistence. The seam test provides same-connection catalog visibility that the normal registration interface does not expose.
 
@@ -87,11 +87,9 @@ This digest records acquisition evidence, not an independently published trusted
 
 The browser was never launched, even for `--version`. No quarantine removal, signing changes, signature relaxation, browser-sandbox changes or everyday-browser settings changes were made. The acquired app/extraction and archive were removed after saving diagnostic metadata. No profile was created.
 
-All browser runtime tasks remain pending: actual raw catalog/schema verification, navigation, DOM fill/click, snapshot, screenshot, console/network capture and header redaction, short automatic/manual traces, URL-rule tests, server/browser shutdown and reconnect, profile cleanup and artifact cleanup. Unsupported-browser behavior has not been attributed to the adapter.
+## Corrected host and signed browser execution
 
-## Signed Chrome retry and host blocker
-
-The user fetched the standard Google Chrome DMG through Homebrew. A read-only mount supplied `Google Chrome.app`, copied into a private temporary directory outside the repository and `/Applications`; the mount was detached before this retry. Static acquisition evidence is:
+The standard Google Chrome candidate has this acquisition identity:
 
 ```text
 Version 152.0.7977.83
@@ -103,27 +101,44 @@ Gatekeeper source Notarized Developer ID
 DMG SHA256 9fe77bfc6f6e08bffba887da0730c7b513e6787ce7fc28bb681ba5e22ecee469
 ```
 
-Both `codesign --verify --deep --strict` and `spctl --assess --type execute` passed, including a repeat check during implementation. The app was not launched or modified. The original Homebrew DMG cache remains unchanged. [`provenance.json`](../scripts/browser-pilot/provenance.json) retains the failed CfT acquisition separately from this signed candidate.
+The user-supplied Homebrew cache matched those bytes. A read-only mount supplied only `Google Chrome.app`, copied with `ditto` into an owned private directory outside the repository and `/Applications`. The mount was detached and removed before execution. Strict `codesign --verify --deep --strict`, signing identity, exact version, universal architectures and `spctl --assess --type execute` all passed again. The runner repeats these gates before browsing. The cached DMG and app signatures remain unchanged.
 
-The installed `0.84.4` host path was absent; Homebrew's installed host was now `0.85.0`. A separately approved, source-only compatibility review read the installed packages, extensions, SDK and session-format documentation and relevant examples. The direct loader diff only moves the unchanged `isBundledNode` expression into `config.js`. Registration, runtime tool-list methods, aliases and explicit-path loading are unchanged. That comparison was insufficient: the transitive `main.js` imports changed too.
-
-With temporary approval to test `0.85.0`, the first synthetic mode failed during module linking:
+Pi `0.85.0` previously failed before adapter registration through this import graph:
 
 ```text
-dist/core/extensions/loader.js:24 -> dist/index.js:33
--> dist/main.js:42 -> dist/experimental/server.js:10-11
-ERR_MODULE_NOT_FOUND: @earendil-works/pi-server
+dist/core/extensions/loader.js -> dist/index.js -> dist/main.js
+-> dist/experimental/server.js -> undeclared @earendil-works/pi-server
 ```
 
-The exact official npm `0.85.0` archive passed registry SHA-512 verification. Its manifest, shrinkwrap, loader, `main.js` and `experimental/server.js` match the installed files byte for byte. The server imports `@earendil-works/pi-server` and its `/unix` export, but the package does not declare that dependency and its shrinkwrap does not include it. `PI_EXPERIMENTAL` gates command execution, not static module linking. No documented alternate extension loader avoids this graph. The current Homebrew formula consumes the same npm artifact without a dependency correction.
+The official `0.85.0` npm archive reproduced the installed defect. `PI_EXPERIMENTAL` did not gate static linking. This was a failure of the pilot's unbundled loader route, not an established failure of Pi's normal bundled CLI. No adapter, fixture, Chrome server or browser started in that attempt.
 
-This establishes a defect in this pilot's unbundled loader route, not failure of the normal bundled Pi CLI. The package's `bin` points to `dist/bundle/cli.js`, not `dist/cli.js`; normal CLI behavior was not tested. No adapter, synthetic MCP fixture, Chrome server or browser started during the failed retry. The second synthetic mode did not run. Earlier successful `0.84.4` results above remain historical evidence, not `0.85.0` results.
+The official `0.85.1` archive removes the offending imports and excludes experimental modules. Its root index and loader are unchanged from `0.85.0`. The review checked all eleven changed unbundled JavaScript files and then inspected the installed import graph and Pi peers. Installed `extensions.md`, `sdk.md`, `packages.md`, `session-format.md` and the dynamic-tool and SDK extension examples were read completely. A comparison matched 203 installed unbundled JavaScript files to the integrity-verified official archive. This excludes bundles and launch scripts affected by Homebrew shebang rewriting; it is not a full host or dependency audit.
 
-The attempted host-gate update was reverted. The runner still requires the accepted Pi `0.84.4` version and loader digest, and refuses the installed `0.85.0` host. No dependency injection, installed-source patch, stub loader or direct MCP substitute is part of this pilot. A corrected upstream distribution, separately reviewed and installed through the host's owner, is needed before rerunning both synthetic modes and implementing browser checks. No host repair was attempted.
+Homebrew's stale signed API metadata initially hid `0.85.1`. A supported forced API refresh exposed the release without updating Homebrew Git checkouts. The user then authorized `brew upgrade --formula pi-coding-agent`, with automatic updates and install cleanup disabled. Homebrew poured its `arm64_tahoe` bottle and warned that macOS 27 is prerelease. Node remained `v24.18.0`. A credential-free isolated import of the official installed loader passed before the accepted host gate changed. Both synthetic modes passed before any browser call. No installed-source patch or substitute loader was used.
 
-A subsequent source-only review verified the exact official Pi `0.85.1` archive. It removes the offending experimental imports from `main.js` and excludes experimental modules from the published package. No `pi-server` imports remain in shipped unbundled JavaScript; the loader and root index are unchanged from `0.85.0`. This addresses the known import defect in source, not runtime compatibility. Both Homebrew's formula and API still offered `0.85.0` at this check. Installation and isolated import/synthetic verification remain pending Homebrew availability. The candidate's integrity and revision are recorded in provenance; the accepted execution gate remains unchanged.
+### Browser coverage and limits
 
-The failed runtime process exited, and the runner confirmed its owned process group had exited before removing the temporary runtime. After independent review, the parent removed the exact source, dependency, failure-diagnostic and app-extraction workspaces. Source comparisons, integrity metadata and review reports remain in the private review artifacts. The original Homebrew DMG remains intact. No browser profile or browser output was created.
+The runner deliberately seeds an empty metadata cache and supplies programmatic configuration. It launches the exact source-checked server through the actual adapter, not a direct MCP client. A separate finite configuration sets approval false only for the twelve named browser tools and fixed fictional arguments. The refusal modes keep approval enabled.
+
+| Check | Actual result |
+|---|---|
+| Catalog and filtering | Two dispatch connections each exposed the expected 27 SDK-normalized tools and only the twelve filtered tool names. Tools/logging capabilities, exact schema/metadata digests and absence of prompts/resources/UI metadata passed before calls and after reconnect. |
+| Blank page and ownership | Both fresh servers launched the approved executable over a debugging pipe, each with one blank page and an owned temporary user-data-dir. Checks used only owned PID metadata, never profile contents. |
+| DOM and screenshot | Snapshot UIDs drove a fictional field fill and button click. A fresh snapshot contained the expected greeting. The PNG was exactly 1280x720. |
+| Console and network | Known fictional message/request retrieval passed. The fixture received the fictional authorization header; returned authorization and set-cookie headers were redacted while the expected response body remained visible. |
+| Performance | One five-second automatic trace and one short explicit start/stop trace passed. Both trace files and the PNG were nonempty, bounded and mode `0600`. |
+| URL rules | Direct navigation, an ordinary page subresource fetch and a redirect targeted a second owned loopback listener outside the allowlist. The page reported failures and that listener received zero requests. This does not establish complete egress isolation. |
+| Shutdown and retention | Nineteen calls across two connections passed. EOF and separately signaled SIGTERM shutdown each stopped the owned server/browser. Four server/browser exits and two removed profiles were checked. All observed owned descendants exited without forced cleanup before the runtime, cache, spills and output tree were deleted. |
+
+The process observer tracks PID and start time, not mutable command titles. Server title changes therefore preserve descendant discovery. Changed birth identities refuse signaling that PID and make cleanup fail; the runtime remains for inspection. Regressions cover title changes followed by detached-child discovery and cleanup, PID reuse, metadata-query errors and retained-runtime failure.
+
+[`browser-catalog.json`](../scripts/browser-pilot/browser-catalog.json) keeps separate full source-projection and expected SDK-normalized digests. The source projection invoked Chrome's registered `tools/list` handler without a transport or browser. MCP client `2.0.0`'s legacy `ToolAnnotationsSchema` strips `annotations.category`; it retains `execution: {taskSupport: "forbidden"}`. Only category is removed from source expectations. Observed tools are never normalized again to force a match. Two preliminary catalog-only runs stopped on this mismatch before any browser launch, and their owned processes/runtime trees were removed.
+
+These are SDK-normalized catalog assertions, not raw-wire capture. The SDK strips unknown annotation keys generally, so this interface cannot establish that arbitrary unknown wire annotations were absent. Exact source pins, visible `_meta` checks and unchanged expected schemas remain required. Offline mutations verify rejection of SDK-visible changes, including execution, schemas, capabilities and UI metadata. They do not claim to detect fields already discarded by the SDK. Post-discovery assertions are not a pre-discovery firewall, and catalog-change races are not covered.
+
+The small supplied headless Pi context is not a full agent session. No model loop, TUI approval dialog, real transcript, persistent session, ambient model/resource discovery or live extension coexistence was tested. Browser-internal networking, OS permission behavior, complete egress control, crash recovery and all dependency internals remain outside the evidence. Cleared HOME/environment and URL rules are not an OS sandbox. Header redaction does not sanitize URLs, bodies, screenshots, console messages or traces.
+
+After correcting the ownership race, the parent reran both synthetic modes and all nineteen browser calls. Four server/browser exits, two removed profiles and twenty observed owned process exits passed without forced cleanup. The parent then removed the exact dependency/source and signed-app workspaces. Runtime profiles and outputs were already gone; the user's cached DMG still matches its recorded digest. Bounded source and review evidence remains in private artifacts.
 
 ### Repeating signed acquisition
 
@@ -143,7 +158,7 @@ node --check scripts/browser-pilot/load.mjs
 
 Adapter execution is opt-in. First obtain approval for the exact locked source and execution scope. Do not use live Pi package directories, `pi install`, `pi -e npm:...`, `npx`, a project settings file or a global extension location for this test.
 
-The following shell recipe creates only a private dependency workspace. Run it from the repository after approval, using the reviewed installed Node/npm and Pi 0.84.4. It does not download or launch a browser. Keep the printed workspace path until review and cleanup are complete.
+The following shell recipe creates only a private dependency workspace. Run it from the repository after approval, using the reviewed installed Node/npm and Pi 0.85.1. It does not download or launch a browser. Keep the printed workspace path until review and cleanup are complete.
 
 ```bash
 set -euo pipefail
@@ -151,7 +166,7 @@ umask 077
 TMPBASE="${TMPDIR:-/tmp}"
 NODE="$(command -v node)"
 NPM="$(command -v npm)"
-PI_ROOT=/opt/homebrew/Cellar/pi-coding-agent/0.84.4/libexec/lib/node_modules/@earendil-works/pi-coding-agent
+PI_ROOT=/opt/homebrew/Cellar/pi-coding-agent/0.85.1/libexec/lib/node_modules/@earendil-works/pi-coding-agent
 PILOT="$(mktemp -d "${TMPBASE%/}/pi-browser-deps.XXXXXX")"
 mkdir "$PILOT/home" "$PILOT/tmp" "$PILOT/cache" "$PILOT/work"
 : > "$PILOT/user.npmrc"
@@ -171,7 +186,7 @@ python3 scripts/test-agent-browser-pilot.py \
 printf '%s\n' "$PILOT"
 ```
 
-The runner checks installed source bytes before adapter execution, copies only the finite test resources into fresh private runtime directories, and emits counts/booleans. It never accepts a URL, browser path or arbitrary tool input. It removes successful runtime trees. On a tool failure it may retain only private synthetic diagnostics under a printed `pi-browser-failure-*` path; it does not print raw diagnostics. Timeout/error cleanup targets only the process group created for that run. Review any cleanup failure before retrying.
+The runner checks installed source bytes before adapter execution, copies only the finite test resources into fresh private runtime directories, and emits counts/booleans. The synthetic path accepts no URL or tool input. The opt-in browser path accepts only separately reviewed private source/app paths; it creates both loopback fixtures and all arguments itself. It removes successful runtime trees. On a tool failure it may retain only private synthetic diagnostics under a printed `pi-browser-failure-*` path; it does not print raw diagnostics. Synthetic timeout/error cleanup targets only that run's process group. Browser cleanup also tracks its owned detached descendants by PID identity. Review any cleanup failure before retrying.
 
 To disable the pilot, stop invoking the runner. No live settings need removal. After the process and reviewer have finished, delete only the exact dependency or failure directory created by that invocation. For the recipe above, retain the shell's original `PILOT` value and use:
 
@@ -184,22 +199,31 @@ esac
 
 Do not clean shared temp directories with a wildcard. Keep retained evidence outside git and do not inspect profiles, live authentication or generated settings to diagnose this test.
 
-## Requirements to resume browser work
+## Repeating browser checks and adoption gate
 
-The exact signed candidate above has acquisition approval, but the Pi host blocker must be resolved through a separately approved corrected distribution and source review. Do not weaken the version/digest gate or repair installed imports locally. Then rerun both synthetic modes and review the exact raw tool schemas before any browser tool execution.
+After acquiring and verifying the exact Chrome server tarball and signed app above, append both private paths to the synthetic runner command:
 
-The source-reviewed full MCP launch would use an absolute Node/server entrypoint and separately approved signed Google Chrome executable, with `--headless`, `--isolated`, `--viewport=1280x720`, `--no-usage-statistics`, `--no-performance-crux`, `--no-category-emulation`, `--redact-network-headers` and one exact loopback fixture URL pattern. `CHROME_DEVTOOLS_MCP_NO_UPDATE_CHECKS=1` must be set before the entrypoint, including help/version calls. No attach flags, custom Chrome arguments, existing profile, `initScript`, uploads or `evaluate_script` belong in that finite test.
+```bash
+python3 scripts/test-agent-browser-pilot.py \
+  --node "$NODE" --pi-root "$PI_ROOT" \
+  --adapter "$PILOT/work/node_modules/pi-mcp-adapter" \
+  --chrome-server "$CHROME_SERVER" --chrome-app "$CHROME_APP"
+```
 
-Only a separate finite fixture configuration may set `approveTools: false` for the exact 12 browser tools and fixed fictional requests. It must not change the headless-refusal tests or imply general browsing authorization. Confirm the actual browser executable, pipe transport and owned temporary `--user-data-dir` using only owned PID metadata; native macOS HOME handling is not an OS sandbox. Verify server/browser exit before removing owned profile/output trees, including failure paths. Stop for user interaction if macOS requests consent.
+`CHROME_SERVER` identifies the independently integrity-verified `chrome-devtools-mcp@1.8.0` package tree. `CHROME_APP` identifies `Google Chrome.app` inside the acquisition owner's `pi-browser-app-*` directory directly under the OS temporary directory. No browser acquisition, dependency resolution or installation runs implicitly. Both synthetic modes must pass before browser preflight and execution. A changed package or browser candidate requires a new source review and approval.
 
-The proposed 12-tool allowlist is `list_pages`, `navigate_page`, `take_snapshot`, `click`, `fill`, `take_screenshot`, `list_console_messages`, `get_console_message`, `list_network_requests`, `get_network_request`, `performance_start_trace` and `performance_stop_trace`. Source projects 27 raw tools with the selected flags. Raw names, capabilities, schemas and absence of resources/prompts/UI metadata still need runtime confirmation on each dispatch connection. Do not infer an application-wide permission boundary from a finite driver assertion.
+The fixed server arguments are `--headless`, `--isolated`, the explicit signed `--executable-path`, `--viewport=1280x720`, `--no-usage-statistics`, `--no-performance-crux`, `--no-category-emulation`, `--redact-network-headers` and one exact owned loopback fixture URL pattern. `CHROME_DEVTOOLS_MCP_NO_UPDATE_CHECKS=1` precedes imports and execution. Attach options, existing profiles, custom Chrome flags, sandbox changes, `initScript`, script evaluation and uploads remain forbidden. Stop for user action if macOS requests consent.
 
-General adoption requires a separate production configuration/approval decision, upstream handling or explicit acceptance of cold-cache startup and Apps filtering limitations, a demonstrated browser lifecycle/output policy, and live Pi/TUI verification. App-owned adapter overrides, caches, auth, profiles and sessions must remain unstowed. Do not edit the phase 3 package fragment or measurement gates as part of a test rerun.
+The exact allowlist is `list_pages`, `navigate_page`, `take_snapshot`, `click`, `fill`, `take_screenshot`, `list_console_messages`, `get_console_message`, `list_network_requests`, `get_network_request`, `performance_start_trace` and `performance_stop_trace`. The driver asserts fixed argument shapes and source-reviewed catalog digests before each adapter call. It never accepts arbitrary browsing requests.
+
+The runner bounds waits and output, records only owned descendant identities and verifies exit before deleting runtime/profile/output trees. Failures copy only private diagnostics, the last fictional result and catalog evidence to a named failure directory. If process cleanup cannot be established, the owned runtime is retained and the invocation fails. Do not retry or remove that runtime until its owned processes have been checked. Never kill system/default browsers or clean shared temp trees.
+
+General adoption requires a separate production configuration/approval decision, upstream handling or explicit acceptance of cold-cache startup and Apps filtering limitations, and live Pi/TUI verification. SDK-normalized catalog visibility is another explicit limit. App-owned overrides, caches, auth, profiles and sessions must remain unstowed. The phase 3 package fragment, model pins and measurement gates are unchanged.
 
 ## MCP versus official CLI
 
 The shipped `chrome-devtools` CLI can perform all required tasks through the same tools. Exact-revision CLI docs call it experimental while the packaged README does not; that inconsistency is not the reason to choose MCP.
 
-The CLI uses a detached daemon and retains browser state until `stop`. Explicit `start` and implicit first-tool startup differ in isolation defaults. `--viaCli` enables broader defaults, including memory debugging and extensions, and daemon-version mismatch warns rather than refuses. Images create additional temporary files. These paths add lifecycle/state owners and do not test the Pi adapter. Full stdio MCP remains the proposed route. `--slim` lacks the required DOM/console/network/performance tools. No CLI path was executed.
+The CLI uses a detached daemon and retains browser state until `stop`. Explicit `start` and implicit first-tool startup differ in isolation defaults. `--viaCli` enables broader defaults, including memory debugging and extensions, and daemon-version mismatch warns rather than refuses. Images create additional temporary files. These paths add lifecycle/state owners and do not test the Pi adapter. Full stdio MCP is the checked finite route. `--slim` lacks the required DOM/console/network/performance tools. No CLI path was executed.
 
 Updates require a new source review, exact lock resolution with scripts disabled, hook inspection, integrity checks, intentional provenance changes and fresh synthetic gates. Do not refresh source digests just to make a test pass. Homebrew Pi updates require rechecking official docs and the loader boundary; a package pin does not pin the host or prove dependency safety. [Agent tooling maintenance](agent-tooling-maintenance.md) continues to own the existing three-package baseline.
