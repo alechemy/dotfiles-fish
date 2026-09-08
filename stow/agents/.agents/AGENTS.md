@@ -33,6 +33,7 @@
 - Prefer the smallest maintainable change, not the fewest lines or files. Add abstractions, dependencies, and configuration only for a current requirement or a concrete reduction in complexity.
 - Preserve validation, error handling, security, accessibility, and operational constraints. Explain any proposed reduction in scope rather than silently implementing it.
 - When delegating, pass the relevant requirements and constraints explicitly; do not assume children inherit these instructions.
+- Before delegating work that needs extension tools, verify that the provider loads in the chosen child execution mode. An async workflow does not make its children background children, and a tool allowlist does not load extensions.
 
 ## Verification and tests
 

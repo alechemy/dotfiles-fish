@@ -49,6 +49,15 @@ def configuration(root):
             "trace": {"enabled": False}}, "mcpServers": {"pilot": server, "disabled": {**server, "disabled": True}}}
 
 
+def synthetic_configuration(root):
+    config = configuration(root)
+    config["mcpServers"]["pilot"].update({
+        "literalEnv": True,
+        "env": {"PILOT_LITERAL": "!fictional-${PILOT_PARENT_VALUE}", "PILOT_VALUE": "fictional-override"},
+    })
+    return config
+
+
 def validate_configuration(config):
     for server in config["mcpServers"].values():
         allowlist = server.get("includeTools")
@@ -123,10 +132,12 @@ def run(node, pi_root, adapter, mode):
         root = Path(temporary)
         env = environment(root, node, pi_root)
         env["PILOT_MODE"] = mode
+        env["PILOT_PARENT_VALUE"] = "fictional-parent"
+        env["PILOT_VALUE"] = "fictional-parent-default"
         version = subprocess.run([str(node), "--version"], env=env, cwd=root, check=True, capture_output=True, text=True)
         if version.stdout.strip() != "v24.18.0":
             raise ValueError("Reviewed Node version mismatch")
-        config = configuration(root)
+        config = synthetic_configuration(root)
         validate_configuration(config)
         (root / "config.json").write_text(json.dumps(config))
         ambient = {"mcpServers": {"ambient": {**config["mcpServers"]["pilot"], "lifecycle": "eager"}}}
@@ -157,7 +168,15 @@ def run(node, pi_root, adapter, mode):
             except ProcessLookupError:
                 continue
             raise RuntimeError("Owned fixture process survived shutdown")
+        checks = [row["checks"] for row in rows if row["event"] == "environment"]
+        expected = {"literalPreserved": True, "configuredValueDelivered": True,
+                    "adapterParentInherited": True, "outerCredentialAbsent": True}
+        if not checks or len(checks) != sum(row["event"] == "start" for row in rows) or any(
+            check != expected for check in checks
+        ):
+            raise RuntimeError("Fictional environment delivery mismatch")
         result = json.loads((root / "summary.json").read_text())
+        result["fixtureEnvironmentChecks"] = len(checks)
     if root.exists():
         raise RuntimeError("Owned runtime cleanup failed")
     return {"mode": mode, **result, "ownedRuntimeRemoved": True}

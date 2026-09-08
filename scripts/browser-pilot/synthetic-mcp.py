@@ -7,6 +7,15 @@ from pathlib import Path
 import sys
 
 
+def environment_checks():
+    return {
+        "literalPreserved": os.environ.get("PILOT_LITERAL") == "!fictional-${PILOT_PARENT_VALUE}",
+        "configuredValueDelivered": os.environ.get("PILOT_VALUE") == "fictional-override",
+        "adapterParentInherited": os.environ.get("PILOT_PARENT_VALUE") == "fictional-parent",
+        "outerCredentialAbsent": "FAKE_AUTH_TOKEN" not in os.environ,
+    }
+
+
 def main():
     journal = Path(sys.argv[1])
 
@@ -18,6 +27,7 @@ def main():
         print(json.dumps({"jsonrpc": "2.0", **message}), flush=True)
 
     record("start")
+    record("environment", checks=environment_checks())
     try:
         for line in sys.stdin:
             message = json.loads(line)

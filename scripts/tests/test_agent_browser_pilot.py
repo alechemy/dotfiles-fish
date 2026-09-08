@@ -54,6 +54,28 @@ class AgentBrowserPilotTests(unittest.TestCase):
         self.assertIs(server["exposeResources"], False)
         self.assertIs(config["mcpServers"]["disabled"]["disabled"], True)
 
+    def test_synthetic_environment_is_literal_and_separate_from_browser_configuration(self):
+        config = pilot.synthetic_configuration(self.root)
+        pilot.validate_configuration(config)
+        server = config["mcpServers"]["pilot"]
+        self.assertTrue(server["literalEnv"])
+        self.assertEqual(server["env"], {
+            "PILOT_LITERAL": "!fictional-${PILOT_PARENT_VALUE}", "PILOT_VALUE": "fictional-override",
+        })
+        self.assertNotIn("env", pilot.configuration(self.root)["mcpServers"]["pilot"])
+        spec = importlib.util.spec_from_file_location("synthetic_mcp", pilot.RESOURCES / "synthetic-mcp.py")
+        fixture = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(fixture)
+        with patch.dict(os.environ, {**server["env"], "PILOT_PARENT_VALUE": "fictional-parent"}, clear=True):
+            self.assertTrue(all(fixture.environment_checks().values()))
+            for key, field in (("PILOT_LITERAL", "literalPreserved"), ("PILOT_VALUE", "configuredValueDelivered"),
+                               ("PILOT_PARENT_VALUE", "adapterParentInherited")):
+                with patch.dict(os.environ, {key: "fictional-wrong"}):
+                    self.assertFalse(fixture.environment_checks()[field])
+            with patch.dict(os.environ, {"FAKE_AUTH_TOKEN": "fictional-outside"}):
+                self.assertFalse(fixture.environment_checks()["outerCredentialAbsent"])
+        self.assertTrue(all(type(value) is bool for value in fixture.environment_checks().values()))
+
     def test_empty_wildcard_and_malformed_allowlists_fail(self):
         for value in ([], None, "allowed_echo", ["*"], [""], [False], ["echo?"]):
             with self.subTest(value=value):
@@ -239,7 +261,11 @@ class AgentBrowserPilotTests(unittest.TestCase):
         self.assertEqual(len(tools), 5)
         self.assertEqual(responses[-1]["error"]["code"], -32601)
         rows = [json.loads(line) for line in journal.read_text().splitlines()]
-        self.assertEqual([row["event"] for row in rows], ["start", "initialize", "call", "exit"])
+        self.assertEqual([row["event"] for row in rows], ["start", "environment", "initialize", "call", "exit"])
+        self.assertEqual(rows[1]["checks"], {
+            "literalPreserved": False, "configuredValueDelivered": False,
+            "adapterParentInherited": False, "outerCredentialAbsent": True,
+        })
 
     def test_process_group_exit_between_probe_and_signal(self):
         for calls, expected in (([None, ProcessLookupError()], False),

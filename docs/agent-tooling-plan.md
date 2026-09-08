@@ -84,12 +84,12 @@ Acceptance: The fixed tasks pass through official Pi extension loading and actua
 
 ### 5. Evaluate private work MCP in Pi
 
-Status: Pending. Depends on checkpoint 4.
+Status: Source and synthetic evaluation accepted; live migration deferred. The existing definition and client are retained. The private evaluation records the candidate, source limitations and approval gates. An exact server/dependency review and separately approved backend canary remain necessary.
 
-- [ ] Inventory existing work definitions using sanitized structural metadata only.
-- [ ] Evaluate adapter transport and authentication compatibility without printing endpoints, environment values, or credentials.
-- [ ] Keep any adopted definitions and work documentation in the ignored work package. Avoid importing all legacy host configuration globally.
-- [ ] Validate configuration and synthetic transport behavior first. Request a bounded real-backend validation scope before making business-data queries or mutations.
+- [x] Inventory existing work definitions using sanitized structural metadata only.
+- [x] Evaluate adapter transport and authentication configuration without printing endpoints, environment values, or credentials. Credential validity, permissions and hosted runtime behavior remain unverified.
+- [x] Keep work documentation in the ignored work package. No production definition was adopted or activated, and no legacy configuration was imported globally.
+- [x] Validate fictional stdio configuration delivery through the actual adapter, retaining filtering, headless refusals and cleanup checks. The hosted alternative remains source-reviewed only. Record a bounded real-backend approval scope before making business-data queries or mutations.
 - [ ] Retain the old client until authentication, needed tools, permissions, and results are verified. Evaluate Zed separately; MCP parity does not imply editor-client parity.
 
 Acceptance: Necessary work tools function through Pi under the same confidentiality requirements, or a specific blocker and retained fallback are documented. No identifying work data is tracked.
@@ -151,3 +151,5 @@ Acceptance: The primary Pi workflow is reproducible at every tested boundary; br
 - Independent review found a process-title race in descendant tracking. The parent reproduced it, switched ownership to PID/start time, preserved PID-reuse refusal and made ambiguous cleanup retain its runtime. The retained regressions and full rerun passed, including 120 scripts tests and eighteen focused Apple-Python tests. The category-only catalog expectation adjustment follows the negotiated legacy SDK; discarded wire annotations remain outside runtime visibility.
 - The secrets scanner mistook two `press_key` catalog SHA-256 digests for API keys. A filter matches only that rule, file, field shape and those two exact public digests. Disposable-repository tests confirm that changed hashes, other fields and other paths still produce findings.
 - Checkpoint 4 is accepted for the isolated pilot. Live model/TUI checks, production configuration and fallback retirement remain separate decisions, with cold-cache startup, Apps filtering and output-retention limits still documented. The next planned checkpoint is the private work MCP evaluation; real-backend access requires its own bounded approval.
+- Checkpoint 5's source and synthetic evaluation is accepted after independent review. The existing private definition remains unchanged, and the detailed comparison and proposed canary stay in the ignored work package. Actual server dependencies, authentication, permissions, nested requests and result parity remain approval gates; live migration is deferred.
+- Both actual synthetic modes passed after restarting the parent on Pi `0.85.1`. Six boolean receipts verify literal values, explicit overrides, adapter-parent inheritance and exclusion of an outer fictional credential. Existing refusal/call/spill counts and owned cleanup are unchanged. The parent reran 121 scripts tests and nineteen focused Apple-Python tests. The original research workflow failed on missing child extension tools; its preserved public-source report is separate from the successful fresh implementation review.
