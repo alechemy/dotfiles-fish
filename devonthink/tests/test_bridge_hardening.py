@@ -2,9 +2,10 @@
 the ensure_event undated-match gap/backfill core, the shared LastContact
 guard, alias union, source-kind classify() precedence, email normalization,
 the NFKD/casefold rewrite of normName, and mdField (the enumeration-path
-split of mdValue that reads a bulk-fetched customMetaData dict).
+split of mdValue that reads a bulk-fetched customMetaData dict), and
+find_by_field's exact post-filter over mocked search candidates.
 
-All of these are pure functions in the bridge, so this drives them through
+These checks use pure functions or mocked I/O, so this drives them through
 the real JXA via the same osascript eval harness as test_section_span.py and
 test_entity_log_sort.py rather than reimplementing them in Python — a Python
 copy would only prove the copy agrees with itself. No DEVONthink involved.
@@ -58,6 +59,32 @@ HARNESS = textwrap.dedent("""
         },
       }
       return JSON.stringify(cases.map(function (c) {
+        if (c.fn === 'find_by_field') {
+          const start = bridgeSrc.indexOf('    find_by_field(op) {')
+          const end = bridgeSrc.indexOf('\\n    },', start)
+          if (start < 0 || end < 0) throw new Error('lookup handler not found')
+          let query = null
+          let scope = null
+          const db = { root: function () { return 'fixture-root' } }
+          const dt = { search: function (q, options) {
+            query = q
+            scope = options.in
+            return c.records.map(function (r) {
+              return {
+                uuid: function () { return r.uuid },
+                name: function () { return r.name },
+                path: function () { return '/tmp/fixture.tiff' },
+                location: function () { return '/Fixture' },
+                customMetaData: function () { return r.md || {} },
+              }
+            })
+          } }
+          const handler = Function('dt', 'db', 'mdValue', 'flagSet',
+            'return ({' + bridgeSrc.slice(start, end + 7) + '})'
+          )(dt, db, mdValue, flagSet)
+          const results = handler.find_by_field(c.op)
+          return { query: query, scope: scope, results: results }
+        }
         if (c.fn === 'linkEntities') {
           const src = bridgeSrc + '\\n;(function(){ entityIndex = ' +
             JSON.stringify(c.entityIndex) + '; return linkEntities(' +
@@ -156,6 +183,58 @@ class LinkEntitiesUrlAndBracketSafety(unittest.TestCase):
         }], self.tmp)[0]
         self.assertNotIn("Maya [Chen]", names)
         self.assertIn("Sam Rivera", names)
+
+
+class FindByFieldExactFilter(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = make_tmp("dt-find-by-field-test")
+
+    def test_multiword_and_punctuation_values_reject_near_matches(self):
+        values = ["Project Atlas", 'Atlas "Review" (A+B)', "Atlas: Phase-2",
+                  "NOT Atlas", "Atlas OR Meridian"]
+        cases = []
+        for value in values:
+            candidates = [value + " draft", value.lower(), value, value + " "]
+            records = [
+                {"uuid": f"FIXTURE-{i}", "name": "Fictional notebook",
+                 "md": {"mdsourcefile": candidate, "mdhandwritten": "true",
+                        "mddocumenttype": "Handwritten Note"}}
+                for i, candidate in enumerate(candidates)
+            ]
+            records.append({"uuid": "MISSING", "name": "Missing field"})
+            cases.append({"fn": "find_by_field", "records": records,
+                          "op": {"field": "SourceFile", "value": value}})
+        for value, result in zip(values, run_cases(cases, self.tmp)):
+            with self.subTest(value=value):
+                self.assertEqual(result["query"], "mdsourcefile==" + value)
+                self.assertEqual(result["scope"], "fixture-root")
+                self.assertEqual([r["uuid"] for r in result["results"]],
+                                 ["FIXTURE-2"])
+                self.assertTrue(result["results"][0]["handwritten"])
+
+    def test_document_type_uses_exact_metadata_not_record_name(self):
+        result = run_cases([{
+            "fn": "find_by_field",
+            "op": {"field": "Document Type", "value": "Meeting Notes"},
+            "records": [
+                {"uuid": "EXACT", "name": "Fictional session",
+                 "md": {"mddocumenttype": "Meeting Notes"}},
+                {"uuid": "NEAR", "name": "Meeting Notes",
+                 "md": {"mddocumenttype": "Meeting Notes Draft"}},
+                {"uuid": "MISSING", "name": "Meeting Notes"},
+            ],
+        }], self.tmp)[0]
+        self.assertEqual(result["query"], "mddocumenttype==Meeting Notes")
+        self.assertEqual([r["uuid"] for r in result["results"]], ["EXACT"])
+        self.assertFalse(result["results"][0]["handwritten"])
+
+    def test_no_search_candidates_produces_no_match(self):
+        result = run_cases([{
+            "fn": "find_by_field", "records": [],
+            "op": {"field": "SourceFile", "value": "Project Atlas"},
+        }], self.tmp)[0]
+        self.assertEqual(result["results"], [])
 
 
 class EnsureEventGapAndBackfillCore(unittest.TestCase):

@@ -13,7 +13,8 @@ use scripting additions
 --   3. No H1 exists → inject "# <filename>" into the document body.
 --
 -- Parsing notes:
--- - YAML frontmatter (--- … ---) at the top of the file is skipped.
+-- - YAML frontmatter at the top of the file is skipped. An unclosed block
+--   ends at the first blank line, or EOF if none exists.
 -- - Fenced code blocks (``` / ~~~) are skipped.
 -- - The first line matching ^#\s+.+$ outside those regions is treated as the H1.
 -- - When injecting an H1, it is placed immediately after frontmatter (if any),
@@ -231,18 +232,24 @@ on parseH1(t)
 	set firstLine to my trimWhitespace(item 1 of linesList)
 	if firstLine is "---" then
 		set i to 2
+		set firstBlank to 0
 		repeat while i ≤ lineCount
-			if (my trimWhitespace(item i of linesList)) is "---" then
+			set trimmedLine to my trimWhitespace(item i of linesList)
+			if trimmedLine is "---" then
 				set i to i + 1
 				set fmEnd to i
 				exit repeat
 			end if
+			if trimmedLine is "" and firstBlank is 0 then set firstBlank to i + 1
 			set i to i + 1
 		end repeat
 		if fmEnd is 1 then
-			-- Never found closing ---; treat entire file as frontmatter
-			set fmEnd to lineCount + 1
-			set i to lineCount + 1
+			if firstBlank > 0 then
+				set fmEnd to firstBlank
+			else
+				set fmEnd to lineCount + 1
+			end if
+			set i to fmEnd
 		end if
 	end if
 
@@ -326,8 +333,8 @@ on isEffectivelyEmpty(t)
 end isEffectivelyEmpty
 
 on splitLines(t)
-	set t2 to my replaceText(return, linefeed, t)
-	set t2 to my replaceText(character id 13, linefeed, t2)
+	set t2 to my replaceText(return & linefeed, linefeed, t)
+	set t2 to my replaceText(return, linefeed, t2)
 
 	set AppleScript's text item delimiters to linefeed
 	set itemsList to text items of t2
@@ -345,11 +352,11 @@ end joinLines
 on trimWhitespace(t)
 	set s to t as text
 	repeat while s begins with " " or s begins with tab
-		if (count of s) = 0 then exit repeat
+		if (count of s) ≤ 1 then return ""
 		set s to text 2 thru -1 of s
 	end repeat
 	repeat while s ends with " " or s ends with tab
-		if (count of s) = 0 then exit repeat
+		if (count of s) ≤ 1 then return ""
 		set s to text 1 thru -2 of s
 	end repeat
 	return s

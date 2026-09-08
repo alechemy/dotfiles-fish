@@ -269,28 +269,126 @@ README's [Multi-Mac Topology](../README.md#multi-mac-topology-driver--follower).
 
 ## Database restore
 
-The Lorebook database is lost or corrupt, and CloudKit + Time Machine aren't
-enough (e.g. sync-store loss plus a dead machine).
+Use this section to plan recovery or an isolated restore drill. Opening a
+restored database on the normal driver is not a harmless inspection: sync,
+smart rules, and launch agents can act on it. A renamed package can retain
+the same database and record UUIDs. Preserve the original database, archives,
+and machine-local state before making recovery changes.
 
-A weekly **verified** archive runs on the driver (`dt-database-archive`,
-verify → compress → CRC-check → keep the newest 4):
+### Establish the available recovery point
+
+The [native archive job](../README.md#native-archive-job) attempts a backup at
+03:30 daily but normally creates one only after seven days have elapsed since
+its recorded success. It requires the driver/power gates to pass, DEVONthink
+to be running, and Lorebook to be open. It verifies the database, compresses
+it, checks that the ZIP is nonempty and readable, then records success and
+keeps the four most recently modified matching archives.
+
+Under an approved inspection scope:
+
+1. Inspect archive count, dated filenames, sizes, and modification times in
+   `~/Backups/DEVONthink/`. Select an explicit archive; do not assume the
+   newest file is complete or predates the incident.
+2. Compare it with `~/.local/state/devonthink/dt-database-archive.last-success`
+   and the archive component's success/failure entries in the local pipeline
+   log. Report only sanitized dates, counts, and outcomes. A loaded launch
+   agent, zero exit status, or success marker alone does not establish that
+   the archive still exists or is usable. Normal skips can exit successfully.
+3. Test the selected ZIP without extracting or printing its member paths.
+   Replace the placeholder date in this example first:
+
+   ```bash
+   archive="$HOME/Backups/DEVONthink/Lorebook-YYYY-MM-DD.dtBase2.zip"
+   if [ -s "$archive" ] && unzip -tq "$archive" >/dev/null 2>&1; then
+       printf '%s\n' 'Archive integrity check passed.'
+   else
+       printf '%s\n' 'Archive is missing, empty, or failed its integrity check.'
+   fi
+   ```
+
+4. Confirm that a separate backup destination retains a usable copy. Local
+   archives share the live database's disk-failure risk. Record archive age,
+   integrity outcome, and backup coverage separately from restore results.
+
+Creating a new archive is a separate operation, not part of read-only
+inspection. On the intended driver, with Lorebook open and explicit approval
+for the work and rotation, use:
 
 ```bash
-ls -lt ~/Backups/DEVONthink/              # Lorebook-YYYY-MM-DD.dtBase2.zip
-
-# Force an archive right now (bypasses the battery/role/cadence gates).
-~/.local/bin/dt-database-archive.sh --force
+PIPELINE_MANUAL=1 ~/.local/bin/dt-database-archive.sh --force
 ```
 
-To restore: quit DEVONthink, unzip the newest archive, open the resulting
-`.dtBase2` in DT, and run **Tools → Verify & Repair** before trusting it. Then
-rebuild every machine-local cache from the restored database so imports don't
-duplicate:
+This bypasses power, role, and cadence gates. It still verifies the database
+and tests the ZIP. A second forced run on the same day uses the same dated
+filename; it does not create a separately named recovery point. Preserve any
+archive needed for investigation before forcing a new one. A fresh archive
+of the current database also does not replace a known-good pre-incident copy.
 
-```bash
-~/.local/bin/entity-filing.py --rebuild-state
-python3 ~/.local/bin/import-github-stars.py --rebuild-state
-```
+### Isolate a restore drill before opening the copy
 
-Background on the backup layers: the README "Database Backup & Recovery"
-section.
+Agree on the source archive, destination, isolation method, expected checks,
+and cleanup scope before extraction. Prefer a separate offline macOS user
+or VM with no production database, synced account, sync-store credentials,
+or pipeline installation. Ensure networking is unavailable before opening
+the restored copy. Do not import production application settings or smart
+rules into that environment, and verify that no automation is configured to
+act on the copy. Arrange any required application access before the drill.
+
+A follower role alone is insufficient isolation. The watchdog still runs on
+followers, and sync remains available. Quitting DEVONthink on the normal
+account is likewise insufficient because the watchdog can reopen it. If an
+isolated environment is unavailable, stop and agree on another procedure
+rather than opening a duplicate in the production session.
+
+In the approved environment:
+
+1. Copy the archive and extract it to the agreed local test directory, never
+   over the live database or inside a cloud-synced folder. Keep the source
+   archive unchanged.
+2. Open only the test copy. Inspect DEVONthink's opening verification, then
+   use **File → Verify & Repair Database** to check consistency. Any repair
+   applies only to the disposable copy; record whether repair was required.
+3. Check expected record identity, internal links, and representative
+   attachment readability in the UI. A same-UUID database requires that the
+   production copy remain unavailable during link checks. Account for any
+   indexed files whose contents live outside the database package.
+4. Record sanitized outcomes and the tested app/macOS versions. Excluded
+   personal content stays out of agent output; the user confirms those checks
+   in the UI. ZIP integrity alone does not complete this drill.
+5. Close the test database and remove only the approved test artifacts.
+   Never enable production sync or run pipeline state rebuilds for the copy.
+
+An encrypted or revision-proof archive also needs its original key and a
+compatible macOS version. Check all intended recovery/follower machines
+before adopting 4.4's APFS encryption format. This drill does not authorize
+converting the production database.
+
+### Promote a recovery only under a separate plan
+
+A successful drill is not authorization to replace Lorebook. Actual recovery
+must define which copy is authoritative, where the pre-recovery files and
+state are preserved, how production automation is stopped, and how sync and
+followers will rejoin without reintroducing unwanted changes. Resolve the
+sync-store procedure against current vendor guidance before reconnecting.
+
+Reconcile machine-local state only after selecting the authoritative
+production database and before resuming automation. The available rebuild
+commands are not a universal rollback:
+
+- `entity-filing.py --rebuild-state` adds missing processed entries from
+  `EntityFiled`; it does not discard newer existing state.
+- `import-github-stars.py --rebuild-state` unions database-derived IDs with
+  existing state and retains its retry queue. It does not remove IDs that
+  exist only in a newer cache.
+- `boox-process.py --rebuild-state` reseeds journal information, not every
+  notebook page cache or staging/dedup marker. Review the
+  [Boox recovery constraints](boox-local.md#debugging) before resuming it.
+
+Preserve and reconcile each affected cache and staging area against the
+recovery point. Do not blindly delete state or run these commands against a
+test database. Authorized manual pipeline maintenance sets `PIPELINE_MANUAL=1`
+and keeps excluded content out of agent output.
+
+The [4.4 plan](devonthink-4.4-plan.md#dt44-02-correct-recovery-documentation-and-verify-archive-recovery)
+tracks archive integrity and isolated restore validation separately. The
+[README](../README.md#database-backup--recovery) describes the backup layers.

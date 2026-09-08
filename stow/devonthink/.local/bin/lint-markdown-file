@@ -1,9 +1,9 @@
 #!/bin/bash
 # Lint-fix a markdown file in place.
 #
-# Runs the same sed-plus-markdownlint-plus-tilde-escape sequence that
-# Extract: Native Text Bypass → lint-markdown.applescript applies to
-# freshly-arrived markdown. Programmatic record creators (the SingleFile
+# Normalizes tabs and runs markdownlint with DEVONthink-specific prose
+# rules for Extract: Native Text Bypass → lint-markdown.applescript.
+# Programmatic record creators (the SingleFile
 # ingester, GitHub Stars importer, etc.) call this BEFORE
 # handing the file to DT so the resulting record arrives fully lint-fixed
 # and can be pre-flagged with Recognized=1, Commented=1 — which keeps
@@ -13,10 +13,8 @@
 # Usage:
 #   lint-markdown-file <path-to-markdown>
 #
-# Exit code is always 0 so callers can use `|| :` without masking real
-# errors; markdownlint's own failures are tolerated (|| true in the
-# pipeline) because any unfixable rule violation shouldn't block the
-# document from entering DT.
+# Unfixable lint violations return 0. Invalid inputs, missing rules, and
+# formatter execution errors return nonzero.
 
 set -eu
 
@@ -31,18 +29,17 @@ if [[ ! -f "$path" ]]; then
     exit 2
 fi
 
-# Step 1: tabs → two spaces
+rules="$HOME/.config/dt-pipeline/markdownlint-rules.cjs"
+if [[ ! -r "$rules" ]]; then
+    echo "lint-markdown-file: missing rules: $rules" >&2
+    exit 2
+fi
+
 sed -i '' 's/\t/  /g' "$path"
 
-# Step 2: markdownlint --fix, non-fatal
-/opt/homebrew/bin/markdownlint "$path" --quiet --fix || true
-
-# Step 3: preserve ~~ and \~, escape bare ~ (DT renders bare ~ as
-# strikethrough unless escaped)
-sed -i '' \
-    -e 's/~~/%%DT%%/g' \
-    -e 's/\\~/%%ET%%/g' \
-    -e 's/~/\\~/g' \
-    -e 's/%%DT%%/~~/g' \
-    -e 's/%%ET%%/\\~/g' \
-    "$path"
+/opt/homebrew/bin/markdownlint --quiet --fix --rules "$rules" --enable DT001 -- "$path" || {
+    status=$?
+    if [[ $status -ne 1 ]]; then
+        exit "$status"
+    fi
+}

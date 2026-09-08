@@ -8,6 +8,7 @@ fenced code blocks) matches the given title. Prints the result to stdout.
 - H1 matches title → output unchanged
 - H1 differs → H1 line replaced
 - No H1 found → injected after frontmatter (or at the top)
+- Unclosed frontmatter ends at the first blank line, or EOF if none exists.
 
 Usage:
     python3 sync-markdown-h1.py "Document Title" < input.md
@@ -43,16 +44,19 @@ def main():
     fm_end = 0
     if lines and lines[0].strip() == "---":
         i = 1
+        first_blank = None
         while i < len(lines):
-            if lines[i].strip() == "---":
+            stripped = lines[i].strip()
+            if stripped == "---":
                 fm_end = i + 1
                 i += 1
                 break
+            if stripped == "" and first_blank is None:
+                first_blank = i + 1
             i += 1
         else:
-            # No closing --- found; treat entire file as frontmatter
-            fm_end = len(lines)
-            i = len(lines)
+            fm_end = first_blank if first_blank is not None else len(lines)
+            i = fm_end
 
     # Search for first H1 outside fenced code blocks
     in_code = False

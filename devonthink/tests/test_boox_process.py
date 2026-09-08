@@ -400,6 +400,37 @@ class FileRegularNote(unittest.TestCase):
         self.assertEqual(fields["EventDate"], "2026-07-04")
 
 
+    def test_reexport_preserves_uuid_and_local_processing_flags(self):
+        stem = "Fictional Atlas Review (A+B)"
+        calls = []
+
+        def fake_run_bridge(ops):
+            calls.append(ops)
+            if ops[0]["op"] == "find_by_field":
+                return [[{"uuid": "FIXTURE-EXISTING"}]]
+            return [{} for _ in ops]
+
+        with mock.patch.object(jp, "run_bridge", side_effect=fake_run_bridge):
+            for _ in range(2):
+                self.assertEqual(
+                    jp.file_regular_note(stem, "/tmp/fixture.tiff", "Fictional text", None),
+                    ("FIXTURE-EXISTING", "updated"),
+                )
+        self.assertEqual(len(calls), 4)
+        for lookup, updates in zip(calls[::2], calls[1::2]):
+            self.assertEqual(lookup, [{"op": "find_by_field", "field": "SourceFile",
+                                       "value": stem}])
+            self.assertEqual([op["op"] for op in updates],
+                             ["replace_file", "set_comment", "set_fields", "move_to"])
+            self.assertTrue(all(op["uuid"] == "FIXTURE-EXISTING" for op in updates))
+            fields = updates[2]["fields"]
+            self.assertEqual(fields["SourceFile"], stem)
+            self.assertEqual(fields["DocumentType"], "Handwritten Note")
+            for flag in ("Handwritten", "NeedsProcessing", "Recognized", "Commented", "AIEnriched"):
+                self.assertEqual(fields[flag], 1)
+            self.assertEqual(updates[3]["group"], jp.INBOX_GROUP)
+
+
 class ChatTransportClassification(unittest.TestCase):
     CONFIG = {"OMLX_MODEL": "m", "OMLX_URL": "http://x", "OMLX_API_KEY": ""}
 

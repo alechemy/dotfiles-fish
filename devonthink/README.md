@@ -6,6 +6,8 @@ Pipeline scripts live in [`../stow/devonthink/`](../stow/devonthink/) (stowed to
 
 When something breaks, jump to the [Runbook](docs/runbook.md) — recovery is organized by symptom (stuck inbox record, missing brief, dead agent, duplicate imports, database restore, …).
 
+The [DEVONthink 4.4 adoption plan](docs/devonthink-4.4-plan.md) records the compatibility fixes, retained configuration, and deferred evaluations. Its [closeout handoff](docs/devonthink-4.4-plan.md#handoff-to-the-agent-tooling-plan) is prepared; recovery validation remains open.
+
 ## Multi-Mac Topology (Driver / Follower)
 
 The Lorebook database syncs across every Mac over CloudKit, but exactly **one** machine — the *driver* — runs the document-mutating automation: the ingest watchers, the scheduled importers, the morning brief, entity filing, and the daily-note/archive jobs. Every other Mac is a *follower*: it keeps DEVONthink and Maestral alive and serves reads and UI, but never writes to the synced database. Two drivers would race each other's mutations over the same synced records, which is exactly what this split prevents.
@@ -349,6 +351,8 @@ Bookmark → HTML → markdown ingestion lives outside DT smart rules, in three 
 - **Scenario 1 — desktop SingleFile save.** User hits the SingleFile hotkey in Chrome. The extension writes an HTML file to `~/Downloads/SingleFile/` (a plain folder, not symlinked to DT's inbox). `fswatch`, running under a launchd agent, notices the new file and invokes the ingester. Ingester parses the URL from the SingleFile comment header, runs `defuddle` for markdown, and creates three cross-linked records in DT: a new bookmark in `99_ARCHIVE`, the HTML snapshot in `99_ARCHIVE`, and the markdown in `00_INBOX` (which enters AI enrichment). Staging file is deleted.
 - **Scenario 2 — batched capture of queued bookmarks.** User saves a bookmark directly to DEVONthink (typically from phone, via DTTG). [Extract: Web Content](#extract-web-content) flags it with `NeedsSingleFile=1` on arrival. Later, the user manually runs `capture-bookmarks-batch` (CLI or KM hotkey) to drain the queue. The batch script queries DT for pending bookmarks, drives Chromium + SingleFile one URL at a time, and hands each resulting HTML to the ingester with `--bookmark <UUID>` so the existing bookmark is reused rather than re-created. The ingester clears `NeedsSingleFile` on success.
 
+The [4.4 API review](docs/devonthink-4.4-plan.md#dt44-05-compare-native-web-extraction-with-defuddle) retains SingleFile and defuddle. DEVONthink's documented Markdown conversion commands create database records, whereas this pipeline validates and preprocesses a Markdown file before import. This is an integration decision, not a claim that defuddle produces better output.
+
 ### Components
 
 | Component | Location | Role |
@@ -487,6 +491,8 @@ tail -f ~/Library/Logs/devonthink-pipeline.log
 ### Extract: Native Text Bypass (True Fast-Track)
 
 Documents that are natively text-based (Markdown, RTF, Web Archives, HTML pages, or PDFs that already contain a text layer) bypass OCR entirely. This rule flips both flags in a single pass and advances the document straight to AI enrichment. For Markdown files, a lint step runs `markdownlint --fix` (with tab-to-space conversion) over the record's in-memory content before the flags are set, ensuring house style compliance before downstream processing. Linting reads `plain text of theRecord`, round-trips it through a temp file for `markdownlint`, and writes the result back via `set plain text` — never touching `path of theRecord` directly — so programmatically-created records aren't at risk of a `synchronize record` racing DT's buffered disk write and wiping the body.
+
+The shared `lint-markdown-file` helper loads `~/.config/dt-pipeline/markdownlint-rules.cjs` through markdownlint's custom-rule API. Its micromark parser keeps tilde escaping out of code spans, fenced/indented code, frontmatter, HTML blocks, and literal link destinations/reference identifiers. Single prose tildes remain escaped until native rendering tests establish whether that workaround is needed. Unfixable lint findings are non-fatal; missing rules and formatter execution errors return nonzero. The focused `devonthink/tests/test_lint_markdown_file.py` tests require the installed Homebrew markdownlint CLI and use only temporary fictional inputs.
 
 Bookmarks are excluded because they are handled by [Extract: Web Content](#extract-web-content). HTML pages from SingleFile captures never reach `00_INBOX` — they're handed to DT as finished records in `99_ARCHIVE` by the [SingleFile Ingestion Pipeline](#singlefile-ingestion-pipeline). Any HTML that does land in `00_INBOX` (e.g. user-dragged, DTTG-synced) is fast-tracked by this rule.
 
@@ -828,6 +834,7 @@ State the repo can't stow or seed — reproduce by hand (or with the noted one-l
 - **`20_ENTITIES/People`, `20_ENTITIES/_Review`, `20_ENTITIES/_Review/Approved`, and `20_ENTITIES/_Facts` are excluded from AI chat** for the same reason, applied the same way — Person records are distilled dossiers and `_Facts` holds raw fact captures, both more sensitive than any single note. Entity-layer automation reads them via AppleScript/JXA and is unaffected; DT chat and the DT MCP server cannot.
 
 - **AI engine configuration** (Settings → AI): provider + model selection; API keys live in the macOS Keychain and are never captured by the repo.
+- Native AI skills in Settings → AI → Library have their own context, tools, and automatic-use controls. Disabling Chat's Allow MCP tools does not disable skill access. Review each deliberately adopted skill separately; a `.dtSkill` export can include scripts. The [4.4 skill audit](docs/devonthink-4.4-plan.md#dt44-06-pilot-one-read-only-ai-skill-and-define-ownership) covers documented behavior, not current live library settings. The 4.4 plan retains the scripted pipeline and adds no native skill.
 - **MCP server privacy** (Settings → AI): private-information **redaction is enabled** on the MCP server; re-toggle it on a fresh machine and confirm which databases are exposed before pointing any external AI client at them. Record/group AI exclusions (`/10_DAILY`, `20_ENTITIES/People`, `20_ENTITIES/_Review`, `20_ENTITIES/_Review/Approved`, `20_ENTITIES/_Facts`) are database-level state and sync on their own.
 - **Keyboard Maestro macros** — the AppleScripts they run are tracked in [`../keyboard-maestro/`](../keyboard-maestro/); the macro wrappers (hotkey triggers → Execute AppleScript) sync via KM's own iCloud syncing (`~/Library/Mobile Documents/com~apple~CloudDocs/Keyboard Maestro/Keyboard Maestro Macros.kmsync`), so a fresh machine gets them by signing into iCloud and enabling KM sync.
 - **Calendars access for osascript** — the morning brief reads EventKit from `/usr/bin/osascript`; the TCC grant can only be created interactively. Run `osascript -l JavaScript ~/.local/bin/calendar-events-json.js` once in a terminal and approve the prompt (or toggle osascript under System Settings → Privacy & Security → Calendars).
@@ -842,12 +849,26 @@ State the repo can't stow or seed — reproduce by hand (or with the noted one-l
 
 ## Database Backup & Recovery
 
-Nothing in this repo backs up `~/Databases/Lorebook.dtBase2` — the repo rebuilds the *machinery* (scripts, agents, seeded rules), not the data. The database survives via two independent channels:
+The repository manages native database archives as well as the scripts and seeded configuration. Recovery has several distinct layers:
 
-1. **CloudKit sync** — continuous, and the recovery path for a single-machine loss. Script-driven sync also runs after each daily-note creation.
-2. **Time Machine** — the package is included in the hourly backup (verified 2026-07-03; local destination `MacBookBackup`). Caveat: TM snapshots the package while DT may be mid-write, so a restored copy should get **Tools → Verify & Repair** before trusting it. For a consistency-guaranteed archive (e.g. before risky bulk operations), use **File → Export → Database Archive**, which verifies and zips the closed database.
+| Layer | Purpose and limits |
+| --- | --- |
+| Native database archives | The driver creates dated ZIP archives in `~/Backups/DEVONthink/`. They provide point-in-time database copies, subject to archive integrity and restore verification. |
+| Time Machine | This backs up files and retains older snapshots. Lorebook's inclusion was verified on 2026-07-03, not rechecked during the 4.4 audit. Confirm current coverage of both the database and archive directory. A restored database still needs validation in DEVONthink. |
+| CloudKit sync | This distributes the current database across devices and can assist recovery after losing one Mac. It propagates changes and deletions, so it is not a historical backup. |
+| Document versions | These provide per-record recovery within the database. They do not protect against losing the database or its storage. DEVONthink's internal metadata backups are likewise not full file backups. |
 
-A *sync-store* loss plus a dead machine is the only scenario with no automated answer; the Time Machine copy is the fallback there.
+### Native archive job
+
+[`dt-database-archive.sh`](../stow/devonthink/.local/bin/dt-database-archive.sh) is scheduled by [`com.user.dt-database-archive`](../stow/devonthink/Library/LaunchAgents/com.user.dt-database-archive.plist.template) at 03:30 local time each day. It does not run at agent load. Normal invocations skip until seven days have elapsed since the last recorded success, then check the power and driver-role gates. Battery or UPS power skips the attempt; unknown power status follows the shared helper's fail-open policy. DEVONthink must already be running with Lorebook open. These conditions can make an archive older than seven days; a scheduled tick is not proof of a backup.
+
+The job asks DEVONthink to verify the database and proceeds only when it reports zero errors. It then compresses the database to `Lorebook-YYYY-MM-DD.dtBase2.zip`, requires a nonempty file, and tests ZIP integrity with `unzip -tq`. Only after those checks does it update `~/.local/state/devonthink/dt-database-archive.last-success` and prune matching archives to the four most recently modified files.
+
+Setup loads the job only on the driver and boots it out on followers. `--force` bypasses the cadence, power, and role gates, but still requires the open database and still performs verification and rotation. The date-only destination means a second forced run on the same day targets the same filename, not a new recovery point. See the [runbook](docs/runbook.md#database-restore) before using it.
+
+A successful ZIP test establishes archive integrity, not successful database recovery. A restore drill must also check database health, record identity, links, and representative attachments. Indexed files outside the database need their own backup and recovery plan.
+
+Archives stored on the same disk as Lorebook do not protect against loss of that disk. Verify that a separate backup destination retains them, and decide on an off-device/offsite copy under the appropriate privacy policy. Do not put the live database package in a cloud-synced folder. Archive verification evidence and remaining backup-coverage and isolated-restore checks are tracked in [DT44-02](docs/devonthink-4.4-plan.md#dt44-02-correct-recovery-documentation-and-verify-archive-recovery).
 
 ## Integrations
 

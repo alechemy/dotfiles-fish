@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="180" viewBox="0 0 640 180" role="img" aria-labelledby="title description">
+  <title id="title">Light and dark rendering controls</title>
+  <desc id="description">Two equal panels show contrasting text, borders, and accent colors.</desc>
+  <rect x="1" y="1" width="319" height="178" fill="#fbfaf7" stroke="#1f2328" stroke-width="2"/>
+  <rect x="320" y="1" width="319" height="178" fill="#1c1e22" stroke="#d8d4cc" stroke-width="2"/>
+  <text x="24" y="52" fill="#1f2328" font-family="sans-serif" font-size="24">Light panel</text>
+  <text x="344" y="52" fill="#d8d4cc" font-family="sans-serif" font-size="24">Dark panel</text>
+  <circle cx="70" cy="115" r="24" fill="#0969da"/>
+  <circle cx="390" cy="115" r="24" fill="#7cc4ff"/>
+  <path d="M120 115h160M440 115h160" stroke="#c9a227" stroke-width="4"/>
+</svg>

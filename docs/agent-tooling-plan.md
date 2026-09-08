@@ -21,9 +21,10 @@ This plan follows the review of `aa0657e`. It replaces neither the architecture 
 1. The Pi fragment remains authoritative for portable settings, including complete package and model-cycle arrays. Runtime writes do not silently become repository policy. Capture deliberate changes back into the fragment; do not union arrays because that would defeat removals.
 2. Preserve the current startup model and provider routing. Capture the current model cycle and non-secret portable preferences, including the telemetry opt-out and opt-in project trust.
 3. Pin the currently installed Context7, Subagents, and Web Access versions first. This freezes existing behavior while source-review and upgrade procedures are documented.
-4. Pilot the MCP adapter with Chrome DevTools before changing DEVONthink. Web retrieval remains separate from interactive browser control.
+4. Pilot the MCP adapter with Chrome DevTools before evaluating DEVONthink's external-client transport replacement. This does not gate the separate DEVONthink 4.4 pipeline work. Web retrieval remains separate from interactive browser control.
 5. Treat work MCP migration and DEVONthink transport replacement as evaluations with explicit acceptance gates. An evaluation can conclude that the retained implementation is preferable.
 6. Keep the existing Things helper and native Context7 integration. Leave Anki and filesystem MCP retired. Do not add Pi comment stripping without a demonstrated need.
+7. Complete the [DEVONthink 4.4 plan and handoff](../devonthink/docs/devonthink-4.4-plan.md#handoff-to-the-agent-tooling-plan) before starting checkpoint 6, including helper hardening. Checkpoints 4 and 5 can proceed independently of that plan. Native DT feature adoption does not authorize new external-agent capabilities.
 
 ## Checkpoints
 
@@ -96,16 +97,20 @@ Acceptance: Necessary work tools function through Pi under the same confidential
 
 ### 6. Harden DEVONthink and decide transport ownership
 
-Status: Pending. Client hardening can precede checkpoint 4; adapter replacement depends on it.
+Status: The [DEVONthink 4.4 handoff](../devonthink/docs/devonthink-4.4-plan.md#handoff-to-the-agent-tooling-plan) is prepared but not released. Its sole remaining gate is the [DT44-02 recovery disposition](../devonthink/docs/devonthink-4.4-plan.md#remaining-recovery-decision): approved validation or explicit deferral. Code fixes and adoption decisions are documented; native GUI/PDF/search/vendor-fix checks are deferred and no new native skill is adopted. After release, helper hardening can proceed independently of checkpoint 4; adapter evaluation also requires checkpoint 4's outcome.
 
-- [ ] Keep the three-operation interface and official stdio server as the baseline.
-- [ ] Add synthetic regression tests for output shape, UUID/name projection, result counts, bounded transport frames, and safe error reporting. Inspect actual documented response envelopes before enforcing a schema.
+This checkpoint owns external-client response hardening and transport choice, not pipeline routing, native web extraction, Markdown rendering, or DT's internal AI library. The 4.4 audit verified protocol negotiation and metadata-field discovery only; it did not close the response-validation or privacy work below.
+
+- [ ] Read the 4.4 handoff and record the exact current app/server version, retained configuration, approved native skills, completed canaries, and unresolved limitations. Reuse relevant fictional query/privacy fixtures and evidence; repeat affected checks if the server, configuration, or client changes.
+- [ ] Keep metadata-field discovery, record search with UUID/name results, and custom-metadata reads through the official stdio server as the baseline. Native AI skills, PDF page/TOC tools, annotations, and script execution remain outside this interface even if adopted inside DT.
+- [ ] Add synthetic regression tests for output shape, UUID/name projection, result counts, bounded transport frames, and safe error reporting. Inspect the current official response envelopes and schemas before enforcing them; the 4.4 handshake is compatibility evidence, not output enforcement.
 - [ ] Harden the retained helper so its implementation matches its stated bounds. Preserve shared CLI use across Pi and retained clients.
-- [ ] Compare adapter-backed access with the helper on exact tool allowlisting, fixed search fields, batch limits, response filtering, protocol compatibility, sampling, and sensitive spill files.
+- [ ] Compare adapter-backed access with the helper on exact tool allowlisting, fixed search fields, batch limits, response filtering, protocol negotiation, sampling, and sensitive spill files. Treat 4.4 tool annotations as descriptive hints, not permission enforcement; newly advertised tools must remain unavailable by default. If checkpoint 4 rejects or defers the adapter, retain the hardened helper and record that outcome here.
 - [ ] Replace custom protocol handling only if those constraints and cross-client use remain practical. Otherwise retain the hardened helper and record the maintenance tradeoff.
-- [ ] Keep the unused HTTP login item disabled. Perform vendor privacy canaries only under a bounded, approved private-data validation scope.
+- [ ] Keep the unused HTTP login item disabled. Local HTTP no longer requiring TLS does not justify switching transport. Perform vendor privacy canaries only under a bounded, approved private-data validation scope, distinguishing external-server redaction/exclusions from native skill permissions.
+- [ ] Update the shared skill documentation and maintenance reference with the tested version, chosen transport, enforced bounds, and remaining limitations. Link the 4.4 evidence rather than repeating its adoption work.
 
-Acceptance: The chosen implementation enforces the declared interface rather than merely requesting limited results, preserves vendor exclusions, and has tests for its failure behavior. A broader interface requires an explicit user decision.
+Acceptance: The chosen implementation enforces the declared interface rather than merely requesting limited results, preserves vendor exclusions, and has tests for its failure behavior against the post-4.4 configuration. Native skill permissions do not broaden external-agent access. A broader interface requires an explicit user decision.
 
 ### 7. Close verification and maintenance follow-ups
 
