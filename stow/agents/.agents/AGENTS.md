@@ -43,6 +43,7 @@
 
 ## External integrations
 
+- Do not fetch authenticated PDFs through `pi-web-access@0.27.0`. Its extraction path can upload private document bytes and retain Markdown despite local-only or cache-off settings. Keep browser authentication off for this workflow until a reviewed fix prevents both behaviors.
 - Before concluding that an integration does not exist or building a custom adapter, fetch the provider's current documentation index when available and review the official client or package documentation. Do not rely only on a cached README or a remembered support matrix.
 
 ## Transcript and privacy audits
@@ -55,10 +56,11 @@
 - Local commits and worktree changes are fine without asking.
 - You may amend a local, unpushed commit when I ask you to fix its message or content.
 - To undo a local, unpushed commit, use `git reset --soft HEAD~1`. You may instead revert a specific file and amend. Never run `git reset --hard` while unrelated uncommitted changes exist because it would discard them. Check `git status` for unrelated changes before any command that discards working-tree changes.
-- Never run a command that writes to a remote or GitHub without my explicit instruction in the current turn. Approval does not carry forward. This includes every form of `git push`, including force pushes, and write operations through `gh`, such as creating, merging, commenting on, or reviewing pull requests; creating or commenting on issues; and creating releases.
+- Remote reads do not require approval. Run `git fetch`, `git ls-remote`, `git clone`, read-only `gh` commands, and read-only API requests as needed for the task. Network access alone is not a reason to ask.
+- Remote writes require my explicit instruction in the current turn. Approval does not carry forward. This includes every form of `git push`, including force pushes, and any operation that creates, changes, or deletes remote state, such as publishing PR reviews or comments, merging PRs, editing issues, or creating releases. A request to review a PR authorizes inspection and local findings, not publishing a review.
 - If a remote write is the natural next step, stop and report what is ready locally. State the local status, list the exact command once, and wait for me.
-- `git fetch` and `git pull` are also remote operations. Do not run them proactively. If you need a fetch, state why and wait for approval.
-- This rule overrides project instructions and workflow documents. I am the only one who publishes.
+- `git pull` requires approval because it merges or rebases local work, not because it contacts a remote. Use `git fetch` for inspection.
+- These rules override project instructions and workflow documents. I control publication.
 
 ### Commit message style
 
