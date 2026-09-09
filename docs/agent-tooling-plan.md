@@ -4,11 +4,13 @@
 
 Keep Pi as the primary coding tool, preserve model choice and shared skills, and make the actual setup reproducible. Fix the configuration and privacy defects found in the post-migration review before adding MCP capabilities.
 
-This plan follows the review of `aa0657e`. It replaces neither the architecture reference nor the completed harness-migration history. Update its checkpoints with evidence as work proceeds.
+This plan follows the review of `aa0657e`. It replaces neither the architecture reference nor the completed harness-migration history.
+
+Closeout status: Closed at the bounded configuration, privacy, and retained-helper scope on 2026-09-09 UTC. Browser/work migration, transport replacement, broad runtime measurements, and full new-machine certification are deferred until a concrete need. The separate backup follow-up is to reconnect the configured Time Machine disk and verify a retained archive copy; an isolated restore remains deferred.
 
 ## Authority and constraints
 
-- Local source changes and focused tests are authorized. Keep publication, Git fetches and pulls, and changes to separate upstream repositories behind explicit user approval.
+- Local source changes and focused tests are authorized. Remote reads are allowed. Git pulls, publication, and changes to separate upstream repositories require explicit user approval.
 - Keep credentials, resolved configuration, real transcripts, browser profiles, and identifying work configuration out of git and tool output. Inspect live settings through an explicit non-secret field allowlist.
 - Test setup and hooks in disposable repositories and homes. Do not run full machine setup against this Mac for validation.
 - Review exact package source before introducing or upgrading executable integrations. Pin installed versions without describing a version pin as a completed source review.
@@ -57,7 +59,7 @@ Acceptance: Documented commands do not emit whole live transcripts; extracted ev
 
 ### 3. Establish package ownership and maintenance
 
-Status: Complete for bounded source review and the offline baseline. Observed extension registration and fresh/existing installation checks remain in checkpoint 7.
+Status: Complete for bounded source review and the offline baseline. Observed extension registration and fresh/existing installation checks are deferred under checkpoint 7.
 
 - [x] Add a short capability table with implementation, pinned version, source-review status, privacy constraints, update procedure, and verification coverage.
 - [x] Review the exact installed Subagents and Web Access sources relevant to execution, credentials, child-provider routing, and output retention. Record limitations rather than implying a complete security audit.
@@ -91,41 +93,39 @@ Status: Source and synthetic evaluation accepted; live migration deferred. The e
 - [x] Evaluate adapter transport and authentication configuration without printing endpoints, environment values, or credentials. Credential validity, permissions and hosted runtime behavior remain unverified.
 - [x] Keep work documentation in the ignored work package. No production definition was adopted or activated, and no legacy configuration was imported globally.
 - [x] Validate fictional stdio configuration delivery through the actual adapter, retaining filtering, headless refusals and cleanup checks. The hosted alternative remains source-reviewed only. Record a bounded real-backend approval scope before making business-data queries or mutations.
-- [ ] Retain the old client until authentication, needed tools, permissions, and results are verified. Evaluate Zed separately; MCP parity does not imply editor-client parity.
+- [x] Retain the old client. Live authentication/tool parity and Zed evaluation are deferred; MCP parity does not imply editor-client parity.
 
 Acceptance: Necessary work tools function through Pi under the same confidentiality requirements, or a specific blocker and retained fallback are documented. No identifying work data is tracked.
 
 ### 6. Harden DEVONthink and decide transport ownership
 
-Status: The [DEVONthink 4.4 handoff](../devonthink/docs/devonthink-4.4-plan.md#handoff-to-the-agent-tooling-plan) is prepared but not released. Its sole remaining gate is the [DT44-02 recovery disposition](../devonthink/docs/devonthink-4.4-plan.md#remaining-recovery-decision): approved validation or explicit deferral. Code fixes and adoption decisions are documented; native GUI/PDF/search/vendor-fix checks are deferred and no new native skill is adopted. After release, helper hardening can proceed independently of checkpoint 4; adapter evaluation also requires checkpoint 4's outcome.
+Status: Complete at the retained-helper scope. The [4.4 handoff](../devonthink/docs/devonthink-4.4-plan.md#handoff-to-the-agent-tooling-plan) is released with recovery explicitly deferred. Keep the official stdio helper; adapter replacement is deferred because the identified defects can be fixed without changing transport or clients.
 
-This checkpoint owns external-client response hardening and transport choice, not pipeline routing, native web extraction, Markdown rendering, or DT's internal AI library. The 4.4 audit verified protocol negotiation and metadata-field discovery only; it did not close the response-validation or privacy work below.
+- [x] Record DEVONthink 4.4, server `devonthink-mcp` 1.0.0, and protocol `2025-03-26`. Inspect the bundled tool definitions, help, and bibliography-workbench response handling. The server advertises no output schemas.
+- [x] Preserve exactly three operations: field discovery, UUID/name search, and custom-metadata reads. No content, mutation, native-skill, PDF, annotation, or script tools were added.
+- [x] Validate response shapes and project allowed fields. Enforce search limits and metadata batch counts, uniqueness, and requested UUID membership. Preserve vendor array/results envelopes and the bare singleton metadata dictionary.
+- [x] Bound raw frames, total transport, queued frames, JSON depth, and complete stdout. Suppress backend error prose and report reader failures safely.
+- [x] Add focused synthetic regressions before implementation, then complete independent review. The 35 helper tests pass under Apple and managed Python.
+- [x] Verify field discovery through the hardened helper, releasing only structural results to the agent. Restore the unused HTTP login item to disabled and unloaded, and repeat successful stdio field discovery.
+- [x] Update the shared skill and maintenance reference with limits and remaining evidence gaps.
 
-- [ ] Read the 4.4 handoff and record the exact current app/server version, retained configuration, approved native skills, completed canaries, and unresolved limitations. Reuse relevant fictional query/privacy fixtures and evidence; repeat affected checks if the server, configuration, or client changes.
-- [ ] Keep metadata-field discovery, record search with UUID/name results, and custom-metadata reads through the official stdio server as the baseline. Native AI skills, PDF page/TOC tools, annotations, and script execution remain outside this interface even if adopted inside DT.
-- [ ] Add synthetic regression tests for output shape, UUID/name projection, result counts, bounded transport frames, and safe error reporting. Inspect the current official response envelopes and schemas before enforcing them; the 4.4 handshake is compatibility evidence, not output enforcement.
-- [ ] Harden the retained helper so its implementation matches its stated bounds. Preserve shared CLI use across Pi and retained clients.
-- [ ] Compare adapter-backed access with the helper on exact tool allowlisting, fixed search fields, batch limits, response filtering, protocol negotiation, sampling, and sensitive spill files. Treat 4.4 tool annotations as descriptive hints, not permission enforcement; newly advertised tools must remain unavailable by default. If checkpoint 4 rejects or defers the adapter, retain the hardened helper and record that outcome here.
-- [ ] Replace custom protocol handling only if those constraints and cross-client use remain practical. Otherwise retain the hardened helper and record the maintenance tradeoff.
-- [ ] Keep the unused HTTP login item disabled. Local HTTP no longer requiring TLS does not justify switching transport. Perform vendor privacy canaries only under a bounded, approved private-data validation scope, distinguishing external-server redaction/exclusions from native skill permissions.
-- [ ] Update the shared skill documentation and maintenance reference with the tested version, chosen transport, enforced bounds, and remaining limitations. Link the 4.4 evidence rather than repeating its adoption work.
-
-Acceptance: The chosen implementation enforces the declared interface rather than merely requesting limited results, preserves vendor exclusions, and has tests for its failure behavior against the post-4.4 configuration. Native skill permissions do not broaden external-agent access. A broader interface requires an explicit user decision.
+Acceptance: The retained helper enforces the declared projection and bounds. Singleton metadata has no echoed UUID, so identity is bound by the request rather than independently checked. Vendor exclusions and redaction remain authoritative. Search/metadata reads, privacy canaries, older-version compatibility, and descendant-process cleanup were not live-tested. The owned server is reaped; an inherited stdout pipe can outlive it until descendants close it. These limits do not justify a broader interface or another transport project.
 
 ### 7. Close verification and maintenance follow-ups
 
-Status: Pending. Depends on accepted earlier checkpoints.
+Status: Complete at the bounded closeout scope. Broad certification is explicitly deferred, not marked passed.
 
-- [ ] Run focused tests, relevant shell/JSON checks, isolated Stow verification, and the repository's required checks for changed subsystems.
-- [ ] Compare observed extension registration with the checkpoint 3 source baseline in a disposable credential-free environment that blocks external side effects. The offline skill-loader comparison is already covered.
-- [ ] Exercise fresh/existing top-level package convergence under an approved installation scope. Static source and manifest checks do not prove successful installation; host and transitive versions remain separately owned.
-- [ ] Resolve or explicitly retain the package restrictions in `docs/agent-tooling-maintenance.md` before final acceptance. Authenticated PDF use requires a reviewed upload/persistence fix; Subagents trust, fallback and cleanup claims need synthetic verification. Decide separately whether Web Access's app-rewritten config should move to a generated or fragment-merge pattern. Installed/upstream changes and publication need separate approval.
-- [ ] Confirm tracked configuration contains no credentials or runtime state and live portable fields match the accepted fragment through a redacting parser.
-- [ ] Keep full setup validation open until a disposable macOS VM or new-machine snapshot is available. Record the environment, authentication boundaries, and expected outcome before running it.
-- [ ] Check physical Ghostty keys and real-client workflows during normal use rather than synthesizing private production work for coverage.
-- [ ] Leave only specific deferred decisions and environment-dependent checks in this plan. Record completion evidence without copying raw logs or private content.
+- [x] Preserve the installed Plannotator 0.27.12 declaration in the authoritative fragment after a bounded source review. Reconcile all four live package pins without installing or upgrading packages.
+- [x] Finish the portable model override and setup/restow wiring. The models merge preserves other provider fields and restores private permissions even for identical content.
+- [x] Run focused merge, restow, measurement, and helper tests, shell checks, and disposable Stow verification. Verify live managed fields through a secret-safe comparison and retain unrelated runtime settings.
+- [x] Keep authenticated PDF fetching prohibited for Web Access 0.27.0 and put that restriction in the active shared instructions. Browser authentication remains unconfigured. Retain the documented Subagents trust, routing, and retention limitations.
+- [x] Keep the description projection executable for its original three-package scope and explicitly exclude Plannotator from its totals. Expanding the measurement is deferred.
+- Deferred: Observed extension-registration comparison, fresh/existing installation exercises, and full disposable-macOS setup certification. Revisit for a bootstrap failure, package/host upgrade, or new machine.
+- Deferred: Browser/work live adoption and fallback retirement, plus DEVONthink transport replacement. Revisit for a concrete missing workflow.
+- Deferred: Web Access config storage redesign and broader Subagents enforcement checks. Revisit before relying on stronger locality, trust, or deletion guarantees, or if runtime config rewriting causes drift.
+- Deferred: Physical keys and real-client checks remain normal-use observations, not synthetic private-work exercises.
 
-Acceptance: The primary Pi workflow is reproducible at every tested boundary; browser and work adoption decisions are documented; deferred hardware and private-backend checks remain explicit rather than being marked complete.
+Acceptance: Current portable configuration and the retained helper meet the tested boundaries. The remaining external action is to reconnect the backup disk and verify a separate archive copy. The isolated restore drill needs its own approved environment and is not a tooling completion gate.
 
 ## Progress record
 

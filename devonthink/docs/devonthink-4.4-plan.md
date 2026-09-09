@@ -6,7 +6,7 @@ Resolve the compatibility issues identified in the 4.4 audit, validate the chang
 
 This document tracks implementation and adoption decisions. The [README](../README.md) remains the architecture reference, and the [runbook](runbook.md) remains the recovery guide.
 
-Closeout status: Code fixes and adoption decisions are documented. The [handoff](#handoff-to-the-agent-tooling-plan) is prepared but not released. DT44-02 recovery validation is the only remaining completion gate; it needs an approved execution scope or explicit deferral. Deferred feature checks are not pending setup tasks.
+Closeout status: Closed at the accepted compatibility and retain scope on 2026-09-09 UTC. The [handoff](#handoff-to-the-agent-tooling-plan) is released. The restore drill is explicitly deferred to a separately approved isolated environment. Backup-copy verification resumes when the configured Time Machine disk is available. Neither follow-up blocks the read-only helper work. Deferred feature checks are not pending setup tasks.
 
 ## Baseline and evidence
 
@@ -31,7 +31,7 @@ No production-record inspection, database migration, or feature adoption was par
 - Keep real third-party data, credentials, resolved configuration, runtime state, and raw private logs out of tracked evidence. Record counts and sanitized outcomes instead.
 - Preserve the existing three-operation MCP interface and disabled HTTP login item. Broader access requires a separate decision. [Agent tooling plan checkpoint 6](../../docs/agent-tooling-plan.md#6-harden-devonthink-and-decide-transport-ownership) owns client hardening and transport evaluation and starts only after this plan's handoff. This plan does not depend on that checkpoint or on the tooling plan's Chrome DevTools adapter pilot. Native DT skills can be evaluated without changing external-agent access.
 - Follow the [seeded configuration rules](../../docs/dotfiles-reference.md#seeded-config-copy-if-absent-not-stowed). Do not symlink app-owned settings or copy live preferences wholesale. Capture deliberate portable changes and exclude runtime bookkeeping.
-- Keep Git publication, fetches, pulls, and GitHub writes behind explicit approval in the current turn.
+- Remote reads are allowed. Git pulls and remote writes require explicit user approval in the current turn.
 
 ## Tracking protocol
 
@@ -55,7 +55,7 @@ At the end of each iteration, update the checkpoint status and append a short pr
 | ID | Checkpoint | Status | Dependency or approval boundary |
 | --- | --- | --- | --- |
 | DT44-01 | Align frontmatter handling in both H1 helpers. | Complete. | Offline parser/injection regressions and full pipeline suite verified. |
-| DT44-02 | Correct recovery documentation and verify archive recovery. | Documentation and ZIP integrity complete; restore blocked. | Agree on an isolated restore environment and approve its scope. |
+| DT44-02 | Correct recovery documentation and verify archive recovery. | Documentation and current ZIP integrity complete; restore explicitly deferred. | Reconnect the backup disk to verify a separate copy; approve an isolated restore before recovery-sensitive production changes. |
 | DT44-03 | Validate Markdown rendering and custom themes. | Preprocessing complete; GUI evaluation deferred by user. | Retain current styling; revisit for a rendering problem or a proposed style replacement. |
 | DT44-04 | Validate PDF routing, metadata searches, and relevant vendor fixes. | Offline review complete; native checks deferred by user. | Retain existing behavior; revisit a reproduced routing/search/reliability problem. |
 | DT44-05 | Compare native web extraction with defuddle. | Complete at API-review scope; retain defuddle. | Revisit for a demonstrated extraction problem or a documented pre-import Markdown API. |
@@ -94,7 +94,7 @@ Recovery: Keep changes confined to the parsers and their bindings. Any later pro
 
 ### DT44-02. Correct recovery documentation and verify archive recovery
 
-Status: Documentation and approved archive integrity check complete. Blocked on an agreed isolated restore environment and scope.
+Status: Documentation and current archive integrity check complete. The closeout explicitly defers the restore drill. Separate-copy verification is blocked on the configured Time Machine disk being available, not on more pipeline implementation.
 
 Review `stow/devonthink/.local/bin/dt-database-archive.sh`, its launchd template, setup wiring, the README backup section, and the runbook's restore procedure. The version-retention fix is on page 10; APFS image changes are on page 5.
 
@@ -110,7 +110,9 @@ Evidence: The README and runbook now match the archive script, launchd template,
 
 Archive evidence: On 2026-09-05 UTC, approved read-only inspection found four dated archives. The newest was dated 2026-08-29, measured 414,493,785 bytes, and was approximately 6.63 days old by modification time. `/usr/bin/unzip -tq` returned zero with all member output suppressed. The file's identity, size, and modification time were unchanged after the check. Nothing was extracted or opened in DEVONthink. Older archives were inventoried but not integrity-tested. Separate backup coverage, encryption settings, and restore usability remain unverified.
 
-Acceptance: Documentation matches the code, a recent archive's integrity is known, and restore usability has explicit evidence. Keep this checkpoint open or blocked until the remaining restore evidence is recorded.
+Closeout evidence on 2026-09-09 UTC: Four local archives exist. The newest was modified on 2026-09-06 at 10:30 UTC, measured 422,046,134 bytes, and passed `unzip -tq` with all member output suppressed. Its identity, size, and modification time were unchanged afterward. The success marker agrees with that archive. Time Machine reports the archive folder as included and has one configured local-disk destination, but `latestbackup` could not mount that destination and the disk was absent from the current disk inventory. A separate copy and live-database backup coverage remain unverified. No archive was extracted or opened.
+
+Acceptance: The compatibility work can close with this recovery limitation explicit. A successful isolated restore is still required before claiming proven recoverability. Revisit separate-copy verification when the backup disk is connected, and agree on a restore drill before production-rule, database-format, or recovery changes. Encryption/revision-proof evaluation stays deferred because no format change is proposed.
 
 Recovery: Never overwrite or register the restored copy as the production database. No APFS conversion is planned merely because 4.4 supports it.
 
@@ -288,20 +290,20 @@ Acceptance: The selected model produces usable outputs within the agreed budget.
 
 ## Handoff to the agent tooling plan
 
-Status: Prepared, not released. Closeout documentation and adoption decisions are complete. DT44-02 recovery validation is the sole remaining gate for [agent tooling checkpoint 6](../../docs/agent-tooling-plan.md#6-harden-devonthink-and-decide-transport-ownership). Tooling checkpoints 4 and 5 remain independent.
+Status: Released on 2026-09-09 UTC with the recovery limitation explicitly deferred. Compatibility fixes and retain decisions are accepted. [Agent tooling checkpoint 6](../../docs/agent-tooling-plan.md#6-harden-devonthink-and-decide-transport-ownership) can complete its read-only helper hardening independently of the restore drill. Tooling checkpoints 4 and 5 remain independent.
 
 - [x] Consolidate checkpoint outcomes, changed files, evidence, and unverified behavior.
 - [x] Record retained configuration, known version evidence, and ownership boundaries.
 - [x] Distinguish offline fixtures from live checks and identify the absence of privacy-canary evidence.
 - [x] Record the external-client baseline and the work owned by tooling checkpoint 6.
-- [ ] Resolve the remaining DT44-02 scope through approved execution or explicit deferral, then release this handoff and update the tooling dependency. Closeout approval alone does not resolve that choice.
+- [x] Resolve DT44-02 through explicit restore deferral and a named backup-disk follow-up, release this handoff, and update the tooling dependency.
 
 ### Closeout summary
 
 | Checkpoint | Disposition | Evidence or limitation |
 | --- | --- | --- |
 | DT44-01 | Complete. | Both H1 parsers have retained regression coverage, including real AppleScript handlers with a stub writer. Existing production records were not repaired. |
-| DT44-02 | Open recovery task. | Backup documentation corrected; the 2026-08-29 archive passed a read-only ZIP check on 2026-09-05. Restore usability, current separate/off-device backup coverage, and encryption/revision-proof relevance remain unverified. |
+| DT44-02 | Recovery follow-up separated from closeout. | The 2026-09-06 archive passed a read-only ZIP check on 2026-09-09. Time Machine includes the archive folder, but its configured disk is unavailable. Separate-copy coverage and restore usability remain unverified; the restore drill and format evaluation are explicitly deferred. |
 | DT44-03 | Preprocessing complete; GUI checks deferred by user. | Keep current CSS/JS and prose escaping. Source-preservation checks passed; native rendering, WYSIWYG, and DTTG comparisons were not performed. |
 | DT44-04 | Offline review complete; native checks deferred by user. | Keep routing and queries. Mocked search candidates exercise exact filtering, not native retrieval completeness. Vendor PDF/search/reliability fixes remain unverified locally. |
 | DT44-05 | Complete at API-review scope; retain SingleFile/defuddle. | Documented native conversion creates records rather than matching the pre-import file boundary. No native fidelity or performance comparison was performed. |
@@ -319,24 +321,26 @@ The last full pipeline validation ran `PIPELINE_MANUAL=1 /usr/bin/python3 -m uni
 
 ### Retained configuration and ownership
 
-- Version evidence is DEVONthink 4.4 on macOS 27.0, with the official server bundled with that app. Protocol negotiation and metadata-field discovery succeeded during the audit. A separate server-reported implementation version was not retained in this plan; record it with the current app version when tooling checkpoint 6 begins.
+- Version evidence is DEVONthink 4.4 on macOS 27.0, with the official server bundled with that app. Protocol negotiation and metadata-field discovery succeeded during the audit. The tooling closeout additionally recorded server `devonthink-mcp` 1.0.0 with protocol `2025-03-26` and repeated field discovery through the hardened helper.
 - Keep word-count routing, `OCR - Apply`, local-only Boox/entity extraction, import pre-flagging, deterministic record writes, content hashes, and existing CSS/JS. Keep SingleFile/defuddle and the current scripted enrichment. This plan adopted no native AI skill and did not inventory the user's live library.
 - Portable scripts and style files belong to Stow; app-owned selections, credentials, database exclusions, and runtime state do not. Any future custom `.dtSkill` export needs inspection before tracking because it may bundle scripts. The native library is not a replacement for the shared external `devonthink` skill.
-- The retained external interface is the [shared helper](../../stow/agents/.agents/skills/devonthink/scripts/devonthink_read.py) over official stdio, with metadata-field discovery, UUID/name record search, and custom-metadata reads only. The [setup script](../../scripts/setup.sh) disables the unused HTTP login item. Preserve exclusions and redaction. Live launchd/privacy settings were not rechecked during closeout; this records the retained baseline, not a fresh enforcement result.
-- No DEVONthink privacy canary was completed under this plan. Earlier handshake/field-discovery evidence and the new mocked query cases are not privacy tests. Current server schemas, response bounds, exclusions, and redaction need the separate tooling work and any required private-data approval.
+- The retained external interface is the [shared helper](../../stow/agents/.agents/skills/devonthink/scripts/devonthink_read.py) over official stdio, with metadata-field discovery, UUID/name record search, and custom-metadata reads only. The [setup script](../../scripts/setup.sh) disables the unused HTTP login item. Preserve exclusions and redaction. The tooling closeout found the HTTP login item loaded, restored its disabled/unloaded state, and verified stdio field discovery still works. Private exclusion/redaction settings were not audited.
+- No DEVONthink privacy canary was completed under this plan. Earlier handshake/field-discovery evidence and the new mocked query cases are not privacy tests. The tooling closeout validates current vendor response shapes and bounds; exclusion and redaction canaries still require separate private-data approval.
 
-Tooling checkpoint 6 owns output projection/count enforcement, bounded transport frames, safe errors, protocol/schema validation, and the adapter comparison. It must keep unapproved tools unavailable and preserve cross-client use. Its adapter decision also uses checkpoint 4's outcome. This handoff does not claim any of that hardening is implemented.
+Tooling checkpoint 6 now records the completed output projection/count enforcement, bounded transport, safe errors, and retained protocol validation. It preserves the three-operation shared helper and defers adapter replacement. See that checkpoint and the shared skill for synthetic and live-field evidence and the singleton metadata limitation.
 
 ### Remaining recovery decision
 
-Choose one disposition for the remaining DT44-02 work:
+Disposition recorded on 2026-09-09 UTC: Use option 2 below. The user approved the bounded closeout, retaining recovery as a separate follow-up. Recheck separate-copy coverage when the Time Machine disk is connected. Agree on an isolated restore scope before recovery-sensitive production changes; no restore, production repair, or database-format change is part of this closeout.
+
+The available recovery dispositions are:
 
 1. Approve an isolated restore scope using the [runbook](runbook.md#isolate-a-restore-drill-before-opening-the-copy), including the destination, sync/automation isolation, permitted inspection, and cleanup. Confirm separate/off-device backup coverage and whether encrypted/revision-proof database changes matter. Record the results and any remaining limitations.
 2. Explicitly defer the remaining DT44-02 validation, retain the unverified recovery/coverage items as a named follow-up with a revisit condition, and approve releasing the handoff with that limitation.
 
-Until that decision is recorded, the restore remains open and tooling checkpoint 6 remains blocked. The archive's CRC result is not evidence that it can be restored successfully.
+The deferral releases tooling checkpoint 6. The archive's CRC result is not evidence that it can be restored successfully.
 
-Acceptance: Release the handoff only after the remaining recovery disposition is explicit. Deferred native feature checks do not require further setup. The tooling work starts with the retained configuration and evidence above, not with a claim that all vendor behavior or privacy enforcement has been tested.
+Acceptance: The recovery disposition is explicit and the handoff is released. Deferred native feature checks need no further setup. The tooling work starts with the retained configuration and evidence above, not with a claim that all vendor behavior or privacy enforcement has been tested.
 
 ## Progress record
 
@@ -354,3 +358,4 @@ Acceptance: Release the handoff only after the remaining recovery disposition is
 - The user set the sequence: finish this plan before starting the DEVONthink phase of the agent tooling plan. The handoff above is that dependency; the Chrome DevTools and private work MCP evaluations remain independent.
 - The user approved closeout documentation, retaining the current pipeline without a native skill, and deferring the remaining native PDF/search/vendor-fix checks. The handoff now consolidates files, evidence, configuration ownership, and explicit unverified behavior. DT44-02 recovery validation remains open; closeout approval did not authorize a restore or select its deferral. Tooling checkpoint 6 stays blocked only on that disposition.
 - The session closes with the completed work packaged locally. Recovery validation and external MCP hardening remain documented follow-ups for a future session.
+- On 2026-09-09 UTC, the user approved the bounded closeout. The newest local archive passed a fresh ZIP check, and its success marker agrees. Time Machine includes the archive folder but cannot mount its configured destination. Separate-copy verification waits for that disk; the isolated restore drill is explicitly deferred. The handoff is released with those limitations, and the retained read-only helper is hardened in the tooling closeout.
