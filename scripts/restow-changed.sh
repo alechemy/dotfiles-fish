@@ -107,10 +107,12 @@ done < <(git -C "$DOTFILES" -c core.quotePath=off diff --diff-filter=D --name-on
 changed_files="$(git -C "$DOTFILES" -c core.quotePath=off diff --name-only "$OLD" "$NEW" 2>/dev/null)"
 
 rebuild() {
-    if "$DOTFILES/scripts/$1"; then
-        echo "restow-changed: rebuilt via scripts/$1"
+    local script="$1"
+    shift
+    if "$DOTFILES/scripts/$script" "$@"; then
+        echo "restow-changed: rebuilt via scripts/$script $*"
     else
-        echo "restow-changed: scripts/$1 failed; re-run it by hand" >&2
+        echo "restow-changed: scripts/$script $* failed; re-run it by hand" >&2
     fi
 }
 
@@ -126,6 +128,9 @@ if grep -q '^stow/vscode/.*settings\.template\.json$' <<<"$changed_files"; then
 fi
 if grep -Eq '^stow/pi/\.pi/agent/settings\.fragment\.json$|^scripts/merge-pi-settings\.sh$' <<<"$changed_files"; then
     rebuild merge-pi-settings.sh
+fi
+if grep -Eq '^stow/pi/\.pi/agent/models\.fragment\.json$|^scripts/merge-pi-settings\.sh$' <<<"$changed_files"; then
+    rebuild merge-pi-settings.sh --models
 fi
 if grep -q '^stow/zed/.*settings\.template\.jsonc$' <<<"$changed_files"; then
     if op_ok; then

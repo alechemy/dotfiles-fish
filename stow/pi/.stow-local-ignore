@@ -1,2 +1,2 @@
 \.stow-local-ignore
-^/\.pi/agent/settings\.fragment\.json$
+^/\.pi/agent/(settings|models)\.fragment\.json$

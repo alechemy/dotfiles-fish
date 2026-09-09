@@ -11,7 +11,9 @@ import textwrap
 
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGES = {"@upstash/context7-pi": "0.1.2", "pi-subagents": "0.65.0", "pi-web-access": "0.27.0"}
+UNMEASURED_PACKAGES = {"@plannotator/pi-extension": "0.27.12"}
 SOURCE_SHA256 = {
+    "@plannotator/pi-extension/package.json": "7d0127237625a7500461a0e9f184ab99e46d656d12251742f7442f6785c7ff6e",
     "@upstash/context7-pi/package.json": "367f6565087be5e89315d3cb171d9f391017124b598b744662c3500705adcb11",
     "@upstash/context7-pi/extensions/context7.ts": "b8b3ae539981a1469678e19771c061e692838e8c1fde6a5a3990962a8671c8e7",
     "@upstash/context7-pi/lib/prompts.ts": "8169441933875f0e6ffd4fb01959141f1c33921f7dea7fd6ab5a8151318e1156",
@@ -144,7 +146,8 @@ def sizes(text):
 def measure(repo, packages_root):
     fragment_data = source_file(repo, "stow/pi/.pi/agent/settings.fragment.json").read_bytes()
     fragment = json.loads(fragment_data)
-    expected = [f"npm:{name}@{version}" for name, version in PACKAGES.items()]
+    declared = {**PACKAGES, **UNMEASURED_PACKAGES}
+    expected = [f"npm:{name}@{version}" for name, version in declared.items()]
     require(fragment.get("packages") == expected, "Declared package set/filters changed; review the projection")
     inputs = {"tracked/settings.fragment.json": hashlib.sha256(fragment_data).hexdigest()}
     sources, manifests = {}, {}
@@ -154,10 +157,11 @@ def measure(repo, packages_root):
         inputs[label] = hashlib.sha256(data).hexdigest()
         return data.decode("utf-8")
 
-    for name, version in PACKAGES.items():
+    for name, version in declared.items():
         manifest = json.loads(read(packages_root, f"{name}/package.json", f"{name}/package.json"))
         require(manifest.get("name") == name and manifest.get("version") == version, f"Installed version mismatch: {name}")
-        manifests[name] = manifest
+        if name in PACKAGES:
+            manifests[name] = manifest
     for relative, digest in SOURCE_SHA256.items():
         sources[relative] = read(packages_root, relative, relative)
         require(inputs[relative] == digest, f"Reviewed source drift: {relative}")
@@ -224,13 +228,14 @@ def measure(repo, packages_root):
     fingerprint = "".join(f"{digest}  {name}\n" for name, digest in sorted(inputs.items()))
     return {
         "method": "source-derived default-registration projection; not observed runtime registration",
-        "declared_versions": PACKAGES,
+        "declared_versions": declared,
+        "unmeasured_packages": UNMEASURED_PACKAGES,
         "tools": tools, "tool_descriptions": total(tools),
         "skills": skills, "advertised_skill_descriptions": total(skills),
         "manual_skills_excluded": sorted(manual),
         "assumptions": ["Parent session after ordinary session_start; no environment or project overrides",
                         "Default Subagents description and enabled bg_wait; all four default Web Access tools",
-                        "Only the fragment package set and tracked shared skills"],
+                        "Measured packages and tracked shared skills only; unmeasured_packages are excluded"],
         "exclusions": ["Tool schemas and names/labels, promptSnippet, promptGuidelines",
                        "Skill XML escaping/wrappers, names, locations, instructions and bodies",
                        "Built-in tools, commands, prompts, roles, dynamic resources and runtime tool activation",

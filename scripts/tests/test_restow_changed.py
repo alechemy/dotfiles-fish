@@ -29,7 +29,7 @@ class RestowChangedTests(unittest.TestCase):
         self.stub(self.bin / "stow", 'printf "stow %s\\n" "$*" >> "$CALL_LOG"')
         for name in ("merge-pi-settings.sh", "build-dtnote-handler.sh", "build-launchd-plists.sh",
                      "build-vscode-config.sh", "build-zed-config.sh", "build-streamrip-config.sh"):
-            self.stub(self.repo / "scripts" / name, f'echo {name} >> "$CALL_LOG"')
+            self.stub(self.repo / "scripts" / name, f'echo "{name}${{1:+ $*}}" >> "$CALL_LOG"')
         self.write("stow/pi/.pi/agent/settings.fragment.json", "{}")
         self.git("init", "-q")
         self.git("config", "user.name", "Fixture")
@@ -67,7 +67,7 @@ class RestowChangedTests(unittest.TestCase):
     def test_script_only_change_rebuilds_without_stow(self):
         with (self.repo / "scripts/merge-pi-settings.sh").open("a") as stream:
             stream.write("# changed\n")
-        self.assertEqual(self.run_hook(), ["merge-pi-settings.sh"])
+        self.assertEqual(self.run_hook(), ["merge-pi-settings.sh", "merge-pi-settings.sh --models"])
 
     def test_fragment_change_rebuilds_before_stow(self):
         self.write("stow/pi/.pi/agent/settings.fragment.json", '{"theme":"dark"}')
@@ -76,6 +76,13 @@ class RestowChangedTests(unittest.TestCase):
         self.assertEqual(len(calls), 2)
         self.assertTrue(calls[1].startswith("stow --restow --no-folding "))
         self.assertIn(f"--target={self.home} pi", calls[1])
+
+    def test_models_fragment_change_rebuilds_before_stow(self):
+        self.write("stow/pi/.pi/agent/models.fragment.json", '{"providers":{}}')
+        calls = self.run_hook()
+        self.assertEqual(calls[0], "merge-pi-settings.sh --models")
+        self.assertEqual(len(calls), 2)
+        self.assertTrue(calls[1].startswith("stow --restow --no-folding "))
 
     def test_noop_and_unrelated_diff_do_nothing(self):
         self.assertEqual(self.run_hook(self.old), [])
@@ -92,7 +99,7 @@ class RestowChangedTests(unittest.TestCase):
 
     def test_rebuild_failure_remains_nonfatal(self):
         self.stub(self.repo / "scripts/merge-pi-settings.sh", 'echo failed >> "$CALL_LOG"; exit 1')
-        self.assertEqual(self.run_hook(), ["failed"])
+        self.assertEqual(self.run_hook(), ["failed", "failed"])
 
     def test_opt_in_packages_require_existing_link(self):
         for package in ("stow/devonthink", "stow/streamrip", "stow-work/work", "stow-local/local"):

@@ -365,6 +365,8 @@ chmod +x "$DOTFILES/scripts/build-vscode-config.sh"
 chmod +x "$DOTFILES/scripts/merge-pi-settings.sh"
 "$DOTFILES/scripts/merge-pi-settings.sh" \
     || info "WARNING: Pi settings merge failed; check jq and ~/.pi/agent/settings.json."
+"$DOTFILES/scripts/merge-pi-settings.sh" --models \
+    || info "WARNING: Pi models merge failed; check jq and ~/.pi/agent/models.json."
 if ! jq -e '
     has("openai-codex") and has("github-copilot") and has("anthropic")
 ' "$HOME/.pi/agent/auth.json" >/dev/null 2>&1; then

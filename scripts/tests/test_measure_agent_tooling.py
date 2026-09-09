@@ -29,8 +29,9 @@ class MeasureAgentToolingTests(unittest.TestCase):
         self.packages = self.root / "node_modules"
         self.shared = self.repo / "stow/agents/.agents/skills"
         self.fragment = self.repo / "stow/pi/.pi/agent/settings.fragment.json"
-        self.put(self.fragment, json.dumps({"packages": [f"npm:{n}@{v}" for n, v in measurement.PACKAGES.items()]}))
-        for name, version in measurement.PACKAGES.items():
+        declared = {**measurement.PACKAGES, "@plannotator/pi-extension": "0.27.12"}
+        self.put(self.fragment, json.dumps({"packages": [f"npm:{n}@{v}" for n, v in declared.items()]}))
+        for name, version in declared.items():
             manifest = {"name": name, "version": version, "pi": {"extensions": ["./index.ts"]}}
             if name != "pi-web-access":
                 manifest["pi"]["skills"] = ["./skills"]
@@ -75,6 +76,17 @@ class MeasureAgentToolingTests(unittest.TestCase):
         visible = next(row for row in result["skills"] if row["name"] == "visible")
         self.assertEqual((visible["characters"], visible["utf8_bytes"]), (9, 13))
         self.assertEqual(result, self.measure())
+
+    def test_plannotator_is_explicitly_outside_the_description_projection(self):
+        result = self.measure()
+        self.assertEqual(result["unmeasured_packages"], {"@plannotator/pi-extension": "0.27.12"})
+        self.assertNotIn("@plannotator/pi-extension", [row["package"] for row in result["tools"] + result["skills"]])
+        path = self.packages / "@plannotator/pi-extension/package.json"
+        manifest = json.loads(path.read_text())
+        manifest["version"] = "99.0.0"
+        self.put(path, json.dumps(manifest))
+        with self.assertRaisesRegex(ValueError, "version mismatch"):
+            self.measure()
 
     def test_shared_skill_invocation_policy(self):
         root = HELPER.parent.parent / "stow/agents/.agents/skills"
