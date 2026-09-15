@@ -523,6 +523,14 @@ class TopHitsSafety(unittest.TestCase):
         self.top.save_progress({"year": 2000, "ranks": {"1": {"verified": True, "path": str(self.root / "gone")}}})
         self.assertEqual(self.top.year_status(2000)["verified"], 0)
 
+    def test_redo_acquires_lock_before_reading_manifest_or_progress(self):
+        with patch.dict(sys.modules, self.top._mutagen), patch.object(self.top, "year_lock", side_effect=SystemExit("busy")) as lock, patch.object(self.top, "load_manifest") as manifest, patch.object(self.top, "load_progress") as progress:
+            with self.assertRaises(SystemExit):
+                self.top.cmd_redo(types.SimpleNamespace(year=2000, rank=[1]))
+        lock.assert_called_once_with(2000, "redo")
+        manifest.assert_not_called()
+        progress.assert_not_called()
+
     def test_failed_publication_preserves_old_and_download(self):
         old, new, target = [self.root / n for n in ("old.m4a", "new.m4a", "target.m4a")]
         old.write_bytes(b"old")

@@ -1454,15 +1454,19 @@ def replace_recording(source, target, old_paths):
 
 # ------------------------------------------------------------------ stage: redo
 def cmd_redo(args):
-    """Replace specific ranks of an already-filed year with the manifest's current pick."""
-    from mutagen.mp4 import MP4  # noqa: F401
+    """Replace ranks using state read only after acquiring the year lock."""
+    with year_lock(args.year, "redo"):
+        _redo_locked(args)
+
+
+def _redo_locked(args):
+    from mutagen.mp4 import MP4
     year = args.year
     manifest = load_manifest(year)
     progress = load_progress(year)
     library_dir = progress.get("library_dir")
     if not progress.get("assembled_at") or not library_dir or not os.path.isdir(library_dir):
         raise SystemExit(f"ERROR: {year} is not assembled; use download/assemble instead.")
-    lock = year_lock(year, "redo")
     by_rank = {r["rank"]: r for r in manifest["entries"]}
     existing = {}
     for path in find_audio(library_dir):
