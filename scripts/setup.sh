@@ -455,6 +455,7 @@ if command -v stow &> /dev/null; then
     # LinearMouse's config is app-rewritten (an atomic-rename save de-stows a
     # symlink), so seed it copy-if-absent rather than stow it.
     "$DOTFILES/scripts/seed-linearmouse-config.sh"
+    "$DOTFILES/scripts/setup-herdr.sh"
 
     # 4a. Opt-in work config (stow-work/work/).
     #

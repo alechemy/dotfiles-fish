@@ -132,6 +132,9 @@ fi
 if grep -Eq '^stow/pi/\.pi/agent/models\.fragment\.json$|^scripts/merge-pi-settings\.sh$' <<<"$changed_files"; then
     rebuild merge-pi-settings.sh --models
 fi
+if grep -Eq '^stow/herdr/|^scripts/(setup-herdr\.sh|install-herdr-hunk-diff\.sh|configure-herdr-hunk\.mjs|patches/herdr-hunk-diff\.patch)$' <<<"$changed_files"; then
+    rebuild setup-herdr.sh
+fi
 if grep -q '^stow/zed/.*settings\.template\.jsonc$' <<<"$changed_files"; then
     if op_ok; then
         rebuild build-zed-config.sh

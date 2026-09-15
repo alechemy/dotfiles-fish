@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+set -euo pipefail
+exec open -na Ghostty --args --config-file="$HOME/.config/ghostty/shell.conf" "$@"

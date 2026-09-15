@@ -336,6 +336,12 @@ For tier 1 scripts, even when the launchd plist provides the interpreter explici
 
 Multiple Claude Code sessions can run against this repo at once (desktop plus a Moshi phone session), so HEAD may not be the commit you made earlier in your own session. Before any `git commit --amend`, run `git log -1` and confirm HEAD is the exact commit you intend to rewrite; if it isn't, make a new commit instead. To repair a wrong amend: `git reset --soft HEAD@{1}` restores the clobbered commit and re-stages only your changes.
 
+### Herdr: persistent Pi workspaces in Ghostty
+
+Ghostty starts Herdr by default through a Fish login shell. Herdr owns agent panes and tabs; Ghostty forwards the existing split and navigation shortcuts as CSI-u keys. `ghostty-shell` opens the native-split profile. [Herdr workflow](herdr.md) documents all keys, lifecycle boundaries, integration ownership, and isolated verification.
+
+Homebrew owns the binary. `scripts/setup-herdr.sh` seeds the app-owned config copy-if-absent, installs the official Pi integration, and installs the pinned, locally patched Herdr–Hunk plugin through `scripts/install-herdr-hunk-diff.sh`. The plugin uses the existing Homebrew Hunk; its source cache, review state, and seeded preferences remain outside Stow. Only its marked shortcut block is merged into Herdr's live config. Setup and the Herdr restow handler call it. The `herdr` package stows a shared skill and the small Pi UI-prompt status bridge; it never stows runtime state or the live config. Saved pane-screen history remains disabled. Start the server from Ghostty, not a background service, to retain the GUI Keychain context.
+
 ### tmux: test config on an isolated socket
 
 Never run `tmux kill-server` (or `kill-session`) on the default socket for verification — a live server may be hosting a remote (Moshi) session, and killing it drops that client. Test config changes on a throwaway socket instead: `tmux -L test new -d && tmux -L test show -g <option> && tmux -L test kill-server`. Also note a running server never re-reads `tmux.conf`; if options look half-applied (e.g. `mouse on` but default `history-limit`), you attached to a pre-existing server rather than starting a fresh one.
