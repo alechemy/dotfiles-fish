@@ -450,6 +450,57 @@ Two invariants there:
 
 That `artist_name_variant` check groups artist *folders*, so it cannot see drift that exists only in tags. Nothing in the pipeline produces that state, but `tagger.py --album-artist` run by hand can.
 
+### Music recovery and download ownership
+
+`riptag-worker.sh` serializes downloads with a host-wide `/tmp/riptag-worker.lock`
+directory. An existing lock always blocks a new worker. After an interrupted run,
+confirm that no worker is running before removing the stale lock directory.
+Each download uses a private `.riptag-run.*` directory inside its inbox and passes
+that directory to streamrip with `-f`. The worker refuses zero or multiple album
+outputs instead of selecting an unrelated recent folder. Failed run files and
+logs remain in that directory.
+
+Resume metadata stays on the download host under
+`~/.local/state/riptag/sessions/<id>.meta`. `riptag --resume=<id>` uses local
+metadata when present; otherwise it queries the NAS. `--local` never transfers a
+NAS session. Legacy `/tmp/riptag-<id>.meta` sessions need manual recovery; the new
+worker refuses to guess their download directory. NAS deployment and result
+files use a fresh remote directory per invocation. The wrapper exposes only the
+current session ID to `batch_rip`, which retains failed entries for retry.
+
+Music-doctor deletes only truly empty directories. Covers, sidecars, archives,
+and any other contents require review rather than recursive deletion.
+Top-hits adoption checks the full unique chart-rank set and each expected tagged
+artist, title, and duration under the year lock. Initial verified tagging stores
+`TOP_HITS_IDENTITY` with the Qobuz recording ID, source artist credit, and expected
+display tags, and persists the same `tag_identity` in the manifest before saving
+audio. The manifest is authoritative; an audio atom alone cannot establish an
+expected credit. Retagging and verification reload that identity so featured
+credits survive repeated tagging. A changed recording ID requires redo. Legacy files
+without provenance must match tags derived from known chart or recording credits;
+unknown feature credits remain unverified and staging stays intact. These metadata
+checks do not prove a recording's binary identity.
+
+A verified fresh download also binds its progress record to the requested Qobuz
+recording ID. Download reuse and assembly require that binding. Missing or changed
+IDs do not become valid from title/duration similarity. Such staging is retained;
+manually move the rank's recorded files and rank-directory audio aside before a
+fresh download, or use redo for an already-filed album. Old progress without this
+binding requires the same manual recovery, not an automatic migration.
+
+Download skips and assembly both reverify current files, including another check
+immediately before tagging. A previously tagged staged file can use exact
+manifest-authoritative artist/title/duration only with the same bound recording
+ID. This preserves interrupted-assembly retries for de-censored titles and other
+supported display transformations. These checks do not lock out unrelated file
+writers. Recorded completion is not current completion: missing files or unavailable storage block unattended work until
+reconciled, without automatically redownloading a previously assembled album.
+
+Runnability stores a file identity with each analysis. Existing feature rows
+without that identity require reanalysis before tag writes. Replaced or changed
+files are rejected before writing rather than stamped as current. The check
+uses file metadata, not a content hash or a cross-process file lock.
+
 ### AeroSpace scripting: identify apps by PID, not name
 
 When a script bridges AeroSpace and System Events (e.g. to hide or focus a specific app), key off the **PID**, not the app name. AeroSpace's `%{app-name}` and the System Events process name disagree for some apps — notably case (`Ghostty` vs `ghostty`) — so a name comparison silently mismatches: it fails to exclude the target when picking a sibling, and `set visible of (process whose name is …)` can no-op against the wrong identity. Use AeroSpace's `%{app-pid}` and hide/match via System Events `unix id` (`first application process whose unix id is <pid>`), which is namespace-safe. Reference: `scripts/aerospace-hide.sh`.

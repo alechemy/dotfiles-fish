@@ -100,7 +100,14 @@ def open_db() -> sqlite3.Connection:
     for col in ("mood_party", "mood_relaxed", "mood_aggressive"):
         if col not in cols:
             conn.execute(f"ALTER TABLE features ADD COLUMN {col} REAL")
+    if "file_identity" not in cols:
+        conn.execute("ALTER TABLE features ADD COLUMN file_identity TEXT")
     return conn
+
+
+def file_identity(path):
+    st = os.stat(path)
+    return json.dumps([st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns, st.st_ctime_ns])
 
 
 _worker_models: dict | None = None
@@ -149,6 +156,7 @@ def _analyze_one(abspath: str, relpath: str) -> dict:
     row: dict = {"relpath": relpath, "error": None}
     st = os.stat(abspath)
     row["size"], row["mtime"] = st.st_size, st.st_mtime
+    row["file_identity"] = file_identity(abspath)
     try:
         try:
             tags = MP4(abspath)
@@ -190,6 +198,8 @@ def _analyze_one(abspath: str, relpath: str) -> dict:
         row["mood_party"] = float(m["mood_party"](emb).mean(axis=0)[1])
         row["mood_relaxed"] = float(m["mood_relaxed"](emb).mean(axis=0)[1])
         row["mood_aggressive"] = float(m["mood_aggressive"](emb).mean(axis=0)[0])
+        if file_identity(abspath) != row["file_identity"]:
+            raise ValueError("file changed during analysis; reanalyze")
     except Exception as e:
         row["error"] = f"{type(e).__name__}: {e}"
     return row
@@ -223,8 +233,8 @@ def cmd_analyze(args) -> int:
     paths = collect_paths(args)
     conn = open_db()
     known = {
-        r[0]: (r[1], r[2])
-        for r in conn.execute("SELECT relpath, size, mtime FROM features WHERE error IS NULL")
+        r[0]: r[1]
+        for r in conn.execute("SELECT relpath, file_identity FROM features WHERE error IS NULL")
     }
     todo = []
     for p in paths:
@@ -232,8 +242,7 @@ def cmd_analyze(args) -> int:
             rel = str(p.resolve().relative_to(LIBRARY_ROOT))
         except ValueError:
             rel = str(p)
-        st = p.stat()
-        if not args.reanalyze and known.get(rel) == (st.st_size, st.st_mtime):
+        if not args.reanalyze and known.get(rel) == file_identity(p):
             continue
         todo.append((str(p), rel))
     print(f"{len(paths)} candidates, {len(todo)} to analyze", file=sys.stderr)
@@ -376,7 +385,7 @@ def cmd_score(args) -> int:
     return 0
 
 
-def _write_mp4(p: pathlib.Path, score: int, folded: int | None, tmpo: int | None, dry_run: bool):
+def _write_mp4(p: pathlib.Path, score: int, folded: int | None, tmpo: int | None, dry_run: bool, expected_identity: str):
     from mutagen.mp4 import MP4, MP4FreeForm
 
     key_r = "----:com.apple.iTunes:RUNNABILITY"
@@ -397,11 +406,13 @@ def _write_mp4(p: pathlib.Path, score: int, folded: int | None, tmpo: int | None
         audio["tmpo"] = [tmpo]
         changed = True
     if changed and not dry_run:
+        if file_identity(p) != expected_identity:
+            raise ValueError("file changed before tag save; reanalyze")
         audio.save()
     return changed
 
 
-def _write_mp3(p: pathlib.Path, score: int, folded: int | None, tmpo: int | None, dry_run: bool):
+def _write_mp3(p: pathlib.Path, score: int, folded: int | None, tmpo: int | None, dry_run: bool, expected_identity: str):
     from mutagen.id3 import ID3, TBPM, TXXX
     from mutagen.id3._util import ID3NoHeaderError
 
@@ -426,11 +437,13 @@ def _write_mp3(p: pathlib.Path, score: int, folded: int | None, tmpo: int | None
             tags.setall("TBPM", [TBPM(encoding=3, text=[str(tmpo)])])
             changed = True
     if changed and not dry_run:
+        if file_identity(p) != expected_identity:
+            raise ValueError("file changed before tag save; reanalyze")
         tags.save(str(p))
     return changed
 
 
-def _write_vorbis(p: pathlib.Path, score: int, folded: int | None, tmpo: int | None, dry_run: bool):
+def _write_vorbis(p: pathlib.Path, score: int, folded: int | None, tmpo: int | None, dry_run: bool, expected_identity: str):
     import mutagen
 
     audio = mutagen.File(str(p))
@@ -449,28 +462,33 @@ def _write_vorbis(p: pathlib.Path, score: int, folded: int | None, tmpo: int | N
             audio[k] = [v]
             changed = True
     if changed and not dry_run:
+        if file_identity(p) != expected_identity:
+            raise ValueError("file changed before tag save; reanalyze")
         audio.save()
     return changed
 
 
-def _write_one(rel: str, score: int, folded: int | None, tmpo: int | None, dry_run: bool):
+def _write_one(rel: str, score: int, folded: int | None, tmpo: int | None,
+               expected_identity: str | None, dry_run: bool):
     p = LIBRARY_ROOT / rel
     try:
         if not p.exists():
-            return rel, "missing", None, None, None
+            return rel, "missing", None, None, None, None
+        if not expected_identity or file_identity(p) != expected_identity:
+            return rel, "stale", None, None, None, "file changed or lacks identity; reanalyze before writing"
         ext = p.suffix.lower()
         writer = {".m4a": _write_mp4, ".mp3": _write_mp3}.get(ext, _write_vorbis)
-        changed = writer(p, score, folded, tmpo, dry_run)
+        changed = writer(p, score, folded, tmpo, dry_run, expected_identity)
         if changed is None:
-            return rel, "skipped-gated", None, None, None
+            return rel, "skipped-gated", None, None, None, None
         if not changed:
-            return rel, "unchanged", None, None, None
+            return rel, "unchanged", None, None, None, None
         if dry_run:
-            return rel, "would-write", None, None, None
+            return rel, "would-write", None, None, None, None
         st = p.stat()
-        return rel, "written", st.st_size, st.st_mtime, None
+        return rel, "written", st.st_size, st.st_mtime, file_identity(p), None
     except Exception as e:
-        return rel, "error", None, None, f"{type(e).__name__}: {e}"
+        return rel, "error", None, None, None, f"{type(e).__name__}: {e}"
 
 
 def cmd_write(args) -> int:
@@ -512,22 +530,22 @@ def cmd_write(args) -> int:
         bpm = r["bpm"]
         tmpo = round(bpm) if bpm else None
         folded = round(fold_bpm(bpm, target)) if bpm else None
-        jobs.append((r["relpath"], score, folded, tmpo))
+        jobs.append((r["relpath"], score, folded, tmpo, r["file_identity"]))
 
     counts: dict[str, int] = {}
     done = 0
     with ThreadPoolExecutor(max_workers=args.workers) as pool:
         futs = [pool.submit(_write_one, *j, args.dry_run) for j in jobs]
         for fut in as_completed(futs):
-            rel, status, size, mtime, err = fut.result()
+            rel, status, size, mtime, identity, err = fut.result()
             counts[status] = counts.get(status, 0) + 1
             done += 1
             if err:
                 print(f"ERROR {rel}: {err}", file=sys.stderr)
             elif status == "written":
                 conn.execute(
-                    "UPDATE features SET size=?, mtime=? WHERE relpath=?",
-                    (size, mtime, rel),
+                    "UPDATE features SET size=?, mtime=?, file_identity=? WHERE relpath=?",
+                    (size, mtime, identity, rel),
                 )
                 if done % 50 == 0:
                     conn.commit()
@@ -535,7 +553,8 @@ def cmd_write(args) -> int:
                 print(f"[{done}/{len(jobs)}] {counts}", file=sys.stderr)
     conn.commit()
     print(json.dumps(counts, sort_keys=True))
-    return 0
+    conn.close()
+    return 1 if counts.get("error") or counts.get("stale") or counts.get("missing") else 0
 
 
 def cmd_status(args) -> int:

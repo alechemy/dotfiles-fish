@@ -1,4 +1,5 @@
 function riptag -d "download, tag, and organize an album into the music library"
+    set -g __riptag_resume_id
     # --- Configuration ---
     set -l NAS admin@192.168.50.54
     set -l NAS_TS admin@100.89.43.9
@@ -39,7 +40,6 @@ function riptag -d "download, tag, and organize an album into the music library"
                 set local_mode 1
             case '--resume=*'
                 set resume_id (string replace -- '--resume=' '' $arg)
-                set local_mode 1
             case '--replaces=*'
                 set replaces (string replace -- '--replaces=' '' $arg)
             case '-h' '--help'
@@ -61,11 +61,39 @@ function riptag -d "download, tag, and organize an album into the music library"
         end
     end
 
-    # --- Resume mode: load saved genre/compilation from metadata ---
     if test -n "$resume_id"
-        set -l meta_file "/tmp/riptag-$resume_id.meta"
-        if test -f "$meta_file"
-            set -l meta_lines (cat "$meta_file")
+        if not string match -qr '^[a-f0-9]+$' -- "$resume_id"
+            echo "ERROR: Invalid resume session ID."
+            return 1
+        end
+        # A locally recorded session stays local; otherwise query the NAS.
+        if test -f "$HOME/.local/state/riptag/sessions/$resume_id.meta"
+            set local_mode 1
+        end
+    end
+
+    # --- NAS mode: prefer the LAN address, fall back to Tailscale ---
+    if test $local_mode -eq 0
+        if not ssh -n -o ConnectTimeout=3 -o BatchMode=yes "$NAS" true 2>/dev/null
+            if ssh -n -o ConnectTimeout=5 -o BatchMode=yes "$NAS_TS" true 2>/dev/null
+                echo "ℹ️  NAS not reachable on LAN — using Tailscale ($NAS_TS)"
+                set NAS $NAS_TS
+            else
+                echo "ERROR: NAS unreachable on both LAN ($NAS) and Tailscale ($NAS_TS)."
+                return 1
+            end
+        end
+    end
+
+    # --- Resume mode: load saved genre/compilation from its original host ---
+    if test -n "$resume_id"
+        set -l meta_lines
+        if test $local_mode -eq 1
+            set meta_lines (cat "$HOME/.local/state/riptag/sessions/$resume_id.meta" 2>/dev/null)
+        else
+            set meta_lines (ssh -n "$NAS" "cat ~/.local/state/riptag/sessions/$resume_id.meta" 2>/dev/null)
+        end
+        if test $status -eq 0 -a (count $meta_lines) -ge 6
             if test -z "$genre"
                 # Use saved genre (first positional arg might be genre override)
                 if test -n "$url_or_query" -a -z "$genre"
@@ -88,11 +116,9 @@ function riptag -d "download, tag, and organize an album into the music library"
                 set replaces "$meta_lines[5]"
             end
         else
-            # No meta file — treat positional arg as genre
-            if test -n "$url_or_query" -a -z "$genre"
-                set genre "$url_or_query"
-                set url_or_query
-            end
+            echo "ERROR: Resume metadata unavailable on the selected host. Use --local only for a local session."
+            echo "Legacy /tmp sessions require manual recovery; no download was started."
+            return 1
         end
     end
 
@@ -100,19 +126,6 @@ function riptag -d "download, tag, and organize an album into the music library"
     if test -z "$resume_id" -a -z "$url_or_query"
         __riptag_usage
         return 1
-    end
-
-    # --- NAS mode: prefer the LAN address, fall back to Tailscale ---
-    if test $local_mode -eq 0
-        if not ssh -n -o ConnectTimeout=3 -o BatchMode=yes "$NAS" true 2>/dev/null
-            if ssh -n -o ConnectTimeout=5 -o BatchMode=yes "$NAS_TS" true 2>/dev/null
-                echo "ℹ️  NAS not reachable on LAN — using Tailscale ($NAS_TS)"
-                set NAS $NAS_TS
-            else
-                echo "ERROR: NAS unreachable on both LAN ($NAS) and Tailscale ($NAS_TS)."
-                return 1
-            end
-        end
     end
 
     # --- Genre prompt (if omitted) ---
@@ -181,18 +194,10 @@ function riptag -d "download, tag, and organize an album into the music library"
         set year_args --year $year
     end
 
-    # --- Build replaces args (re-download guard; passed to worker if set) ---
-    # $replaces_args is a list for direct worker calls; $replaces_remote is a
-    # single shell-escaped string spliced into the NAS-mode ssh command. Built
-    # here (not next to the NAS-mode block below) because $replaces is fully
-    # resolved by this point — unlike $url, which is only set later in the
-    # URL-resolution block.
+    # --- Re-download guard, quoted by the shared invocation helper ---
     set -l replaces_args
-    set -l replaces_remote
     if test -n "$replaces"
         set replaces_args --replaces "$replaces"
-        set -l esc (string replace -a "'" "'\\''" "$replaces")
-        set replaces_remote "--replaces '$esc'"
     end
 
     # --- Resume mode: skip URL resolution, go straight to worker ---
@@ -208,18 +213,18 @@ function riptag -d "download, tag, and organize an album into the music library"
         if test -n "$year"
             echo "   Year: $year"
         end
-        echo "   Mode: local (VPN resume)"
+        echo "   Mode: original host"
         echo ""
 
-        LOCAL_PYTHON="$LOCAL_PYTHON" LOCAL_RIP="$LOCAL_RIP" "$WORKER" --local --resume "$resume_id" $compilation_flag $playlist_flag $year_args $replaces_args "$genre"
+        __riptag_invoke "$local_mode" "$NAS" "$LOCAL_PYTHON" "$LOCAL_RIP" "$TAGGER" "$MUSIC_TAGS" "$ORGANIZER" "$WORKER" --resume "$resume_id" $compilation_flag $playlist_flag $year_args $replaces_args "$genre"
         set -l worker_status $status
 
         if test $worker_status -eq 2
             # Partial failure — worker kept the download and wrote session ID
-            set -l sid (cat /tmp/riptag-resume-id 2>/dev/null)
+            set -l sid "$__riptag_resume_id"
             if test -n "$sid"
                 echo ""
-                echo "⚠️  Some tracks still failing. Switch VPN and retry:"
+                echo "⚠️  Some tracks still failing. Retry on the original host:"
                 echo "  riptag --resume=$sid"
             end
             return 1
@@ -339,40 +344,16 @@ for r in json.load(sys.stdin):
     end
     echo ""
 
-    # --- Run the worker ---
-    if test $local_mode -eq 1
-        LOCAL_PYTHON="$LOCAL_PYTHON" LOCAL_RIP="$LOCAL_RIP" "$WORKER" --local $compilation_flag $playlist_flag $year_args $replaces_args "$url" "$genre"
-    else
-        # Shell-escape user-controlled args before splicing into the ssh
-        # command string. Apostrophes in genre names ("rock 'n' roll"), URLs,
-        # or a hand-typed year would otherwise break out of the single-quote
-        # wrapping and execute on the NAS shell. Same escape pattern as
-        # $replaces_remote above. Built here (not earlier) because $url is
-        # only resolved during the URL-resolution block above.
-        set -l url_remote (string replace -a "'" "'\\''" "$url")
-        set -l genre_remote (string replace -a "'" "'\\''" "$genre")
-        set -l year_args_remote
-        if test -n "$year"
-            set -l year_esc (string replace -a "'" "'\\''" "$year")
-            set year_args_remote "--year '$year_esc'"
-        end
-
-        # Deploy scripts to NAS /tmp, then run via SSH
-        scp -q "$TAGGER" "$MUSIC_TAGS" "$ORGANIZER" "$WORKER" "$NAS":/tmp/
-        if test $status -ne 0
-            echo "ERROR: Failed to deploy scripts to NAS."
-            return 1
-        end
-        ssh -t "$NAS" ". ~/.profile 2>/dev/null; TAGGER_SCRIPT=/tmp/tagger.py ORGANIZER_SCRIPT=/tmp/music-organize.py bash /tmp/riptag-worker.sh $compilation_flag $playlist_flag $year_args_remote $replaces_remote '$url_remote' '$genre_remote'"
-    end
+    # --- Run the worker with a private result/deployment directory ---
+    __riptag_invoke "$local_mode" "$NAS" "$LOCAL_PYTHON" "$LOCAL_RIP" "$TAGGER" "$MUSIC_TAGS" "$ORGANIZER" "$WORKER" $compilation_flag $playlist_flag $year_args $replaces_args "$url" "$genre"
     set -l worker_status $status
 
     if test $worker_status -eq 2
         # Partial failure — extract session ID and show resume command
-        set -l sid (cat /tmp/riptag-resume-id 2>/dev/null)
+        set -l sid "$__riptag_resume_id"
         if test -n "$sid"
             echo ""
-            echo "⚠️  Some tracks failed. Switch VPN and retry:"
+            echo "⚠️  Some tracks failed. Retry on the original host:"
                 echo "  riptag --resume=$sid"
         end
         return 1
@@ -395,6 +376,49 @@ for r in json.load(sys.stdin):
     __riptag_done
 end
 
+function __riptag_invoke -a local_mode nas python rip tagger music_tags organizer worker
+    set -e argv[1..8]
+    set -g __riptag_resume_id
+    set -l worker_status
+    if test "$local_mode" -eq 1
+        mkdir -p "$HOME/.local/state/riptag"
+        or return 1
+        set -l result_dir (mktemp -d "$HOME/.local/state/riptag/request.XXXXXX")
+        or return 1
+        RIPTAG_RESULT_DIR="$result_dir" LOCAL_PYTHON="$python" LOCAL_RIP="$rip" "$worker" --local $argv
+        set worker_status $status
+        if test $worker_status -eq 2
+            set -g __riptag_resume_id (cat "$result_dir/resume-id" 2>/dev/null)
+        end
+        rm -rf "$result_dir"
+    else
+        # Deployment names and result files belong to this invocation, not /tmp globals.
+        set -l remote_dir (ssh -n "$nas" "mktemp -d /tmp/riptag.XXXXXX")
+        if test $status -ne 0; or not string match -qr '^/tmp/riptag\.[A-Za-z0-9]+$' -- "$remote_dir"
+            echo "ERROR: Could not allocate NAS deployment directory."
+            return 1
+        end
+        scp -q "$tagger" "$music_tags" "$organizer" "$worker" "$nas:$remote_dir/"
+        or return 1
+        set -l remote_args
+        for arg in $argv
+            set -l escaped (string replace -a "'" "'\\''" -- "$arg")
+            set -a remote_args "'$escaped'"
+        end
+        set -l joined (string join ' ' -- $remote_args)
+        ssh -t "$nas" ". ~/.profile 2>/dev/null; RIPTAG_RESULT_DIR='$remote_dir' TAGGER_SCRIPT='$remote_dir/tagger.py' ORGANIZER_SCRIPT='$remote_dir/music-organize.py' bash '$remote_dir/riptag-worker.sh' $joined"
+        set worker_status $status
+        if test $worker_status -eq 2
+            set -g __riptag_resume_id (ssh -n "$nas" "cat '$remote_dir/resume-id'" 2>/dev/null)
+        end
+        # Retain a failed deployment for diagnostics. Successful runs need no copy.
+        if test $worker_status -eq 0 -o $worker_status -eq 3
+            ssh -n "$nas" "rm -rf '$remote_dir'" >/dev/null 2>&1
+        end
+    end
+    return $worker_status
+end
+
 function __riptag_done
     echo ""
     echo "✅ Done! Album organized into the library."
@@ -415,7 +439,7 @@ function __riptag_usage
     echo "                         the replacement happens only if the new download"
     echo "                         is no worse on track count and quality"
     echo "  --local                Download locally instead of on NAS"
-    echo "  --resume=<id>          Resume a failed session (implies --local)"
+    echo "  --resume=<id>          Resume on the original host (local metadata or NAS)"
     echo ""
     echo "Playlist URLs (containing /playlist/) are auto-detected and unified:"
     echo "  forces --compilation, sets albumartist=Various Artists, embeds the"

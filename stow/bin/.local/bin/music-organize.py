@@ -329,8 +329,11 @@ def track_quality(path):
 
 def album_quality(files):
     """Worst track quality across an album, or None if nothing is readable."""
-    quals = [q for q in (track_quality(f) for f in files) if q is not None]
-    return min(quals) if quals else None
+    quals = [track_quality(f) for f in files]
+    if not quals or any(q is None or (q[0] and (not q[1] or not q[2]))
+                        or (not q[0] and not q[3]) for q in quals):
+        return None
+    return min(quals)
 
 
 def fmt_quality(q):
@@ -352,7 +355,9 @@ def evaluate_replacement(new_files, existing_dir):
     problems = []
     if new_n < existing_n:
         problems.append(f"fewer tracks ({new_n} new vs {existing_n} existing)")
-    if new_q is not None and existing_q is not None and new_q < existing_q:
+    if new_q is None or existing_q is None:
+        problems.append("technical quality could not be established for every track")
+    elif new_q < existing_q:
         problems.append(
             f"lower quality ({fmt_quality(new_q)} new vs {fmt_quality(existing_q)} existing)"
         )
@@ -361,8 +366,8 @@ def evaluate_replacement(new_files, existing_dir):
     return True, f"{new_n} tracks vs {existing_n}, quality {fmt_quality(new_q)}"
 
 
-def archive_folder(path, archive_root, dry_run):
-    """Move an album folder into archive_root/<date>/<artist>/<album>; return the dest."""
+def archive_destination(path, archive_root):
+    """Resolve the final archive path before any library or source mutation."""
     dest = unique_path(
         os.path.join(
             archive_root,
@@ -371,6 +376,15 @@ def archive_folder(path, archive_root, dry_run):
             os.path.basename(path),
         )
     )
+    root, resolved = os.path.realpath(archive_root), os.path.realpath(dest)
+    if resolved == root or os.path.commonpath([root, resolved]) != root:
+        raise ValueError("archive destination escapes archive root")
+    return dest
+
+
+def archive_folder(path, archive_root, dry_run):
+    """Move an album only to a contained, revalidated archive destination."""
+    dest = archive_destination(path, archive_root)
     if not dry_run:
         os.makedirs(os.path.dirname(dest), exist_ok=True)
         shutil.move(path, dest)
@@ -389,9 +403,25 @@ def log_decision(archive_root, line, dry_run):
         print(f"  -> WARNING: could not write decision log: {e}", file=sys.stderr)
 
 
+def replacement_path(library_root, replaces):
+    """Resolve a library-relative target without accepting traversal or symlink escapes."""
+    if os.path.isabs(replaces) or ".." in replaces.split(os.sep):
+        raise ValueError("--replaces must be library-relative without parent traversal")
+    root = os.path.realpath(library_root)
+    target = os.path.realpath(os.path.join(root, replaces))
+    if target == root or os.path.commonpath([root, target]) != root:
+        raise ValueError("--replaces must resolve strictly inside the library")
+    return target
+
+
+def paths_overlap(left, right):
+    left, right = os.path.realpath(left), os.path.realpath(right)
+    return os.path.commonpath([left, right]) in (left, right)
+
+
 # ----------------------------------------------------------------- organizing
 def organize_source(source, library_root, policy, dry_run, manifest, stats,
-                    replaces=None, archive_root=None):
+                    replaces=None, archive_root=None, protected_sources=()):
     is_dir = os.path.isdir(source)
     if is_dir:
         audio = list(iter_audio(source))
@@ -426,6 +456,35 @@ def organize_source(source, library_root, policy, dry_run, manifest, stats,
         stats["failed"].append(source)
         return
 
+    # Preflight every destructive target before recasing, archiving, or deleting.
+    try:
+        existing_dir = replacement_path(library_root, replaces) if replaces else None
+    except ValueError as e:
+        print(f"  -> ERROR: {e}", file=sys.stderr)
+        stats["failed"].append(source)
+        return
+    targets = {d for _, d, _ in plan}
+    if existing_dir:
+        targets.add(existing_dir)
+    protected = [source, *audio, *protected_sources]
+    if any(paths_overlap(s, d) for s in protected for d in targets):
+        print("  -> ERROR: destination overlaps a source; refusing to organize", file=sys.stderr)
+        stats["failed"].append(source)
+        return
+    if archive_root and any(paths_overlap(s, archive_root) for s in [*protected, *targets]):
+        print("  -> ERROR: archive overlaps source or destination", file=sys.stderr)
+        stats["failed"].append(source)
+        return
+
+    if archive_root:
+        try:
+            for target in targets:
+                archive_destination(target, archive_root)
+        except ValueError as e:
+            print(f"  -> ERROR: {e}", file=sys.stderr)
+            stats["failed"].append(source)
+            return
+
     if recase:
         spellings = sorted(set(recase.values()))
         print(f"  -> artist case aligned with the library: {', '.join(repr(s) for s in spellings)}")
@@ -438,9 +497,15 @@ def organize_source(source, library_root, policy, dry_run, manifest, stats,
             except Exception as e:
                 print(f"  -> WARNING: could not recase artist tags in {f}: {e}",
                       file=sys.stderr)
+                failures.append(f)
                 continue
             if fields:
                 print(f"     {os.path.basename(f)}: {', '.join(fields)} -> {artist!r}")
+
+    # A partial plan must not delete an album or discard the remaining source.
+    if failures:
+        stats["failed"].append(source)
+        return
 
     album_dirs = sorted({d for _, d, _ in plan})
 
@@ -449,7 +514,6 @@ def organize_source(source, library_root, policy, dry_run, manifest, stats,
     # download wins on both track count and quality.
     guard_archived = None
     if replaces:
-        existing_dir = os.path.join(library_root, replaces)
         if os.path.isdir(existing_dir):
             ok, reason = evaluate_replacement([f for f, _, _ in plan], existing_dir)
             if not ok:
@@ -656,6 +720,12 @@ def main():
 
     stats = {"moved": 0, "failed": [], "kept": []}
     manifest = set()
+    protected_sources = []
+    for source in args.sources:
+        source = os.path.abspath(os.path.expanduser(source))
+        protected_sources.append(source)
+        if os.path.isdir(source):
+            protected_sources.extend(iter_audio(source))
     for src in args.sources:
         src = os.path.abspath(os.path.expanduser(src))
         if not os.path.exists(src):
@@ -666,6 +736,7 @@ def main():
         organize_source(
             src, library_root, args.on_collision, args.dry_run, manifest, stats,
             replaces=args.replaces, archive_root=archive_root,
+            protected_sources=protected_sources,
         )
 
     if args.manifest and not args.dry_run:

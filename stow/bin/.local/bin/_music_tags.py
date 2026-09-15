@@ -17,7 +17,7 @@ _FEAT_RE = re.compile(r"\s+(?:feat\.?|ft\.?|featuring|with)\s+", re.I)
 
 def norm_artist(s):
     """Strip 'feat./ft./featuring/with' suffixes; lowercase; collapse whitespace."""
-    return _FEAT_RE.split(str(s or ""), maxsplit=1)[0].strip().lower()
+    return " ".join(_FEAT_RE.split(str(s or ""), maxsplit=1)[0].lower().split())
 
 
 def compilation_signal(album_artists, track_artists):
