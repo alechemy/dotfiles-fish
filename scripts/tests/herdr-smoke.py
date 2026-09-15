@@ -25,7 +25,10 @@ def main():
     plugin = parser.add_mutually_exclusive_group()
     plugin.add_argument("--hunk-plugin-root", type=Path)
     plugin.add_argument("--hunk", action="store_true")
+    parser.add_argument("--worktrunk", action="store_true")
     args = parser.parse_args()
+    if args.worktrunk and not args.hunk_plugin_root:
+        args.hunk = True
     if args.hunk:
         result = subprocess.run(["herdr", "plugin", "list", "--json"],
                                 check=True, capture_output=True, text=True, timeout=10)
@@ -47,7 +50,8 @@ def main():
         config = root / "config.toml"
         shutil.copy2(ROOT / "stow/herdr/_seed/.config/herdr/config.toml", config)
         env = {key: value for key, value in os.environ.items()
-               if not key.startswith(("PI_", "HERDR_"))}
+               if not key.startswith(("PI_", "HERDR_", "WORKTRUNK_", "GIT_"))
+               and key != "AI_AGENT"}
         env.update(HOME=str(root), XDG_CONFIG_HOME=str(root / ".config"),
                    PI_CODING_AGENT_DIR=str(agent), PI_OFFLINE="1",
                    HERDR_CONFIG_PATH=str(config), TERM="xterm-256color")
@@ -79,6 +83,20 @@ def main():
             with socket.socket() as probe:
                 probe.bind(("127.0.0.1", 0))
                 env["HUNK_MCP_PORT"] = str(probe.getsockname()[1])
+        if args.worktrunk:
+            helper_dir = root / ".agents/skills/worktrunk"
+            helper_dir.mkdir(parents=True)
+            shutil.copy2(ROOT / "stow/agents/.agents/skills/worktrunk/wt_pi.py", helper_dir)
+            binary_dir = root / ".local/bin"
+            binary_dir.mkdir(parents=True)
+            shutil.copy2(ROOT / "stow/bin/.local/bin/wt-pi", binary_dir)
+            env.update(PATH=f"{binary_dir}:{env['PATH']}",
+                       WORKTRUNK_WORKTREE_PATH=str(root / "trees/{{ branch | sanitize }}"),
+                       WORKTRUNK_SYSTEM_CONFIG_PATH=os.devnull)
+            subprocess.run(["bash", str(ROOT / "scripts/setup-worktrunk.sh")], env=env,
+                           capture_output=True, check=True, timeout=10)
+            (agent / "extensions").mkdir(exist_ok=True)
+            shutil.copy2(ROOT / "stow/worktrunk/.pi/agent/extensions/worktrunk.ts", agent / "extensions")
         subprocess.run(["herdr", "integration", "install", "pi"], env=env,
                        capture_output=True, check=True, timeout=10)
         bridge = ROOT / "stow/herdr/.pi/agent/extensions/herdr-ui-state.ts"
@@ -101,15 +119,16 @@ def main():
         ]) + "\n")
         (agent / "extensions/smoke.ts").write_text('''
 import { writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 export default function (pi) {
   pi.on("session_start", (_event, ctx) => {
     writeFileSync(join(process.env.HOME, "ready.json"), JSON.stringify({
       mode: ctx.mode, sessionId: ctx.sessionManager.getSessionId(),
     }));
   });
-  pi.on("input", (event) => {
+  pi.on("input", (event, ctx) => {
     writeFileSync(join(process.env.HOME, "input.json"), JSON.stringify({ text: event.text }));
+    writeFileSync(join(process.env.HOME, `input-${basename(ctx.cwd)}.json`), JSON.stringify({ text: event.text }));
     return { action: "handled" };
   });
   pi.registerCommand("smoke-confirm", {
@@ -172,9 +191,14 @@ export default function (pi) {
             assert json.loads((root / "ready.json").read_text())["mode"] == "tui"
             key(b"first\rsecond")
             assert not (root / "input.json").exists(), "Enter submitted instead of inserting a newline"
+            ghostty = (ROOT / "stow/ghostty/.config/ghostty/config").read_text()
+            shift_enter = next(line.split("=text:", 1)[1] for line in ghostty.splitlines()
+                               if line.startswith("keybind = shift+enter=text:"))
+            key(shift_enter.encode().decode("unicode_escape").encode() + b"third")
+            assert not (root / "input.json").exists(), "Shift+Enter submitted instead of inserting a newline"
             key(b"\x1b[13;9u")
             wait(lambda: (root / "input.json").exists(), "Cmd+Enter submission")
-            assert json.loads((root / "input.json").read_text())["text"] == "first\nsecond"
+            assert json.loads((root / "input.json").read_text())["text"] == "first\nsecond\nthird"
             (root / "input.json").unlink()
             key(b"control-submit\x13")
             wait(lambda: (root / "input.json").exists(), "Ctrl+S submission")
@@ -245,6 +269,9 @@ export default function (pi) {
             key(b"\r")
             wait(lambda: (root / "confirm.json").exists(), "explicit confirmation")
             assert json.loads((root / "confirm.json").read_text())["approved"] is True
+            if args.worktrunk:
+                from worktrunk_smoke import exercise_worktrunk
+                exercise_worktrunk(root, env, workspace, pane, api, wait, key, drain)
             key(b"\x1b[116;9u")
             wait(lambda: len(api("pane", "list", "--workspace", workspace)["panes"]) == 2,
                  "Cmd+T split")

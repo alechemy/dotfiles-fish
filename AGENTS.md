@@ -18,7 +18,7 @@ Also read:
 
 ## Repository-wide constraints
 
-- Preserve the Stow mirror. A file destined for `~/.config/tool/config` belongs at `stow/<package>/.config/tool/config`. Restow only when files are added or removed.
+- Preserve the Stow mirror. A file destined for `~/.config/tool/config` belongs at `stow/<package>/.config/tool/config`. Restow only when files are added or removed. Run setup and Stow only from the primary dotfiles checkout; linked task worktrees must not own live HOME links.
 - Never treat display count as docking state. Gate ultrawide behavior on the `DELL U4025QW` name. Gate power behavior independently through `~/.local/bin/should-run-background-job`.
 - Do not stow app-owned files that are atomically rewritten. Use the repository's generated, seeded, fragment-merge, or copy-if-absent pattern.
 - Pi's settings fragment owns portable preferences and complete package/model arrays. Capture deliberate changes through the documented allowlist, never by copying live settings wholesale.

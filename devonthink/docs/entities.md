@@ -899,6 +899,9 @@ Mechanics worth knowing (mostly in `things_bridge.py`):
   block in `~/.zshenv`; launchd sources no shell profile). Without it the
   loop degrades: proposals still apply, but bounced tasks stay completed and
   the brief's entity-review digest remains the backstop.
+- Database discovery searches only Things Mac group containers, excluding
+  backups. Permission failures report the OS error and affected path with
+  Full Disk Access guidance; a missing database gets a separate message.
 - Reading the Things DB needs Full Disk Access on `/usr/bin/python3` — the
   same grant the Messages→LastContact pass established. The local DB only
   receives cloud pushes while Things.app runs, so the poller pre-warms it

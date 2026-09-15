@@ -1,0 +1,74 @@
+#set document(date: none$if(title)$, title: [$title$]$endif$)
+#set page(
+  width: $page-width$mm,
+  height: $page-height$mm,
+  margin: (
+    left: $left-margin$mm,
+    right: $right-margin$mm,
+    top: $top-margin$mm,
+    bottom: $bottom-margin$mm,
+  ),
+  numbering: "1",
+  number-align: center + bottom,
+  fill: white,
+)
+#set text(font: "$prose-font$", size: $body-size$pt, fill: black, lang: "en")
+#set par(justify: false, leading: $leading$em, spacing: $paragraph-spacing$em)
+#set heading(numbering: none)
+#show heading: set block(below: $heading-spacing$em)
+#show heading: set text(font: "$heading-font$", weight: "semibold")
+#show heading.where(level: 1): set text(size: $heading-1-size$pt)
+#show heading.where(level: 2): set text(size: $heading-2-size$pt)
+#show heading.where(level: 3): set text(size: $heading-3-size$pt)
+#set raw(theme: none, tab-size: 4)
+#show raw: it => {
+  set text(
+    font: "$code-font$",
+    size: $code-size$pt,
+    hyphenate: false,
+    ligatures: false,
+    features: (calt: 0),
+    overhang: false,
+  )
+  let lines = it.text.split("\n").map(line => text(line.clusters().join("\u{200b}")))
+  let body = lines.join(linebreak())
+  if it.block {
+    block(width: 100%, breakable: true, inset: (x: 6pt, y: 4pt),
+      stroke: (left: 0.5pt + black), above: 0.7em, below: 0.7em, {
+        set par(justify: false, leading: 0.55em)
+        body
+      })
+  } else {
+    body
+  }
+}
+#set table(inset: 4pt, stroke: none)
+#show table: set text(size: $table-size$pt)
+#show figure.where(kind: table): set block(breakable: true)
+#show figure.where(kind: table): set figure.caption(position: top)
+#set image(width: 100%)
+#show link: set text(fill: black)
+#set terms(hanging-indent: 1.5em)
+#let horizontalRule = line(length: 100%, stroke: 0.5pt + black)
+#let divider = horizontalRule
+
+$if(title-block)$
+#block(above: 0pt, below: 1em)[
+$if(title)$
+  #text(font: "$heading-font$", size: $title-size$pt, weight: "semibold")[$title$]
+$endif$
+$if(subtitle)$
+
+  #text(size: $subtitle-size$pt)[$subtitle$]
+$endif$
+$if(author)$
+
+  $for(author)$$author$$sep$, $endfor$
+$endif$
+$if(date)$
+
+  $date$
+$endif$
+]
+$endif$
+$body$

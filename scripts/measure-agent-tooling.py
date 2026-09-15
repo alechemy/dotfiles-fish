@@ -11,9 +11,8 @@ import textwrap
 
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGES = {"@upstash/context7-pi": "0.1.2", "pi-subagents": "0.65.0", "pi-web-access": "0.27.0"}
-UNMEASURED_PACKAGES = {"@plannotator/pi-extension": "0.27.12"}
+SUBAGENTS_SOURCE = "./local/copilot-delegation/node_modules/pi-subagents"
 SOURCE_SHA256 = {
-    "@plannotator/pi-extension/package.json": "7d0127237625a7500461a0e9f184ab99e46d656d12251742f7442f6785c7ff6e",
     "@upstash/context7-pi/package.json": "367f6565087be5e89315d3cb171d9f391017124b598b744662c3500705adcb11",
     "@upstash/context7-pi/extensions/context7.ts": "b8b3ae539981a1469678e19771c061e692838e8c1fde6a5a3990962a8671c8e7",
     "@upstash/context7-pi/lib/prompts.ts": "8169441933875f0e6ffd4fb01959141f1c33921f7dea7fd6ab5a8151318e1156",
@@ -143,11 +142,14 @@ def sizes(text):
     return {"characters": len(text), "utf8_bytes": len(text.encode("utf-8"))}
 
 
-def measure(repo, packages_root):
+def measure(repo, packages_root, subagents_root):
     fragment_data = source_file(repo, "stow/pi/.pi/agent/settings.fragment.json").read_bytes()
     fragment = json.loads(fragment_data)
-    declared = {**PACKAGES, **UNMEASURED_PACKAGES}
-    expected = [f"npm:{name}@{version}" for name, version in declared.items()]
+    declared = PACKAGES
+    expected = [SUBAGENTS_SOURCE if name == "pi-subagents" else f"npm:{name}@{version}"
+                for name, version in declared.items()]
+    package_roots = {name: subagents_root if name == "pi-subagents" else packages_root / name
+                     for name in declared}
     require(fragment.get("packages") == expected, "Declared package set/filters changed; review the projection")
     inputs = {"tracked/settings.fragment.json": hashlib.sha256(fragment_data).hexdigest()}
     sources, manifests = {}, {}
@@ -158,12 +160,12 @@ def measure(repo, packages_root):
         return data.decode("utf-8")
 
     for name, version in declared.items():
-        manifest = json.loads(read(packages_root, f"{name}/package.json", f"{name}/package.json"))
+        manifest = json.loads(read(package_roots[name], "package.json", f"{name}/package.json"))
         require(manifest.get("name") == name and manifest.get("version") == version, f"Installed version mismatch: {name}")
-        if name in PACKAGES:
-            manifests[name] = manifest
+        manifests[name] = manifest
     for relative, digest in SOURCE_SHA256.items():
-        sources[relative] = read(packages_root, relative, relative)
+        name = next(name for name in declared if relative.startswith(name + "/"))
+        sources[relative] = read(package_roots[name], relative[len(name) + 1:], relative)
         require(inputs[relative] == digest, f"Reviewed source drift: {relative}")
 
     tools = []
@@ -209,7 +211,7 @@ def measure(repo, packages_root):
         require(isinstance(manifest.get("pi"), dict), "Package manifest discovery changed")
         paths = manifest["pi"].get("skills", [])
         require(paths in ([], ["./skills"]), "Package skill manifest/filters require review")
-        roots.extend((name, packages_root / name / "skills", True) for _ in paths)
+        roots.extend((name, package_roots[name] / "skills", True) for _ in paths)
     for origin, root, include_root_files in roots:
         for path in skill_files(root, include_root_files):
             relative = path.relative_to(root).as_posix()
@@ -229,13 +231,13 @@ def measure(repo, packages_root):
     return {
         "method": "source-derived default-registration projection; not observed runtime registration",
         "declared_versions": declared,
-        "unmeasured_packages": UNMEASURED_PACKAGES,
+        "unmeasured_packages": {},
         "tools": tools, "tool_descriptions": total(tools),
         "skills": skills, "advertised_skill_descriptions": total(skills),
         "manual_skills_excluded": sorted(manual),
         "assumptions": ["Parent session after ordinary session_start; no environment or project overrides",
                         "Default Subagents description and enabled bg_wait; all four default Web Access tools",
-                        "Measured packages and tracked shared skills only; unmeasured_packages are excluded"],
+                        "Declared packages and tracked shared skills only"],
         "exclusions": ["Tool schemas and names/labels, promptSnippet, promptGuidelines",
                        "Skill XML escaping/wrappers, names, locations, instructions and bodies",
                        "Built-in tools, commands, prompts, roles, dynamic resources and runtime tool activation",
@@ -249,9 +251,10 @@ def measure(repo, packages_root):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--packages-root", type=Path, required=True, help="Installed npm node_modules source directory")
+    parser.add_argument("--subagents-root", type=Path, required=True, help="Installed local delegation guard package directory")
     args = parser.parse_args()
     try:
-        print(json.dumps(measure(ROOT, args.packages_root), indent=2, ensure_ascii=False))
+        print(json.dumps(measure(ROOT, args.packages_root, args.subagents_root), indent=2, ensure_ascii=False))
     except (OSError, ValueError) as error:
         print(f"measure-agent-tooling: {error}", file=sys.stderr)
         return 1

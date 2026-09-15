@@ -6,6 +6,10 @@
 # post-commit, and non-merge commits are filtered by the HEAD^2 check, so
 # this fires precisely for resolved merges; restow is idempotent anyway.
 
+git_dir="$(git rev-parse --git-dir 2>/dev/null)" || exit 0
+common_dir="$(git rev-parse --git-common-dir 2>/dev/null)" || exit 0
+[ "$git_dir" = "$common_dir" ] || exit 0
+
 toplevel="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
 [ -x "$toplevel/scripts/restow-changed.sh" ] || exit 0
 git rev-parse --quiet --verify HEAD^2 >/dev/null || exit 0

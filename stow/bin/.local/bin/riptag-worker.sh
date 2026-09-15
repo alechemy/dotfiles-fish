@@ -117,6 +117,28 @@ else
   fi
 fi
 
+if [ $LOCAL_MODE -eq 1 ] && [ ! -d "$LIBRARY_DIR" ]; then
+  if [ -x "$HOME/.local/bin/mount-nas.sh" ]; then
+    printf "%s\n" "--> Music library is not mounted; trying the NAS mount helper..."
+    "$HOME/.local/bin/mount-nas.sh"
+  fi
+fi
+
+if [ ! -d "$LIBRARY_DIR" ]; then
+  printf "%s\n" "ERROR: Music library is unavailable: $LIBRARY_DIR"
+  if [ $LOCAL_MODE -eq 1 ]; then
+    printf "%s\n" "Mount the NAS Media share in Finder or run ~/.local/bin/mount-nas.sh, then retry."
+  fi
+  printf "%s\n" "No download was started. Existing downloads are unchanged."
+  exit 1
+fi
+
+if [ ! -r "$LIBRARY_DIR" ] || [ ! -w "$LIBRARY_DIR" ] || [ ! -x "$LIBRARY_DIR" ]; then
+  printf "%s\n" "ERROR: Music library requires read, write, and directory access: $LIBRARY_DIR"
+  printf "%s\n" "No download was started. Existing downloads are unchanged."
+  exit 1
+fi
+
 # --- STEP 1: DOWNLOAD ---
 # Marker lives in the inbox so mtime comparison stays on one filesystem;
 # Step 2 uses it to find what THIS run downloaded (streamrip can exit 0

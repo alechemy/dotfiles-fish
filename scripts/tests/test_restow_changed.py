@@ -29,7 +29,7 @@ class RestowChangedTests(unittest.TestCase):
         self.stub(self.bin / "stow", 'printf "stow %s\\n" "$*" >> "$CALL_LOG"')
         for name in ("merge-pi-settings.sh", "build-dtnote-handler.sh", "build-launchd-plists.sh",
                      "build-vscode-config.sh", "build-zed-config.sh", "build-streamrip-config.sh",
-                     "setup-herdr.sh"):
+                     "setup-herdr.sh", "setup-worktrunk.sh"):
             self.stub(self.repo / "scripts" / name, f'echo "{name}${{1:+ $*}}" >> "$CALL_LOG"')
         self.write("stow/pi/.pi/agent/settings.fragment.json", "{}")
         self.git("init", "-q")
@@ -84,6 +84,28 @@ class RestowChangedTests(unittest.TestCase):
         self.assertEqual(calls[0], "merge-pi-settings.sh --models")
         self.assertEqual(len(calls), 2)
         self.assertTrue(calls[1].startswith("stow --restow --no-folding "))
+
+    def test_worktrunk_seed_change_runs_setup(self):
+        self.write("stow/worktrunk/_seed/.config/worktrunk/config.toml", '[merge]\nremove = false\n')
+        calls = self.run_hook()
+        self.assertEqual(calls[0], "setup-worktrunk.sh")
+        self.assertTrue(calls[1].endswith(" worktrunk"))
+
+    def test_worktrunk_setup_change_runs_without_stow(self):
+        with (self.repo / "scripts/setup-worktrunk.sh").open("a") as stream:
+            stream.write("\n")
+        self.assertEqual(self.run_hook(), ["setup-worktrunk.sh"])
+
+    def test_linked_worktree_never_restows_or_rebuilds(self):
+        self.write("stow/pi/.pi/agent/settings.fragment.json", '{"theme":"dark"}')
+        new = self.commit()
+        target = self.root / "task"
+        self.git("worktree", "add", "-qb", "task", str(target))
+        result = subprocess.run(["bash", str(target / "scripts/restow-changed.sh"), self.old, new],
+                                cwd=target, env=self.env, capture_output=True, text=True, timeout=10)
+        self.assertEqual(result.returncode, 0)
+        self.assertFalse(self.log.exists())
+        self.assertIn("linked worktree", result.stderr)
 
     def test_herdr_seed_change_runs_setup(self):
         self.write("stow/herdr/_seed/.config/herdr/config.toml", 'onboarding = false\n')

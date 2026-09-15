@@ -14,7 +14,7 @@ macos-window-shadow = false
 macos-option-as-alt = true
 macos-titlebar-style = tabs
 keybind = cmd+enter=text:\x1b[13;9u
-keybind = shift+enter=text:\x1b\r
+keybind = shift+enter=text:\x1b[13;2u
 keybind = cmd+t=text:\x1b[116;9u
 keybind = cmd+shift+t=text:\x1b[116;10u
 keybind = cmd+d=text:\x1b[100;9u
@@ -23,7 +23,7 @@ keybind = cmd+shift+h=text:\x1b[104;10u
 keybind = cmd+shift+j=text:\x1b[106;10u
 keybind = cmd+shift+k=text:\x1b[107;10u
 keybind = cmd+shift+l=text:\x1b[108;10u
-keybind = cmd+w=text:\x1b[119;9u
+keybind = cmd+w=close_window
 keybind = cmd+alt+w=text:\x1b[119;11u
 keybind = cmd+shift+enter=text:\x1b[13;10u
 keybind = cmd+shift+left_bracket=text:\x1b[91;10u

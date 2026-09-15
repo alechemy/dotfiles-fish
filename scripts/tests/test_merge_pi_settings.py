@@ -179,11 +179,60 @@ exec /bin/mv "$@"
             "defaultThinkingLevel": "high", "defaultProjectTrust": "ask",
             "enableInstallTelemetry": False, "hideThinkingBlock": True,
             "tuiMode": "fullscreen", "fullscreenExitOutput": "transcript",
-            "packages": ["npm:@upstash/context7-pi@0.1.2", "npm:pi-subagents@0.65.0", "npm:pi-web-access@0.27.0",
-                         "npm:@plannotator/pi-extension@0.27.12"],
+            "packages": ["npm:@upstash/context7-pi@0.1.2", "./local/copilot-delegation/node_modules/pi-subagents", "npm:pi-web-access@0.27.0"],
             "enabledModels": ["openai-codex/gpt-5.6-sol", "github-copilot/claude-opus-5",
-                              "omlx/Qwen3.8-27B-8bit", "openai-codex/gpt-6-astra",
-                              "github-copilot/claude-fable-5.1", "github-copilot/gemini-3.8-flash"]})
+                              "omlx/Qwen3.8-27B-oQ8e-mtp", "openai-codex/gpt-6-astra",
+                              "github-copilot/claude-fable-5.1", "github-copilot/gemini-3.8-flash"],
+            "subagents": self.approved_subagent_settings()})
+
+    @staticmethod
+    def approved_subagent_settings():
+        providers = {}
+        for provider in ("github-copilot", "openai-codex"):
+            providers[provider] = {
+                role: {"model": f"{provider}/{model}"}
+                for role, model in {
+                    "delegate": "gpt-5.6-luna", "local-editor": "gpt-5.6-luna",
+                    "oracle": "gpt-6-astra", "researcher": "gpt-5.6-luna", "reviewer": "gpt-5.6-sol",
+                    "scout": "gpt-5.6-luna", "worker": "gpt-5.6-luna",
+                }.items()
+            }
+        local_model = "omlx/Qwen3.8-27B-oQ8e-mtp"
+        providers["github-copilot"]["local-editor"] = {
+            "model": local_model, "fallbackModels": [], "thinking": False,
+            "defaultContext": "fresh", "tools": ["read", "grep", "find", "ls", "edit", "write"],
+            "extensions": [], "output": False,
+            "description": "Local editor for small, well-specified changes under a Copilot root. Give it explicit files or a narrow source area and acceptance criteria; the parent reviews and validates the result.",
+        }
+        providers["github-copilot"]["scout"] = {
+            "model": local_model, "fallbackModels": [], "thinking": False,
+            "defaultContext": "fresh", "tools": ["read", "grep", "find", "ls"],
+            "extensions": [], "output": False,
+            "description": "Local scout for short, mechanical retrieval under a Copilot root. Use it for one narrow source area or question, such as tracing one caller chain, locating tests, or extracting configuration facts. Do not use it for merge-conflict analysis, cross-cutting synthesis, architecture, or broad repository reconstruction; keep those tasks on Copilot. Return a short answer with file and line references.",
+        }
+        return {
+            "worktreeProvider": "worktrunk",
+            "modelScope": {
+                "allow": ["inherit-provider"], "enforce": True, "strict": True,
+                "localDelegation": {"rootProvider": "github-copilot", "agents": {
+                    "scout": [local_model], "local-editor": [local_model]}},
+            },
+            "agentOverridesByProvider": providers,
+        }
+
+    def test_managed_subagent_routing_preserves_unrelated_runtime_settings(self):
+        self.target.write_text(json.dumps({"subagents": {
+            "runtimeOwned": {"keep": True}, "modelScope": {"enforce": False},
+            "agentOverridesByProvider": {"github-copilot": {
+                "scout": {"model": "github-copilot/old", "fallbackModels": ["github-copilot/old"]},
+            }},
+        }}))
+        self.fragment.write_text(json.dumps({"subagents": self.approved_subagent_settings()}))
+        result = self.run_merge()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        expected = self.approved_subagent_settings()
+        expected["runtimeOwned"] = {"keep": True}
+        self.assertEqual(json.loads(self.target.read_text())["subagents"], expected)
 
 
 class MergePiModelsTests(MergePiSettingsTests):

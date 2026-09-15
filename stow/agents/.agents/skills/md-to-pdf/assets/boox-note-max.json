@@ -1,0 +1,22 @@
+{
+  "page-width": 204,
+  "page-height": 272,
+  "text-margin": 18,
+  "annotation-margin": 38,
+  "top-margin": 16,
+  "bottom-margin": 20,
+  "body-size": 10.5,
+  "code-size": 8.5,
+  "table-size": 9.5,
+  "title-size": 20,
+  "subtitle-size": 12,
+  "heading-1-size": 16,
+  "heading-2-size": 13,
+  "heading-3-size": 11.5,
+  "leading": 0.72,
+  "paragraph-spacing": 1.1,
+  "heading-spacing": 0.8,
+  "prose-font": "Source Serif 4",
+  "heading-font": "Source Sans 3",
+  "code-font": "Source Code Pro"
+}

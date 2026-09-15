@@ -5,6 +5,7 @@ import hashlib
 import importlib.util
 import json
 from pathlib import Path
+import shutil
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -29,8 +30,11 @@ class MeasureAgentToolingTests(unittest.TestCase):
         self.packages = self.root / "node_modules"
         self.shared = self.repo / "stow/agents/.agents/skills"
         self.fragment = self.repo / "stow/pi/.pi/agent/settings.fragment.json"
-        declared = {**measurement.PACKAGES, "@plannotator/pi-extension": "0.27.12"}
-        self.put(self.fragment, json.dumps({"packages": [f"npm:{n}@{v}" for n, v in declared.items()]}))
+        declared = measurement.PACKAGES
+        self.put(self.fragment, json.dumps({"packages": [
+            measurement.SUBAGENTS_SOURCE if n == "pi-subagents" else f"npm:{n}@{v}"
+            for n, v in declared.items()
+        ]}))
         for name, version in declared.items():
             manifest = {"name": name, "version": version, "pi": {"extensions": ["./index.ts"]}}
             if name != "pi-web-access":
@@ -66,7 +70,17 @@ class MeasureAgentToolingTests(unittest.TestCase):
         path.write_text(text, encoding="utf-8")
 
     def measure(self):
-        return measurement.measure(self.repo, self.packages)
+        return measurement.measure(self.repo, self.packages, self.packages / "pi-subagents")
+
+    def test_local_subagents_source_is_measured_instead_of_npm_copy(self):
+        local = self.root / "local-guard"
+        shutil.copytree(self.packages / "pi-subagents", local)
+        self.put(self.packages / "pi-subagents/src/extension/tool-description.ts", "unreviewed npm source")
+        result = measurement.measure(self.repo, self.packages, local)
+        self.assertEqual(result["tool_descriptions"]["count"], 9)
+        self.put(local / "src/extension/tool-description.ts", "unreviewed local source")
+        with self.assertRaisesRegex(ValueError, "source drift"):
+            measurement.measure(self.repo, self.packages, local)
 
     def test_default_projection_manual_exclusion_and_utf8(self):
         result = self.measure()
@@ -77,16 +91,13 @@ class MeasureAgentToolingTests(unittest.TestCase):
         self.assertEqual((visible["characters"], visible["utf8_bytes"]), (9, 13))
         self.assertEqual(result, self.measure())
 
-    def test_plannotator_is_explicitly_outside_the_description_projection(self):
+    def test_projection_requires_only_retained_packages(self):
         result = self.measure()
-        self.assertEqual(result["unmeasured_packages"], {"@plannotator/pi-extension": "0.27.12"})
-        self.assertNotIn("@plannotator/pi-extension", [row["package"] for row in result["tools"] + result["skills"]])
-        path = self.packages / "@plannotator/pi-extension/package.json"
-        manifest = json.loads(path.read_text())
-        manifest["version"] = "99.0.0"
-        self.put(path, json.dumps(manifest))
-        with self.assertRaisesRegex(ValueError, "version mismatch"):
-            self.measure()
+        self.assertEqual(result["declared_versions"], measurement.PACKAGES)
+        self.assertEqual(result["unmeasured_packages"], {})
+        self.assertFalse((self.packages / "@plannotator/pi-extension").exists())
+        self.assertNotIn("@plannotator/pi-extension/package.json", measurement.SOURCE_SHA256)
+        self.assertFalse(any("plannotator" in name for name in result["input_sha256"]))
 
     def test_shared_skill_invocation_policy(self):
         root = HELPER.parent.parent / "stow/agents/.agents/skills"

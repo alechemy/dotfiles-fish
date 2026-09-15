@@ -23,16 +23,14 @@ seconds, and status is 0=open / 2=canceled / 3=done.
 
 from __future__ import annotations
 
-import glob
 import os
 import re
 import sqlite3
+import stat
 import subprocess
 import time
 import urllib.parse
 
-DB_GLOB = ("~/Library/Group Containers/*/ThingsData-*/"
-           "Things Database.thingsdatabase/main.sqlite")
 ZSHENV = os.path.expanduser("~/.zshenv")
 TASK_COLUMNS = ("uuid", "title", "notes", "status", "trashed", "project",
                 "heading", "stopDate", "userModificationDate")
@@ -43,11 +41,41 @@ class ThingsError(RuntimeError):
     unconfirmed, ambiguous project). Callers degrade, never crash."""
 
 
+def _directory_names(path):
+    try:
+        with os.scandir(path) as entries:
+            return [entry.name for entry in entries]
+    except (FileNotFoundError, NotADirectoryError):
+        return []
+
+
 def find_db():
-    hits = glob.glob(os.path.expanduser(DB_GLOB))
-    if not hits:
-        raise ThingsError("Things database not found (is Things 3 installed?)")
-    return hits[0]
+    """Locate the live Things Mac database, preserving filesystem errors."""
+    root = os.path.expanduser("~/Library/Group Containers")
+    try:
+        for name in _directory_names(root):
+            if not name.endswith(".com.culturedcode.ThingsMac"):
+                continue
+            container = os.path.join(root, name)
+            for data in _directory_names(container):
+                if not data.startswith("ThingsData-"):
+                    continue
+                db = os.path.join(container, data,
+                                  "Things Database.thingsdatabase", "main.sqlite")
+                try:
+                    mode = os.stat(db).st_mode
+                except (FileNotFoundError, NotADirectoryError):
+                    continue
+                if stat.S_ISREG(mode):
+                    return db
+    except PermissionError as exc:
+        raise ThingsError(
+            f"cannot access Things database location ({exc}); if this is a "
+            "launchd run, check Full Disk Access for /usr/bin/python3") from exc
+    except OSError as exc:
+        raise ThingsError(f"Things database discovery failed: {exc}") from exc
+    raise ThingsError(f"Things database not found under {root}; "
+                      "open Things 3 and check its local database")
 
 
 def _query(sql, params=()):

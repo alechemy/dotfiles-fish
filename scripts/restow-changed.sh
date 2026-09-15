@@ -22,6 +22,13 @@ set -uo pipefail
 
 DOTFILES="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
+git_dir="$(git -C "$DOTFILES" rev-parse --git-dir 2>/dev/null)" || exit 0
+common_dir="$(git -C "$DOTFILES" rev-parse --git-common-dir 2>/dev/null)" || exit 0
+if [ "$git_dir" != "$common_dir" ]; then
+    echo "restow-changed: linked worktree; live dotfiles remain owned by the primary checkout" >&2
+    exit 0
+fi
+
 OLD="${1:-}"
 NEW="${2:-HEAD}"
 
@@ -134,6 +141,9 @@ if grep -Eq '^stow/pi/\.pi/agent/models\.fragment\.json$|^scripts/merge-pi-setti
 fi
 if grep -Eq '^stow/herdr/|^scripts/(setup-herdr\.sh|install-herdr-hunk-diff\.sh|configure-herdr-hunk\.mjs|patches/herdr-hunk-diff\.patch)$' <<<"$changed_files"; then
     rebuild setup-herdr.sh
+fi
+if grep -Eq '^stow/worktrunk/|^scripts/setup-worktrunk\.sh$' <<<"$changed_files"; then
+    rebuild setup-worktrunk.sh
 fi
 if grep -q '^stow/zed/.*settings\.template\.jsonc$' <<<"$changed_files"; then
     if op_ok; then

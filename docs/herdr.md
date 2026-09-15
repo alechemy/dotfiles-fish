@@ -13,7 +13,8 @@ Ghostty starts Herdr by default. Herdr owns persistent workspaces, tabs, and pan
 | Cmd+Shift+Enter | Zoom the pane. |
 | Cmd+1 through Cmd+9 | Switch Herdr tabs. |
 | Cmd+Shift+[ or Cmd+Shift+] | Switch to the previous or next tab. |
-| Cmd+W | Close the Herdr pane. |
+| Cmd+W | Close the Ghostty window, leaving Herdr running. |
+| Ctrl+B, then X | Terminate the Herdr pane. |
 | Cmd+Option+W | Close the Herdr tab. |
 | Cmd+Ctrl+N | Create a workspace. |
 | Cmd+Ctrl+W | Open workspace navigation. |
@@ -22,7 +23,9 @@ Ghostty starts Herdr by default. Herdr owns persistent workspaces, tabs, and pan
 | Ctrl+B, then Q | Detach, leaving Herdr running. |
 | Ctrl+B, then ? | Show Herdr's complete keybindings. |
 
-Ghostty forwards the mapped shortcuts as CSI-u sequences, and Herdr binds those modified keys directly. The Ctrl+B prefix bindings remain available. Pi keeps Enter for newlines and Cmd+Enter or Ctrl+S for submission.
+Cmd+W closes only the outer window. Cmd+N reattaches to the running Herdr session. Ctrl+B, then X terminates a pane without a confirmation prompt.
+
+Ghostty forwards the Herdr shortcuts as CSI-u sequences, and Herdr binds those modified keys directly. The Ctrl+B prefix bindings remain available. Pi keeps Enter and Shift+Enter for newlines and Cmd+Enter or Ctrl+S for submission. Ghostty sends Shift+Enter as CSI-u to preserve its modifier; ESC followed by Return means Alt+Enter and triggers Pi's follow-up submission.
 
 Use `ghostty-shell` for an ordinary Ghostty instance with the original native split shortcuts. Its `shell.conf` overrides both the launch command and Herdr-specific key forwarding. To return permanently to native splits, replace the Herdr command and mapped keybindings in Ghostty's config with the corresponding entries from `shell.conf`.
 
@@ -39,6 +42,12 @@ The `herdr` Stow package links the local UI-state extension and the shared Herdr
 Herdr installs its bundled integration at `~/.pi/agent/extensions/herdr-agent-state.ts`, or beneath `PI_CODING_AGENT_DIR` when explicitly set. Reinstalling the integration replaces that managed file. Re-run `scripts/setup-herdr.sh` after reviewing integration changes bundled with a Herdr update. The script does not replace Pi's package list or the guarded local Subagents build.
 
 Launch Herdr from Ghostty rather than a launchd service. A server started in a background or SSH launch context may not have interactive macOS Keychain access. Check `launchctl managername` from a pane when diagnosing this; the normal GUI context is `Aqua`.
+
+## Worktrunk tasks
+
+[Worktrunk](worktrunk.md) allocates sibling task worktrees. From a shell in the repository's workspace, `wt pi new <branch>` opens a named task tab and starts Pi. `wt pi open <branch>` focuses or resumes it. Each worktree keeps its own Hunk review recipient. `wt pi list` refreshes native Pi activity markers before listing worktrees.
+
+After sending Hunk comments and closing a task tab, `wt pi remove <branch>` checks ownership, sessions, panes, processes, and files before removing the checkout and retaining its branch. The launcher is for human shell use. Agents retain Subagents' project-pane and delegation APIs. Subagents uses its official Worktrunk allocator while retaining lifecycle ownership of `pi-subagents/` worktrees.
 
 ## Pi and Subagents
 
@@ -94,7 +103,7 @@ node --test scripts/tests/test_herdr_ui_state.mjs
 python3 scripts/tests/herdr-smoke.py --hunk
 ```
 
-The smoke test uses a disposable HOME, a named Herdr server, a synthetic Pi session, and a PTY. It makes no model calls. It checks Enter/newline behavior, Cmd+Enter and Ctrl+S submission, explicit confirmation and cancellation, blocked-state reporting, split/tab keys, detach persistence, and exact native session identity after a server restart. Its temporary path stays short enough for macOS Unix-domain sockets. With `--hunk`, it also links the installed plugin into the disposable profile, starts a separate loopback Hunk daemon, creates a synthetic Git change and a human inline comment through the TUI, and checks explicit sending, blocked-dialog retention, Pi receipt, comment cleanup, and deduplication. It checks repeated configuration preserves user preferences. Omit `--hunk` to test Herdr without the plugin.
+The smoke test uses a disposable HOME, a named Herdr server, a synthetic Pi session, and a PTY. It makes no model calls. It checks Enter and Shift+Enter newline behavior, Cmd+Enter and Ctrl+S submission, explicit confirmation and cancellation, blocked-state reporting, split/tab keys, detach persistence, and exact native session identity after a server restart. Its temporary path stays short enough for macOS Unix-domain sockets. With `--hunk`, it also links the installed plugin into the disposable profile, starts a separate loopback Hunk daemon, creates a synthetic Git change and a human inline comment through the TUI, and checks explicit sending, blocked-dialog retention, Pi receipt, comment cleanup, and deduplication. It checks repeated configuration preserves user preferences. Omit `--hunk` to test Herdr without the plugin.
 
 These checks do not exercise macOS sleep/wake, desktop notification delivery, or physical keyboard input through Ghostty. Ghostty's own config validator checks both profiles.
 

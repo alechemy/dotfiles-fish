@@ -1,0 +1,13 @@
+worktree-path = "{{ repo_path }}/../{{ repo }}.{{ branch | sanitize }}"
+skip-commit-generation-prompt = true
+
+[commit]
+stage = "none"
+
+[merge]
+commit = false
+rebase = false
+remove = false
+
+[switch.picker]
+pager = "delta --paging=never"

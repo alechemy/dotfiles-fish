@@ -1,9 +1,12 @@
+import errno
 import json
 import logging
 import os
+from pathlib import Path
 import subprocess
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from helpers import capture_logs, load, person
 
@@ -1066,6 +1069,95 @@ class MapFile(unittest.TestCase):
                                     for msg in logs.messages()))
             finally:
                 ef.THINGS_MAP_FILE = orig
+
+
+class DatabaseDiscovery(unittest.TestCase):
+    def setUp(self):
+        home = tempfile.TemporaryDirectory()
+        self.addCleanup(home.cleanup)
+        self.enter_home = patch.dict(os.environ, HOME=home.name)
+        self.enter_home.start()
+        self.addCleanup(self.enter_home.stop)
+        self.root = Path(home.name) / "Library" / "Group Containers"
+        self.container = self.root / "TEST.com.culturedcode.ThingsMac"
+        self.data = self.container / "ThingsData-TEST"
+        self.db = self.data / "Things Database.thingsdatabase" / "main.sqlite"
+        self.db.parent.mkdir(parents=True)
+        with tb.sqlite3.connect(str(self.db)) as con:
+            con.execute("CREATE TABLE probe (value INTEGER)")
+
+    def test_finds_live_database_and_queries_read_only(self):
+        self.assertEqual(tb.find_db(), str(self.db))
+        self.assertEqual(tb._query("SELECT 1"), [(1,)])
+        with self.assertRaisesRegex(tb.ThingsError, "readonly"):
+            tb._query("INSERT INTO probe VALUES (1)")
+
+    def test_directory_permissions_are_not_reported_as_missing(self):
+        scandir = os.scandir
+        for denied in (self.root, self.container):
+            for code in (errno.EACCES, errno.EPERM):
+                with self.subTest(path=denied, errno=code):
+                    error = PermissionError(code, os.strerror(code), str(denied))
+
+                    def scan(path):
+                        if Path(path) == denied:
+                            raise error
+                        return scandir(path)
+
+                    with patch.object(tb.os, "scandir", side_effect=scan):
+                        with self.assertRaises(tb.ThingsError) as caught:
+                            tb.find_db()
+                    self.assertIs(caught.exception.__cause__, error)
+                    self.assertIn(str(denied), str(caught.exception))
+                    self.assertIn("Full Disk Access", str(caught.exception))
+                    self.assertNotIn("not found", str(caught.exception))
+
+    def test_database_stat_permission_error_is_preserved(self):
+        error = PermissionError(errno.EPERM, "Operation not permitted", str(self.db))
+        with patch.object(tb.os, "stat", side_effect=error):
+            with self.assertRaisesRegex(tb.ThingsError, "Full Disk Access") as caught:
+                tb.find_db()
+        self.assertIs(caught.exception.__cause__, error)
+
+    def test_other_io_errors_are_not_reported_as_missing(self):
+        error = OSError(errno.EIO, "Input/output error", str(self.root))
+        with patch.object(tb.os, "scandir", side_effect=error):
+            with self.assertRaisesRegex(tb.ThingsError, "Input/output error") as caught:
+                tb.find_db()
+        self.assertIs(caught.exception.__cause__, error)
+        self.assertNotIn("Full Disk Access", str(caught.exception))
+
+    def test_missing_database_does_not_select_backup(self):
+        backup = self.data / "Backups" / "Backup.thingsdatabase" / "main.sqlite"
+        backup.parent.mkdir(parents=True)
+        self.db.rename(backup)
+        with self.assertRaisesRegex(tb.ThingsError, "Things database not found") as caught:
+            tb.find_db()
+        self.assertNotIn("installed?", str(caught.exception))
+        self.assertNotIn("Full Disk Access", str(caught.exception))
+
+    def test_missing_group_containers_is_reported_as_missing(self):
+        self.root.rename(self.root.with_name("Unavailable"))
+        with self.assertRaisesRegex(tb.ThingsError, "Things database not found"):
+            tb.find_db()
+
+    def test_unrelated_containers_are_not_opened(self):
+        unrelated = self.root / "TEST.com.example.other"
+        unrelated.mkdir()
+        scandir = os.scandir
+
+        def scan(path):
+            if Path(path) == unrelated:
+                raise AssertionError("must not open unrelated app containers")
+            return scandir(path)
+
+        with patch.object(tb.os, "scandir", side_effect=scan):
+            self.assertEqual(tb.find_db(), str(self.db))
+
+    def test_incomplete_data_directory_does_not_hide_live_database(self):
+        (self.container / "ThingsData-EMPTY").mkdir()
+        (self.container / "ThingsData-FILE").touch()
+        self.assertEqual(tb.find_db(), str(self.db))
 
 
 class UpdateTodoShortCircuit(unittest.TestCase):

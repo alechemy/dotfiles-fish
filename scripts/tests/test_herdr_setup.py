@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Herdr bootstrap and Ghostty shortcut contracts in a disposable home."""
 
+import json
 import os
 from pathlib import Path
 import re
@@ -92,7 +93,7 @@ class GhosttyHerdrKeysTests(unittest.TestCase):
         aliases = {"enter": "\r", "left_bracket": "[", "right_bracket": "]"}
         for key, codepoint, modifier in re.findall(
                 r"^keybind = ([^=]+)=text:\\x1b\[(\d+);(\d+)u$", config, re.M):
-            if key == "cmd+enter":
+            if key in {"cmd+enter", "shift+enter"}:
                 continue
             parts = key.split("+")
             name = parts[-1]
@@ -109,12 +110,27 @@ class GhosttyHerdrKeysTests(unittest.TestCase):
         for number in range(1, 10):
             self.assertIn(f"keybind = cmd+digit_{number}=text:", config)
 
+    def test_cmd_w_closes_outer_window_and_preserves_shell_profile(self):
+        config = (ROOT / "stow/ghostty/.config/ghostty/config").read_text()
+        shell = (ROOT / "stow/ghostty/.config/ghostty/shell.conf").read_text()
+        bindings = dict(re.findall(r"^keybind = ([^=]+)=(.*)$", config, re.M))
+        overrides = dict(re.findall(r"^keybind = ([^=]+)=(.*)$", shell, re.M))
+        self.assertEqual(bindings["cmd+w"], "close_window")
+        self.assertEqual(overrides["cmd+w"], "close_surface")
+
     def test_submit_bindings_remain_owned_by_pi(self):
         config = (ROOT / "stow/ghostty/.config/ghostty/config").read_text()
         herdr = (ROOT / "stow/herdr/_seed/.config/herdr/config.toml").read_text()
         self.assertIn(r"keybind = cmd+enter=text:\x1b[13;9u", config)
         self.assertNotIn('"cmd+enter"', herdr)
         self.assertNotIn('"ctrl+s"', herdr)
+
+    def test_shift_enter_preserves_modifier_and_inserts_newline(self):
+        config = (ROOT / "stow/ghostty/.config/ghostty/config").read_text()
+        keys = json.loads((ROOT / "stow/pi/.pi/agent/keybindings.json").read_text())
+        self.assertIn(r"keybind = shift+enter=text:\x1b[13;2u", config)
+        self.assertEqual(keys["tui.input.newLine"], ["enter", "shift+enter"])
+        self.assertEqual(keys["tui.input.submit"], ["super+enter", "ctrl+s"])
 
 
 if __name__ == "__main__":

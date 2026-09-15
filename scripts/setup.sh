@@ -5,6 +5,13 @@ set -e
 DOTFILES="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 STOW_DIR="$DOTFILES/stow"
 
+git_dir="$(git -C "$DOTFILES" rev-parse --git-dir)" || exit 1
+common_dir="$(git -C "$DOTFILES" rev-parse --git-common-dir)" || exit 1
+if [ "$git_dir" != "$common_dir" ]; then
+    echo "Run setup from the primary dotfiles checkout, not a linked worktree." >&2
+    exit 1
+fi
+
 info() {
     printf "\r  [ \033[00;34m..\033[0m ] $1\n"
 }
@@ -229,6 +236,7 @@ if brew trust --help >/dev/null 2>&1; then
     info "Trusting third-party tap entries..."
     if brew trust --command domt4/autoupdate/autoupdate \
         && brew trust --formula \
+            atlassian/acli/acli \
             felixkratz/formulae/borders \
             felixkratz/formulae/sketchybar \
             modem-dev/tap/hunk \
@@ -362,6 +370,10 @@ chmod +x "$DOTFILES/scripts/build-vscode-config.sh"
 # Pi rewrites settings.json itself. Merge the portable preferences rather than
 # stowing the live settings file, leaving runtime fields and OAuth credentials
 # local.
+if [ ! -f "$HOME/.pi/agent/local/copilot-delegation/node_modules/pi-subagents/package.json" ]; then
+    info "WARNING: the local Copilot delegation guard is missing. Restore the reviewed local package before starting Pi."
+    info "  See docs/agent-tooling-maintenance.md#copilot-local-delegation."
+fi
 chmod +x "$DOTFILES/scripts/merge-pi-settings.sh"
 "$DOTFILES/scripts/merge-pi-settings.sh" \
     || info "WARNING: Pi settings merge failed; check jq and ~/.pi/agent/settings.json."
@@ -456,6 +468,7 @@ if command -v stow &> /dev/null; then
     # symlink), so seed it copy-if-absent rather than stow it.
     "$DOTFILES/scripts/seed-linearmouse-config.sh"
     "$DOTFILES/scripts/setup-herdr.sh"
+    "$DOTFILES/scripts/setup-worktrunk.sh"
 
     # 4a. Opt-in work config (stow-work/work/).
     #

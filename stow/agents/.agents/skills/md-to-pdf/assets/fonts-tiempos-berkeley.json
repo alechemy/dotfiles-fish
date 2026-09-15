@@ -1,0 +1,21 @@
+{
+  "prose-font": "Tiempos Text",
+  "heading-font": "Tiempos Headline",
+  "code-font": "Berkeley Mono",
+  "font-files": [
+    "TiemposText-Regular.otf",
+    "TiemposText-RegularItalic.otf",
+    "TiemposText-Bold.otf",
+    "TiemposText-BoldItalic.otf",
+    "TiemposHeadline-Regular.otf",
+    "TiemposHeadline-RegularItalic.otf",
+    "TiemposHeadline-Semibold.otf",
+    "TiemposHeadline-SemiboldItalic.otf",
+    "TiemposHeadline-Bold.otf",
+    "TiemposHeadline-BoldItalic.otf",
+    "Berkeley Mono Regular.otf",
+    "Berkeley Mono Oblique.otf",
+    "Berkeley Mono Bold.otf",
+    "Berkeley Mono Bold Oblique.otf"
+  ]
+}

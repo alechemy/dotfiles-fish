@@ -5,6 +5,10 @@
 # without re-running setup.sh. See scripts/restow-changed.sh and docs/dotfiles-reference.md
 # ("Auto-restow on pull"). Installed via core.hooksPath by setup.sh.
 
+git_dir="$(git rev-parse --git-dir 2>/dev/null)" || exit 0
+common_dir="$(git rev-parse --git-common-dir 2>/dev/null)" || exit 0
+[ "$git_dir" = "$common_dir" ] || exit 0
+
 toplevel="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
 [ -x "$toplevel/scripts/restow-changed.sh" ] || exit 0
 

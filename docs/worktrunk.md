@@ -1,0 +1,130 @@
+# Worktrunk with Pi, Herdr, and Hunk
+
+Worktrunk owns worktree allocation and navigation. Herdr owns persistent tabs and panes. Pi owns implementation and delegation. Hunk owns local review feedback. Use one Herdr workspace per repository and one task tab per interactive worktree.
+
+## Everyday workflow
+
+From a Fish shell inside that repository's Herdr workspace:
+
+```fish
+wt pi new feature/auth
+wt pi new fix/login --base main --no-focus
+wt pi open feature/auth
+wt pi list
+```
+
+`new` allocates a fresh branch and sibling worktree, creates a named tab, and starts Pi there. It leaves the source checkout and any existing changes untouched. Type the task into Pi normally. `open` focuses the existing task tab, resumes Pi in its available shell pane, or creates a replacement tab and continues the worktree's latest Pi session. Repeated opening does not create another writer. Use Herdr's normal workspace navigation to switch between repositories.
+
+The helper requires the calling pane to belong to the same repository. It preserves the inherited server/socket context and uses returned pane IDs. It does not attach to or start another Herdr server. Startup trust and login dialogs remain yours to answer. A startup failure retains the allocated worktree and tab; inspect that tab before reopening rather than blindly retrying creation.
+
+`wt switch` opens Worktrunk's picker. `wt switch <branch>` navigates to an existing worktree, and `wt switch -` returns to the previous one. For an ordinary worktree outside the task launcher's ownership, `wt switch <branch> -x pi` launches Pi in the current shell pane. The launcher does not adopt or delete those worktrees.
+
+Sibling paths use `{{ repo_path }}/../{{ repo }}.{{ branch | sanitize }}`. Existing repositories stay where they are. Work repositories retain the `~/Work` layout. The picker uses noninteractive Delta output; Git's normal pager remains Hunk.
+
+## Review, integrate, and remove
+
+From the intended task's Pi pane, Ctrl+B then `f` opens its Hunk review. Save a human inline comment with Ctrl+S. Ctrl+B then Shift+F sends unsent comments explicitly. Each worktree has a separate review and recipient. The existing blocked/busy checks and Ctrl+S submission patch remain in effect. See [Herdr's Hunk workflow](herdr.md#hunk-review-integration).
+
+The default Hunk shortcut shows working-tree changes. To review committed task changes, reload that worktree's review with the intended comparison, for example:
+
+```sh
+hunk session reload --repo /path/to/task-worktree -- diff main...HEAD
+```
+
+Prepare commits with Pi or Git under the existing signing, message, and secrets-scan rules. The seeded configuration makes `wt merge` a clean-tree, fast-forward-only local integration that keeps the task worktree. Explicit flags preserve that behavior even after editing your preferences:
+
+```sh
+wt merge --no-commit --no-rebase --no-remove
+```
+
+Rebase separately with `git rebase --no-update-refs` when needed. Your global `rebase.updateRefs=true` otherwise also affects Worktrunk's rebase command. Worktrunk merge does not fetch or publish by itself, but configured hooks can. Inspect hooks and retain the current-turn approval requirement for all remote writes.
+
+Send Hunk comments, stop task processes, and close the task tab with Cmd+Option+W. From another worktree:
+
+```fish
+wt pi remove feature/auth
+```
+
+Removal checks the launcher's ownership record, live interactive Pi records, Herdr panes, current-user process working directories, Git status, and ignored files. It refuses ambiguous or active work. If ignored files remain, inspect and preserve anything needed before using `--discard-ignored`. The branch is always retained, including unmerged commits. Delete it separately after confirming integration or intentional discard.
+
+The helper never kills a process or closes a pane during removal. Its checks cannot prove that no external writer will race the operation, or find every process that opened a file and then changed directory. Direct Worktrunk/Git removal bypasses these extra checks. Keep one writer per checkout and use the helper for task cleanup.
+
+## Native Pi activity
+
+`stow/worktrunk/.pi/agent/extensions/worktrunk.ts` reports native Pi lifecycle events through the bundled `wt-pi` helper. It uses `agent_settled`, not `agent_end`, so automatic retries and queued continuations do not announce a settled session early.
+
+| Marker | Meaning |
+| --- | --- |
+| 🤖 | An interactive Pi session is working. |
+| 💬 | Interactive Pi sessions are idle. |
+| ❗ | An interactive Pi session has a blocking extension UI prompt. |
+
+Blocked takes precedence over working, then idle. Each extension instance has a random identity. The helper serializes per-worktree updates and aggregates surviving sessions, so one session's shutdown cannot erase another's state. It identifies processes by PID and process start time, which avoids treating sleep as session exit or PID reuse as continued activity. A 30-second heartbeat refreshes status. Shutdown removes only that instance's record. `wt pi list` prunes dead records before running `wt list`.
+
+A manual Worktrunk marker that differs from the integration's last marker takes precedence. Clearing a manual marker allows the next lifecycle event or heartbeat to resume activity reporting. A SIGKILL can leave a marker until the next update or `wt pi list`. Changing the branch beneath a live Pi session requires quitting that session before starting another; shutdown also clears owned markers after a detached checkout.
+
+The extension ignores print, JSON, and RPC modes. Herdr and Subagents remain authoritative for headless child activity. Each marker subprocess has a two-second timeout; failures warn once per failure streak and do not fail the Pi turn. It sends no prompts, dialog titles, task descriptions, or transcript contents. No model calls are made for status or commit messages.
+
+Worktrunk 0.77.0's advertised Pi plugin is an Oh My Pi hook. Its installer writes `hooks/pre/worktrunk.ts`, which native Pi does not discover. This repository's native extension is independently owned; do not install the upstream Oh My Pi hook as a replacement.
+
+## Subagents
+
+Pi's settings fragment explicitly selects `subagents.worktreeProvider = "worktrunk"`. The guarded Subagents build already implements this allocator; no delegation adapter or package patch is added.
+
+Subagents calls `wt switch --create ... --no-cd --no-hooks --format json` and verifies the returned branch, commit, repository, and path. Its `pi-subagents/` branches remain Subagents-owned. Setup hooks, model/provider restrictions, handoff evidence, resume, and cleanup stay under Subagents. Installing Worktrunk no longer changes allocation implicitly through the upstream `auto` setting.
+
+The human launcher rejects the `pi-subagents/` namespace and requires a separate task ownership record for reopening or removal. It also refuses launches from agent-marked environments. Agents use Subagents `project.open` for an explicitly requested independent visible session, or managed delegation for child work. The launcher guard is a misuse check, not a sandbox against an agent deliberately clearing its environment.
+
+## Configuration and installation ownership
+
+Homebrew core owns `worktrunk`, currently verified at 0.77.0. The existing Homebrew update schedule owns binary upgrades. No new tap, server, LaunchAgent, LLM provider, or always-on status service is installed.
+
+`stow/fish/.config/fish/conf.d/worktrunk.fish` loads the installed binary's Fish wrapper in interactive shells. Homebrew supplies Fish completions. `wt-pi` is on PATH through the `bin` package and therefore available as Worktrunk's custom `wt pi` subcommand. Its stdlib Python implementation and instructions live in the shared `worktrunk` skill. Python must be at least 3.9.
+
+`scripts/setup-worktrunk.sh` copies the config seed only when `${XDG_CONFIG_HOME:-$HOME/.config}/worktrunk/config.toml` is absent, with mode 600. Existing regular files remain app-owned. Symlink targets are rejected. Worktrunk atomically saves this file during its own preference updates, so it must not be stowed directly. Seed edits affect new machines, not existing preferences.
+
+Setup and the restow dispatcher call that helper. To apply this integration explicitly from the primary dotfiles checkout:
+
+```sh
+brew install worktrunk
+stow --restow --no-folding --dir=stow --target="$HOME" worktrunk fish bin agents
+scripts/setup-worktrunk.sh
+scripts/merge-pi-settings.sh
+```
+
+Open a new Fish shell for directory-switching integration. Reload or restart existing Pi sessions to discover the new skill and activity extension. New Pi sessions load them automatically. Custom Pi agent directories require installing the extension into that profile separately, as with other Stow-managed Pi resources.
+
+Approvals remain in Worktrunk's local `approvals.toml`. The helper's task binding and activity records live beneath each worktree's Git directory in `wt-pi/`; its launch lock lives in the common Git directory. Worktrunk owns its own Git-config state, caches, logs, and trash. None of these files belongs in Stow or Git. They may contain private paths or branch names even though activity records contain no conversation text.
+
+Project preparation belongs in reviewed `.config/wt.toml` commands. The launcher refuses unapproved or stale project commands before allocation and checks the destination afterward. It never passes `--yes`. Worktrunk approval is independent of Pi trust; ordinary Worktrunk commands can continue without project hooks when approval is declined. Avoid global copying of ignored files or hooks that launch more agents.
+
+## Dotfiles safety
+
+`setup.sh` refuses linked checkouts. The restow worker and the three restow-triggering Git hooks skip them. Hook-level checks also protect old task branches whose worker script predates this guard. Experimental dotfiles stay isolated until integrated into the primary checkout. Never run Stow directly from a task worktree.
+
+## Verification
+
+```sh
+python3 -m unittest discover -s scripts/tests -p 'test_worktrunk.py'
+python3 -m unittest discover -s scripts/tests -p 'test_restow_changed.py'
+python3 -m unittest discover -s scripts/tests -p 'test_merge_pi_settings.py'
+node --test scripts/tests/test_worktrunk_activity.mjs
+node scripts/tests/worktrunk-subagents-smoke.mjs
+python3 scripts/tests/herdr-smoke.py --worktrunk
+```
+
+All checks use synthetic data. Worktrunk tests use disposable Git repositories and homes. The Subagents smoke test exercises the installed guarded allocator without launching a model, checks that Worktrunk project hooks are suppressed, and confirms that unrecorded child edits survive cleanup.
+
+The Herdr smoke uses a named test server, isolated HOME, PTY, and separate loopback Hunk daemon. It opens two real task worktrees and Pi sessions, verifies tab reuse, native idle/blocked/shutdown markers, task-specific human feedback, duplicate-send prevention, dirty-tree refusal, and branch-preserving removal. It also retains the original Pi submission, confirmation, detach, and native session-restore checks. It never stops the default Herdr server or calls a model.
+
+Physical Ghostty keyboard delivery, desktop notifications, and macOS sleep/wake are not automated by these checks.
+
+## Upstream references
+
+- [Worktrunk documentation index](https://worktrunk.dev/llms.txt).
+- [Switch and agent launch](https://worktrunk.dev/switch/).
+- [Shell integration](https://worktrunk.dev/shell-integration/).
+- [Configuration and approvals](https://worktrunk.dev/config/).
+- [Custom subcommands](https://worktrunk.dev/extending/).
+- [Merge behavior](https://worktrunk.dev/merge/).
+- [Oh My Pi hook source at 0.77.0](https://github.com/max-sixty/worktrunk/blob/v0.77.0/dev/pi-plugin.ts).
