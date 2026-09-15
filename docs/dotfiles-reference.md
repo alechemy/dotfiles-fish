@@ -98,6 +98,67 @@ Rules baked into the worker:
 
 Setup refuses linked dotfiles checkouts. The restow worker and its `post-merge`, `post-rewrite`, and `post-commit` entrypoints skip them so experimental worktrees cannot replace live HOME links. The hook-level checks also cover branches carrying an older worker script. Integrate task changes into the primary checkout before applying them.
 
+### Fish command authority and port listeners
+
+Bare `copilot` no longer expands to `copilot --allow-all`. Pass `--allow-all`
+explicitly only when that authority is intended. This does not change Pi's
+Copilot provider. `unpop` is removed: `git reset --merge` is not a general
+inverse of `git stash pop`. Inspect the index and working tree, then choose the
+actual Git command for the recovery you need.
+
+`ports` is the only port helper. `killport` remains an abbreviation for
+`ports kill`.
+
+```fish
+ports show 8081
+ports pid 8081
+ports kill 8081
+ports kill 8081 --force
+```
+
+`kill` sends SIGTERM to one verified TCP listener owner. It checks for exit
+30 times at 0.1-second intervals. If the process survives, it returns failure
+without escalating. `--force` permits SIGKILL only after this TERM wait and a
+fresh check of the original listener and process identity. It waits again after
+KILL. Process queries add to the roughly three-second wait per signal.
+
+The helper validates argument counts and ports from 1 through 65535 before
+queries. It deduplicates IPv4/IPv6 PIDs, refuses multiple owners, and requires
+a listener owned by the current user. It prints at most 160 characters of
+owner UID, start time and executable, never command arguments. Query warnings,
+malformed output and changed identities stop signaling. A new process that
+acquires the port is not selected as a replacement target. It does not use
+`sudo`, act on UDP sockets, or stop services by name.
+
+Identity checks use `ps` owner, start time and executable immediately before
+each signal. macOS shell tools do not provide an atomic check-and-signal handle;
+PID reuse between that check and `kill` remains a narrow OS-level race. Start
+times have one-second resolution. Use the application's own shutdown command
+when stronger lifecycle guarantees are needed.
+
+After these changes are integrated into the primary dotfiles checkout, a new
+interactive Fish shell loads the new abbreviations and helper. Existing shells
+keep loaded functions and abbreviations until refreshed. Either open a new
+shell or run the following in each existing shell after integration:
+
+```fish
+source ~/.config/fish/conf.d/abbrs.fish
+source ~/.config/fish/functions/ports.fish
+complete -c ports -e
+source ~/.config/fish/completions/ports.fish
+```
+
+Sourcing the abbreviation file removes old `copilot` and `unpop` definitions.
+Text already expanded on a command line does not change; clear that line before
+running it. No Stow operation is needed for edits to these existing linked files.
+Do not source from a task worktree to activate unintegrated changes.
+
+Run the isolated regressions with
+`/usr/bin/python3 -m unittest discover -s scripts/tests -p test_shell_safety.py`.
+The suite uses a disposable HOME, no Fish startup files, synthetic identities,
+and listeners it creates itself. It never launches Copilot or targets a live
+development server.
+
 ### Secrets gate (betterleaks)
 
 Two hooks in `scripts/git-hooks/` scan for leaked secrets with [betterleaks](https://betterleaks.com) (Brewfile) and — unlike the restow hooks — block on a finding: `pre-commit` scans staged changes, and `pre-push` scans every outgoing commit per pushed ref (`remote..local`, or `--not --remotes` for a new branch). pre-push is the authoritative gate: it catches commits made with `--no-verify` or by tooling that skipped the pre-commit hook. Both skip with a warning when betterleaks isn't installed, so bare git still works mid-bootstrap.

@@ -1,13 +1,11 @@
 if status is-interactive
     abbr -a -- glog 'git log -n10 --oneline'
-    abbr -a -- unpop 'git reset --merge'
+    # Remove retired abbreviations when this file is sourced in an existing shell.
+    abbr -e copilot unpop
 
     abbr -a dotfiles "$HOME/.dotfiles"
 
-    abbr -a -- copilot 'copilot --allow-all'
-
-    # Kill the process listening on a given port
-    # Usage: > killport 8081
+    # TERM first; killport 8081 --force explicitly permits KILL
     abbr -a killport 'ports kill'
     abbr -a -- rwm reload_wm
 end
