@@ -351,17 +351,17 @@ The right (pointer) pad keeps the processor at `400` ms, so the layer stays live
 
 ## Sync workflow for new TailorKey releases
 
-When a new TailorKey version ships at sites.google.com/view/tailorkey:
+When a new TailorKey version ships at sites.google.com/view/tailorkey, run the following steps from the repository root:
 
 1. Download the new JSON.
-2. Place it under `tailorkey/upstream/<board> TailorKey <version> ... .json` alongside the existing reference.
+2. Place it under `firmware/tailorkey/upstream/<board> TailorKey <version> ... .json` alongside the existing reference.
 3. Diff the new upstream against the previously stored upstream to see what TailorKey actually changed:
 
    ```bash
    python3 - <<'PY'
    import json
-   old = json.load(open('tailorkey/upstream/Glove80 TailorKey v5.2³ Bilateral - macOS.json'))
-   new = json.load(open('tailorkey/upstream/Glove80 TailorKey vNEW Bilateral - macOS.json'))
+   old = json.load(open('firmware/tailorkey/upstream/Glove80 TailorKey v5.2³ Bilateral - macOS.json'))
+   new = json.load(open('firmware/tailorkey/upstream/Glove80 TailorKey vNEW Bilateral - macOS.json'))
    strip = lambda k: {kk: vv for kk, vv in k.items() if kk != 'decoration'}
    for li, (ol, nl) in enumerate(zip(old['layers'], new['layers'])):
        for pi, (ok, nk) in enumerate(zip(ol, nl)):

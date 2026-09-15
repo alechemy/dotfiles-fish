@@ -10,7 +10,7 @@ config-version = 2
 after-startup-command = [
     'exec-and-forget sketchybar',
     'exec-and-forget borders',
-    'exec-and-forget rm -f /tmp/aerospace-gaps-suppressed-workspace',
+    'exec-and-forget rm -f "$HOME/.cache/aerospace-gaps/suppressed-workspace"',
 ]
 
 # Start AeroSpace at login
