@@ -284,76 +284,10 @@
     "editor.defaultFormatter": "redhat.vscode-xml"
   },
 
-  // INLINE FOLD
-  // ----------------------------------------
-  "inlineFold.maskChar": "…",
-  "inlineFold.maskCss": "color: #808080",
-  "inlineFold.regex": "(class|className)=[`'{\"]([^`'\"}]{50,})[`'\"}]",
-  "inlineFold.regexFlags": "g",
-  "inlineFold.regexGroup": "2",
-  "inlineFold.supportedLanguages": [
-    "astro",
-    "vue",
-    "html",
-    "svelte",
-    "vue-html",
-    "php",
-    "blade",
-    "erb",
-    "twig",
-    "nunjucks",
-    "django-html",
-    "jinja-html",
-    "javascript",
-    "typescript",
-    "javascriptreact",
-    "typescriptreact",
-    "markdown"
-  ],
-  "inlineFold.unfoldOnLineSelect": true,
-  "inlineFold.unfoldedOpacity": 1,
-  "[markdown]": {
-    "inlineFold.regex": "\\[.*\\]\\((.*)\\)",
-    "inlineFold.regexFlags": "g",
-    "inlineFold.regexGroup": "1"
-  },
-  "[svg]": {
-    "inlineFold.regex": "<svg(\\s*.*?\\s*)<\\/svg>",
-    "inlineFold.regexFlags": "gs",
-    "inlineFold.regexGroup": "2"
-  },
-
   // =========================================
   // EVERYTHING ELSE
   // =========================================
   "chat.commandCenter.enabled": false,
-  "colorize.enable_search_variables": false,
-  "colorize.languages": [
-    "css",
-    "sass",
-    "scss",
-    "less",
-    "postcss",
-    "sss",
-    "stylus",
-    "xml",
-    "svg",
-    "js",
-    "ts"
-  ],
-  "colorize.include": [
-    "**/*.css",
-    "**/*.scss",
-    "**/*.sass",
-    "**/*.less",
-    "**/*.styl",
-    "**/*.js",
-    "**/*.ts"
-  ],
-  "cSpell.allowCompoundWords": true,
-  "cSpell.language": "en,en-US",
-  "cSpell.showInRuler": false,
-  "cSpell.userWords": ["Gifs", "Karabiner", "tivo", "uirouter"],
   "[csv]": {
     "editor.inlayHints.maximumLength": 0
   },
@@ -361,7 +295,7 @@
   "diffEditor.ignoreTrimWhitespace": false,
   "diffEditor.maxComputationTime": 0,
   "errorLens.enabledDiagnosticLevels": ["error"],
-  "errorLens.excludeBySource": ["cSpell", "eslint"],
+  "errorLens.excludeBySource": ["eslint"],
   "eslint.format.enable": true,
   "eslint.lintTask.enable": true,
   "explorer.confirmDragAndDrop": false,
@@ -372,12 +306,8 @@
   "fileNestingUpdater.autoUpdateInterval": 10080, // 1 week
   "fileNestingUpdater.promptOnAutoUpdate": false,
   "maven.executable.path": "/opt/homebrew/bin/mvn",
-  "peacock.affectActivityBar": false,
-  "peacock.affectStatusBar": false,
-  "peacock.showColorInStatusBar": false,
   "projectManager.git.baseFolders": ["~/Work"],
   "projectManager.tags": ["1_Work", "2_Personal", "3_Roles"],
-  "rainbow_csv.virtual_alignment_mode": "always",
   "shfmt.executablePath": "/opt/homebrew/bin/shfmt",
   "terraform.languageServer.ignoreSingleFileWarning": true,
   "vsicons.dontShowNewVersionMessage": true,
@@ -387,16 +317,6 @@
     "file://${HOME}/Library/Application Support/VSCodium/User/custom.css",
     "file://${HOME}/Library/Application Support/VSCodium/User/custom.js"
   ],
-  "multiCommand.commands": [
-    {
-      "command": "multiCommand.toggleQuietRead",
-      "sequence": [
-        { "command": "errorLens.toggleError" },
-        { "command": "disable-error-squiggles.toggleErrorWarningColors" }
-      ]
-    }
-  ],
-
   // =========================================
   // FILE NESTING (MUST COME LAST)
   // antfu.file-nesting
