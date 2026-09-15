@@ -101,6 +101,21 @@ Its native Pi markers distinguish working, idle, and blocked sessions. Herdr als
 
 Keep one writer per checkout. Managed Subagents write worktrees that can enter automatic cleanup are currently restricted: the installed guarded build can delete a checkout even when its captured binary patch cannot be replayed. Do not use that cleanup path until the reviewed preservation fix passes its binary, stale-patch, and failure-retention tests. This is separate from the human `wt pi` helper, which retains branches and refuses dirty work. Do not bulk-clean either kind of retained task.
 
+### Check delegated work without confusing root and child status
+
+An idle root can still have active children. In the currently retained guarded
+Subagents 0.65 build, `/subagents-fleet` opens foreground and recent asynchronous
+runs, including completed entries. Ctrl+Alt+F is also registered in that build;
+do not assume the same default after an upgrade. Use Fleet to locate the relevant
+run before treating the whole task as settled.
+
+`/subagents-doctor` runs diagnostics on demand. `/subagent-cost` reports current
+parent/child cost. These are checks, not reasons to keep another polling dashboard
+running. Fleet also offers steering, stop, and inspector actions; those are not
+all read-only. Transcript views need explicit content scope and are not suitable
+for metadata-only audits. None of these commands relaxes the managed-worktree
+restriction above.
+
 ## 4. Review the changes in Hunk
 
 Wait until Pi settles. From **the Pi pane that should receive your feedback**, press:
@@ -130,21 +145,46 @@ If Pi is busy or showing a blocking dialog, delivery is refused and the comments
 
 These comments are local. They are not published GitHub reviews.
 
-### When the default review looks empty
+### Review the whole task, including committed work
 
-The default shortcut reviews working-tree changes. Once Pi commits the work, that view can be empty.
+The default shortcut chooses scope automatically. Dirty or untracked files select
+working-tree mode. A clean branch with a usable base and commits ahead selects
+branch mode; otherwise it falls back to working-tree mode. Verify the displayed
+comparison rather than treating an empty view as proof that the task is reviewed.
 
-To inspect the complete committed task, ask Pi:
+From the intended Pi pane, **Ctrl+B, then Shift+B** requests committed branch review.
+Shift+A reviews the index; Shift+C reviews the latest commit. These scopes are not
+interchangeable. The installer preserves existing key conflicts, so check Herdr's
+shortcut help if the binding is unavailable.
 
-> Reload this worktree's Hunk review with `diff main...HEAD`.
+Hunk's `[review] base` can select the integration target. Without it, the reviewed
+resolver tries a usable upstream, `origin/HEAD`, then local `main`, `master`, or
+`trunk`. An invalid configured base can fall back to automatic resolution, and a
+missing base can fall back to working-tree mode. Neither fallback proves that the
+intended branch was reviewed. See [the exact scope rules](herdr.md#review-scope-and-receipts).
 
-Or run this from a shell in the task checkout:
+For a non-`main` integration target, validate the ref and merge-base, then reload the
+exact worktree's session with an explicit comparison:
 
 ```fish
-hunk session reload --repo . -- diff main...HEAD
+hunk session reload --repo /path/to/task-worktree -- diff release/integration...HEAD
 ```
 
-That comparison shows the committed task changes since the shared ancestor with `main`. It does not include subsequent uncommitted edits.
+This shows committed changes since the shared ancestor. It excludes staged,
+unstaged, and untracked work, which need a separate working-tree review when they
+belong to the task. Explicitly open review from the intended Pi pane first; an
+unrelated shell does not establish the right feedback recipient.
+
+Use `hunk skill path` for the installed agent interaction guide. For your own
+history browsing, run `hunk log` in the task shell. Headless Git review does not
+need a Hunk TUI or daemon.
+
+Before sending feedback clears comments, save unresolved findings in a local
+[coding-task receipt](../stow/agents/.agents/skills/handoff/SKILL.md#coding-task-review-receipt).
+Record the integration target, base/merge-base, reviewed HEAD, scope/exclusions,
+tested dirty state, checks, service ownership, and next action. Link existing
+artifacts rather than copying private transcripts or patches. Recheck the receipt
+after further edits or a rebase.
 
 ## 5. Iterate, then commit deliberately
 
@@ -204,7 +244,7 @@ Use this order:
 
 1. Send outstanding Hunk comments.
 2. Finish any resulting Pi work. If it changed the code after integration, review, commit, and integrate those changes too.
-3. Submit `/quit` in Pi and stop task dev servers.
+3. Submit `/quit` in Pi and stop task dev servers with their own shutdown commands. If needed, `ports kill <port>` sends TERM to one verified listener; `--force` explicitly permits KILL after the bounded wait. It refuses ambiguous or changed owners. Removing a checkout never substitutes for stopping its services.
 4. Close the task tab with **Cmd+Option+W**.
 5. Return to the control shell.
 
@@ -263,9 +303,13 @@ Restarting the Herdr server is different. It stops processes and attempts layout
 | Fish shell | `wt switch <branch>` | Move that shell to a worktree. |
 | Pi editor | Cmd+Enter or Ctrl+S | Submit a message. |
 | Pi editor | `/hotkeys` | Show Pi shortcuts. |
+| Pi editor | `/subagents-fleet` | Inspect delegated-run status in the retained guarded build. |
+| Pi editor | `/subagents-doctor` | Run diagnostics on demand. |
 | Intended Pi pane | Ctrl+B, then `f` | Open its Hunk review. |
 | Herdr | Ctrl+B, then Shift+A | Review staged changes. |
 | Herdr | Ctrl+B, then Shift+C | Review the latest commit. |
+| Intended Pi pane | Ctrl+B, then Shift+B | Review committed branch changes; check the base. |
+| Task shell | `hunk log` | Browse commit history. |
 | Hunk | `c`, then Ctrl+S | Write and save a comment. |
 | Herdr | Ctrl+B, then Shift+F | Send saved human comments. |
 | Task shell | `wt merge main --no-commit --no-rebase --no-remove` | Integrate locally. |
@@ -276,6 +320,18 @@ Restarting the Herdr server is different. It stops processes and attempts layout
 If task creation fails halfway, inspect the retained tab and `wt pi list` before retrying. If reopening reports another active agent, resolve that existing session rather than starting another writer.
 
 For dotfiles specifically, **only the primary checkout owns your live HOME links**. Integrate experimental changes before applying them. Never run setup or Stow from a task worktree.
+
+## Bounded physical check
+
+Automated fixtures cover submission logic, review scope, recipient selection,
+human-task retention, and explicit force without model calls. They do not establish physical
+Ghostty key delivery, an unfocused desktop notification, or macOS sleep/wake.
+
+Those three checks are deferred until an agreed ten-minute session with one
+disposable task. Server restart is a separate process-ending operation, not part
+of that session. Never stop the default Herdr server for testing. A declined
+session leaves these coverage limits recorded; it does not invalidate the
+repeatable fixture results.
 
 ## References
 
