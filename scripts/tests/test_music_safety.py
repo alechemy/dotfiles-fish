@@ -18,7 +18,7 @@ BIN = Path(__file__).resolve().parents[2] / "stow/bin/.local/bin"
 def load(name):
     mocks = {}
     for suffix, names in {
-        "": [], "flac": ["FLAC"], "mp3": ["MP3"], "mp4": ["MP4", "MP4Cover"],
+        "": [], "flac": ["FLAC"], "mp3": ["MP3"], "mp4": ["MP4", "MP4Cover", "MP4FreeForm"],
         "id3": ["COMM", "TALB", "TCMP", "TCON", "TCOP", "TDRC", "TIT2", "TPE1", "TPE2", "TPOS", "TRCK"],
     }.items():
         key = "mutagen" + ("." + suffix if suffix else "")
@@ -70,6 +70,23 @@ class MusicSafety(unittest.TestCase):
         self.assertTrue(stats["failed"])
         self.assertEqual(other.read_bytes(), b"old")
         self.assertEqual(source.read_bytes(), b"new")
+
+    def test_archive_artist_symlink_into_source_is_rejected_before_mutation(self):
+        source = self.root / "source"
+        source.mkdir()
+        incoming = source / "01 Song.m4a"
+        incoming.write_bytes(b"new")
+        old = self.album / "01 Song.m4a"
+        old.write_bytes(b"old")
+        archive = self.root / "archive"
+        dated = archive / self.org.datetime.now().strftime("%Y-%m-%d")
+        dated.mkdir(parents=True)
+        (dated / "Artist").symlink_to(source)
+        stats = self.organize(source, archive_root=str(archive))
+        self.assertTrue(stats["failed"])
+        self.assertEqual(old.read_bytes(), b"old")
+        self.assertEqual(incoming.read_bytes(), b"new")
+        self.assertFalse((source / "Album").exists())
 
     def test_replacement_paths_reject_absolute_traversal_root_and_symlink(self):
         outside = self.root / "outside"
@@ -196,6 +213,11 @@ class MetadataSafety(unittest.TestCase):
             self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
             self.assertEqual(json.loads((root / "needs-retry.json").read_text()), [entry])
             self.assertEqual(json.loads(queue.read_text()), [])
+            retry_command = f"source {shlex.quote(str(source))}; function riptag; return 1; end; batch_rip {shlex.quote(str(root / 'needs-retry.json'))}"
+            result = subprocess.run(["fish", "--no-config", "--private", "-c", retry_command],
+                                    env=dict(os.environ, HOME=tmp), capture_output=True, text=True, timeout=10)
+            self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+            self.assertEqual(json.loads((root / "needs-retry.json").read_text()), [entry])
             # Invalid retry state must not remove the input entry.
             queue.write_text(json.dumps([entry]))
             (root / "needs-retry.json").write_text("invalid")
@@ -271,7 +293,7 @@ class TopHitsSafety(unittest.TestCase):
         self.top.TOP_N = 2
         self.manifest = {"year": 2000, "album": "Fictional Hits", "entries": [
             {"rank": rank, "status": "manual", "chart_artist": "Example Artist", "chart_title": f"Song {rank}",
-             "qobuz": {"title": f"Song {rank}", "performer": "Example Artist", "duration": 100}}
+             "qobuz": {"id": str(rank), "title": f"Song {rank}", "performer": "Example Artist", "duration": 100}}
             for rank in (1, 2)]}
         self.top.write_json(self.top.state_path("manifests", "2000.json"), self.manifest)
 
@@ -282,6 +304,28 @@ class TopHitsSafety(unittest.TestCase):
             self.top.cmd_resolve(types.SimpleNamespace(year=2000, rank=[1]))
         qb.assert_not_called()
         self.assertFalse(Path(self.top.state_path("manifests", "2000.json")).exists())
+
+    def test_resolve_preserves_provenance_and_invalidates_changed_pick(self):
+        import copy
+        for row in self.manifest["entries"]:
+            row["tag_identity"] = self.top.recording_identity(row, "Example Artist feat. Guest")
+        self.top.write_json(self.top.state_path("manifests", "2000.json"), self.manifest)
+        self.top.write_json(self.top.state_path("charts", "2000.json"),
+                            {"entries": [{"rank": r, "title": f"Song {r}", "artist": "Example Artist"} for r in (1, 2)], "source_url": "https://example.com/chart", "retrieved_at": "fixture"})
+        def resolved(entry, year, items):
+            row = copy.deepcopy(self.manifest["entries"][entry["rank"] - 1])
+            row.pop("tag_identity")
+            row.update(flags=[], skip_reason=None)
+            row["qobuz"].update(album="Album", released="2000")
+            if row["rank"] == 1:
+                row["qobuz"]["id"] = "changed"
+            return row
+        with patch.object(self.top, "Qobuz", return_value=types.SimpleNamespace(calls=0)), patch.object(self.top, "search_entry", return_value=("fixture", [])), patch.object(self.top, "resolve_entry", side_effect=resolved), patch.object(self.top, "enrich_from_track_get"), patch.object(self.top, "write_review", return_value="fixture"):
+            self.top.cmd_resolve(types.SimpleNamespace(year=2000, rank=None))
+        reloaded = self.top.load_manifest(2000)
+        self.assertEqual(reloaded["entries"][1]["tag_identity"], self.manifest["entries"][1]["tag_identity"])
+        with self.assertRaises(ValueError):
+            self.top.expected_recording_identity({}, reloaded["entries"][0])
 
     def test_manifest_requires_exact_unique_ranks(self):
         for ranks in ((1,), (1, 1), (1, 3)):
@@ -330,6 +374,150 @@ class TopHitsSafety(unittest.TestCase):
                 with self.assertRaises(SystemExit):
                     self.top.cmd_run(types.SimpleNamespace(years="2000", max_attempts=1, retry_wait=0, cooldown=0))
                 stage.assert_not_called()
+
+    def test_tag_retag_and_status_share_persisted_feature_credit(self):
+        class Audio(dict):
+            info = types.SimpleNamespace(length=100)
+            def save(self):
+                pass
+        mp4 = self.top._mutagen["mutagen.mp4"]
+        mp4.MP4FreeForm = bytes
+        mp4.MP4Cover = Mock(return_value=b"cover")
+        for performer in ("Example Artist", "Example Artist feat. Guest"):
+            manifest = json.loads(json.dumps(self.manifest))
+            manifest["album_artist"] = "Various Artists"
+            audios = {}
+            for row in manifest["entries"]:
+                row["genre"] = "Pop"
+                row["qobuz"]["performer"] = performer
+                row["chart_artist"] = "Example Artist feat. Guest"
+                audios[str(row["rank"])] = Audio(**{"\xa9ART": ["Example Artist feat. Guest"], "\xa9nam": [row["qobuz"]["title"]]})
+            mp4.MP4 = lambda path: audios[path]
+            with patch.dict(sys.modules, self.top._mutagen), patch.object(self.top, "find_audio", return_value=list(audios)):
+                for row in manifest["entries"]:
+                    path = str(row["rank"])
+                    self.top.tag_file(path, row, manifest, b"cover")
+                    self.assertEqual(audios[path]["\xa9nam"], [f"Song {row['rank']} (feat. Guest)"])
+                    first = dict(audios[path])
+                    reloaded = self.top.load_manifest(2000)
+                    persisted_row = next(r for r in reloaded["entries"] if r["rank"] == row["rank"])
+                    self.assertEqual(persisted_row["tag_identity"]["source_artist"], "Example Artist feat. Guest")
+                    self.top.tag_file(path, persisted_row, reloaded, b"cover", new_recording=False)
+                    self.assertEqual(dict(audios[path]), first)
+                self.assertEqual(len(self.top.verified_library_files(manifest)), 2)
+                self.top.write_json(self.top.state_path("manifests", "2000.json"), manifest)
+                self.top.save_progress({"year": 2000, "ranks": {}, "assembled_at": "fixture"})
+                with patch.object(self.top, "library_available", return_value=True):
+                    self.assertTrue(self.top.year_status(2000)["assembled"])
+                for key, value in (("\xa9ART", "Wrong Artist"), ("\xa9nam", "Song 1 (feat. Wrong Guest)"),
+                                   ("\xa9nam", "Song 1 (Remix)")):
+                    original = audios["1"][key]
+                    audios["1"][key] = [value]
+                    with self.assertRaises(SystemExit):
+                        self.top.verified_library_files(manifest)
+                    audios["1"][key] = original
+                original_audio = dict(audios["1"])
+                forged = self.top.recording_identity(manifest["entries"][0], "Example Artist feat. Wrong Guest")
+                audios["1"][self.top.IDENTITY_TAG] = [json.dumps(forged).encode()]
+                audios["1"]["\xa9nam"] = [forged["title"]]
+                with self.assertRaises(SystemExit):
+                    self.top.verified_library_files(self.top.load_manifest(2000))
+                audios["1"].clear()
+                audios["1"].update(original_audio)
+                changed = self.top.load_manifest(2000)
+                changed["entries"][0]["qobuz"]["id"] = "replacement-id"
+                with self.assertRaises(SystemExit):
+                    self.top.verified_library_files(changed)
+
+    def test_full_assemble_retag_status_identity_parity(self):
+        class Audio(dict):
+            info = types.SimpleNamespace(length=100)
+            def save(self):
+                pass
+        manifest = self.manifest
+        manifest["album_artist"] = "Various Artists"
+        audios, records = {}, {}
+        for row in manifest["entries"]:
+            rank = str(row["rank"])
+            row["genre"] = "Pop"
+            row["qobuz"]["performer"] = "Example Artist feat. Guest"
+            row["chart_artist"] = "Example Artist feat. Guest"
+            path = Path(self.top.DOWNLOADS_DIR) / "2000" / rank / "source.m4a"
+            path.parent.mkdir(parents=True)
+            path.write_text(rank)
+            records[rank] = {"verified": True, "path": str(path)}
+            audios[rank] = Audio(**{"\xa9ART": ["Example Artist feat. Guest"], "\xa9nam": [row["qobuz"]["title"]]})
+        self.top.write_json(self.top.state_path("manifests", "2000.json"), manifest)
+        self.top.save_progress({"year": 2000, "ranks": records})
+        (Path(self.top.LIBRARY_ROOT) / "Compilations").mkdir(parents=True)
+        mp4 = self.top._mutagen["mutagen.mp4"]
+        mp4.MP4 = lambda path: audios[Path(path).read_text()]
+        mp4.MP4FreeForm = bytes
+        mp4.MP4Cover = Mock(return_value=b"cover")
+        def cover(year, path):
+            Path(path).write_bytes(b"cover")
+            return b"cover"
+        def organizer(cmd, **kwargs):
+            self.top.shutil.move(cmd[-1], self.top.library_album_dir(manifest))
+            Path(cmd[cmd.index("--manifest") + 1]).write_text(self.top.library_album_dir(manifest) + "\n")
+            return types.SimpleNamespace(returncode=0)
+        with patch.dict(sys.modules, self.top._mutagen), patch.object(self.top, "make_cover", side_effect=cover), patch.object(self.top.subprocess, "run", side_effect=organizer), patch.object(self.top, "nas_chmod", return_value=[]), patch.object(self.top, "score_runnability", return_value=(True, "")), patch.object(self.top, "library_available", return_value=True):
+            self.top.cmd_assemble(types.SimpleNamespace(year=2000, force=False))
+            before = {rank: dict(audio) for rank, audio in audios.items()}
+            self.assertTrue(self.top.year_status(2000)["assembled"])
+            self.top.cmd_retag(types.SimpleNamespace(year=2000))
+            self.assertEqual(before, {rank: dict(audio) for rank, audio in audios.items()})
+            self.assertTrue(self.top.year_status(2000)["assembled"])
+
+    def test_legacy_unknown_feature_credit_is_not_inferred_from_title(self):
+        row = self.manifest["entries"][0]
+        audio = {"\xa9ART": ["Example Artist"], "\xa9nam": ["Song 1 (feat. Unproven Guest)"]}
+        expected = self.top.expected_recording_identity(audio, row)
+        self.assertEqual(expected["title"], "Song 1")
+        self.assertNotEqual(expected["title"], audio["\xa9nam"][0])
+        forged = self.top.recording_identity(row, "Example Artist feat. Unproven Guest")
+        audio[self.top.IDENTITY_TAG] = [json.dumps(forged).encode()]
+        self.assertEqual(self.top.expected_recording_identity(audio, row), expected)
+        row["chart_artist"] = "Example Artist feat. Known Guest"
+        audio["\xa9nam"] = ["Song 1 (feat. Known Guest)"]
+        self.assertEqual(self.top.expected_recording_identity(audio, row)["title"], audio["\xa9nam"][0])
+        audio["\xa9nam"] = ["Song 1 (feat. Wrong Guest)"]
+        self.assertNotEqual(self.top.expected_recording_identity(audio, row)["title"], audio["\xa9nam"][0])
+
+    def test_download_reverifies_recorded_files_before_skipping(self):
+        for row in self.manifest["entries"]:
+            row["qobuz"]["url"] = "https://example.com/track/fixture"
+        self.top.write_json(self.top.state_path("manifests", "2000.json"), self.manifest)
+        staging = Path(self.top.DOWNLOADS_DIR) / "2000"
+        records = {}
+        for rank in (1, 2):
+            path = staging / f"{rank:02d}" / "song.m4a"
+            path.parent.mkdir(parents=True)
+            path.write_bytes(b"replaced wrong recording")
+            records[str(rank)] = {"verified": True, "path": str(path)}
+        self.top.save_progress({"year": 2000, "ranks": records})
+        with patch.object(self.top, "verify_file", return_value=(False, "wrong recording")), patch.object(self.top, "rip_track", return_value=(1, "failed")) as rip, patch.object(self.top.time, "sleep"), self.assertRaises(SystemExit):
+            self.top.cmd_download(types.SimpleNamespace(year=2000))
+        self.assertEqual(rip.call_count, 2)
+        self.assertTrue(all(not rec["verified"] for rec in self.top.load_progress(2000)["ranks"].values()))
+
+    def test_assembly_reverifies_recorded_files_before_any_tag_or_move(self):
+        staging = Path(self.top.DOWNLOADS_DIR) / "2000"
+        records = {}
+        for rank in (1, 2):
+            path = staging / f"{rank:02d}" / "song.m4a"
+            path.parent.mkdir(parents=True)
+            path.write_bytes(b"replaced wrong recording")
+            records[str(rank)] = {"verified": True, "path": str(path)}
+        self.top.save_progress({"year": 2000, "ranks": records})
+        Path(self.top.LIBRARY_ROOT).mkdir()
+        (Path(self.top.LIBRARY_ROOT) / "placeholder").mkdir()
+        with patch.object(self.top, "verify_file", return_value=(False, "wrong recording")), patch.object(self.top, "tag_file") as tag, patch.object(self.top, "make_cover") as cover, patch.object(self.top.shutil, "move") as move, self.assertRaises(SystemExit):
+            self.top.cmd_assemble(types.SimpleNamespace(year=2000, force=False))
+        tag.assert_not_called()
+        cover.assert_not_called()
+        move.assert_not_called()
+        self.assertTrue(all(Path(rec["path"]).exists() for rec in records.values()))
 
     def test_downloaded_status_requires_existing_verified_audio(self):
         self.top.save_progress({"year": 2000, "ranks": {"1": {"verified": True, "path": str(self.root / "gone")}}})

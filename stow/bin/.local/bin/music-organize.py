@@ -366,8 +366,8 @@ def evaluate_replacement(new_files, existing_dir):
     return True, f"{new_n} tracks vs {existing_n}, quality {fmt_quality(new_q)}"
 
 
-def archive_folder(path, archive_root, dry_run):
-    """Move an album folder into archive_root/<date>/<artist>/<album>; return the dest."""
+def archive_destination(path, archive_root):
+    """Resolve the final archive path before any library or source mutation."""
     dest = unique_path(
         os.path.join(
             archive_root,
@@ -376,6 +376,15 @@ def archive_folder(path, archive_root, dry_run):
             os.path.basename(path),
         )
     )
+    root, resolved = os.path.realpath(archive_root), os.path.realpath(dest)
+    if resolved == root or os.path.commonpath([root, resolved]) != root:
+        raise ValueError("archive destination escapes archive root")
+    return dest
+
+
+def archive_folder(path, archive_root, dry_run):
+    """Move an album only to a contained, revalidated archive destination."""
+    dest = archive_destination(path, archive_root)
     if not dry_run:
         os.makedirs(os.path.dirname(dest), exist_ok=True)
         shutil.move(path, dest)
@@ -466,6 +475,15 @@ def organize_source(source, library_root, policy, dry_run, manifest, stats,
         print("  -> ERROR: archive overlaps source or destination", file=sys.stderr)
         stats["failed"].append(source)
         return
+
+    if archive_root:
+        try:
+            for target in targets:
+                archive_destination(target, archive_root)
+        except ValueError as e:
+            print(f"  -> ERROR: {e}", file=sys.stderr)
+            stats["failed"].append(source)
+            return
 
     if recase:
         spellings = sorted(set(recase.values()))

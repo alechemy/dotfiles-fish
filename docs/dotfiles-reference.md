@@ -404,9 +404,19 @@ current session ID to `batch_rip`, which retains failed entries for retry.
 Music-doctor deletes only truly empty directories. Covers, sidecars, archives,
 and any other contents require review rather than recursive deletion.
 Top-hits adoption checks the full unique chart-rank set and each expected tagged
-artist, title, and duration under the year lock. These metadata checks do not
-prove a recording's binary identity. Recorded completion is not current
-completion: missing files or unavailable storage block unattended work until
+artist, title, and duration under the year lock. Initial verified tagging stores
+`TOP_HITS_IDENTITY` with the Qobuz recording ID, source artist credit, and expected
+display tags, and persists the same `tag_identity` in the manifest before saving
+audio. The manifest is authoritative; an audio atom alone cannot establish an
+expected credit. Retagging and verification reload that identity so featured
+credits survive repeated tagging. A changed recording ID requires redo. Legacy files
+without provenance must match tags derived from known chart or recording credits;
+unknown feature credits remain unverified and staging stays intact. These metadata
+checks do not prove a recording's binary identity.
+
+Download skips and assembly both reverify current files, including another check
+immediately before tagging. These checks do not lock out unrelated file writers.
+Recorded completion is not current completion: missing files or unavailable storage block unattended work until
 reconciled, without automatically redownloading a previously assembled album.
 
 Runnability stores a file identity with each analysis. Existing feature rows

@@ -78,8 +78,14 @@ def save(path, value):
     finally:
         if os.path.exists(tmp):
             os.unlink(tmp)
-save(retry_path, retry)
-save(input_path, remaining)
+same_queue = (os.path.realpath(input_path) == os.path.realpath(retry_path)
+              or (os.path.exists(retry_path) and os.path.samefile(input_path, retry_path)))
+if same_queue:
+    # Retrying needs-retry.json: the failed entry already belongs to this queue.
+    save(input_path, data)
+else:
+    save(retry_path, retry)
+    save(input_path, remaining)
 " "$input_file" "$url" "$session_id" "$retry_file"
     end
 

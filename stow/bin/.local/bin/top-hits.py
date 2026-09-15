@@ -736,11 +736,17 @@ def search_entry(qb, entry, year, min_accepted=3):
 
 
 def cmd_resolve(args):
+    with year_lock(args.year, "resolve"):
+        _resolve_locked(args)
+
+
+def _resolve_locked(args):
     year = args.year
     chart = read_json(state_path("charts", f"{year}.json"))
     if not chart:
         raise SystemExit(f"ERROR: no chart for {year}; run `top-hits.py chart {year}` first.")
-    existing = load_manifest(year) if args.rank else None
+    existing = load_manifest(year) if args.rank else read_json(state_path("manifests", f"{year}.json"))
+    previous = {r["rank"]: r for r in existing["entries"]} if existing else {}
     if args.rank and not set(args.rank) <= set(range(1, TOP_N + 1)):
         raise SystemExit("ERROR: requested rank is outside the chart")
     overrides = read_json(state_path("overrides", f"{year}.json"), default={})
@@ -757,6 +763,10 @@ def cmd_resolve(args):
             apply_override(row, override, qb)
         elif row["qobuz"]:
             enrich_from_track_get(row, qb)
+        # Keep the filed recording's provenance even when the pick changes.
+        # A differing Qobuz ID remains invalid until a verified redo replaces it.
+        if previous.get(row["rank"], {}).get("tag_identity"):
+            row["tag_identity"] = previous[row["rank"]]["tag_identity"]
         rows.append(row)
         pick = row["qobuz"]
         label = f"{pick['title']} · {pick['album']} ({(pick['released'] or '')[:4]})" if pick else (row["skip_reason"] or "—")
@@ -951,6 +961,11 @@ def rip_track(dest, url):
 
 
 def cmd_download(args):
+    with year_lock(args.year, "download"):
+        _download_locked(args)
+
+
+def _download_locked(args):
     year = args.year
     manifest = load_manifest(year)
     blocked = not_ready_rows(manifest)
@@ -966,7 +981,6 @@ def cmd_download(args):
     if os.path.isdir(filed) and find_audio(filed):
         raise SystemExit(f"ERROR: {filed} already holds {len(find_audio(filed))} tracks but progress/{year}.json is not marked assembled; "
                          f"run `top-hits.py adopt {year}` to reconcile instead of re-downloading.")
-    lock = year_lock(year, "download")
     staging = os.path.join(DOWNLOADS_DIR, str(year))
     consecutive = 0
     done = skipped = failed = 0
@@ -976,9 +990,15 @@ def cmd_download(args):
             skipped += 1
             continue
         rec = progress["ranks"].get(str(rank), {})
-        if rec.get("verified") and os.path.exists(rec.get("path", "")):
-            done += 1
-            continue
+        if rec.get("verified"):
+            path = rec.get("path") or ""
+            ok, detail = verify_file(path, row) if os.path.isfile(path) else (False, "file missing")
+            if ok:
+                done += 1
+                continue
+            rec.update({"verified": False, "error": detail})
+            progress["ranks"][str(rank)] = rec
+            save_progress(progress)
         dest = os.path.join(staging, f"{rank:02d}")
         existing = find_audio(dest)
         if existing:
@@ -1132,12 +1152,66 @@ def artist_override(file_artist, chart_artist):
     return re.sub(r"\s+", " ", strip_parens(chart_artist)).strip()
 
 
-def tag_file(path, row, manifest, cover_bytes):
+IDENTITY_TAG = "----:com.apple.iTunes:TOP_HITS_IDENTITY"
+
+
+def recording_identity(row, source_artist):
+    artist, title = artist_and_title(row, source_artist)
+    return {"version": 1, "qobuz_id": str(row["qobuz"]["id"]),
+            "source_artist": source_artist, "artist": artist, "title": title}
+
+
+def expected_recording_identity(audio, row, *, new_recording=False):
+    """Derive expected tags from manifest provenance, never from audio provenance.
+
+    A verified first download can establish a source artist credit. Later reads
+    use that persisted manifest identity. Legacy rows without provenance accept
+    only candidates derived from known chart or recording credits.
+    """
+    identity = row.get("tag_identity")
+    if identity:
+        if (not isinstance(identity, dict) or identity.get("version") != 1
+                or not isinstance(identity.get("source_artist"), str)):
+            raise ValueError("invalid manifest tag identity")
+        if identity.get("qobuz_id") != str(row["qobuz"]["id"]):
+            if not new_recording:
+                raise ValueError("manifest recording changed; use redo to establish new provenance")
+        else:
+            expected = recording_identity(row, identity["source_artist"])
+            if identity != expected:
+                raise ValueError("stored tag identity no longer matches manifest")
+            return expected
+    candidates = [recording_identity(row, credit)
+                  for credit in (row["qobuz"]["performer"], row["chart_artist"])]
+    artist, title = (audio.get("\xa9ART") or [""])[0], (audio.get("\xa9nam") or [""])[0]
+    for expected in candidates:
+        if (norm(artist), norm(title)) == (norm(expected["artist"]), norm(expected["title"])):
+            return expected
+    if new_recording:
+        return recording_identity(row, artist)
+    return candidates[0]
+
+
+def tag_file(path, row, manifest, cover_bytes, *, new_recording=True):
     from mutagen.mp4 import MP4, MP4Cover, MP4FreeForm
+    if new_recording:
+        ok, detail = verify_file(path, row)
+        if not ok:
+            raise ValueError(f"cannot establish tag provenance: {detail}")
     audio = MP4(path)
     file_artist = (audio.get("\xa9ART") or [""])[0]
-    artist, title = artist_and_title(row, file_artist)
+    identity = expected_recording_identity(audio, row, new_recording=new_recording)
+    artist, title = identity["artist"], identity["title"]
+    if not new_recording and (
+            norm(file_artist) != norm(artist)
+            or norm((audio.get("\xa9nam") or [""])[0]) != norm(title)):
+        raise ValueError("unverified legacy tag identity; preserve files and use redo")
     fixed = artist if artist != file_artist else None
+    # Persist authority before changing audio. An interrupted tag save can retry
+    # without deriving a new expectation from partially changed tags.
+    row["tag_identity"] = identity
+    write_json(state_path("manifests", f"{manifest['year']}.json"), manifest)
+    audio[IDENTITY_TAG] = [MP4FreeForm(json.dumps(identity, sort_keys=True).encode("utf-8"))]
     audio["\xa9ART"] = [artist]
     audio["\xa9nam"] = [title]
     audio["\xa9alb"] = [manifest["album"]]
@@ -1195,6 +1269,11 @@ def score_runnability(library_dir):
 
 
 def cmd_assemble(args):
+    with year_lock(args.year, "assemble"):
+        _assemble_locked(args)
+
+
+def _assemble_locked(args):
     year = args.year
     manifest = load_manifest(year)
     progress = load_progress(year)
@@ -1202,17 +1281,21 @@ def cmd_assemble(args):
         require_current_assembly(manifest)
         print(f"{year}: already assembled at {progress['assembled_at']} ({progress.get('library_dir')}); nothing to do (use --force to redo).")
         return
-    lock = year_lock(year, "assemble")
     rows = [r for r in manifest["entries"] if r["status"] != "skip"]
     staging = os.path.join(DOWNLOADS_DIR, str(year))
     album_dir = os.path.join(staging, safe_filename(manifest["album"]))
-    os.makedirs(album_dir, exist_ok=True)
     for row in rows:
         rec = progress["ranks"].get(str(row["rank"]), {})
         if rec.get("verified") and not os.path.exists(rec.get("path") or ""):
             moved = glob.glob(os.path.join(album_dir, f"{row['rank']:02d} *.m4a"))
             if moved:
                 rec["path"] = moved[0]
+        if rec.get("verified"):
+            path = rec.get("path") or ""
+            ok, detail = verify_file(path, row) if os.path.isfile(path) else (False, "file missing")
+            if not ok:
+                rec.update({"verified": False, "error": detail})
+                save_progress(progress)
     missing = [r["rank"] for r in rows
                if not progress["ranks"].get(str(r["rank"]), {}).get("verified")
                or not os.path.exists(progress["ranks"][str(r["rank"])]["path"])]
@@ -1221,6 +1304,7 @@ def cmd_assemble(args):
     if not os.path.isdir(LIBRARY_ROOT) or not os.listdir(LIBRARY_ROOT):
         raise SystemExit(f"ERROR: library root {LIBRARY_ROOT} is not mounted.")
 
+    os.makedirs(album_dir, exist_ok=True)
     cover_bytes = make_cover(year, os.path.join(album_dir, "cover.jpg"))
     print(f"--> Tagging {len(rows)} tracks as '{manifest['album']}'")
     for row in rows:
@@ -1230,6 +1314,11 @@ def cmd_assemble(args):
             shutil.move(rec["path"], staged)
             rec["path"] = staged
             save_progress(progress)
+        ok, detail = verify_file(staged, row)
+        if not ok:
+            rec.update({"verified": False, "error": detail})
+            save_progress(progress)
+            raise SystemExit(f"ERROR: rank {row['rank']} changed before tagging: {detail}")
         fixed, title = tag_file(staged, row, manifest, cover_bytes)
         dst = os.path.join(album_dir, f"{row['rank']:02d} {safe_filename(title)}.m4a")
         if dst != staged:
@@ -1304,7 +1393,8 @@ def verified_library_files(manifest):
             if rank not in wanted or rank in found:
                 raise ValueError(f"unexpected or duplicate rank {rank}")
             row = wanted[rank]
-            artist, title = artist_and_title(row, row["qobuz"]["performer"])
+            identity = expected_recording_identity(audio, row)
+            artist, title = identity["artist"], identity["title"]
             if norm((audio.get("\xa9nam") or [""])[0]) != norm(title):
                 raise ValueError(f"rank {rank}: title mismatch")
             if norm((audio.get("\xa9ART") or [""])[0]) != norm(artist):
@@ -1428,7 +1518,12 @@ def cmd_redo(args):
 
 # ----------------------------------------------------------------- stage: retag
 def cmd_retag(args):
-    """Re-apply the compilation tags (and cleaned titles) to an already-filed year, renaming files to match."""
+    """Re-apply tags only after checking the complete filed album under its lock."""
+    with year_lock(args.year, "retag"):
+        _retag_locked(args)
+
+
+def _retag_locked(args):
     import tempfile
     from mutagen.mp4 import MP4
     year = args.year
@@ -1437,6 +1532,7 @@ def cmd_retag(args):
     library_dir = progress.get("library_dir")
     if not progress.get("assembled_at") or not library_dir or not os.path.isdir(library_dir):
         raise SystemExit(f"ERROR: {year} is not assembled (or {library_dir} is missing).")
+    require_current_assembly(manifest)
     by_rank = {r["rank"]: r for r in manifest["entries"]}
     with tempfile.TemporaryDirectory() as tmp:
         cover_bytes = make_cover(year, os.path.join(tmp, "cover.jpg"))
@@ -1448,7 +1544,7 @@ def cmd_retag(args):
         if not row or not row["qobuz"]:
             print(f"  skipping {os.path.basename(path)}: no manifest row for track {rank}")
             continue
-        _, title = tag_file(path, row, manifest, cover_bytes)
+        _, title = tag_file(path, row, manifest, cover_bytes, new_recording=False)
         dest = os.path.join(library_dir, f"{rank:02d} {safe_filename(title)}.m4a")
         if dest != path:
             os.rename(path, dest)
