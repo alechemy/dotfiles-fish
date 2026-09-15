@@ -192,7 +192,7 @@ for e in data:
         set -l riptag_args
         if test -n "$session_id"
             # Resume a previously failed download
-            set riptag_args "--resume=$session_id"
+            set riptag_args $local_flag "--resume=$session_id"
             if test "$compilation" = true
                 set -a riptag_args --compilation
             else if test "$compilation" = false
@@ -221,6 +221,7 @@ for e in data:
             _log "Downloading: $display ($genre) [$url]"
         end
 
+        set -g __riptag_resume_id
         if riptag $riptag_args >>$log_file 2>>$error_log
             echo -e $green"✓"$nc
             _log "OK: $url"
@@ -232,7 +233,7 @@ for e in data:
             _log_error "FAILED: $display ($genre) [$url]"
             set failed_count (math $failed_count + 1)
             # Move failed entry to retry file (with session ID if available)
-            set -l sid (cat /tmp/riptag-resume-id 2>/dev/null)
+            set -l sid "$__riptag_resume_id"
             _move_to_retry "$url" "$sid"
             or return 1
             if test -n "$sid"

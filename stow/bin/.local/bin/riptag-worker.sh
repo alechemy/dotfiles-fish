@@ -23,7 +23,8 @@
 # Exit codes:
 #   0  All tracks downloaded successfully; album tagged and organized.
 #   1  Hard error (crash, bad args, etc.)
-#   2  Some tracks failed; session ID written to /tmp/riptag-resume-id.
+#   2  Some tracks failed; session ID written to $RIPTAG_RESULT_DIR/resume-id.
+#      Metadata stays on this host at ~/.local/state/riptag/sessions/<id>.meta.
 #   3  Existing library copy kept; the new download was not an improvement.
 #   4  Album organized, but the NAS permission fix (local mode) couldn't reach
 #      the NAS over SSH. Files are in the library; perms need a manual retry.
@@ -33,6 +34,9 @@
 #   ORGANIZER_SCRIPT     Path to music-organize.py (auto-set by riptag remotely)
 #   STREAMRIP_DOWNLOADS  Local download dir (default: ~/StreamripDownloads)
 #   LOCAL_RIP            Path to local rip command (default: rip)
+#   RIPTAG_RESULT_DIR    Private caller-owned result directory (default: run dir)
+#   RIPTAG_STATE_DIR     Session metadata directory (default: ~/.local/state/riptag)
+#   RIPTAG_LOCK_DIR      Host-wide lock override (default: /tmp/riptag-worker.lock)
 #
 # To upgrade streamrip on the NAS:
 #   sudo /share/CACHEDEV1_DATA/python-apps/streamrip_env/bin/pip install --upgrade \
@@ -43,9 +47,8 @@
 INBOX_DIR="/share/Media/Music-Inbox"
 LIBRARY_DIR="/share/Media/Music"
 RIP_CONFIG="/share/CACHEDEV1_DATA/streamrip/config.toml"
-RIP_LOG_FILE="/tmp/rip-download.log"
-RIP_EXIT_FILE="/tmp/rip-exit-status.txt"
-RESUME_FILE="/tmp/riptag-resume-id"
+STATE_DIR="${RIPTAG_STATE_DIR:-$HOME/.local/state/riptag}"
+SESSION_DIR="$STATE_DIR/sessions"
 NAS_HOST="admin@192.168.50.54"
 NAS_TS_HOST="admin@100.89.43.9"
 
@@ -139,13 +142,49 @@ if [ ! -r "$LIBRARY_DIR" ] || [ ! -w "$LIBRARY_DIR" ] || [ ! -x "$LIBRARY_DIR" ]
   exit 1
 fi
 
-# --- STEP 1: DOWNLOAD ---
-# Marker lives in the inbox so mtime comparison stays on one filesystem;
-# Step 2 uses it to find what THIS run downloaded (streamrip can exit 0
-# without creating anything, and stale partial downloads share the inbox).
-DOWNLOAD_MARKER=$(mktemp "$INBOX_DIR/.riptag-marker.XXXXXX") || exit 1
-trap 'rm -f "$DOWNLOAD_MARKER"' EXIT
+# Serialize workers on this host. Never guess that an existing lock is stale.
+umask 077
+mkdir -p "$SESSION_DIR" || exit 1
+LOCK_DIR="${RIPTAG_LOCK_DIR:-/tmp/riptag-worker.lock}"
+if ! mkdir "$LOCK_DIR" 2>/dev/null; then
+  printf "%s\n" "ERROR: another riptag worker holds $LOCK_DIR. If interrupted, verify no worker is running before removing that directory."
+  exit 1
+fi
+printf "%s\n" "$$" > "$LOCK_DIR/pid"
+trap 'rm -f "$LOCK_DIR/pid"; rmdir "$LOCK_DIR"' EXIT
+trap 'exit 1' HUP INT TERM
 
+# Each download owns a private directory. Resume reuses only its recorded one.
+if [ -n "$RESUME_ID" ]; then
+  case "$RESUME_ID" in *[!a-f0-9]*) printf "%s\n" "ERROR: invalid session ID"; exit 1 ;; esac
+  META_FILE="$SESSION_DIR/$RESUME_ID.meta"
+  if [ ! -f "$META_FILE" ]; then
+    printf "%s\n" "ERROR: no resume metadata on this host for $RESUME_ID"
+    exit 1
+  fi
+  RUN_DIR=$(sed -n '6p' "$META_FILE")
+  if ! "$PYTHON_CMD" -c 'import os, sys
+root, run = map(os.path.realpath, sys.argv[1:])
+assert os.path.dirname(run) == root and os.path.basename(run).startswith(".riptag-run.") and os.path.isdir(run)
+' "$INBOX_DIR" "$RUN_DIR"; then
+    printf "%s\n" "ERROR: resume directory is not an owned inbox run"
+    exit 1
+  fi
+else
+  RUN_DIR=$(mktemp -d "$INBOX_DIR/.riptag-run.XXXXXX") || exit 1
+fi
+DOWNLOAD_DIR="$RUN_DIR/downloads"
+mkdir -p "$DOWNLOAD_DIR" || exit 1
+RIP_LOG_FILE="$RUN_DIR/rip-download.log"
+RIP_EXIT_FILE="$RUN_DIR/rip-exit-status.txt"
+MANIFEST_FILE="$RUN_DIR/organize-manifest.txt"
+RESULT_DIR="${RIPTAG_RESULT_DIR:-$RUN_DIR}"
+mkdir -p "$RESULT_DIR" || exit 1
+RESUME_FILE="$RESULT_DIR/resume-id"
+rm -f "$RESUME_FILE"
+printf "%s\n" "Run files: $RUN_DIR"
+
+# --- STEP 1: DOWNLOAD ---
 if [ -n "$RESUME_ID" ]; then
   printf "%s\n" "--> Step 1: Resuming download (session $RESUME_ID)..."
 else
@@ -160,21 +199,15 @@ fi
     fi
   else
     if [ $LOCAL_MODE -eq 1 ]; then
-      "$RIP_CMD" url "$URL" 2>&1
+      "$RIP_CMD" -f "$DOWNLOAD_DIR" url "$URL" 2>&1
     else
-      "$RIP_CMD" --config-path "$RIP_CONFIG" url "$URL" 2>&1
+      "$RIP_CMD" --config-path "$RIP_CONFIG" -f "$DOWNLOAD_DIR" url "$URL" 2>&1
     fi
   fi
   printf "%s\n" "$?" > "$RIP_EXIT_FILE"
 } | tee "$RIP_LOG_FILE"
 RIP_EXIT=$(cat "$RIP_EXIT_FILE")
 rm -f "$RIP_EXIT_FILE"
-
-if [ "$RIP_EXIT" -ne 0 ]; then
-  printf "%s\n" "ERROR: streamrip download failed."
-  rm -f "$RIP_LOG_FILE"
-  exit 1
-fi
 
 # --- CHECK FOR FAILED TRACKS ---
 # Extract session ID from streamrip's "rip resume <id>" output. Rich wraps at
@@ -195,25 +228,24 @@ if [ -n "$SESSION_ID" ]; then
   # Save genre + compilation + playlist-mode + year so resume doesn't need them re-specified
   PLAYLIST_FLAG_SAVED=""
   if [ $PLAYLIST_MODE -eq 1 ]; then PLAYLIST_FLAG_SAVED="--playlist-mode"; fi
-  printf "%s\n%s\n%s\n%s\n%s\n" "$GENRE" "$COMPILATION_FLAG" "$PLAYLIST_FLAG_SAVED" "$YEAR" "$REPLACES" > "/tmp/riptag-$SESSION_ID.meta"
-  rm -f "$RIP_LOG_FILE"
+  printf "%s\n%s\n%s\n%s\n%s\n%s\n" "$GENRE" "$COMPILATION_FLAG" "$PLAYLIST_FLAG_SAVED" "$YEAR" "$REPLACES" "$RUN_DIR" > "$SESSION_DIR/$SESSION_ID.meta"
+  printf "%s\n" "Resume on this host: riptag --resume=$SESSION_ID"
   exit 2
 fi
 
-rm -f "$RIP_LOG_FILE" "$RESUME_FILE"
-# Clean up resume metadata on success
-if [ -n "$RESUME_ID" ]; then
-  rm -f "/tmp/riptag-$RESUME_ID.meta"
-fi
-
-# --- STEP 2: FIND THE NEW ALBUM ---
-printf "%s\n" "--> Step 2: Finding the newly downloaded album..."
-ALBUM_PATH=$(find "$INBOX_DIR" -mindepth 1 -maxdepth 1 -type d -newer "$DOWNLOAD_MARKER" | head -n 1)
-
-if [ -z "$ALBUM_PATH" ]; then
-  printf "%s\n" "ERROR: The rip downloaded nothing new into $INBOX_DIR (skipped URL or already-fetched album?)"
+if [ "$RIP_EXIT" -ne 0 ]; then
+  printf "%s\n" "ERROR: streamrip download failed; run files retained at $RUN_DIR"
   exit 1
 fi
+
+# --- STEP 2: FIND THIS RUN'S ALBUM ---
+printf "%s\n" "--> Step 2: Finding the owned download..."
+ALBUM_COUNT=$(find "$DOWNLOAD_DIR" -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' ')
+if [ "$ALBUM_COUNT" -ne 1 ]; then
+  printf "%s\n" "ERROR: expected exactly one album in $DOWNLOAD_DIR; found $ALBUM_COUNT. No files tagged."
+  exit 1
+fi
+ALBUM_PATH=$(find "$DOWNLOAD_DIR" -mindepth 1 -maxdepth 1 -type d)
 
 ALBUM_PATH=$(printf "%s\n" "$ALBUM_PATH" | sed 's:/*$::')
 printf "%s\n" "    Found: $ALBUM_PATH"
@@ -244,7 +276,6 @@ fi
 
 # --- STEP 4: ORGANIZE INTO THE LIBRARY ---
 printf "%s\n" "--> Step 4: Organizing album into the library..."
-MANIFEST_FILE="/tmp/riptag-organize-manifest.txt"
 rm -f "$MANIFEST_FILE"
 if [ -n "$REPLACES" ]; then
   printf "%s\n" "    Re-download mode: replaces '$REPLACES' only if the new download is no worse."
@@ -336,3 +367,6 @@ if [ $LOCAL_MODE -eq 1 ] && [ -f "$MANIFEST_FILE" ]; then
 fi
 
 rm -f "$MANIFEST_FILE"
+if [ -n "$RESUME_ID" ]; then
+  rm -f "$SESSION_DIR/$RESUME_ID.meta"
+fi

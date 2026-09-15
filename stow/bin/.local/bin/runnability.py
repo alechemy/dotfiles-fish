@@ -553,6 +553,7 @@ def cmd_write(args) -> int:
                 print(f"[{done}/{len(jobs)}] {counts}", file=sys.stderr)
     conn.commit()
     print(json.dumps(counts, sort_keys=True))
+    conn.close()
     return 1 if counts.get("error") or counts.get("stale") or counts.get("missing") else 0
 
 

@@ -222,6 +222,31 @@ class MetadataSafety(unittest.TestCase):
             writer.assert_not_called()
             self.assertEqual(path.read_bytes(), b"new")
 
+    def test_runnability_write_refreshes_identity_only_after_current_file_write(self):
+        runn = load("runnability")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            runn.LIBRARY_ROOT = root
+            runn.DB_PATH = root / "features.db"
+            path = root / "song.m4a"
+            path.write_bytes(b"old")
+            identity = runn.file_identity(path)
+            conn = runn.open_db()
+            conn.execute("INSERT INTO features (relpath, size, mtime, analyzed_at, file_identity) VALUES (?, ?, ?, ?, ?)",
+                         ("song.m4a", 3, path.stat().st_mtime, "fixture", identity))
+            conn.commit()
+            conn.close()
+            def writer(path, *args):
+                path.write_bytes(b"tagged")
+                return True
+            args = types.SimpleNamespace(dry_run=False, force=True, paths=[], workers=1)
+            with patch.object(runn, "load_config", return_value={"cadence": {"target_spm": 170}}), patch.object(runn, "score_row", return_value=(80, {})), patch.object(runn, "_write_mp4", side_effect=writer):
+                self.assertEqual(runn.cmd_write(args), 0)
+            conn = runn.open_db()
+            row = conn.execute("SELECT size, file_identity FROM features").fetchone()
+            self.assertEqual(row, (6, runn.file_identity(path)))
+            conn.close()
+
     def test_runnability_requires_legacy_rows_to_be_reanalyzed(self):
         runn = load("runnability")
         with tempfile.TemporaryDirectory() as tmp:
