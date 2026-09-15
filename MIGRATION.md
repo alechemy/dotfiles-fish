@@ -45,6 +45,15 @@ If `setup.sh` halts early, fix the reported issue and re-run — it's idempotent
 
 ## 4. Local repos to clone
 
+### Before the first Pi launch
+
+- [ ] Restore the unpublished guarded Subagents package before running Pi, including a first `/login` session. The portable fragment requires `~/.pi/agent/local/copilot-delegation/node_modules/pi-subagents`; setup only warns if it is absent. Do not substitute the unguarded public npm package.
+- [ ] Preserve the source checkout at `~/Developer/pi-subagents` together with its uncommitted guard changes, untracked guard helper, tests, retained tarball, and `build-receipt.json`. A clone of its HEAD alone does not reconstruct the installed build. Keep this recovery material private and separate from settings backups or credentials.
+- [ ] Check the retained tarball hash against the receipt and compare the installed package bytes with that artifact. Follow [the guarded package maintenance owner](docs/agent-tooling-maintenance.md#copilot-local-delegation) for provider/local-role guard tests and an isolated loader check. If the source, artifact, or receipt is missing or disagrees, stop before starting Pi and resolve the recovery gap.
+- [ ] The current guarded artifact still has the managed-worktree preservation defect. Restoring it does not authorize managed write-worktree cleanup. A reproducible reviewed source baseline and binary/stale-patch regression evidence are required before adopting the repair. Keep the old artifact for rollback; installation and Pi restart are separate deliberate steps.
+
+### Other local repositories
+
 - [ ] **`~/Developer/claude-agent-acp`** — `setup.sh` clones and builds this automatically (step 7b), so normally you don't need to do anything. If the build failed (look for a `WARNING: claude-agent-acp build failed` line), run it manually: `cd ~/Developer/claude-agent-acp && mise exec -- npm install && mise exec -- npm run build`. Without `dist/index.js`, the "Claude Code by Rohan Patra" agent entry in Zed won't function.
 - [ ] Any other `~/Developer/*` repos you actively work in.
 
