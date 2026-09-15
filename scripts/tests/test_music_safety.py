@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Offline regression fixtures. Mutagen is stubbed; no personal audio is read."""
 import importlib.util
+import json
+import shlex
+import subprocess
 import os
 import sys
 import tempfile
@@ -15,7 +18,7 @@ BIN = Path(__file__).resolve().parents[2] / "stow/bin/.local/bin"
 def load(name):
     mocks = {}
     for suffix, names in {
-        "": [], "flac": ["FLAC"], "mp3": ["MP3"], "mp4": ["MP4"],
+        "": [], "flac": ["FLAC"], "mp3": ["MP3"], "mp4": ["MP4", "MP4Cover"],
         "id3": ["COMM", "TALB", "TCMP", "TCON", "TCOP", "TDRC", "TIT2", "TPE1", "TPE2", "TPOS", "TRCK"],
     }.items():
         key = "mutagen" + ("." + suffix if suffix else "")
@@ -139,6 +142,98 @@ class MusicSafety(unittest.TestCase):
         self.assertFalse(empty.exists())
 
 
+class MetadataSafety(unittest.TestCase):
+    def test_artist_whitespace_collapses(self):
+        helpers = load("_music_tags")
+        self.assertEqual(helpers.norm_artist("  Example   Artist\t feat. Guest  "), "example artist")
+
+    def test_import_numbering_and_declared_totals(self):
+        importer = load("import-album")
+        args = types.SimpleNamespace(album="Album", year="2000", artist="Artist", albumartist=None, genre="Rock")
+        files = ["/fictional/one.m4a", "/fictional/three.m4a"]
+        for numbers, totals, expected, invalid in (([1, 3], [0, 0], 3, False), ([1, 3], [5, 5], 5, False),
+                                                    ([1, 3], [2, 2], None, True), ([1, 1], [2, 2], None, True),
+                                                    ([1, 3], [3, 4], None, True)):
+            tags = {f: {"title": "Song", "track": n, "track_total": t} for f, n, t in zip(files, numbers, totals)}
+            plans, errors = importer.build_plan(files, tags, None, args, "/fictional")
+            self.assertEqual(bool(errors), invalid)
+            if not invalid:
+                self.assertEqual([p["track_total"] for p in plans], [expected, expected])
+
+    def test_doctor_detects_missing_trailing_track(self):
+        doctor = load("music-doctor")
+        album = doctor.AlbumInfo("/fictional/Artist/Album", "Artist", "Album", audio=["one", "two"])
+        files = {name: doctor.FileInfo(path=name, size=1000, ext=".m4a", tags={"track": n, "track_total": 3},
+                                       lossless=True, bitrate=1000, sample_rate=44100, duration=100, codec="alac")
+                 for name, n in (("one", 1), ("two", 2))}
+        findings = doctor.check_files([album], files, False)
+        gaps = [f for f in findings if f.kind == "track_gap"]
+        self.assertEqual(len(gaps), 1)
+        self.assertIn("missing [3]", gaps[0].message)
+
+    def test_tagger_file_failure_returns_nonzero(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "song.m4a"
+            path.write_bytes(b"fictional audio")
+            with patch.object(sys, "argv", ["tagger.py", "--genre", "Rock", str(path)]), self.assertRaises(SystemExit) as exit:
+                load("tagger")
+            self.assertEqual(exit.exception.code, 1)
+            self.assertEqual(path.read_bytes(), b"fictional audio")
+
+    def test_batch_failure_returns_nonzero_and_preserves_retry(self):
+        # Resolve from the Stow root, not a live HOME link.
+        batch = BIN.parents[2] / "fish/.config/fish/functions/batch_rip.fish"
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "batch.fish"
+            source.write_text(batch.read_text().replace("/tmp/riptag-resume-id", str(root / "resume")))
+            entry = {"url": "https://example.com/album/fiction", "genre": "Rock"}
+            queue = root / "queue.json"
+            queue.write_text(json.dumps([entry]))
+            command = f"source {shlex.quote(str(source))}; function riptag; return 1; end; batch_rip {shlex.quote(str(queue))}"
+            result = subprocess.run(["fish", "--no-config", "--private", "-c", command],
+                                    env=dict(os.environ, HOME=tmp), capture_output=True, text=True, timeout=10)
+            self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+            self.assertEqual(json.loads((root / "needs-retry.json").read_text()), [entry])
+            self.assertEqual(json.loads(queue.read_text()), [])
+            # Invalid retry state must not remove the input entry.
+            queue.write_text(json.dumps([entry]))
+            (root / "needs-retry.json").write_text("invalid")
+            result = subprocess.run(["fish", "--no-config", "--private", "-c", command],
+                                    env=dict(os.environ, HOME=tmp), capture_output=True, text=True, timeout=10)
+            self.assertEqual(result.returncode, 1)
+            self.assertEqual(json.loads(queue.read_text()), [entry])
+
+    def test_runnability_rejects_replaced_file_even_with_same_size_and_mtime(self):
+        runn = load("runnability")
+        with tempfile.TemporaryDirectory() as tmp:
+            runn.LIBRARY_ROOT = Path(tmp)
+            path = Path(tmp) / "song.m4a"
+            path.write_bytes(b"old")
+            identity = runn.file_identity(path)
+            st = path.stat()
+            other = Path(tmp) / "replacement"
+            other.write_bytes(b"new")
+            os.utime(other, ns=(st.st_atime_ns, st.st_mtime_ns))
+            other.replace(path)
+            with patch.object(runn, "_write_mp4") as writer:
+                result = runn._write_one("song.m4a", 80, None, None, identity, False)
+            self.assertEqual(result[1], "stale")
+            writer.assert_not_called()
+            self.assertEqual(path.read_bytes(), b"new")
+
+    def test_runnability_requires_legacy_rows_to_be_reanalyzed(self):
+        runn = load("runnability")
+        with tempfile.TemporaryDirectory() as tmp:
+            runn.DB_PATH = Path(tmp) / "features.db"
+            runn.LIBRARY_ROOT = Path(tmp)
+            (Path(tmp) / "song.m4a").write_bytes(b"music")
+            conn = runn.open_db()
+            self.assertIn("file_identity", {r[1] for r in conn.execute("PRAGMA table_info(features)")})
+            conn.close()
+            self.assertEqual(runn._write_one("song.m4a", 80, None, None, None, False)[1], "stale")
+
+
 class TopHitsSafety(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -197,6 +292,23 @@ class TopHitsSafety(unittest.TestCase):
         with patch.dict(sys.modules, self.top._mutagen), patch.object(self.top, "find_audio", return_value=["one", "two"]), patch.object(self.top, "nas_chmod", return_value=[]), patch.object(self.top, "score_runnability", return_value=(True, "")):
             self.top.cmd_adopt(types.SimpleNamespace(year=2000))
         self.assertTrue(self.top.load_progress(2000)["assembled_at"])
+
+    def test_completion_uses_current_files_and_never_redownloads_recorded_loss(self):
+        self.top.save_progress({"year": 2000, "ranks": {"1": {"verified": True}, "2": {"verified": True}},
+                                "assembled_at": "2000-01-01T00:00:00Z", "library_dir": "old"})
+        for available in (False, True):
+            with patch.dict(sys.modules, self.top._mutagen), patch.object(self.top, "library_available", return_value=available), patch.object(self.top, "_run_stage") as stage:
+                info = self.top.year_status(2000)
+                self.assertFalse(info["assembled"])
+                self.assertFalse(info["downloaded"])
+                self.assertTrue(info["recorded_assembled"])
+                with self.assertRaises(SystemExit):
+                    self.top.cmd_run(types.SimpleNamespace(years="2000", max_attempts=1, retry_wait=0, cooldown=0))
+                stage.assert_not_called()
+
+    def test_downloaded_status_requires_existing_verified_audio(self):
+        self.top.save_progress({"year": 2000, "ranks": {"1": {"verified": True, "path": str(self.root / "gone")}}})
+        self.assertEqual(self.top.year_status(2000)["verified"], 0)
 
     def test_failed_publication_preserves_old_and_download(self):
         old, new, target = [self.root / n for n in ("old.m4a", "new.m4a", "target.m4a")]

@@ -959,6 +959,7 @@ def cmd_download(args):
         raise SystemExit(f"ERROR: {year} has rows needing a decision: {ranks}. Fix overrides/{year}.json and re-resolve.")
     progress = load_progress(year)
     if progress.get("assembled_at"):
+        require_current_assembly(manifest)
         print(f"{year}: already assembled at {progress['assembled_at']}; nothing to download.")
         return
     filed = library_album_dir(manifest)
@@ -1198,6 +1199,7 @@ def cmd_assemble(args):
     manifest = load_manifest(year)
     progress = load_progress(year)
     if progress.get("assembled_at") and not args.force:
+        require_current_assembly(manifest)
         print(f"{year}: already assembled at {progress['assembled_at']} ({progress.get('library_dir')}); nothing to do (use --force to redo).")
         return
     lock = year_lock(year, "assemble")
@@ -1270,6 +1272,21 @@ def cmd_assemble(args):
         print(f"WARNING: runnability scoring failed (nightly sync will retry): {run_err.strip()}")
     if perm_failures:
         raise SystemExit(4)
+
+
+def library_available():
+    # A disconnected NAS is not an empty collection. Keep the current topology.
+    if LIBRARY_ROOT.startswith("/Volumes/"):
+        mount = "/".join(LIBRARY_ROOT.split("/")[:3])
+        if not os.path.ismount(mount):
+            return False
+    return os.path.isdir(LIBRARY_ROOT) and os.access(LIBRARY_ROOT, os.R_OK | os.X_OK)
+
+
+def require_current_assembly(manifest):
+    if not library_available():
+        raise SystemExit("ERROR: library storage unavailable; recorded assembly is unverified")
+    return verified_library_files(manifest)
 
 
 def verified_library_files(manifest):
@@ -1470,6 +1487,10 @@ def cmd_run(args):
             report.append(f"- {year}: assembled (already) — {info['library_dir']}")
             write_run_report(report + ([f"\nSTOPPED: {stop_reason}"] if stop_reason else []))
             continue
+        if info["recorded_assembled"] or not info["storage_available"]:
+            stop_reason = f"{year}: {info['artifact_error'] or 'library storage unavailable'}; reconcile before retry"
+            report.append(f"- {stop_reason}")
+            break
         if not info["resolved"]:
             report.append(f"- {year}: BLOCKED, rows still need a decision ({info['counts']})")
             write_run_report(report)
@@ -1534,14 +1555,32 @@ def year_status(year):
     progress = read_json(state_path("progress", f"{year}.json"), default={"ranks": {}})
     info = {"year": year, "chart": os.path.exists(state_path("charts", f"{year}.json")),
             "resolved": False, "counts": {}, "wanted": 0, "verified": 0,
-            "assembled": bool(progress.get("assembled_at")), "library_dir": progress.get("library_dir")}
+            "assembled": False, "recorded_assembled": bool(progress.get("assembled_at")),
+            "storage_available": library_available(), "artifact_error": None,
+            "library_dir": progress.get("library_dir")}
     if manifest:
+        try:
+            validate_manifest(manifest)
+        except SystemExit as e:
+            info["artifact_error"] = str(e)
+            info["downloaded"] = False
+            return info
         for r in manifest["entries"]:
             info["counts"][r["status"]] = info["counts"].get(r["status"], 0) + 1
         info["resolved"] = not not_ready_rows(manifest)
         info["wanted"] = sum(1 for r in manifest["entries"] if r["status"] != "skip")
-        info["verified"] = sum(1 for r in manifest["entries"] if r["status"] != "skip"
-                               and progress["ranks"].get(str(r["rank"]), {}).get("verified"))
+        if info["recorded_assembled"]:
+            try:
+                info["verified"] = len(require_current_assembly(manifest))
+                info["assembled"] = True
+            except SystemExit as e:
+                info["artifact_error"] = str(e)
+        else:
+            for row in manifest["entries"]:
+                rec = progress["ranks"].get(str(row["rank"]), {})
+                if row["status"] != "skip" and rec.get("verified") and os.path.isfile(rec.get("path") or ""):
+                    if verify_file(rec["path"], row)[0]:
+                        info["verified"] += 1
     info["downloaded"] = info["resolved"] and info["wanted"] > 0 and info["verified"] == info["wanted"]
     return info
 
@@ -1555,7 +1594,8 @@ def cmd_status(args):
         counts = " ".join(f"{k}={v}" for k, v in sorted(info["counts"].items())) or "-"
         stage = "assembled" if info["assembled"] else "downloaded" if info["downloaded"] else "resolved" if info["resolved"] else "manifest" if info["counts"] else "chart" if info["chart"] else "none"
         print(f"{year}: {stage:<10} {info['verified']:>2}/{info['wanted']:<2} files  [{counts}]"
-              + (f"  {info['library_dir']}" if info["library_dir"] else ""))
+              + (f"  {info['library_dir']}" if info["library_dir"] else "")
+              + (f"  UNVERIFIED: {info['artifact_error']}" if info["artifact_error"] else ""))
     if not all_ok:
         raise SystemExit(1)
 

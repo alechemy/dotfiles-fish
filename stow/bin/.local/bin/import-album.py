@@ -118,7 +118,7 @@ def read_existing_tags(path):
     ext = os.path.splitext(path)[1].lower()
     out = dict(
         albumartist=None, artist=None, album=None, title=None,
-        track=0, disc=0, year=None,
+        track=0, track_total=0, disc=0, year=None,
     )
     if ext == ".m4a":
         a = MP4(path)
@@ -129,6 +129,7 @@ def read_existing_tags(path):
         trkn = _first(a.get("trkn")) or (0, 0)
         disk = _first(a.get("disk")) or (0, 0)
         out["track"] = trkn[0] if trkn else 0
+        out["track_total"] = trkn[1] if len(trkn) > 1 else 0
         out["disc"] = disk[0] if disk else 0
         out["year"] = _first(a.get("\xa9day"))
     elif ext == ".flac":
@@ -139,6 +140,8 @@ def read_existing_tags(path):
         out["album"] = g("album")
         out["title"] = g("title")
         out["track"] = _int(g("tracknumber"))
+        out["track_total"] = _int(g("tracktotal") or g("totaltracks")
+                                  or str(g("tracknumber") or "").partition("/")[2])
         out["disc"] = _int(g("discnumber"))
         out["year"] = g("date")
     elif ext == ".mp3":
@@ -153,6 +156,7 @@ def read_existing_tags(path):
         out["album"] = txt("TALB")
         out["title"] = txt("TIT2")
         out["track"] = _int(txt("TRCK"))
+        out["track_total"] = _int(str(txt("TRCK") or "").partition("/")[2])
         out["disc"] = _int(txt("TPOS"))
         out["year"] = txt("TDRC")
     for k in ("albumartist", "artist", "album", "title", "year"):
@@ -460,10 +464,25 @@ def build_plan(audio_files, existing_tags, pattern, args, source):
             or 1
         )
     disc_max = max(file_disc.values()) if file_disc else 1
-    per_disc_count = {}
+    per_disc_tracks = {}
+    file_track = {}
     for f in audio_files:
         d = file_disc[f]
-        per_disc_count[d] = per_disc_count.get(d, 0) + 1
+        tracks = per_disc_tracks.setdefault(d, [])
+        file_track[f] = parsed.get(f, {}).get("track") or existing_tags[f].get("track") or (len(tracks) + 1)
+        tracks.append(file_track[f])
+    per_disc_total = {}
+    for disc, numbers in per_disc_tracks.items():
+        declared = {existing_tags[f].get("track_total") for f in audio_files
+                    if file_disc[f] == disc and existing_tags[f].get("track_total")}
+        if any(type(n) is not int or n < 1 for n in numbers) or len(set(numbers)) != len(numbers):
+            errors.append(f"disc {disc}: track numbers must be positive and unique")
+        elif len(declared) > 1 or any(n < max(numbers) for n in declared):
+            errors.append(f"disc {disc}: inconsistent or undersized declared track totals")
+        else:
+            per_disc_total[disc] = next(iter(declared), max(numbers))
+    if errors:
+        return [], errors
 
     plans = []
     for i, f in enumerate(audio_files):
@@ -474,7 +493,7 @@ def build_plan(audio_files, existing_tags, pattern, args, source):
             errors.append(f"no title for {os.path.basename(f)} (no filename match, no existing tag)")
             continue
         disc = file_disc[f]
-        track = p.get("track") or ex.get("track") or (i + 1)
+        track = file_track[f]
         per_track_artist = track_artists[i] or albumartist
         plans.append(dict(
             file=f,
@@ -483,7 +502,7 @@ def build_plan(audio_files, existing_tags, pattern, args, source):
             album=album,
             title=title,
             track=track,
-            track_total=per_disc_count.get(disc, len(audio_files)),
+            track_total=per_disc_total[disc],
             disc=disc,
             disc_total=disc_max,
             genre=args.genre,

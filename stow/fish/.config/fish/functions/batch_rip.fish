@@ -61,18 +61,25 @@ if entry is None:
 if sid:
     entry['sessionId'] = sid
 
-with open(input_path, 'w') as f:
-    json.dump(remaining, f, indent=2, ensure_ascii=False)
-    f.write('\n')
-
 retry = []
 if os.path.exists(retry_path):
     with open(retry_path) as f:
         retry = json.load(f)
 retry.append(entry)
-with open(retry_path, 'w') as f:
-    json.dump(retry, f, indent=2, ensure_ascii=False)
-    f.write('\n')
+# Commit the retry artifact first. A failure must leave the input intact.
+import tempfile
+def save(path, value):
+    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(os.path.abspath(path)))
+    try:
+        with os.fdopen(fd, 'w') as f:
+            json.dump(value, f, indent=2, ensure_ascii=False)
+            f.write('\n')
+        os.replace(tmp, path)
+    finally:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+save(retry_path, retry)
+save(input_path, remaining)
 " "$input_file" "$url" "$session_id" "$retry_file"
     end
 
@@ -167,6 +174,7 @@ for e in data:
 
         if test -z "$url" -o -z "$genre"
             _log_error "Missing url or genre in entry $current"
+            set failed_count (math $failed_count + 1)
             continue
         end
 
@@ -218,6 +226,7 @@ for e in data:
             _log "OK: $url"
             set -a successful_urls $url
             _update_input_file
+            or return 1
         else
             echo -e $red"✗"$nc
             _log_error "FAILED: $display ($genre) [$url]"
@@ -225,6 +234,7 @@ for e in data:
             # Move failed entry to retry file (with session ID if available)
             set -l sid (cat /tmp/riptag-resume-id 2>/dev/null)
             _move_to_retry "$url" "$sid"
+            or return 1
             if test -n "$sid"
                 _log "Moved to retry file with session ID: $sid ($url)"
             else
@@ -258,5 +268,7 @@ for e in data:
 
     if test $failed_count -gt 0
         echo -e $yellow"Failed albums written to $retry_file for retry."$nc
+        return 1
     end
+    return 0
 end

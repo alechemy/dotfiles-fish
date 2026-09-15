@@ -121,9 +121,11 @@ def process_file(
 
         audio.save()
         print(f"  -> Updated ({' & '.join(actions)}): {filepath}")
+        return True
 
     except Exception as e:
         print(f"  -> ERROR: Could not process {filepath}: {e}", file=sys.stderr)
+        return False
 
 
 parser = argparse.ArgumentParser(description="A simple M4A genre and tag editor.")
@@ -204,15 +206,21 @@ if not parts:
     sys.exit(1)
 print(f"Setting {', '.join(parts)} and clearing comment/copyright tags...")
 
+failed = False
 for path in args.paths:
     if os.path.isdir(path):
         print(f"Processing directory (recursively): {path}")
     elif not os.path.isfile(path):
-        print(f"  -> WARNING: Path not found, skipping: {path}", file=sys.stderr)
+        print(f"  -> ERROR: Path not found: {path}", file=sys.stderr)
+        failed = True
         continue
 
-for fp in iter_m4as(args.paths):
-    process_file(
+files = list(iter_m4as(args.paths))
+if not files:
+    print("ERROR: no M4A files found", file=sys.stderr)
+    failed = True
+for fp in files:
+    ok = process_file(
         fp,
         args.genre,
         is_compilation=final_compilation,
@@ -222,5 +230,9 @@ for fp in iter_m4as(args.paths):
         year=args.year,
         cover=unified_cover,
     )
+    failed = failed or not ok
 
+if failed:
+    print("Tagging failed; source files retained.", file=sys.stderr)
+    sys.exit(1)
 print("Done.")

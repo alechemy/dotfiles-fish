@@ -232,7 +232,8 @@ def read_one(path: str) -> FileInfo:
             tags["comment"] = g("comment")
             tags["copyright"] = g("copyright")
             tags["track"] = _int(g("tracknumber"))
-            tags["track_total"] = _int(g("totaltracks") or g("tracktotal"))
+            tags["track_total"] = _int(g("totaltracks") or g("tracktotal")
+                                       or str(g("tracknumber") or "").partition("/")[2])
             tags["disc"] = _int(g("discnumber"))
             tags["disc_total"] = _int(g("totaldiscs") or g("disctotal"))
             tags["compilation"] = _truthy(g("compilation"))
@@ -687,7 +688,9 @@ def check_files(albums: list[AlbumInfo], files: dict[str, FileInfo],
             nums = sorted(fi.tags.get("track") or 0 for fi in group)
             if not nums or 0 in nums:
                 continue  # missing track numbers handled by empty_field
-            expected = list(range(1, max(nums) + 1))
+            totals = {fi.tags.get("track_total") for fi in group if fi.tags.get("track_total")}
+            total = next(iter(totals)) if len(totals) == 1 else 0
+            expected = list(range(1, max(max(nums), total) + 1))
             missing = [n for n in expected if n not in nums]
             duplicates = [n for n in nums if nums.count(n) > 1]
             if missing:
