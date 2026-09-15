@@ -40,6 +40,39 @@ Do not duplicate content already captured in other artifacts (specs, plans, ADRs
 
 State the current branch and uncommitted work when in a repository. Outside one, state the workspace and relevant local artifacts instead. Give the single next action so the next session can orient without re-deriving it.
 
+## Coding-task review receipt
+
+For a coding task, include a compact receipt in this local handoff, or link an existing
+receipt in `.context/`. Noncoding handoffs need no Git fields. Use the
+[code-review scope rules](../code-review/references/scope.md); do not substitute the last
+commit or working-tree diff for whole-task review.
+
+Record:
+
+- Intended integration target, selected base revision and merge-base, current branch,
+  and exact reviewed HEAD.
+- Review scope: comparison command, selected paths, and exclusions. State whether
+  staged, unstaged, and untracked changes were included. `<base>...HEAD` covers committed
+  branch changes only. An invalid-base fallback is not whole-branch review.
+- Validation commands, results, and tested state. Identify tested dirty state separately
+  from HEAD with a local artifact reference or content fingerprint. A commit ID alone
+  cannot identify unstaged or untracked test inputs.
+- Unresolved findings and decisions, including anything not verified. Record these
+  conclusions before successful Hunk feedback delivery clears the comments.
+- Relevant session/run references and existing evidence paths. Reference artifacts;
+  do not copy patches, private transcripts, or all Hunk comments into the receipt.
+- Service ownership: task-owned services/resources still running, who may stop them,
+  and resources that must remain untouched. Use `none` when applicable. Checkout
+  removal does not stop a service or authorize stopping shared services.
+- One next action, including any review or validation that remains.
+
+Recheck the receipt after edits or rebases. On recall, compare the current HEAD, dirty
+state, and integration target with the recorded state before relying on the results.
+Mark changed evidence stale and rerun the affected checks; do not silently relabel an
+old review as current. For live Hunk interaction, use `hunk skill path` and invoke review
+from the intended Pi pane to select its feedback recipient. Headless Git review needs
+no Hunk TUI.
+
 Write only sanitized task context suitable for a later agent session. Omit API keys, tokens, passwords, personal identifiers, unrelated private prose, and raw tool/config/transcript dumps. Reference sensitive artifacts by safe descriptions rather than copying their contents. When safe summarization is uncertain, request user-provided sanitized context.
 
 **Reply:** the path written, and the next action in one line.

@@ -76,6 +76,95 @@ class HerdrSetupTests(unittest.TestCase):
         self.assertFalse((self.home / ".pi/agent").exists())
 
 
+class HunkConfigurationTests(unittest.TestCase):
+    """Run the tracked configurator with a stub of its external plugin helper.
+
+    The stub records the boundary, not the plugin's TOML merge algorithm.
+    Patch conflict detection is exercised separately in test_hunk_patch.mjs.
+    """
+
+    def setUp(self):
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        self.root = Path(temp.name)
+        self.plugin = self.root / "plugin"
+        dist = self.plugin / "dist"
+        dist.mkdir(parents=True)
+        (self.plugin / "package.json").write_text('{"type":"module"}\n')
+        (dist / "keys-install.js").write_text("""
+import { writeFileSync } from 'node:fs';
+export function resolveHerdrConfigPath(env) { return env.HERDR_CONFIG_PATH; }
+export function installKeys(path, bindings) {
+  writeFileSync(process.env.CALL_LOG, JSON.stringify({path, bindings}));
+  return JSON.parse(process.env.INSTALL_RESULT);
+}
+""")
+        self.config_dir = self.root / "preferences"
+        self.config = self.config_dir / "config.toml"
+        self.log = self.root / "calls.json"
+        self.env = {key: value for key, value in os.environ.items()
+                    if not key.startswith(("PI_", "HERDR_", "NODE_"))}
+        self.env.update(HOME=str(self.root), CALL_LOG=str(self.log),
+                        HERDR_CONFIG_PATH=str(self.root / "herdr.toml"),
+                        INSTALL_RESULT=json.dumps({"ok": True}))
+
+    def configure(self, expected=0):
+        result = subprocess.run(
+            ["node", str(ROOT / "scripts/configure-herdr-hunk.mjs"),
+             str(self.plugin), str(self.config_dir)],
+            env=self.env, capture_output=True, text=True, timeout=10)
+        self.assertEqual(result.returncode, expected, result.stderr)
+        return result
+
+    def test_installs_all_scopes_with_distinct_unoccupied_keys(self):
+        self.configure()
+        call = json.loads(self.log.read_text())
+        self.assertEqual(call["path"], self.env["HERDR_CONFIG_PATH"])
+        bindings = call["bindings"]
+        self.assertEqual({b["key"]: b["action"] for b in bindings}, {
+            "prefix+f": "jhochenbaum.hunkdiff.review",
+            "prefix+shift+f": "jhochenbaum.hunkdiff.send-review",
+            "prefix+shift+c": "jhochenbaum.hunkdiff.review:commit",
+            "prefix+shift+b": "jhochenbaum.hunkdiff.review:branch",
+            "prefix+shift+a": "jhochenbaum.hunkdiff.review:staged",
+        })
+        self.assertEqual(len({b["key"] for b in bindings}), len(bindings))
+        seed = (ROOT / "stow/herdr/_seed/.config/herdr/config.toml").read_text()
+        for binding in bindings:
+            self.assertNotIn('"' + binding["key"] + '"', seed)
+
+    def test_copies_preferences_only_if_absent(self):
+        self.configure()
+        seed = ROOT / "stow/herdr/_seed/.config/herdr/plugins/config/jhochenbaum.hunkdiff/config.toml"
+        self.assertEqual(self.config.read_bytes(), seed.read_bytes())
+        self.assertIn("auto_open = false", self.config.read_text())
+        self.assertIn("on_states = []", self.config.read_text())
+        self.config.write_text('[review]\nbase = "release"\nauto_open = false\non_states = []\n')
+        before = self.config.read_bytes(), self.config.stat().st_mtime_ns
+        self.configure()
+        self.assertEqual((self.config.read_bytes(), self.config.stat().st_mtime_ns), before)
+
+    def test_reports_conflicts_and_helper_failure_without_overwriting_preferences(self):
+        self.configure()
+        before = self.config.read_bytes()
+        for outcome in [
+            {"ok": True, "skipped": ["prefix+shift+b"], "message": "user key conflict"},
+            {"ok": False, "message": "config is invalid"},
+        ]:
+            with self.subTest(outcome=outcome):
+                self.env["INSTALL_RESULT"] = json.dumps(outcome)
+                result = self.configure(expected=1)
+                self.assertIn(outcome["message"], result.stderr)
+                self.assertEqual(self.config.read_bytes(), before)
+
+    def test_dangling_preferences_are_not_replaced(self):
+        self.config_dir.mkdir()
+        self.config.symlink_to(self.root / "absent")
+        self.configure()
+        self.assertTrue(self.config.is_symlink())
+        self.assertFalse((self.root / "absent").exists())
+
+
 class GhosttyHerdrKeysTests(unittest.TestCase):
     def test_every_herdr_forward_has_a_plain_shell_override(self):
         config = (ROOT / "stow/ghostty/.config/ghostty/config").read_text()

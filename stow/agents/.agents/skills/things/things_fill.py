@@ -31,6 +31,7 @@ or the managed export in ~/.zshenv. Get it from Things -> Settings -> General ->
 Enable Things URLs -> Manage.
 Tags must already exist in Things (the `add` command won't create them).
 """
+import argparse
 import sys, os, re, json, time, glob, sqlite3, subprocess, urllib.parse
 
 def find_db():
@@ -40,10 +41,8 @@ def find_db():
         sys.exit("Things SQLite DB not found (is Things 3 installed?).")
     return hits[0]
 
-DB = find_db()
-
 def _con():
-    return sqlite3.connect(f"file:{DB}?mode=ro", uri=True)
+    return sqlite3.connect(f"file:{find_db()}?mode=ro", uri=True)
 
 def auth_token():
     token = os.environ.get("THINGS_AUTH_TOKEN")
@@ -191,7 +190,18 @@ def add_todos_batched(project, items, hids, token):
         batch.append((item["title"], j))
     flush()
 
+def validate_titles(todos):
+    """Titles are the idempotency key across the entire project, not per heading."""
+    seen = set()
+    for item in todos:
+        title = item["title"]
+        if title in seen:
+            raise ValueError("Duplicate to-do titles are not supported, even across headings.")
+        seen.add(title)
+
+
 def fill(project, todos, headings=None, token=None, dry_run=False):
+    validate_titles(todos)
     project = resolve_project(project)
     by = {t["title"]: t for t in todos}
     have = existing_titles(project)
@@ -224,11 +234,21 @@ def fill(project, todos, headings=None, token=None, dry_run=False):
     left = [ti for ti in by if ti not in existing_titles(project)]
     print("DONE" if not left else f"INCOMPLETE, missing {len(left)}: " + ", ".join(left[:5]))
 
-if __name__ == "__main__":
-    args = [a for a in sys.argv[1:] if not a.startswith("--")]
-    dry = "--dry-run" in sys.argv
-    if not args:
-        sys.exit(__doc__)
-    spec = json.load(open(args[0]))
+def main(argv=None):
+    parser = argparse.ArgumentParser(description="Fill a Things project from a JSON spec.",
+                                     allow_abbrev=False)
+    parser.add_argument("spec")
+    parser.add_argument("--dry-run", action="store_true")
+    args = parser.parse_args(argv)
+    with open(args.spec) as stream:
+        spec = json.load(stream)
+    try:
+        validate_titles(spec["todos"])
+    except ValueError as error:
+        parser.error(str(error))
     fill(spec["project"], spec["todos"], spec.get("headings"),
-         auth_token(), dry_run=dry)
+         None if args.dry_run else auth_token(), dry_run=args.dry_run)
+
+
+if __name__ == "__main__":
+    main()

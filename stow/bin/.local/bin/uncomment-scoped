@@ -80,9 +80,12 @@ def main():
         return 0
     baseline_path, target_path, *args = sys.argv[1:]
 
-    target = read(target_path)
-    if target is None:
-        return 0
+    try:
+        target = Path(target_path).read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        return 0  # Non-text files are outside comment cleanup.
+    except OSError:
+        return 1  # Retain the checkpoint so a transient read failure can retry.
     baseline = read(baseline_path) or ""
 
     cur = target.split("\n")
@@ -91,15 +94,19 @@ def main():
     with tempfile.TemporaryDirectory() as td:
         scratch = Path(td) / Path(target_path).name
         scratch.write_text(target, encoding="utf-8")
-        subprocess.run(
-            ["bash", str(clean_wrapper()), *args, str(scratch)],
+        result = subprocess.run(
+            ["bash", str(clean_wrapper()), "--trim-target", str(scratch), "--", *args, str(scratch)],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             check=False,
         )
+        if result.returncode:
+            return 1
         stripped = read(scratch)
 
-    if stripped is None or stripped == target:
+    if stripped is None:
+        return 1
+    if stripped == target:
         return 0
 
     merged = "\n".join(
