@@ -202,24 +202,40 @@ if ! /usr/bin/nc -zw1 "$ND_HOST" "$ND_PORT" >/dev/null 2>&1; then
   exit 0
 fi
 
-# Load cached auth if fresh enough
-if [ -f "$AUTH_CACHE" ]; then
+# Keep only valid token fields. Cache contents are JSON data, never shell code.
+navidrome_auth_fields() {
+  jq -ce 'select(type == "object")
+    | select(.subsonicToken | type == "string" and length > 0)
+    | select(.subsonicSalt | type == "string" and length > 0)
+    | {subsonicToken, subsonicSalt}' 2>/dev/null
+}
+
+AUTH_INFO=""
+if [ -f "$AUTH_CACHE" ] && [ ! -L "$AUTH_CACHE" ] \
+    && [ "$(stat -f %Lp "$AUTH_CACHE" 2>/dev/null)" = 600 ]; then
   AUTH_AGE=$(( $(date +%s) - $(stat -f %m "$AUTH_CACHE") ))
-  if [ "$AUTH_AGE" -lt "$AUTH_MAX_AGE" ]; then
-    source "$AUTH_CACHE"
+  if [ "$AUTH_AGE" -ge 0 ] && [ "$AUTH_AGE" -lt "$AUTH_MAX_AGE" ]; then
+    AUTH_INFO=$(navidrome_auth_fields < "$AUTH_CACHE")
   fi
 fi
 
-# Authenticate if no cached token
-if [ -z "$SUBSONIC_TOKEN" ] || [ -z "$SUBSONIC_SALT" ]; then
-  # Keychain lookup only here: the token cache satisfies every other tick,
-  # and credentials go to curl via stdin so they never appear on argv.
-  PASSWORD=$(security find-generic-password -s 'Navidrome' -a "$USERNAME" -w 2>/dev/null)
+# Authenticate if no valid cached token. Legacy shell caches fail validation.
+if [ -z "$AUTH_INFO" ]; then
+  # The sentinel preserves password newlines through command substitution.
+  # security -w appends one output newline, which is not part of the password.
+  if PASSWORD=$(security find-generic-password -s 'Navidrome' -a "$USERNAME" -w 2>/dev/null && printf '\001'); then
+    PASSWORD=${PASSWORD%$'\001'}
+    PASSWORD=${PASSWORD%$'\n'}
+  else
+    PASSWORD=""
+  fi
   if [ -z "$PASSWORD" ]; then
     sketchybar --set "$NAME" icon=" No keychain" label="" icon.color="0xffffffff" label.color="0xffffffff"
     exit 0
   fi
-  AUTH_INFO=$(printf '{"username":"%s","password":"%s"}' "$USERNAME" "$PASSWORD" |
+  # Encode through stdin, so credentials never appear on jq or curl argv.
+  AUTH_INFO=$(printf '%s\0%s' "$USERNAME" "$PASSWORD" |
+    jq -Rs 'split("\u0000") | {username: .[0], password: .[1]}' |
     curl -s --max-time 3 "$NAVIDROME_URL/auth/login" \
       -H "Content-Type: application/json" \
       --data @- 2>/dev/null)
@@ -229,27 +245,30 @@ if [ -z "$SUBSONIC_TOKEN" ] || [ -z "$SUBSONIC_SALT" ]; then
     exit 0
   fi
 
-  SUBSONIC_TOKEN=$(echo "$AUTH_INFO" | jq -r '.subsonicToken // empty' 2>/dev/null)
-  SUBSONIC_SALT=$(echo "$AUTH_INFO" | jq -r '.subsonicSalt // empty' 2>/dev/null)
-
-  if [ -z "$SUBSONIC_TOKEN" ]; then
+  AUTH_INFO=$(printf '%s' "$AUTH_INFO" | navidrome_auth_fields)
+  if [ -z "$AUTH_INFO" ]; then
     sketchybar --set "$NAME" icon=" Auth failed" label="" icon.color="0xffffffff" label.color="0xffffffff"
     exit 0
   fi
 
-  # The cache holds bearer-equivalent material (subsonic token + salt).
-  # umask 077 ensures the create call uses 0600; chmod 600 covers the case
-  # where the file already existed at a wider mode.
+  # Replace atomically with a private data file, without following old symlinks.
   (
     umask 077
-    printf 'SUBSONIC_TOKEN=%s\nSUBSONIC_SALT=%s\n' "$SUBSONIC_TOKEN" "$SUBSONIC_SALT" > "$AUTH_CACHE"
+    CACHE_TMP=$(mktemp "${AUTH_CACHE}.XXXXXX") || exit 1
+    trap 'rm -f "$CACHE_TMP"' EXIT
+    # macOS mv -h replaces a final symlink, even when it points to a directory.
+    # An actual directory is not a cache file and must never receive token files.
+    if [ -d "$AUTH_CACHE" ] && [ ! -L "$AUTH_CACHE" ]; then
+      exit 1
+    fi
+    printf '%s\n' "$AUTH_INFO" > "$CACHE_TMP" && mv -fh "$CACHE_TMP" "$AUTH_CACHE"
   )
-  chmod 600 "$AUTH_CACHE" 2>/dev/null || true
 fi
 
-# Get now playing
-CURRENT_SONG=$(printf 'u=%s&t=%s&s=%s&v=1.8.0&c=SketchyBar&f=json' \
-    "$USERNAME" "$SUBSONIC_TOKEN" "$SUBSONIC_SALT" |
+# Encode every form value, including cached token/salt, without shell evaluation.
+CURRENT_SONG=$(printf '%s\0%s' "$USERNAME" "$AUTH_INFO" |
+  jq -Rsr 'split("\u0000") | .[0] as $user | (.[1] | fromjson) as $auth
+    | "u=\($user | @uri)&t=\($auth.subsonicToken | @uri)&s=\($auth.subsonicSalt | @uri)&v=1.8.0&c=SketchyBar&f=json"' |
   curl -s --max-time 3 "$NAVIDROME_URL/rest/getNowPlaying" --data @- 2>/dev/null |
   jq -r '.["subsonic-response"].nowPlaying.entry[0] // empty' 2>/dev/null)
 

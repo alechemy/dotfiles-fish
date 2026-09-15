@@ -201,14 +201,33 @@ the public repo `alechemy/trmnl-learn`, which holds nothing but the built corpus
 
 TRMNL's servers have to reach it, so the Tailscale-only Caddy can't serve it. Pages
 serves `.json` as `application/json`; raw.githubusercontent serves `text/plain`,
-which TRMNL may not parse. The corpus is facts drawn from public docs — nothing in
-it is private.
+which TRMNL may not parse. The corpus combines public technical references with
+project-derived facts, including the `Config system` section, `config-01` through
+`config-08`, in `corpus/react-native-expo.facts.json`. Public references do not
+make project configuration safe to publish. Before each publication, review that section and
+all other project-derived material for private configuration, or exclude it from
+the build. Stripping the `source` field does not remove private fact content.
+The publisher checks Git boundaries, not corpus provenance or privacy.
 
 To ship corpus changes (build → overflow-check → push):
 
 ```bash
 bin/publish.sh          # expects the public repo at ~/Work/trmnl-learn
 ```
+
+`TRMNL_LEARN_REPO` can select another checkout of the same public repository.
+The destination must be its checkout root, on `main`, with no staged, unstaged,
+or untracked work. Its single origin push URL must name `alechemy/trmnl-learn`.
+Local `main` must equal the locally recorded `origin/main`, so pending unrelated
+commits cannot be published with the corpus. The script does not fetch; review
+and refresh stale remote-tracking state manually before running it.
+
+Only `corpus.json` and numbered `corpus-N.json` shards are replaced and staged.
+Other files, including ignored files, are left alone. Ignored or non-regular
+managed paths cause refusal. A failed push retains the corpus commit locally.
+Review that commit and retry its push manually; rerunning the publisher refuses
+the now-ahead branch. Do not edit or use this checkout from another process while
+publishing. The repeated preflight check is not a lock against concurrent writers.
 
 Pages caches for 10 minutes, so a new fact takes up to that long to go live.
 
