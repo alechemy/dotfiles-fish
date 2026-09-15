@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Offline regression fixtures. Mutagen is stubbed; no personal audio is read."""
 import importlib.util
+from contextlib import contextmanager
 import json
 import shlex
 import subprocess
@@ -393,10 +394,10 @@ class TopHitsSafety(unittest.TestCase):
                 row["chart_artist"] = "Example Artist feat. Guest"
                 audios[str(row["rank"])] = Audio(**{"\xa9ART": ["Example Artist feat. Guest"], "\xa9nam": [row["qobuz"]["title"]]})
             mp4.MP4 = lambda path: audios[path]
-            with patch.dict(sys.modules, self.top._mutagen), patch.object(self.top, "find_audio", return_value=list(audios)):
+            with patch.dict(sys.modules, self.top._mutagen), patch.object(self.top, "find_audio", return_value=list(audios)), patch.object(self.top.os.path, "isfile", return_value=True):
                 for row in manifest["entries"]:
                     path = str(row["rank"])
-                    self.top.tag_file(path, row, manifest, b"cover")
+                    self.top.tag_file(path, row, manifest, b"cover", downloaded_qobuz_id=row["qobuz"]["id"])
                     self.assertEqual(audios[path]["\xa9nam"], [f"Song {row['rank']} (feat. Guest)"])
                     first = dict(audios[path])
                     reloaded = self.top.load_manifest(2000)
@@ -445,7 +446,7 @@ class TopHitsSafety(unittest.TestCase):
             path = Path(self.top.DOWNLOADS_DIR) / "2000" / rank / "source.m4a"
             path.parent.mkdir(parents=True)
             path.write_text(rank)
-            records[rank] = {"verified": True, "path": str(path)}
+            records[rank] = {"verified": True, "path": str(path), "qobuz_id": rank}
             audios[rank] = Audio(**{"\xa9ART": ["Example Artist feat. Guest"], "\xa9nam": [row["qobuz"]["title"]]})
         self.top.write_json(self.top.state_path("manifests", "2000.json"), manifest)
         self.top.save_progress({"year": 2000, "ranks": records})
@@ -494,7 +495,7 @@ class TopHitsSafety(unittest.TestCase):
             path = staging / f"{rank:02d}" / "song.m4a"
             path.parent.mkdir(parents=True)
             path.write_bytes(b"replaced wrong recording")
-            records[str(rank)] = {"verified": True, "path": str(path)}
+            records[str(rank)] = {"verified": True, "path": str(path), "qobuz_id": str(rank)}
         self.top.save_progress({"year": 2000, "ranks": records})
         with patch.object(self.top, "verify_file", return_value=(False, "wrong recording")), patch.object(self.top, "rip_track", return_value=(1, "failed")) as rip, patch.object(self.top.time, "sleep"), self.assertRaises(SystemExit):
             self.top.cmd_download(types.SimpleNamespace(year=2000))
@@ -508,7 +509,7 @@ class TopHitsSafety(unittest.TestCase):
             path = staging / f"{rank:02d}" / "song.m4a"
             path.parent.mkdir(parents=True)
             path.write_bytes(b"replaced wrong recording")
-            records[str(rank)] = {"verified": True, "path": str(path)}
+            records[str(rank)] = {"verified": True, "path": str(path), "qobuz_id": str(rank)}
         self.top.save_progress({"year": 2000, "ranks": records})
         Path(self.top.LIBRARY_ROOT).mkdir()
         (Path(self.top.LIBRARY_ROOT) / "placeholder").mkdir()
@@ -522,6 +523,116 @@ class TopHitsSafety(unittest.TestCase):
     def test_downloaded_status_requires_existing_verified_audio(self):
         self.top.save_progress({"year": 2000, "ranks": {"1": {"verified": True, "path": str(self.root / "gone")}}})
         self.assertEqual(self.top.year_status(2000)["verified"], 0)
+
+    @contextmanager
+    def interrupted_assembly(self, *, censored=False):
+        class Audio(dict):
+            info = types.SimpleNamespace(length=100)
+            def save(self):
+                pass
+        manifest = self.manifest
+        manifest["album_artist"] = "Various Artists"
+        audios, records = {}, {}
+        for row in manifest["entries"]:
+            rank = str(row["rank"])
+            row["genre"] = "Pop"
+            if censored:
+                row["qobuz"]["title"] = "Gl*** H*****"
+                row["chart_title"] = "Glass Harbor"
+            path = Path(self.top.DOWNLOADS_DIR) / "2000" / f"{row['rank']:02d}" / "source.m4a"
+            path.parent.mkdir(parents=True)
+            path.write_text(rank)
+            records[rank] = {"verified": True, "path": str(path), "qobuz_id": rank}
+            audios[rank] = Audio(**{"\xa9ART": ["Example Artist"], "\xa9nam": [row["qobuz"]["title"]]})
+        self.top.write_json(self.top.state_path("manifests", "2000.json"), manifest)
+        self.top.save_progress({"year": 2000, "ranks": records})
+        (Path(self.top.LIBRARY_ROOT) / "Compilations").mkdir(parents=True)
+        mp4 = self.top._mutagen["mutagen.mp4"]
+        mp4.MP4 = lambda path: audios[Path(path).read_text()]
+        mp4.MP4FreeForm = bytes
+        mp4.MP4Cover = Mock(return_value=b"cover")
+        def cover(year, path):
+            Path(path).write_bytes(b"cover")
+            return b"cover"
+        def organize(cmd, **kwargs):
+            if organizer.call_count == 1:
+                return types.SimpleNamespace(returncode=1)
+            self.top.shutil.move(cmd[-1], self.top.library_album_dir(manifest))
+            Path(cmd[cmd.index("--manifest") + 1]).write_text(self.top.library_album_dir(manifest) + "\n")
+            return types.SimpleNamespace(returncode=0)
+        with patch.dict(sys.modules, self.top._mutagen), patch.object(self.top, "make_cover", side_effect=cover), patch.object(self.top.subprocess, "run", side_effect=organize) as organizer, patch.object(self.top, "nas_chmod", return_value=[]), patch.object(self.top, "score_runnability", return_value=(True, "")), patch.object(self.top, "library_available", return_value=True):
+            with self.assertRaises(SystemExit):
+                self.top.cmd_assemble(types.SimpleNamespace(year=2000, force=False))
+            yield audios
+
+    def test_censored_title_survives_organizer_failure_and_assembly_retry(self):
+        with self.interrupted_assembly(censored=True) as audios:
+            self.assertTrue(all(audio["\xa9nam"] == ["Glass Harbor"] for audio in audios.values()))
+            manifest = self.top.load_manifest(2000)
+            self.assertTrue(all(row["tag_identity"]["title"] == "Glass Harbor" for row in manifest["entries"]))
+            with patch.object(self.top, "rip_track") as rip:
+                self.top.cmd_download(types.SimpleNamespace(year=2000))
+                self.top.cmd_assemble(types.SimpleNamespace(year=2000, force=False))
+            rip.assert_not_called()
+            self.assertTrue(self.top.year_status(2000)["assembled"])
+
+    def assert_ambiguous_staging_preserved(self, *, missing_id=False):
+        with self.interrupted_assembly():
+            manifest = self.top.load_manifest(2000)
+            progress = self.top.load_progress(2000)
+            path = Path(progress["ranks"]["1"]["path"])
+            before = path.read_bytes()
+            if missing_id:
+                del progress["ranks"]["1"]["qobuz_id"]
+                self.top.save_progress(progress)
+            else:
+                manifest["entries"][0]["qobuz"]["id"] = "new-recording"
+                self.top.write_json(self.top.state_path("manifests", "2000.json"), manifest)
+            with patch.object(self.top, "tag_file") as tag, patch.object(self.top, "rip_track") as rip:
+                with self.assertRaises(SystemExit):
+                    self.top.cmd_assemble(types.SimpleNamespace(year=2000, force=False))
+                with self.assertRaises(SystemExit):
+                    self.top.cmd_download(types.SimpleNamespace(year=2000))
+            tag.assert_not_called()
+            rip.assert_not_called()
+            self.assertEqual(path.read_bytes(), before)
+            self.assertEqual(self.top.load_manifest(2000)["entries"][0]["tag_identity"]["qobuz_id"], "1")
+
+    def test_changed_id_cannot_relabel_interrupted_assembly_staging(self):
+        self.assert_ambiguous_staging_preserved()
+
+    def test_missing_download_id_preserves_legacy_staging(self):
+        self.assert_ambiguous_staging_preserved(missing_id=True)
+
+    def test_fresh_download_binds_new_id_only_after_manual_move_aside(self):
+        row = self.manifest["entries"][0]
+        row["tag_identity"] = self.top.recording_identity(row, "Example Artist")
+        row["qobuz"].update(id="new-recording", url="https://example.com/track/new-recording")
+        self.manifest["entries"][1]["status"] = "skip"
+        self.top.write_json(self.top.state_path("manifests", "2000.json"), self.manifest)
+        old = Path(self.top.DOWNLOADS_DIR) / "2000/01/old.m4a"
+        old.parent.mkdir(parents=True)
+        old.write_bytes(b"old recording")
+        self.top.save_progress({"year": 2000, "ranks": {"1": {"verified": True, "path": str(old), "qobuz_id": "1"}}})
+        def rip(dest, url):
+            self.assertEqual(url, row["qobuz"]["url"])
+            path = Path(dest) / "fresh.m4a"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b"fresh recording")
+            return 0, "downloaded"
+        with patch.object(self.top, "rip_track", side_effect=rip) as ripper, patch.object(self.top, "verify_file", return_value=(True, "fixture")), patch.object(self.top.time, "sleep"):
+            with self.assertRaises(SystemExit):
+                self.top.cmd_download(types.SimpleNamespace(year=2000))
+            ripper.assert_not_called()
+            saved = self.root / "manual-recovery.m4a"
+            old.rename(saved)
+            self.top.cmd_download(types.SimpleNamespace(year=2000))
+        ripper.assert_called_once()
+        record = self.top.load_progress(2000)["ranks"]["1"]
+        self.assertEqual(record["qobuz_id"], "new-recording")
+        self.assertTrue(record["verified"])
+        self.assertEqual(Path(record["path"]).read_bytes(), b"fresh recording")
+        self.assertEqual(saved.read_bytes(), b"old recording")
 
     def test_redo_acquires_lock_before_reading_manifest_or_progress(self):
         with patch.dict(sys.modules, self.top._mutagen), patch.object(self.top, "year_lock", side_effect=SystemExit("busy")) as lock, patch.object(self.top, "load_manifest") as manifest, patch.object(self.top, "load_progress") as progress:

@@ -414,9 +414,19 @@ without provenance must match tags derived from known chart or recording credits
 unknown feature credits remain unverified and staging stays intact. These metadata
 checks do not prove a recording's binary identity.
 
+A verified fresh download also binds its progress record to the requested Qobuz
+recording ID. Download reuse and assembly require that binding. Missing or changed
+IDs do not become valid from title/duration similarity. Such staging is retained;
+manually move the rank's recorded files and rank-directory audio aside before a
+fresh download, or use redo for an already-filed album. Old progress without this
+binding requires the same manual recovery, not an automatic migration.
+
 Download skips and assembly both reverify current files, including another check
-immediately before tagging. These checks do not lock out unrelated file writers.
-Recorded completion is not current completion: missing files or unavailable storage block unattended work until
+immediately before tagging. A previously tagged staged file can use exact
+manifest-authoritative artist/title/duration only with the same bound recording
+ID. This preserves interrupted-assembly retries for de-censored titles and other
+supported display transformations. These checks do not lock out unrelated file
+writers. Recorded completion is not current completion: missing files or unavailable storage block unattended work until
 reconciled, without automatically redownloading a previously assembled album.
 
 Runnability stores a file identity with each analysis. Existing feature rows

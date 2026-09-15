@@ -940,6 +940,26 @@ def verify_file(path, row):
     return True, f"{title!r} {length:.0f}s"
 
 
+def verify_staged_file(path, row, record):
+    """Verify only staging bound to this requested recording, raw or already tagged."""
+    if record.get("qobuz_id") != str(row["qobuz"]["id"]):
+        return False, "staging recording ID is missing or changed; preserve it for manual recovery"
+    if not os.path.isfile(path):
+        return False, "file missing"
+    ok, detail = verify_file(path, row)
+    if ok:
+        return True, detail
+    identity = row.get("tag_identity") or {}
+    if identity.get("qobuz_id") == str(row["qobuz"]["id"]):
+        try:
+            from mutagen.mp4 import MP4
+            verify_tagged_audio(MP4(path), row)
+            return True, "verified persisted tagged identity"
+        except Exception as e:
+            return False, f"tagged identity mismatch: {e}"
+    return False, detail
+
+
 TRANSFER_ERROR = re.compile(r"IncompleteRead|Connection broken|Persistent error downloading", re.I)
 
 
@@ -990,19 +1010,32 @@ def _download_locked(args):
             skipped += 1
             continue
         rec = progress["ranks"].get(str(rank), {})
-        if rec.get("verified"):
-            path = rec.get("path") or ""
-            ok, detail = verify_file(path, row) if os.path.isfile(path) else (False, "file missing")
+        dest = os.path.join(staging, f"{rank:02d}")
+        existing = find_audio(dest)
+        path = rec.get("path") or ""
+        tagged_dir = os.path.join(staging, safe_filename(manifest["album"]))
+        tagged = (glob.glob(os.path.join(tagged_dir, f"{rank:02d}.m4a"))
+                  + glob.glob(os.path.join(tagged_dir, f"{rank:02d} *.m4a")))
+        if (existing or tagged or os.path.isfile(path)) and rec.get("qobuz_id") != str(row["qobuz"]["id"]):
+            retained = sorted(set(existing + tagged + ([path] if os.path.isfile(path) else [])))
+            raise SystemExit(f"ERROR: rank {rank} has staging without current recording-ID proof. "
+                             f"Files retained: {retained!r}. Move these files aside for manual recovery "
+                             "before requesting a fresh download.")
+        if not os.path.isfile(path) and len(tagged) == 1:
+            path = rec["path"] = tagged[0]
+        if rec.get("path"):
+            ok, detail = verify_staged_file(path, row, rec)
             if ok:
+                rec.update({"verified": True, "error": None})
+                progress["ranks"][str(rank)] = rec
+                save_progress(progress)
                 done += 1
                 continue
             rec.update({"verified": False, "error": detail})
             progress["ranks"][str(rank)] = rec
             save_progress(progress)
-        dest = os.path.join(staging, f"{rank:02d}")
-        existing = find_audio(dest)
         if existing:
-            ok, detail = verify_file(existing[0], row)
+            ok, detail = verify_staged_file(existing[0], row, rec)
             if ok:
                 rec.update({"verified": True, "path": existing[0], "error": None, "verified_at": now_iso()})
                 progress["ranks"][str(rank)] = rec
@@ -1016,7 +1049,8 @@ def _download_locked(args):
             code, out = rip_track(dest, row["qobuz"]["url"])
         except subprocess.TimeoutExpired:
             code, out = -1, "timeout"
-        rec = {"attempts": rec.get("attempts", 0) + 1, "verified": False, "path": None, "last_attempt": now_iso()}
+        rec = {"attempts": rec.get("attempts", 0) + 1, "verified": False, "path": None,
+               "last_attempt": now_iso()}
         if FATAL_RIP.search(out):
             rec["error"] = "fatal: " + FATAL_RIP.search(out).group(0)
             progress["ranks"][str(rank)] = rec
@@ -1027,7 +1061,8 @@ def _download_locked(args):
         files = find_audio(dest)
         ok, detail = verify_file(files[0], row) if files else (False, f"rip exit {code}, no audio file")
         if ok:
-            rec.update({"verified": True, "path": files[0], "error": None, "verified_at": now_iso()})
+            rec.update({"verified": True, "path": files[0], "error": None, "verified_at": now_iso(),
+                        "qobuz_id": str(row["qobuz"]["id"])})
             consecutive = 0
             done += 1
             print(f"ok {detail}" + (f" (rip exited {code} after the download; see rip.log)" if code != 0 else ""))
@@ -1192,10 +1227,10 @@ def expected_recording_identity(audio, row, *, new_recording=False):
     return candidates[0]
 
 
-def tag_file(path, row, manifest, cover_bytes, *, new_recording=True):
+def tag_file(path, row, manifest, cover_bytes, *, new_recording=True, downloaded_qobuz_id=None):
     from mutagen.mp4 import MP4, MP4Cover, MP4FreeForm
     if new_recording:
-        ok, detail = verify_file(path, row)
+        ok, detail = verify_staged_file(path, row, {"qobuz_id": downloaded_qobuz_id})
         if not ok:
             raise ValueError(f"cannot establish tag provenance: {detail}")
     audio = MP4(path)
@@ -1286,21 +1321,21 @@ def _assemble_locked(args):
     album_dir = os.path.join(staging, safe_filename(manifest["album"]))
     for row in rows:
         rec = progress["ranks"].get(str(row["rank"]), {})
-        if rec.get("verified") and not os.path.exists(rec.get("path") or ""):
+        if rec.get("qobuz_id") == str(row["qobuz"]["id"]) and not os.path.exists(rec.get("path") or ""):
             moved = glob.glob(os.path.join(album_dir, f"{row['rank']:02d} *.m4a"))
             if moved:
                 rec["path"] = moved[0]
-        if rec.get("verified"):
-            path = rec.get("path") or ""
-            ok, detail = verify_file(path, row) if os.path.isfile(path) else (False, "file missing")
-            if not ok:
-                rec.update({"verified": False, "error": detail})
-                save_progress(progress)
+        path = rec.get("path") or ""
+        ok, detail = verify_staged_file(path, row, rec)
+        if rec:
+            rec.update({"verified": ok, "error": None if ok else detail})
+            save_progress(progress)
     missing = [r["rank"] for r in rows
                if not progress["ranks"].get(str(r["rank"]), {}).get("verified")
                or not os.path.exists(progress["ranks"][str(r["rank"])]["path"])]
     if missing:
-        raise SystemExit(f"ERROR: {year} is missing verified files for ranks {missing}; run `top-hits.py download {year}`.")
+        raise SystemExit(f"ERROR: {year} lacks current recording-ID-bound verified files for ranks {missing}. "
+                         "Staging retained; inspect progress errors before download or manual recovery.")
     if not os.path.isdir(LIBRARY_ROOT) or not os.listdir(LIBRARY_ROOT):
         raise SystemExit(f"ERROR: library root {LIBRARY_ROOT} is not mounted.")
 
@@ -1314,12 +1349,13 @@ def _assemble_locked(args):
             shutil.move(rec["path"], staged)
             rec["path"] = staged
             save_progress(progress)
-        ok, detail = verify_file(staged, row)
+        ok, detail = verify_staged_file(staged, row, rec)
         if not ok:
             rec.update({"verified": False, "error": detail})
             save_progress(progress)
             raise SystemExit(f"ERROR: rank {row['rank']} changed before tagging: {detail}")
-        fixed, title = tag_file(staged, row, manifest, cover_bytes)
+        fixed, title = tag_file(staged, row, manifest, cover_bytes,
+                                downloaded_qobuz_id=rec["qobuz_id"])
         dst = os.path.join(album_dir, f"{row['rank']:02d} {safe_filename(title)}.m4a")
         if dst != staged:
             os.rename(staged, dst)
@@ -1378,6 +1414,17 @@ def require_current_assembly(manifest):
     return verified_library_files(manifest)
 
 
+def verify_tagged_audio(audio, row):
+    identity = expected_recording_identity(audio, row)
+    if norm((audio.get("\xa9nam") or [""])[0]) != norm(identity["title"]):
+        raise ValueError(f"rank {row['rank']}: title mismatch")
+    if norm((audio.get("\xa9ART") or [""])[0]) != norm(identity["artist"]):
+        raise ValueError(f"rank {row['rank']}: artist mismatch")
+    duration = row["qobuz"].get("duration")
+    if not duration or abs(audio.info.length - duration) > 4:
+        raise ValueError(f"rank {row['rank']}: unknown or mismatched duration")
+
+
 def verified_library_files(manifest):
     """Require the exact rank multiset and the tagged recording's title, artist, duration."""
     from mutagen.mp4 import MP4
@@ -1393,15 +1440,7 @@ def verified_library_files(manifest):
             if rank not in wanted or rank in found:
                 raise ValueError(f"unexpected or duplicate rank {rank}")
             row = wanted[rank]
-            identity = expected_recording_identity(audio, row)
-            artist, title = identity["artist"], identity["title"]
-            if norm((audio.get("\xa9nam") or [""])[0]) != norm(title):
-                raise ValueError(f"rank {rank}: title mismatch")
-            if norm((audio.get("\xa9ART") or [""])[0]) != norm(artist):
-                raise ValueError(f"rank {rank}: artist mismatch")
-            duration = row["qobuz"].get("duration")
-            if not duration or abs(audio.info.length - duration) > 4:
-                raise ValueError(f"rank {rank}: unknown or mismatched duration")
+            verify_tagged_audio(audio, row)
             found[rank] = path
         except Exception as e:
             raise SystemExit(f"ERROR: cannot verify {filed}: {e}") from e
@@ -1494,7 +1533,8 @@ def _redo_locked(args):
             failures.append((rank, detail))
             print(f"FAILED ({detail})")
             continue
-        _, title = tag_file(files[0], row, manifest, cover_bytes)
+        _, title = tag_file(files[0], row, manifest, cover_bytes,
+                            downloaded_qobuz_id=str(row["qobuz"]["id"]))
         target = os.path.join(library_dir, f"{rank:02d} {safe_filename(title)}.m4a")
         try:
             replace_recording(files[0], target, existing.get(rank, []))
@@ -1504,6 +1544,7 @@ def _redo_locked(args):
             continue
         shutil.rmtree(dest, ignore_errors=True)
         progress["ranks"][str(rank)] = {"attempts": 1, "verified": True, "path": target, "error": None,
+                                        "qobuz_id": str(row["qobuz"]["id"]),
                                         "verified_at": now_iso(), "redone_at": now_iso()}
         save_progress(progress)
         print(f"ok -> {os.path.basename(target)}")
@@ -1679,7 +1720,7 @@ def year_status(year):
             for row in manifest["entries"]:
                 rec = progress["ranks"].get(str(row["rank"]), {})
                 if row["status"] != "skip" and rec.get("verified") and os.path.isfile(rec.get("path") or ""):
-                    if verify_file(rec["path"], row)[0]:
+                    if verify_staged_file(rec["path"], row, rec)[0]:
                         info["verified"] += 1
     info["downloaded"] = info["resolved"] and info["wanted"] > 0 and info["verified"] == info["wanted"]
     return info
