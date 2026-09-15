@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "mount": {
+    "host": "nas.example.invalid",
+    "user": "listener",
+    "shares": [
+      "ExampleMedia",
+      "ExampleArchive"
+    ],
+    "home_gateway": "192.0.2.1"
+  },
+  "ssh_hosts": [
+    "music@nas.example.invalid",
+    "music@fallback.example.invalid"
+  ],
+  "local_library_root": "/Volumes/ExampleMedia/Audio",
+  "remote": {
+    "library_root": "/srv/example-media/Audio",
+    "inbox": "/srv/example-media/Inbox",
+    "python": "/opt/example-music/bin/python3",
+    "rip": "/opt/example-music/bin/rip",
+    "streamrip_config": "/srv/example-config/streamrip.toml"
+  }
+}

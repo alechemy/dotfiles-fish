@@ -41,6 +41,7 @@ import tempfile
 from datetime import datetime
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import _music_nas  # noqa: E402
 from _music_tags import compilation_signal, norm_artist  # noqa: E402
 
 from mutagen.flac import FLAC  # noqa: E402
@@ -583,7 +584,7 @@ def main():
         help="Library-relative path of an existing album folder this import "
              "should replace (passed through to music-organize.py --replaces).",
     )
-    parser.add_argument("--library-root", default="/Volumes/Media/Music")
+    parser.add_argument("--library-root", help="Override the private NAS library root.")
     parser.add_argument(
         "--archive-dir",
         help="Where music-organize.py archives replaced folders "
@@ -611,7 +612,10 @@ def main():
         print(f"ERROR: source is not a directory: {source}", file=sys.stderr)
         sys.exit(1)
 
-    library_root = os.path.abspath(os.path.expanduser(args.library_root))
+    try:
+        library_root = _music_nas.library_root(args.library_root)
+    except _music_nas.ConfigError as e:
+        parser.error(str(e))
     if not os.path.isdir(library_root):
         print(f"ERROR: library root not found: {library_root}", file=sys.stderr)
         sys.exit(1)

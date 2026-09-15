@@ -95,7 +95,7 @@ For partial failures, retain the job and use the exact resume instructions from 
 
 ## 5. Verify the album, then replace the wrong one
 
-The existing NAS library is `/share/Media/Music`, mounted locally at `/Volumes/Media/Music`. Compilation albums normally file under `Compilations/`. Discover the actual destination and read its tags; a folder name is not evidence of the displayed album or artist.
+Find the local library root with `/usr/bin/python3 ~/.local/bin/_music_nas.py get local_library_root`. For a remote operation use the `remote.library_root` getter. Both read private `~/.config/music/nas.json`, or `MUSIC_NAS_CONFIG`. Do not dump that file or copy its topology into task records.
 
 ```bash
 "$PY" "$SKILL/scripts/verify_album.py" "$JOB/manifest.json" '<album-folder>'

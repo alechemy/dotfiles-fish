@@ -42,7 +42,10 @@ import urllib.request
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 
-LIBRARY_ROOT = pathlib.Path("/Volumes/Media/Music")
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
+import _music_nas  # noqa: E402
+
+LIBRARY_ROOT = None  # Read only when a library operation needs it.
 DB_PATH = pathlib.Path("~/.local/state/runnability/features.db").expanduser()
 CONFIG_PATH = pathlib.Path("~/.config/runnability/config.toml").expanduser()
 MODEL_DIR = pathlib.Path("~/.local/share/runnability/models").expanduser()
@@ -470,7 +473,8 @@ def _write_vorbis(p: pathlib.Path, score: int, folded: int | None, tmpo: int | N
 
 def _write_one(rel: str, score: int, folded: int | None, tmpo: int | None,
                expected_identity: str | None, dry_run: bool):
-    p = LIBRARY_ROOT / rel
+    root = LIBRARY_ROOT if LIBRARY_ROOT is not None else pathlib.Path(_music_nas.library_root())
+    p = root / rel
     try:
         if not p.exists():
             return rel, "missing", None, None, None, None
@@ -576,6 +580,7 @@ def main() -> int:
 
     a = sub.add_parser("analyze", help="extract features into the store")
     a.add_argument("paths", nargs="*", help="files/dirs (default: whole library)")
+    a.add_argument("--library-root", help="Override the private NAS library root.")
     a.add_argument("--workers", type=int, default=4)
     a.add_argument("--force", action="store_true", help="ignore the AC-power gate")
     a.add_argument("--reanalyze", action="store_true", help="re-analyze files already in the store")
@@ -588,6 +593,7 @@ def main() -> int:
 
     w = sub.add_parser("write", help="write scores into file tags")
     w.add_argument("paths", nargs="*", help="restrict to files/dirs under the library (default: all)")
+    w.add_argument("--library-root", help="Override the private NAS library root.")
     w.add_argument("--dry-run", action="store_true", help="report changes without saving")
     w.add_argument("--workers", type=int, default=4)
     w.add_argument("--force", action="store_true", help="ignore the AC-power gate")
@@ -597,6 +603,12 @@ def main() -> int:
     st.set_defaults(fn=cmd_status)
 
     args = ap.parse_args()
+    if args.cmd in {"analyze", "write"}:
+        global LIBRARY_ROOT
+        try:
+            LIBRARY_ROOT = pathlib.Path(_music_nas.library_root(args.library_root))
+        except _music_nas.ConfigError as e:
+            ap.error(str(e))
     return args.fn(args)
 
 

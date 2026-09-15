@@ -1,12 +1,11 @@
 function riptag -d "download, tag, and organize an album into the music library"
     set -g __riptag_resume_id
     # --- Configuration ---
-    set -l NAS admin@192.168.50.54
-    set -l NAS_TS admin@100.89.43.9
-    set -l NAS_RIP /share/CACHEDEV1_DATA/python-apps/streamrip_env/bin/rip
-    set -l NAS_RIP_CONFIG /share/CACHEDEV1_DATA/streamrip/config.toml
-    set -l LOCAL_PYTHON $HOME/Developer/streamrip/.venv/bin/python3
-    set -l LOCAL_RIP $HOME/Developer/streamrip/.venv/bin/rip
+    set -l MUSIC_NAS $HOME/.local/bin/_music_nas.py
+    set -l python_cmd "$LOCAL_PYTHON"
+    test -n "$python_cmd"; or set python_cmd $HOME/Developer/streamrip/.venv/bin/python3
+    set -l rip_cmd "$LOCAL_RIP"
+    test -n "$rip_cmd"; or set rip_cmd $HOME/Developer/streamrip/.venv/bin/rip
     set -l TAGGER $HOME/.local/bin/tagger.py
     set -l MUSIC_TAGS $HOME/.local/bin/_music_tags.py
     set -l ORGANIZER $HOME/.local/bin/music-organize.py
@@ -72,16 +71,25 @@ function riptag -d "download, tag, and organize an album into the music library"
         end
     end
 
-    # --- NAS mode: prefer the LAN address, fall back to Tailscale ---
+    # Validate before SSH, search, download, or local state creation.
+    set -l NAS_HOSTS (/usr/bin/python3 "$MUSIC_NAS" get ssh_hosts)
+    or return 1
+    set -l NAS_RIP (/usr/bin/python3 "$MUSIC_NAS" get remote.rip)
+    or return 1
+    set -l NAS_RIP_CONFIG (/usr/bin/python3 "$MUSIC_NAS" get remote.streamrip_config)
+    or return 1
+    set -l NAS "$NAS_HOSTS[1]"
     if test $local_mode -eq 0
-        if not ssh -n -o ConnectTimeout=3 -o BatchMode=yes "$NAS" true 2>/dev/null
-            if ssh -n -o ConnectTimeout=5 -o BatchMode=yes "$NAS_TS" true 2>/dev/null
-                echo "ℹ️  NAS not reachable on LAN — using Tailscale ($NAS_TS)"
-                set NAS $NAS_TS
-            else
-                echo "ERROR: NAS unreachable on both LAN ($NAS) and Tailscale ($NAS_TS)."
-                return 1
+        set NAS
+        for candidate in $NAS_HOSTS
+            if ssh -n -o ConnectTimeout=5 -o BatchMode=yes "$candidate" true 2>/dev/null
+                set NAS "$candidate"
+                break
             end
+        end
+        if test -z "$NAS"
+            echo "ERROR: NAS unreachable on all configured SSH hosts."
+            return 1
         end
     end
 
@@ -216,7 +224,7 @@ function riptag -d "download, tag, and organize an album into the music library"
         echo "   Mode: original host"
         echo ""
 
-        __riptag_invoke "$local_mode" "$NAS" "$LOCAL_PYTHON" "$LOCAL_RIP" "$TAGGER" "$MUSIC_TAGS" "$ORGANIZER" "$WORKER" --resume "$resume_id" $compilation_flag $playlist_flag $year_args $replaces_args "$genre"
+        __riptag_invoke "$local_mode" "$NAS" "$python_cmd" "$rip_cmd" "$TAGGER" "$MUSIC_TAGS" "$ORGANIZER" "$WORKER" --resume "$resume_id" $compilation_flag $playlist_flag $year_args $replaces_args "$genre"
         set -l worker_status $status
 
         if test $worker_status -eq 2
@@ -260,7 +268,7 @@ function riptag -d "download, tag, and organize an album into the music library"
         set -l results
         if test $local_mode -eq 1
             set -l tmpfile (mktemp)
-            command "$LOCAL_RIP" search -o "$tmpfile" -n 5 qobuz album "$url_or_query" >/dev/null 2>&1
+            command "$rip_cmd" search -o "$tmpfile" -n 5 qobuz album "$url_or_query" >/dev/null 2>&1
             if test $status -ne 0
                 echo "ERROR: Search failed."
                 rm -f "$tmpfile"
@@ -274,8 +282,9 @@ with open(sys.argv[1]) as f:
 ' "$tmpfile")
             rm -f "$tmpfile"
         else
-            set -l escaped_query (string replace -a "'" "'\\''" "$url_or_query")
-            set results (ssh -n "$NAS" "$NAS_RIP --config-path $NAS_RIP_CONFIG search -o /tmp/rip-search.json -n 5 qobuz album '$escaped_query' >/dev/null 2>&1 && cat /tmp/rip-search.json && rm -f /tmp/rip-search.json" | python3 -c '
+            set -l search_cmd (/usr/bin/python3 "$MUSIC_NAS" quote "$NAS_RIP" --config-path "$NAS_RIP_CONFIG" search -o /tmp/rip-search.json -n 5 qobuz album "$url_or_query")
+            or return 1
+            set results (ssh -n "$NAS" "$search_cmd >/dev/null 2>&1 && cat /tmp/rip-search.json && rm -f /tmp/rip-search.json" | python3 -c '
 import json, sys
 for r in json.load(sys.stdin):
     print(str(r.get("id", "")) + "\t" + r.get("desc", "Unknown"))
@@ -345,7 +354,7 @@ for r in json.load(sys.stdin):
     echo ""
 
     # --- Run the worker with a private result/deployment directory ---
-    __riptag_invoke "$local_mode" "$NAS" "$LOCAL_PYTHON" "$LOCAL_RIP" "$TAGGER" "$MUSIC_TAGS" "$ORGANIZER" "$WORKER" $compilation_flag $playlist_flag $year_args $replaces_args "$url" "$genre"
+    __riptag_invoke "$local_mode" "$NAS" "$python_cmd" "$rip_cmd" "$TAGGER" "$MUSIC_TAGS" "$ORGANIZER" "$WORKER" $compilation_flag $playlist_flag $year_args $replaces_args "$url" "$genre"
     set -l worker_status $status
 
     if test $worker_status -eq 2
@@ -380,6 +389,8 @@ function __riptag_invoke -a local_mode nas python rip tagger music_tags organize
     set -e argv[1..8]
     set -g __riptag_resume_id
     set -l worker_status
+    /usr/bin/python3 "$HOME/.local/bin/_music_nas.py" check
+    or return 1
     if test "$local_mode" -eq 1
         mkdir -p "$HOME/.local/state/riptag"
         or return 1
@@ -392,13 +403,28 @@ function __riptag_invoke -a local_mode nas python rip tagger music_tags organize
         end
         rm -rf "$result_dir"
     else
-        # Deployment names and result files belong to this invocation, not /tmp globals.
-        set -l remote_dir (ssh -n "$nas" "mktemp -d /tmp/riptag.XXXXXX")
+        set -l nas_helper "$HOME/.local/bin/_music_nas.py"
+        set -l remote_python (/usr/bin/python3 "$nas_helper" get remote.python)
+        or return 1
+        set -l payload_dir (mktemp -d)
+        or return 1
+        /usr/bin/python3 "$nas_helper" project-worker "$payload_dir/nas.json"
+        or begin
+            rm -rf "$payload_dir"
+            return 1
+        end
+        # Deployment names and result files belong to this invocation.
+        set -l remote_dir (ssh -n "$nas" "umask 077; mktemp -d /tmp/riptag.XXXXXX")
         if test $status -ne 0; or not string match -qr '^/tmp/riptag\.[A-Za-z0-9]+$' -- "$remote_dir"
+            rm -rf "$payload_dir"
             echo "ERROR: Could not allocate NAS deployment directory."
             return 1
         end
-        scp -q "$tagger" "$music_tags" "$organizer" "$worker" "$nas:$remote_dir/"
+        scp -q "$tagger" "$music_tags" "$organizer" "$worker" "$nas_helper" "$payload_dir/nas.json" "$nas:$remote_dir/"
+        set -l copied $status
+        rm -rf "$payload_dir"
+        test $copied -eq 0; or return 1
+        set -l python_quoted (/usr/bin/python3 "$nas_helper" quote "$remote_python")
         or return 1
         set -l remote_args
         for arg in $argv
@@ -406,7 +432,7 @@ function __riptag_invoke -a local_mode nas python rip tagger music_tags organize
             set -a remote_args "'$escaped'"
         end
         set -l joined (string join ' ' -- $remote_args)
-        ssh -t "$nas" ". ~/.profile 2>/dev/null; RIPTAG_RESULT_DIR='$remote_dir' TAGGER_SCRIPT='$remote_dir/tagger.py' ORGANIZER_SCRIPT='$remote_dir/music-organize.py' bash '$remote_dir/riptag-worker.sh' $joined"
+        ssh -t "$nas" ". ~/.profile 2>/dev/null; chmod 600 '$remote_dir/nas.json' && MUSIC_NAS_CONFIG='$remote_dir/nas.json' MUSIC_NAS_PYTHON=$python_quoted RIPTAG_RESULT_DIR='$remote_dir' TAGGER_SCRIPT='$remote_dir/tagger.py' ORGANIZER_SCRIPT='$remote_dir/music-organize.py' bash '$remote_dir/riptag-worker.sh' $joined"
         set worker_status $status
         if test $worker_status -eq 2
             set -g __riptag_resume_id (ssh -n "$nas" "cat '$remote_dir/resume-id'" 2>/dev/null)

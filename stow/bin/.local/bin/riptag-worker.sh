@@ -38,22 +38,12 @@
 #   RIPTAG_STATE_DIR     Session metadata directory (default: ~/.local/state/riptag)
 #   RIPTAG_LOCK_DIR      Host-wide lock override (default: /tmp/riptag-worker.lock)
 #
-# To upgrade streamrip on the NAS:
-#   sudo /share/CACHEDEV1_DATA/python-apps/streamrip_env/bin/pip install --upgrade \
-#     https://github.com/nathom/streamrip/archive/refs/tags/v2.2.0.tar.gz
-
-
-# --- CONFIGURATION (NAS defaults) ---
-INBOX_DIR="/share/Media/Music-Inbox"
-LIBRARY_DIR="/share/Media/Music"
-RIP_CONFIG="/share/CACHEDEV1_DATA/streamrip/config.toml"
+# Private topology comes from MUSIC_NAS_CONFIG. Remote callers deploy a
+# worker-only projection and provide MUSIC_NAS_PYTHON to bootstrap its getter.
 STATE_DIR="${RIPTAG_STATE_DIR:-$HOME/.local/state/riptag}"
 SESSION_DIR="$STATE_DIR/sessions"
-NAS_HOST="admin@192.168.50.54"
-NAS_TS_HOST="admin@100.89.43.9"
-
-PYTHON_CMD="/share/CACHEDEV1_DATA/python-apps/streamrip_env/bin/python"
-RIP_CMD="/share/CACHEDEV1_DATA/python-apps/streamrip_env/bin/rip"
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd) || exit 1
+NAS_CONFIG_HELPER="$SCRIPT_DIR/_music_nas.py"
 
 # --- ARGUMENT PARSING ---
 COMPILATION_FLAG=""
@@ -92,18 +82,28 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-# --- LOCAL MODE OVERRIDES ---
-if [ $LOCAL_MODE -eq 1 ]; then
+# --- PRIVATE CONFIGURATION (before mounts, locks, or downloads) ---
+if [ "$LOCAL_MODE" -eq 1 ]; then
+  CONFIG_PYTHON="${LOCAL_PYTHON:-python3}"
+  nas_get() { "$CONFIG_PYTHON" "$NAS_CONFIG_HELPER" get "$1"; }
+  LIBRARY_DIR=$(nas_get local_library_root) || exit 1
+  NAS_HOSTS=$(nas_get ssh_hosts) || exit 1
   INBOX_DIR="${STREAMRIP_DOWNLOADS:-$HOME/StreamripDownloads}"
-  LIBRARY_DIR="/Volumes/Media/Music"
-  PYTHON_CMD="${LOCAL_PYTHON:-python3}"
+  PYTHON_CMD="$CONFIG_PYTHON"
   RIP_CMD="${LOCAL_RIP:-rip}"
   : "${TAGGER_SCRIPT:=$HOME/.local/bin/tagger.py}"
   : "${ORGANIZER_SCRIPT:=$HOME/.local/bin/music-organize.py}"
   RIP_CONFIG=""
 else
-  : "${TAGGER_SCRIPT:=/share/CACHEDEV1_DATA/python-apps/tagger.py}"
-  : "${ORGANIZER_SCRIPT:=/share/CACHEDEV1_DATA/python-apps/music-organize.py}"
+  CONFIG_PYTHON="${MUSIC_NAS_PYTHON:-python3}"
+  nas_get() { "$CONFIG_PYTHON" "$NAS_CONFIG_HELPER" --worker get "$1"; }
+  INBOX_DIR=$(nas_get remote.inbox) || exit 1
+  LIBRARY_DIR=$(nas_get remote.library_root) || exit 1
+  PYTHON_CMD=$(nas_get remote.python) || exit 1
+  RIP_CMD=$(nas_get remote.rip) || exit 1
+  RIP_CONFIG=$(nas_get remote.streamrip_config) || exit 1
+  : "${TAGGER_SCRIPT:=$SCRIPT_DIR/tagger.py}"
+  : "${ORGANIZER_SCRIPT:=$SCRIPT_DIR/music-organize.py}"
 fi
 
 # --- VALIDATION ---
@@ -130,7 +130,7 @@ fi
 if [ ! -d "$LIBRARY_DIR" ]; then
   printf "%s\n" "ERROR: Music library is unavailable: $LIBRARY_DIR"
   if [ $LOCAL_MODE -eq 1 ]; then
-    printf "%s\n" "Mount the NAS Media share in Finder or run ~/.local/bin/mount-nas.sh, then retry."
+    printf "%s\n" "Mount the configured NAS share in Finder or run ~/.local/bin/mount-nas.sh, then retry."
   fi
   printf "%s\n" "No download was started. Existing downloads are unchanged."
   exit 1
@@ -314,14 +314,19 @@ PERM_FAILED=0
 FAILED_CMDS=""
 if [ $LOCAL_MODE -eq 1 ] && [ -f "$MANIFEST_FILE" ]; then
   printf "%s\n" "--> Step 5: Setting permissions on the NAS..."
-  if ! ssh -o ConnectTimeout=5 -o BatchMode=yes "$NAS_HOST" true 2>/dev/null \
-      && ssh -o ConnectTimeout=5 -o BatchMode=yes "$NAS_TS_HOST" true 2>/dev/null; then
-    printf "%s\n" "    LAN unreachable — using Tailscale ($NAS_TS_HOST)."
-    NAS_HOST="$NAS_TS_HOST"
-  fi
+  NAS_HOST=""
+  # Keep the configured preference order. A here-document avoids a subshell.
+  while IFS= read -r candidate; do
+    if ssh -o ConnectTimeout=5 -o BatchMode=yes "$candidate" true 2>/dev/null; then
+      NAS_HOST="$candidate"
+      break
+    fi
+  done <<EOF
+$NAS_HOSTS
+EOF
   while IFS= read -r album_dir; do
     [ -z "$album_dir" ] && continue
-    nas_dir=$(printf "%s" "$album_dir" | sed 's#^/Volumes/Media#/share/Media#')
+    nas_dir=$("$CONFIG_PYTHON" "$NAS_CONFIG_HELPER" map-path "$album_dir") || exit 4
     artist_dir=$(dirname "$nas_dir")
     esc_album=$(printf "%s" "$nas_dir" | sed "s/'/'\\\\''/g")
     esc_artist=$(printf "%s" "$artist_dir" | sed "s/'/'\\\\''/g")
@@ -329,11 +334,12 @@ if [ $LOCAL_MODE -eq 1 ] && [ -f "$MANIFEST_FILE" ]; then
     # Retry once: a fresh SSH to the LAN can fail transiently (VPN race, or a
     # first-run macOS Local Network permission prompt that returns EHOSTUNREACH
     # — "No route to host" — until granted).
-    if ! ssh -o ConnectTimeout=10 "$NAS_HOST" "$remote_cmd"; then
+    if [ -z "$NAS_HOST" ] || ! ssh -o ConnectTimeout=10 "$NAS_HOST" "$remote_cmd"; then
       sleep 3
-      if ! ssh -o ConnectTimeout=10 "$NAS_HOST" "$remote_cmd"; then
+      if [ -z "$NAS_HOST" ] || ! ssh -o ConnectTimeout=10 "$NAS_HOST" "$remote_cmd"; then
         PERM_FAILED=1
-        FAILED_CMDS="${FAILED_CMDS}  ssh $NAS_HOST \"$remote_cmd\"
+        retry_host=${NAS_HOST:-$(printf '%s\n' "$NAS_HOSTS" | head -1)}
+        FAILED_CMDS="${FAILED_CMDS}  ssh $retry_host \"$remote_cmd\"
 "
       fi
     fi
