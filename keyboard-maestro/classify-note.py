@@ -6,7 +6,7 @@ Reads RAW_TEXT from the environment. Exits 1 on empty/whitespace input.
 Otherwise prints one of:
 
     bookmark\\n<url>
-    markdown\\n<title>\\n<<<SPLIT>>>\\n<body>
+    markdown\\n<base64-title>\\n<base64-body>
 
 URL detection first strips wrapping chars (quotes, brackets, angle brackets,
 backticks) and trailing sentence punctuation; if the result is a single
@@ -14,6 +14,7 @@ http(s) URL, the output is a bookmark. Otherwise the original text flows
 into the same first-line-as-title heuristic used by the Drafts actions.
 """
 
+import base64
 import datetime
 import os
 import re
@@ -81,7 +82,9 @@ def main():
         return 0
 
     title, body = resolve_markdown(text)
-    sys.stdout.write("markdown\n" + title + "\n<<<SPLIT>>>\n" + body)
+    encoded_title = base64.b64encode(title.encode()).decode()
+    encoded_body = base64.b64encode(body.encode()).decode()
+    sys.stdout.write("markdown\n" + encoded_title + "\n" + encoded_body)
     return 0
 
 

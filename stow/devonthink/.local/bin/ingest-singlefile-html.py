@@ -924,11 +924,10 @@ def clear_needs_singlefile(bookmark_uuid: str) -> None:
         log.warning("clear NeedsSingleFile failed for %s: %s", bookmark_uuid, e)
 
 
-def compress_images(html_path: Path) -> None:
+def compress_images(html_path: Path) -> bool:
     try:
-        # /usr/bin/python3 explicitly: compress opens the staging file inside
-        # TCC-protected Downloads, so it must run under the Apple-signed
-        # interpreter even when this script is invoked from a mise shell.
+        # Use the Apple-signed interpreter for the helper under launchd, even
+        # when this script is invoked from a mise shell.
         result = subprocess.run(
             ["/usr/bin/python3", str(COMPRESS_IMAGES), str(html_path)],
             check=False,
@@ -942,10 +941,10 @@ def compress_images(html_path: Path) -> None:
             COMPRESS_TIMEOUT_SECS,
             html_path.name,
         )
-        return
+        return False
     except Exception as e:
         log.warning("image compression failed: %s", e)
-        return
+        return False
 
     if result.returncode != 0:
         stderr = (result.stderr or "").strip()
@@ -955,6 +954,8 @@ def compress_images(html_path: Path) -> None:
             html_path.name,
             f": {stderr}" if stderr else "",
         )
+        return False
+    return True
 
 
 def mark_too_large(bookmark_uuid: str) -> None:
@@ -1081,41 +1082,7 @@ def main() -> int:
         html_path, source_url
     )
 
-    # Before compress_images, which rewrites the staging file and resets mtime.
     capture_date, capture_time = capture_timestamp(html_path.stat().st_mtime)
-
-    compress_images(html_path)
-
-    size_bytes = html_path.stat().st_size
-    if size_bytes > MAX_INGEST_BYTES:
-        log.warning(
-            "HTML too large after compression (%.1f MB > %.0f MB limit), skipping: %s",
-            size_bytes / 1024 / 1024,
-            MAX_INGEST_BYTES / 1024 / 1024,
-            html_path.name,
-        )
-        if args.bookmark:
-            mark_too_large(args.bookmark)
-            try:
-                html_path.unlink()
-            except OSError:
-                pass
-            return 0
-        # No bookmark means a deliberate desktop capture with no trace in DT;
-        # deleting it here would silently destroy the user's only copy.
-        quarantine_dir = Path.home() / "Desktop" / "DT_Import_Errors"
-        try:
-            quarantine_dir.mkdir(parents=True, exist_ok=True)
-            dest = quarantine_dir / html_path.name
-            n = 1
-            while dest.exists():
-                dest = quarantine_dir / f"{html_path.stem} ({n}){html_path.suffix}"
-                n += 1
-            shutil.move(str(html_path), str(dest))
-            log.warning("moved oversized capture to %s", dest)
-        except OSError as e:
-            log.error("quarantine move failed, leaving in place: %s", e)
-        return 0
 
     ai_chat_platform = is_ai_chat_url(source_url)
 
@@ -1143,6 +1110,29 @@ def main() -> int:
         #    the start.
         import_html_path = Path(tmpdir) / f"{safe_title}.html"
         shutil.copy2(html_path, import_html_path)
+        if not compress_images(import_html_path):
+            shutil.copy2(html_path, import_html_path)
+
+        compressed_size = import_html_path.stat().st_size
+        if compressed_size > MAX_INGEST_BYTES:
+            log.warning(
+                "HTML too large after compression (%.1f MB > %.0f MB limit), skipping: %s",
+                compressed_size / 1024 / 1024,
+                MAX_INGEST_BYTES / 1024 / 1024,
+                html_path.name,
+            )
+            if args.bookmark:
+                mark_too_large(args.bookmark)
+                return 0
+            quarantine_dir = Path.home() / "Desktop" / "DT_Import_Errors"
+            quarantine_dir.mkdir(parents=True, exist_ok=True)
+            dest = quarantine_dir / html_path.name
+            n = 1
+            while dest.exists():
+                dest = quarantine_dir / f"{html_path.stem} ({n}){html_path.suffix}"
+                n += 1
+            shutil.move(str(html_path), str(dest))
+            return 0
 
         md_path = Path(tmpdir) / f"{safe_title}.md"
         has_md = run_defuddle(import_html_path, md_path)

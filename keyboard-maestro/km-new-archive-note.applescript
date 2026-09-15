@@ -58,13 +58,20 @@ on run
     display notification payload with title "Added bookmark to DT Archive"
 
   else if modeFlag is "markdown" then
-    set sepPos to offset of "<<<SPLIT>>>" in payload
-    if sepPos is 0 then
-      display notification "Classifier output missing split marker" with title "New DT Archive Note"
+    set titleEnd to offset of linefeed in payload
+    if titleEnd is 0 then
+      display notification "Classifier output missing title" with title "New DT Archive Note"
       return
     end if
-    set theTitle to text 1 thru (sepPos - 2) of payload
-    set theBody to text (sepPos + 12) thru -1 of payload
+    set encodedTitle to text 1 thru (titleEnd - 1) of payload
+    set encodedBody to text (titleEnd + 1) thru -1 of payload
+    try
+      set theTitle to do shell script "printf %s " & quoted form of encodedTitle & " | /usr/bin/base64 -D" without altering line endings
+      set theBody to do shell script "printf %s " & quoted form of encodedBody & " | /usr/bin/base64 -D" without altering line endings
+    on error errMsg
+      display notification "Classifier output malformed: " & errMsg with title "New DT Archive Note"
+      return
+    end try
     tell application id "DNtp"
       set tgt to get record with uuid archiveGroupUUID
       set newRec to create record with {name:theTitle, type:markdown, plain text:theBody} in tgt

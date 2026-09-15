@@ -14,7 +14,7 @@
     <div class="item">
       <div class="meta"></div>
       <div class="content">
-        <span class="title title--small" data-clamp="1">{{ m.title }}</span>
+        <span class="title title--small" data-clamp="1">{{ m.title | escape }}</span>
         <span class="label label--small label--underline">{{ m.time }}</span>
       </div>
     </div>
@@ -47,7 +47,7 @@
     <div class="item">
       <div class="meta"></div>
       <div class="content">
-        <span class="title title--small" data-clamp="1">{{ b.name }}</span>
+        <span class="title title--small" data-clamp="1">{{ b.name | escape }}</span>
         <span class="label label--small label--gray">{{ b.date | date: "%b %-d" }}{% if b.today %} · today{% endif %}</span>
       </div>
     </div>
@@ -74,7 +74,7 @@
     <div class="item">
       <div class="meta"></div>
       <div class="content">
-        <span class="title title--small" data-clamp="1">{{ r.name }}</span>
+        <span class="title title--small" data-clamp="1">{{ r.name | escape }}</span>
         <span class="label label--small label--gray">{% if r.days %}{{ r.days }} days ago{% else %}no contact logged{% endif %}</span>
       </div>
     </div>

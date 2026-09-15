@@ -58,18 +58,27 @@ on run
     display notification payload with title "Added bookmark to DT Inbox"
 
   else if modeFlag is "markdown" then
-    set sepPos to offset of "<<<SPLIT>>>" in payload
-    if sepPos is 0 then
-      display notification "Classifier output missing split marker" with title "New DT Inbox Note"
+    set titleEnd to offset of linefeed in payload
+    if titleEnd is 0 then
+      display notification "Classifier output missing title" with title "New DT Inbox Note"
       return
     end if
-    set theTitle to text 1 thru (sepPos - 2) of payload
-    set theBody to text (sepPos + 12) thru -1 of payload
+    set encodedTitle to text 1 thru (titleEnd - 1) of payload
+    set encodedBody to text (titleEnd + 1) thru -1 of payload
+    try
+      set theTitle to do shell script "printf %s " & quoted form of encodedTitle & " | /usr/bin/base64 -D" without altering line endings
+      set theBody to do shell script "printf %s " & quoted form of encodedBody & " | /usr/bin/base64 -D" without altering line endings
+    on error errMsg
+      display notification "Classifier output malformed: " & errMsg with title "New DT Inbox Note"
+      return
+    end try
 
     -- Pre-lint the body so the imported record arrives in house style and
     -- we can pre-flag Recognized=1/Commented=1 to keep Extract: Native
     -- Text Bypass from matching. Falls through with the raw body if the
     -- helper isn't installed.
+    set tmpPath to ""
+    set originalBody to theBody
     try
       set tmpPath to do shell script "mktemp /tmp/km-inbox-note.XXXXXX.md"
       set fileRef to open for access (POSIX file tmpPath) with write permission
@@ -78,8 +87,13 @@ on run
       close access fileRef
       do shell script "$HOME/.local/bin/lint-markdown-file " & quoted form of tmpPath
       set theBody to do shell script "cat " & quoted form of tmpPath without altering line endings
-      do shell script "rm -f " & quoted form of tmpPath
+    on error
+      try
+        close access fileRef
+      end try
+      set theBody to originalBody
     end try
+    if tmpPath is not "" then do shell script "rm -f " & quoted form of tmpPath
 
     tell application id "DNtp"
       set tgt to get record with uuid inboxGroupUUID

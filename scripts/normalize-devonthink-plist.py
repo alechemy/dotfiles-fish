@@ -50,19 +50,28 @@ def load_plist(path):
         return plistlib.load(f)
 
 
+def load_custom_metadata(path):
+    fields = load_plist(path)
+    if not isinstance(fields, list) or any(
+        not isinstance(field, dict)
+        or not isinstance(field.get("identifier"), str)
+        or not field["identifier"]
+        or type(field.get("index", 0)) is not int
+        for field in fields
+    ):
+        raise ValueError("custom metadata must be a list of field definitions")
+    return fields
+
+
 def custom_metadata_status(seed_path, live_path):
     """missing | same | differs. Ignores `index` and RUNTIME_KEYS: "differs"
     means at least one seed identifier is absent from live, matching exactly
     what custom_metadata_merge would add — a merge-caused index shuffle is
     never mistaken for configuration drift."""
+    seed = load_custom_metadata(seed_path)
     if not os.path.exists(live_path):
         return "missing"
-    try:
-        seed, live = load_plist(seed_path), load_plist(live_path)
-    except Exception:
-        return "differs"
-    if not isinstance(seed, list) or not isinstance(live, list):
-        return "differs"
+    live = load_custom_metadata(live_path)
     have = {f.get("identifier") for f in live}
     return "differs" if any(f.get("identifier") not in have for f in seed) \
         else "same"
@@ -75,12 +84,13 @@ def custom_metadata_merge(seed_path, live_path):
     (no index reassignment, so the seed's own field order is preserved) — the
     same algorithm seed-devonthink-config.sh uses. Writes live_path atomically
     and returns the identifiers added."""
-    seed = load_plist(seed_path)
-    if not os.path.exists(live_path):
+    seed = load_custom_metadata(seed_path)
+    missing = not os.path.exists(live_path)
+    if missing:
         live = seed
         added = [f.get("identifier") for f in seed]
     else:
-        live = load_plist(live_path)
+        live = load_custom_metadata(live_path)
         have = {f.get("identifier") for f in live}
         nxt = max((f.get("index", 0) for f in live), default=0) + 1
         added = []
@@ -92,7 +102,7 @@ def custom_metadata_merge(seed_path, live_path):
             nxt += 1
             live.append(field)
             added.append(field.get("identifier"))
-    if added:
+    if added or missing:
         fd, tmp = tempfile.mkstemp(
             dir=os.path.dirname(live_path) or ".", suffix=".plist")
         try:

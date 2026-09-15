@@ -1,3 +1,6 @@
+from contextlib import ExitStack
+from pathlib import Path
+
 import io
 import json
 import os
@@ -509,6 +512,37 @@ class MemoryPressureGate(unittest.TestCase):
         with mock.patch.object(jp.subprocess, "check_output",
                                side_effect=OSError("no sysctl")):
             self.assertTrue(jp.memory_pressure_normal())
+
+
+class SuccessStamp(unittest.TestCase):
+    def test_stamp_requires_empty_queue_or_progress(self):
+        for mode in ("empty", "unavailable", "idle", "failure", "progress"):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as tmp, ExitStack() as stack:
+                root = Path(tmp)
+                staged = root / "staging"
+                staged.mkdir()
+                if mode != "empty":
+                    (staged / "Fixture.pdf").write_bytes(b"fictional pdf")
+                stamp = root / "last-success"
+                stamp.write_text("123")
+                for key, value in (("STATE_DIR", tmp), ("STATE_FILE", str(root / "state.json")),
+                                   ("STAGING_DIR", str(staged)), ("SUCCESS_FILE", str(stamp))):
+                    stack.enter_context(mock.patch.object(jp, key, value))
+                stack.enter_context(mock.patch.object(jp.sys, "argv", ["boox-process"]))
+                stack.enter_context(mock.patch.object(jp.subprocess, "run", return_value=mock.Mock(returncode=0)))
+                stack.enter_context(mock.patch.object(jp, "acquire_lock", return_value=object()))
+                config = dict(jp.DEFAULTS, IDLE_MINUTES="10" if mode == "idle" else "0")
+                stack.enter_context(mock.patch.object(jp, "load_config", return_value=config))
+                stack.enter_context(mock.patch.object(jp, "load_state", return_value={}))
+                stack.enter_context(mock.patch.object(jp, "auto_rebuild_if_missing"))
+                stack.enter_context(mock.patch.object(jp, "user_idle_seconds", return_value=0))
+                stack.enter_context(mock.patch.object(jp, "memory_pressure_normal", return_value=True))
+                stack.enter_context(mock.patch.object(jp, "omlx_available", return_value=mode != "unavailable"))
+                work = stack.enter_context(mock.patch.object(jp, "process_notebook", return_value=1))
+                if mode == "failure":
+                    work.side_effect = jp.LLMUnavailable("fixture")
+                jp.main()
+                self.assertEqual(stamp.read_text() != "123", mode in ("empty", "progress"))
 
 
 if __name__ == "__main__":

@@ -1177,14 +1177,6 @@ def main():
         if lock_fd is None:
             log.info("another boox-process run holds the lock, exiting")
             return
-        # A fresh .last-run only proves the process ticked; this proves it
-        # also got past the role/battery gates instead of being silently
-        # skipped by them every time (dt-watchdog checks the two against
-        # each other).
-        os.makedirs(STATE_DIR, exist_ok=True)
-        with open(SUCCESS_FILE, "w") as f:
-            f.write(str(int(time.time())))
-
     config = load_config()
     state_file_existed = os.path.exists(STATE_FILE)
     state = load_state()
@@ -1197,6 +1189,10 @@ def main():
 
     staged = sorted(glob.glob(os.path.join(STAGING_DIR, "*.pdf")))
     if not staged:
+        if not dry_run:
+            os.makedirs(STATE_DIR, exist_ok=True)
+            with open(SUCCESS_FILE, "w") as f:
+                f.write(str(int(time.time())))
         return
 
     idle_min = int(config["IDLE_MINUTES"])
@@ -1240,6 +1236,10 @@ def main():
                       os.path.basename(pdf_path), exc)
     if processed:
         log.info("run complete: %d page(s) transcribed", processed)
+    if not dry_run and (processed or not glob.glob(os.path.join(STAGING_DIR, "*.pdf"))):
+        os.makedirs(STATE_DIR, exist_ok=True)
+        with open(SUCCESS_FILE, "w") as f:
+            f.write(str(int(time.time())))
 
 
 if __name__ == "__main__":

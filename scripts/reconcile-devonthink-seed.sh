@@ -15,7 +15,7 @@
 #       not mistaken for drift. Nothing is written.
 #   ./reconcile-devonthink-seed.sh --apply [relative-path ...]
 #       Copy seed files over the live copies. With no paths, applies every
-#       file that currently differs; with paths, applies exactly those
+#       file that differs or is missing; with paths, applies exactly those
 #       (relative to _seed/, e.g. "Library/Application Support/DEVONthink/
 #       SmartRules.plist"). Each live file is backed up first to
 #       ~/.local/state/devonthink/seed-backups/<timestamp>/ preserving its
@@ -63,13 +63,13 @@ fi
 status_of() {
   local seed_file="$1" live="$2"
   local rel="${seed_file#"$SEED_ROOT"/}"
-  if [ ! -e "$live" ]; then
-    echo "missing"
-    return 0
-  fi
   if [ "$rel" = "$META_REL" ]; then
     "$DOTFILES/scripts/normalize-devonthink-plist.py" \
       --custom-metadata-status "$seed_file" "$live"
+    return $?
+  fi
+  if [ ! -e "$live" ]; then
+    echo "missing"
     return 0
   fi
   case "$seed_file" in
@@ -130,14 +130,15 @@ if [ "${#TARGETS[@]}" -gt 0 ]; then
 else
   while IFS= read -r src; do
     rel="${src#"$SEED_ROOT"/}"
-    if [ "$(status_of "$src" "$HOME/$rel")" = "differs" ]; then
+    st="$(status_of "$src" "$HOME/$rel")"
+    if [ "$st" = "differs" ] || [ "$st" = "missing" ]; then
       to_apply+=("$rel")
     fi
   done < <(find "$SEED_ROOT" -type f ! -name '.DS_Store')
 fi
 
 if [ "${#to_apply[@]}" -eq 0 ]; then
-  echo "Nothing to apply: no differing seed files."
+  echo "Nothing to apply: no differing or missing seed files."
   exit 0
 fi
 

@@ -18,6 +18,7 @@ from pathlib import Path
 from helpers import load
 
 be = load("brief_events.py", "brief_events")
+mb = load("dt-morning-brief.py", "dt_morning_brief")
 
 BRIDGE = (Path(__file__).resolve().parents[2] / "stow" / "devonthink" /
           ".local" / "bin" / "entity-dt-bridge.js")
@@ -261,6 +262,25 @@ class Merge(unittest.TestCase):
         self.assertFalse(out["changed"])
         out2 = self.merge(BODY, bad)
         self.assertNotIn("10:00am", out2["text"] or "")
+
+    def test_escaped_labels_round_trip_through_both_renderers_and_parsers(self):
+        titles = json.loads((Path(__file__).parent / "fixtures" /
+                             "event-link-labels.json").read_text())
+        for title in titles:
+            linked = be.event_line({"title": title, "time": "10:00am",
+                                    "style": "timeline", "suffix": ""}, "UUID")
+            italic, _ = mb.event_title_md(
+                {"raw_title": title, "title": title}, [], "2026-07-14")
+            for line in (linked, "- 10:00am: 📅 " + italic):
+                with self.subTest(line=line):
+                    self.assertEqual(be.parse_events("# Day\n\n" + line)[0]["title"], title)
+                    parsed = call("parseEventBullet", [line], self.tmp)
+                    self.assertEqual(parsed["title"], title)
+                    desired = [{"minutes": 600, "title": title,
+                                "subLines": [], "line": line}]
+                    out = self.merge(["# Day", "", "- "], desired)
+                    self.assertEqual(out["skipped"], 0)
+                    self.assertFalse(self.merge(out["text"].splitlines(), desired)["changed"])
 
     def test_italic_noteless_lines_round_trip_and_self_migrate(self):
         """A dtnote-linked title renders italicized (*[T](dtnote://…)*); the

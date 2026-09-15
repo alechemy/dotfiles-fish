@@ -98,26 +98,19 @@ ingest_html() {
 
 log "starting, watching $STAGING_DIR"
 
-# One-time backlog sweep: any .html files already present when the watcher
-# starts (after a crash, re-bootstrap, or manual drop) would otherwise be
-# ignored until they're rewritten. Pick them up before subscribing to events.
-shopt -s nullglob 2>/dev/null || true
-for backlog_path in "$STAGING_DIR"/*.html; do
-    [[ -f "$backlog_path" ]] || continue
-    ingest_html "$backlog_path" backlog
-done
-shopt -u nullglob 2>/dev/null || true
+/opt/homebrew/bin/fswatch -0 --event Created --event Renamed "$STAGING_DIR" | {
+    shopt -s nullglob
+    for backlog_path in "$STAGING_DIR"/*.html; do
+        [[ -f "$backlog_path" ]] || continue
+        ingest_html "$backlog_path" backlog
+    done
+    shopt -u nullglob
 
-# --event Created --event Renamed: catch files written directly into the folder
-#   *and* files that arrive via rename. Browser downloads (SingleFile's save
-#   path) finalize by renaming a temp file to the final .html — FSEvents reports
-#   that as Renamed, not Created, so without Renamed here a live desktop capture
-#   is missed until the next watcher restart's backlog sweep.
-# -0: NUL-separated output so filenames with newlines don't break us
-/opt/homebrew/bin/fswatch -0 --event Created --event Renamed "$STAGING_DIR" | while IFS= read -r -d '' path; do
-    case "$path" in
-        *.html)
-            ingest_html "$path" fswatch
-            ;;
-    esac
-done
+    while IFS= read -r -d '' path; do
+        case "$path" in
+            *.html)
+                ingest_html "$path" fswatch
+                ;;
+        esac
+    done
+}

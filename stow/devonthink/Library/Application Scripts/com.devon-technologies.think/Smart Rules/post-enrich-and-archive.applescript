@@ -144,12 +144,18 @@ on performSmartRule(theRecords)
 									end if
 								end repeat
 
+								set createdTasks to {}
 								if (count of newTasksToCreate) > 0 then
 									try
 										tell application "Things3"
 											repeat with taskStr in newTasksToCreate
-												set taskNotes to "From DEVONthink: " & recName & return & docLink
-												make new to do with properties {name:taskStr, notes:taskNotes}
+												try
+													set taskNotes to "From DEVONthink: " & recName & return & docLink
+													make new to do with properties {name:taskStr, notes:taskNotes}
+													set end of createdTasks to taskStr as text
+												on error taskErr
+													my pipelineLog("Post-Enrich & Archive", "WARN", "Things 3 task failed: " & taskErr, recName, recUUID)
+												end try
 											end repeat
 										end tell
 									on error thingsErr
@@ -157,12 +163,12 @@ on performSmartRule(theRecords)
 									end try
 								end if
 
-								-- Save the full list of tasks so future updates ignore them
+								-- Save only tasks confirmed by Things so failed creations retry.
 								set updatedTasksRaw to ""
 								if oldTasksRaw is not missing value then
 									set updatedTasksRaw to oldTasksRaw as text
 								end if
-								repeat with aTask in newTasksToCreate
+								repeat with aTask in createdTasks
 									if updatedTasksRaw is not "" then
 										set updatedTasksRaw to updatedTasksRaw & return & aTask
 									else

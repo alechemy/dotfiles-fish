@@ -63,7 +63,39 @@ class CustomMetadataStatus(unittest.TestCase):
             self.assertEqual(ndp.custom_metadata_status(seed, live), "same")
 
 
+class CustomMetadataValidation(unittest.TestCase):
+    def test_invalid_seed_is_rejected_even_without_live_file(self):
+        for data in ({}, ["not a field"], [{"identifier": 7}],
+                     [{"identifier": "A", "index": "bad"}]):
+            with self.subTest(data=data), tempfile.TemporaryDirectory() as tmp:
+                seed = write_plist(tmp, "seed.plist", data)
+                live = os.path.join(tmp, "live.plist")
+                for operation in (ndp.custom_metadata_status, ndp.custom_metadata_merge):
+                    with self.assertRaises(ValueError):
+                        operation(seed, live)
+                self.assertFalse(os.path.exists(live))
+
+    def test_malformed_live_file_is_rejected_without_replacement(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            seed = write_plist(tmp, "seed.plist", [field("A")])
+            live = Path(tmp) / "live.plist"
+            for data in (b"not a plist", plistlib.dumps({}), plistlib.dumps(["bad"])):
+                with self.subTest(data=data):
+                    live.write_bytes(data)
+                    for operation in (ndp.custom_metadata_status, ndp.custom_metadata_merge):
+                        with self.assertRaises((ValueError, plistlib.InvalidFileException)):
+                            operation(seed, live)
+                    self.assertEqual(live.read_bytes(), data)
+
+
 class CustomMetadataMerge(unittest.TestCase):
+    def test_empty_seed_creates_an_empty_live_list(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            seed = write_plist(tmp, "seed.plist", [])
+            live = os.path.join(tmp, "live.plist")
+            self.assertEqual(ndp.custom_metadata_merge(seed, live), [])
+            self.assertEqual(ndp.load_plist(live), [])
+
     def test_creates_verbatim_when_live_is_absent(self):
         with tempfile.TemporaryDirectory() as tmp:
             seed = write_plist(tmp, "seed.plist", [field("A", index=7)])

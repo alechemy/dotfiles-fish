@@ -2,8 +2,9 @@
 """Compress base64-embedded images in a SingleFile HTML file.
 
 Finds base64 data URIs, decodes each image, recompresses as JPEG via
-macOS sips, and replaces the original if the result is smaller. Images
-under 10KB and SVGs are skipped. The file is modified in place.
+macOS sips, and atomically replaces the original if the result is smaller. Images
+under 10KB and SVGs are skipped. A failed image or write leaves the input
+unchanged.
 
 Usage: compress-singlefile-images.py <html-file>
 """
@@ -93,14 +94,6 @@ def main():
     pattern = re.compile(r"data:image/([^;]+);base64,([A-Za-z0-9+/=]+)")
     new_content = pattern.sub(process_image, content)
 
-    try:
-        with open(html_file, "w", encoding="utf-8") as f:
-            f.write(new_content)
-    except Exception:
-        sys.stderr.write(f"compress-singlefile-images: failed to write {html_file}\n")
-        sys.stderr.write(traceback.format_exc())
-        sys.exit(1)
-
     if image_failures:
         sys.stderr.write(
             f"compress-singlefile-images: {len(image_failures)} image(s) "
@@ -108,6 +101,21 @@ def main():
         )
         for msg in image_failures:
             sys.stderr.write(f"  - {msg}\n")
+        sys.exit(1)
+
+    fd, temp_path = tempfile.mkstemp(
+        dir=os.path.dirname(os.path.abspath(html_file)),
+        prefix=f".{os.path.basename(html_file)}.", suffix=".tmp",
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="") as f:
+            f.write(new_content)
+        os.replace(temp_path, html_file)
+    except Exception:
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
+        sys.stderr.write(f"compress-singlefile-images: failed to write {html_file}\n")
+        sys.stderr.write(traceback.format_exc())
         sys.exit(1)
 
 

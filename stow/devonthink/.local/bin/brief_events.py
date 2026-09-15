@@ -92,9 +92,8 @@ MACHINE_BULLET_RE = re.compile(
 # line must never classify machine (the merge would delete it).
 MACHINE_SUBLINE_RE = re.compile(
     rf"^\s+- \[?[{SUBLINE_EMOJI}]\ufe0f? |^\s{{4,}}- \d{{4}}-\d{{2}}-\d{{2}} — ")
-LINKED_TITLE_RE = re.compile(r"^\[(.+?)\]\(([^)\s]*)\)(.*)$")
-# A note-less event's title link renders italicized (*[title](dtnote://…)*).
-ITALIC_LINKED_TITLE_RE = re.compile(r"^\*\[(.+?)\]\(([^)\s]*)\)\*(.*)$")
+LINKED_TITLE_RE = re.compile(r"^\[((?:\\.|[^\]\\])+)\]\(([^)\s]*)\)(.*)$")
+ITALIC_LINKED_TITLE_RE = re.compile(r"^\*\[((?:\\.|[^\]\\])+)\]\(([^)\s]*)\)\*(.*)$")
 TENTATIVE_RE = re.compile(r"\s*\(tentative\)\s*$")
 HEADING_RE = re.compile(r"^#{1,2}\s")
 ITEM_LINK_RE = re.compile(r"x-devonthink-item://([A-Za-z0-9-]+)")
@@ -247,9 +246,9 @@ def _parse_event_rest(rest):
     """(title, url, suffix) from the text after an event line's prefix."""
     url = None
     suffix = ""
-    lm = ITALIC_LINKED_TITLE_RE.match(rest) or LINKED_TITLE_RE.match(rest)
+    lm = linked_title_parts(rest)
     if lm:
-        title, url, suffix = lm.groups()
+        title, url, suffix = lm
     else:
         title = rest
         tm = TENTATIVE_RE.search(title)
@@ -323,9 +322,25 @@ def best_match(note_name, titles):
     return best_title, "match"
 
 
+def escape_link_label(label):
+    return label.replace("\\", "\\\\").replace("[", "\\[").replace("]", "\\]")
+
+
+def unescape_link_label(label):
+    return re.sub(r"\\([\\\[\]])", r"\1", label)
+
+
+def linked_title_parts(rest):
+    match = ITALIC_LINKED_TITLE_RE.match(rest) or LINKED_TITLE_RE.match(rest)
+    if match is None:
+        return None
+    title, url, suffix = match.groups()
+    return unescape_link_label(title), url, suffix
+
+
 def event_line(ev, uuid):
     """The event's bullet line, item-linked, rendered in its own grammar."""
-    linked = f"[{ev['title']}](x-devonthink-item://{uuid}){ev['suffix']}"
+    linked = f"[{escape_link_label(ev['title'])}](x-devonthink-item://{uuid}){ev['suffix']}"
     if ev["style"] == "legacy":
         return f"- {ev['time']} — {linked}"
     return f"- {ev['time']}: {EVENT_EMOJI} {linked}"

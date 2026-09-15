@@ -44,30 +44,42 @@ def sort_timed_items(lines, header_idx):
     start = header_idx + 1
     while start < len(lines) and lines[start].strip() == "":
         start += 1
-    end = start
-    while end < len(lines) and lines[end].lstrip().startswith("- "):
-        end += 1
-    if end - start < 2:
-        return
-    # Sort whole blocks — a top-level bullet plus its indented sub-lines —
-    # by the parent bullet's time; a sub-line must never sort independently
-    # away from its parent. Blocks without a timed parent keep their
-    # original relative position at the end.
+    end = len(lines)
+    for i in range(start, len(lines)):
+        if re.match(r"^#{1,2}\s", lines[i].strip()):
+            end = i
+            break
     blocks = []
     i = start
     while i < end:
+        if not lines[i].startswith("- "):
+            i += 1
+            continue
         j = i + 1
-        while j < end and lines[j][:1].isspace():
-            j += 1
-        blocks.append(lines[i:j])
+        while j < end:
+            if lines[j][:1].isspace():
+                j += 1
+                continue
+            if lines[j].strip() == "":
+                k = j + 1
+                while k < end and lines[k].strip() == "":
+                    k += 1
+                if k < end and lines[k][:1].isspace():
+                    j = k + 1
+                    continue
+            break
+        blocks.append((i, j, lines[i:j]))
         i = j
+    if len(blocks) < 2:
+        return
     decorated = [
-        ((0, t, i) if not b[0][:1].isspace()
-         and (t := time_key(b[0])) is not None else (1, 0, i), b)
-        for i, b in enumerate(blocks)
+        ((0, t, n) if (t := time_key(b[2][0])) is not None
+         else (1, 0, n), b[2])
+        for n, b in enumerate(blocks)
     ]
     decorated.sort(key=lambda x: x[0])
-    lines[start:end] = [line for _, b in decorated for line in b]
+    for (first, last, _), (_, block) in reversed(list(zip(blocks, decorated))):
+        lines[first:last] = block
 
 
 def legacy_insert(lines, block_lines):

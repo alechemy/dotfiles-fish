@@ -1,3 +1,6 @@
+from contextlib import ExitStack
+from unittest import mock
+
 import hashlib
 import io
 import json
@@ -2236,6 +2239,48 @@ class ScanMemoryPressureGate(ScanExtractionStubs):
         ef.scan(self.config(IDLE_MINUTES="10"), self.fresh_state(),
                 False, None, True)
         self.assertEqual(len(self.extract_calls), 2)
+
+
+class ScanSuccessStamp(ScanExtractionStubs):
+    def main_stamped(self, **config):
+        with tempfile.TemporaryDirectory() as tmp, ExitStack() as stack:
+            state_file = os.path.join(tmp, "state.json")
+            open(state_file, "w").close()
+            stack.enter_context(mock.patch.object(ef, "STATE_FILE", state_file))
+            stack.enter_context(mock.patch.object(ef.sys, "argv", ["entity-filing"]))
+            stack.enter_context(mock.patch.object(ef.subprocess, "run", return_value=mock.Mock(returncode=0)))
+            stack.enter_context(mock.patch.object(ef, "acquire_lock", return_value=object()))
+            stack.enter_context(mock.patch.object(ef, "load_config", return_value=self.config(**config)))
+            stack.enter_context(mock.patch.object(ef, "load_state", return_value=self.fresh_state()))
+            for name in ("things_decisions", "candidate_things_decisions", "promote_candidates",
+                         "apply_approved", "things_reconcile", "mirror_candidates"):
+                stack.enter_context(mock.patch.object(ef, name))
+            stamp = stack.enter_context(mock.patch.object(ef, "record_success"))
+            ef.main()
+            return stamp.called
+
+    def test_empty_queue_is_healthy(self):
+        self.SOURCES = []
+        self.assertTrue(self.main_stamped(MIN_ROSTER="10"))
+
+    def test_successful_filing_is_progress(self):
+        self.assertTrue(self.main_stamped())
+
+    def test_unavailable_model_with_pending_sources_is_not_success(self):
+        ef.omlx_available = lambda config: False
+        self.assertFalse(self.main_stamped())
+
+    def test_idle_deferral_is_not_queue_progress(self):
+        self.assertFalse(self.main_stamped(IDLE_MINUTES="10"))
+        self.assertEqual(self.extract_calls, [])
+
+    def test_inference_failure_with_pending_sources_is_not_success(self):
+        with mock.patch.object(ef, "extract_omlx", side_effect=ef.LLMUnavailable("fixture")):
+            self.assertFalse(self.main_stamped())
+
+    def test_source_failure_is_not_success(self):
+        with mock.patch.object(ef, "run_bridge", side_effect=ef.BridgeUnavailable("fixture")):
+            self.assertFalse(self.main_stamped())
 
 
 if __name__ == "__main__":

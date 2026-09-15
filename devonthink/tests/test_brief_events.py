@@ -6,7 +6,9 @@ or weak match falls back to the plain timeline-bullet path, so every
 "returns None" case here is load-bearing.
 """
 
+import json
 import unittest
+from pathlib import Path
 
 from helpers import load
 
@@ -59,6 +61,20 @@ TIMELINE = """# Tuesday, July 14, 2026
 
 
 class Keys(unittest.TestCase):
+    def test_markdown_link_labels_with_nested_links_round_trip(self):
+        titles = json.loads((Path(__file__).parent / "fixtures" /
+                             "event-link-labels.json").read_text())
+        for title in titles:
+            with self.subTest(title=title):
+                line = be.event_line({"title": title, "time": "10:00am",
+                                      "style": "timeline", "suffix": ""}, "UUID")
+                events = be.parse_events("# Day\n\n" + line)
+                self.assertEqual(events[0]["title"], title)
+                rendered, _ = mb.event_title_md(
+                    {"raw_title": title, "title": title + " (tentative)"}, [], TODAY)
+                self.assertEqual(be.linked_title_parts(rendered),
+                                 (title, be.dtnote_url(TODAY, title), " (tentative)"))
+
     def test_slug_folds_case_punctuation_and_diacritics(self):
         self.assertEqual(be.slug("SE / Prod Engineering Sync"),
                          "se-prod-engineering-sync")

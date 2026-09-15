@@ -2404,6 +2404,7 @@ def pick_transport(config):
 
 
 def scan(config, state, dry_run, force_uuid, user_invoked):
+    """Return whether the queue was empty or at least one source progressed."""
     people, sources, listing = run_bridge([
         {"op": "dump_people", "include_bodies": False},
         {"op": "list_sources"},
@@ -2412,13 +2413,6 @@ def scan(config, state, dry_run, force_uuid, user_invoked):
     index = roster_index(people)
     ignored = ec.CandidateIndex(listing).ignored_names()
     selves = self_names(config)
-
-    min_roster = int(config["MIN_ROSTER"])
-    if len(people) < min_roster and not force_uuid:
-        log.info("People holds %d record(s), MIN_ROSTER is %d — extraction "
-                 "paused until /20_ENTITIES/People is seeded",
-                 len(people), min_roster)
-        return
 
     skip_re = None
     if config["SKIP_SOURCE_TITLES"]:
@@ -2436,7 +2430,7 @@ def scan(config, state, dry_run, force_uuid, user_invoked):
             except Exception as exc:
                 log.error("--force uuid %s could not be fetched: %s",
                           force_uuid, exc)
-                return
+                return False
         if not candidates[0].get("ready", True):
             log.warning("--force target still has NeedsProcessing set — its "
                         "content may not be final; extracting anyway",
@@ -2453,6 +2447,15 @@ def scan(config, state, dry_run, force_uuid, user_invoked):
         candidates.sort(key=lambda s: (source_date_of(s), s["kind"] == "fact"),
                         reverse=True)
 
+    if not candidates:
+        return True
+    min_roster = int(config["MIN_ROSTER"])
+    if len(people) < min_roster and not force_uuid:
+        log.info("People holds %d record(s), MIN_ROSTER is %d — extraction "
+                 "paused until /20_ENTITIES/People is seeded",
+                 len(people), min_roster)
+        return False
+
     limit = int(config["MAX_PER_RUN"])
     filing_mode = config["FILING_MODE"]
     idle_min = float(config["IDLE_MINUTES"])
@@ -2467,6 +2470,7 @@ def scan(config, state, dry_run, force_uuid, user_invoked):
     defer_logged = False
     no_transport = 0
     extracted_count = 0
+    progressed = False
     llm_lock = None
     llm_lock_failed = False
     for source in candidates:
@@ -2530,11 +2534,13 @@ def scan(config, state, dry_run, force_uuid, user_invoked):
             if not dry_run:
                 entry["modified"] = source.get("modified", "")
                 save_state(state)
+            progressed = True
             continue
         if len(text.split()) < min_words_for(source["kind"]):
             if not dry_run:
                 remember_processed(state, source, text)
                 save_state(state)
+            progressed = True
             continue
 
         if parked is not None and not dry_run:
@@ -2582,6 +2588,7 @@ def scan(config, state, dry_run, force_uuid, user_invoked):
             mode = effective_filing_mode(source["kind"], filing_mode)
             file_source(config, state, source, source_date, plans, mode,
                         dry_run, text, candidate_handled=handled)
+            progressed = True
         except BridgeUnavailable:
             raise
         except Exception as exc:
@@ -2596,6 +2603,7 @@ def scan(config, state, dry_run, force_uuid, user_invoked):
     if no_transport and not extracted_count:
         log.info("%d candidate source(s) waiting: no eligible transport "
                  "(TRANSPORT=%s)", no_transport, config["TRANSPORT"])
+    return progressed
 
 
 def review_group_has_name(name):
@@ -3350,9 +3358,6 @@ def main():
             log.info("another entity-filing run holds the lock, exiting")
             return
 
-    if should_record_success(dry_run):
-        record_success()
-
     config = load_config()
     state_file_existed = os.path.exists(STATE_FILE)
     state = load_state()
@@ -3378,11 +3383,14 @@ def main():
             candidate_things_decisions(config, dry_run)
             promote_candidates(dry_run)
             apply_approved(dry_run)
+        scan_healthy = apply_only
         if not apply_only:
-            scan(config, state, dry_run, force_uuid, user_invoked)
+            scan_healthy = scan(config, state, dry_run, force_uuid, user_invoked)
         if not scan_only:
             things_reconcile(config, dry_run)
             mirror_candidates(config, dry_run)
+        if should_record_success(dry_run) and scan_healthy:
+            record_success()
     except BridgeUnavailable as exc:
         log.info("skipping: %s", exc)
 

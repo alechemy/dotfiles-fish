@@ -1,5 +1,9 @@
+import io
+import os
+import subprocess
 import tempfile
 import unittest
+from unittest import mock
 from datetime import datetime
 from pathlib import Path
 
@@ -167,6 +171,64 @@ class CaptureTimestamp(unittest.TestCase):
 
     def test_past_day_keeps_its_date(self):
         self.assertEqual(self._stamp(2026, 7, 21, 23, 59), ("2026-07-21", "11:59pm"))
+
+
+class CompressionSafety(unittest.TestCase):
+    def test_failed_or_timed_out_compression_never_imports_partial_bytes(self):
+        for timeout in (False, True):
+            for import_fails in (False, True):
+                with self.subTest(timeout=timeout, import_fails=import_fails), tempfile.TemporaryDirectory() as tmp:
+                    original = Path(tmp) / "capture.html"
+                    original.write_bytes(b"original html")
+
+                    def compressor(argv, **kwargs):
+                        working = Path(argv[-1])
+                        self.assertNotEqual(working, original)
+                        working.write_bytes(b"partial write")
+                        if timeout:
+                            raise subprocess.TimeoutExpired(argv, 120)
+                        return subprocess.CompletedProcess(argv, 1, stderr="disk full")
+
+                    def importer(**kwargs):
+                        self.assertEqual(original.read_bytes(), b"original html")
+                        self.assertEqual(kwargs["html_path"].read_bytes(), b"original html")
+                        if import_fails:
+                            raise subprocess.CalledProcessError(1, "stub import")
+                        return "fictional-uuid"
+
+                    with mock.patch.object(sf.sys, "argv", ["ingest", str(original), "--force"]), \
+                            mock.patch.object(sf, "parse_source_url", return_value="https://example.com/"), \
+                            mock.patch.object(sf, "derive_title", return_value=("Capture", False, False)), \
+                            mock.patch.object(sf.subprocess, "run", side_effect=compressor), \
+                            mock.patch.object(sf, "run_defuddle", return_value=False), \
+                            mock.patch.object(sf, "import_to_devonthink", side_effect=importer):
+                        self.assertEqual(sf.main(), 1 if import_fails else 0)
+                    if import_fails:
+                        self.assertEqual(original.read_bytes(), b"original html")
+                    else:
+                        self.assertFalse(original.exists())
+
+    def test_compressor_write_and_replace_failures_leave_input_unchanged(self):
+        compressor = load("compress-singlefile-images.py", "compress_singlefile_images")
+        for failure in ("write", "replace"):
+            with self.subTest(failure=failure), tempfile.TemporaryDirectory() as tmp:
+                original = Path(tmp) / "capture.html"
+                original.write_bytes(b"original html")
+                real_fdopen = os.fdopen
+
+                def failing_fdopen(fd, *args, **kwargs):
+                    os.write(fd, b"partial")
+                    os.close(fd)
+                    raise OSError("disk full")
+
+                with mock.patch.object(compressor.sys, "argv", ["compress", str(original)]), \
+                        mock.patch.object(compressor.sys, "stderr", io.StringIO()), \
+                        mock.patch.object(compressor.os, "fdopen", side_effect=failing_fdopen if failure == "write" else real_fdopen), \
+                        mock.patch.object(compressor.os, "replace", side_effect=OSError("rename failed")):
+                    with self.assertRaises(SystemExit):
+                        compressor.main()
+                self.assertEqual(original.read_bytes(), b"original html")
+                self.assertEqual(list(Path(tmp).iterdir()), [original])
 
 
 class ImportArgv(unittest.TestCase):

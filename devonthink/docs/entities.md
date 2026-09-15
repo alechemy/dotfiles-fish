@@ -184,6 +184,12 @@ replaces a matched event's line and rebuilds its machine sub-lines, so a link
 living only in the text would be wiped by the next merge (including the
 `RunAtLoad` rerun a mid-day reboot triggers).
 
+Event link labels escape backslashes and square brackets. Both the Python
+matcher and JavaScript merge decode those escapes before comparing titles.
+Plain and italic links use the same encoding; event keys still use the original
+title. Shared fixtures in `tests/fixtures/event-link-labels.json` cover both
+renderers and parsers. The merge still rejects blocks that cannot round-trip.
+
 Rendering, per event (`event_note_index` → `brief_timeline_blocks`):
 
 - The note whose `DocumentType` contains "Meeting" owns the event: the title

@@ -16,7 +16,7 @@
       <div class="item">
         <div class="meta"></div>
         <div class="content">
-          <span class="title title--small" data-clamp="1">{{ m.title }}</span>
+          <span class="title title--small" data-clamp="1">{{ m.title | escape }}</span>
           {% assign who = m.people | map: "name" | join: " · " %}
           {% if m.unmatched and m.unmatched != empty %}
             {% assign extra = m.unmatched | join: " · " %}
@@ -26,11 +26,11 @@
           {% if m.more_people %}{% assign hidden_who = hidden_who | plus: m.more_people %}{% endif %}
           {% if m.more_unmatched %}{% assign hidden_who = hidden_who | plus: m.more_unmatched %}{% endif %}
           {% if hidden_who > 0 %}{% assign who = who | append: " +" | append: hidden_who %}{% endif %}
-          {% if who != "" %}<span class="description" data-clamp="1">{{ who }}</span>{% endif %}
+          {% if who != "" %}<span class="description" data-clamp="1">{{ who | escape }}</span>{% endif %}
           <div class="flex gap--xsmall">
             <span class="label label--small label--underline">{{ m.time }}</span>
             {% if m.people.first.role %}
-            <span class="label label--small label--gray" data-clamp="1">{{ m.people.first.role }}{% if m.people.first.employer %} · {{ m.people.first.employer }}{% endif %}</span>
+            <span class="label label--small label--gray" data-clamp="1">{{ m.people.first.role | escape }}{% if m.people.first.employer %} · {{ m.people.first.employer | escape }}{% endif %}</span>
             {% endif %}
           </div>
         </div>
@@ -66,7 +66,7 @@
       <div class="item">
         <div class="meta"></div>
         <div class="content">
-          <span class="title title--small" data-clamp="1">{{ b.name }}</span>
+          <span class="title title--small" data-clamp="1">{{ b.name | escape }}</span>
           <div class="flex gap--xsmall">
             <span class="label label--small label--gray">{{ b.date | date: "%b %-d" }}{% if b.age %} · turns {{ b.age }}{% endif %}</span>
             {% if b.today %}<span class="label label--small label--inverted">today</span>{% endif %}
@@ -92,8 +92,8 @@
       <div class="item">
         <div class="meta"></div>
         <div class="content">
-          <span class="title title--small" data-clamp="1">{{ r.name }}</span>
-          <span class="label label--small label--gray">{% if r.days %}{{ r.days }} days ago{% else %}no contact logged{% endif %}{% if r.relationship != "" %} · {{ r.relationship }}{% endif %}</span>
+          <span class="title title--small" data-clamp="1">{{ r.name | escape }}</span>
+          <span class="label label--small label--gray">{% if r.days %}{{ r.days }} days ago{% else %}no contact logged{% endif %}{% if r.relationship != "" %} · {{ r.relationship | escape }}{% endif %}</span>
         </div>
       </div>
       {% endfor %}
@@ -115,8 +115,8 @@
       <div class="item">
         <div class="meta"></div>
         <div class="content">
-          <span class="title title--small" data-clamp="1">{{ o.name }}</span>
-          <span class="label label--small label--gray">{{ o.years }} {% if o.years == 1 %}year{% else %}years{% endif %} ago{% if o.kind != "" %} · {{ o.kind }}{% endif %}</span>
+          <span class="title title--small" data-clamp="1">{{ o.name | escape }}</span>
+          <span class="label label--small label--gray">{{ o.years }} {% if o.years == 1 %}year{% else %}years{% endif %} ago{% if o.kind != "" %} · {{ o.kind | escape }}{% endif %}</span>
         </div>
       </div>
       {% endfor %}

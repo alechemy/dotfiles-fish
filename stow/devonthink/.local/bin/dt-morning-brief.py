@@ -1362,9 +1362,9 @@ def event_title_md(b, notes, today):
         (n for n in notes
          if "meeting" in (n.get("documenttype") or "").casefold()), None)
     if primary:
-        return (f"[{raw}](x-devonthink-item://{primary['uuid']}){suffix}",
+        return (f"[{be.escape_link_label(raw)}](x-devonthink-item://{primary['uuid']}){suffix}",
                 primary)
-    return f"*[{raw}]({be.dtnote_url(today, raw)})*{suffix}", None
+    return f"*[{be.escape_link_label(raw)}]({be.dtnote_url(today, raw)})*{suffix}", None
 
 
 def brief_timeline_blocks(blocks, today, event_notes=None):
@@ -2074,9 +2074,6 @@ def main():
             log.info("another morning-brief run holds the lock, exiting")
             return
 
-    if should_record_success(dry_run):
-        record_success()
-
     try:
         conf = load_config()
     except OSError as exc:
@@ -2276,11 +2273,13 @@ def main():
                     result["skipped"])
     if not result.get("changed"):
         log.info("timeline already current, nothing to do")
-        return
-    log.info(
-        "merged %d event blocks into daily note %s", len(timeline), today,
-        extra={"record_name": today, "record_uuid": daily["uuid"]},
-    )
+    else:
+        log.info(
+            "merged %d event blocks into daily note %s", len(timeline), today,
+            extra={"record_name": today, "record_uuid": daily["uuid"]},
+        )
+    if should_record_success(dry_run) and not failed_sources and not result.get("skipped"):
+        record_success()
 
 
 if __name__ == "__main__":

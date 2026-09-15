@@ -59,9 +59,10 @@ fi
 
 mkdir -p "$DEST_DIR" "$STATE_DIR"
 DEST="$DEST_DIR/${DB_NAME}-$(date +%Y-%m-%d).dtBase2.zip"
+TMP_DEST="$DEST_DIR/.${DB_NAME}-$(date +%Y-%m-%d).dtBase2.zip.partial.$$"
 
 TMPSCRIPT=$(mktemp /tmp/dt-archive.XXXXXX.scpt)
-trap 'rm -f "$TMPSCRIPT"' EXIT
+trap 'rm -f "$TMPSCRIPT" "$TMP_DEST"' EXIT
 cat > "$TMPSCRIPT" << 'APPLESCRIPT'
 on run argv
     set dbName to item 1 of argv
@@ -88,7 +89,7 @@ end run
 APPLESCRIPT
 
 log "archiving ${DB_NAME} to $DEST"
-AS_OUTPUT=$(/usr/bin/osascript "$TMPSCRIPT" "$DB_NAME" "$DEST" 2>&1) || {
+AS_OUTPUT=$(/usr/bin/osascript "$TMPSCRIPT" "$DB_NAME" "$TMP_DEST" 2>&1) || {
     err "archive AppleScript failed: $AS_OUTPUT"
     exit 1
 }
@@ -104,13 +105,16 @@ case "$AS_OUTPUT" in
         ;;
 esac
 
-if [[ ! -s "$DEST" ]]; then
-    err "archive missing or empty: $DEST"
+if [[ ! -s "$TMP_DEST" ]]; then
+    err "archive missing or empty: $TMP_DEST"
     exit 1
 fi
-if ! unzip -tq "$DEST" >/dev/null 2>&1; then
-    err "archive failed CRC check, deleting: $DEST"
-    rm -f "$DEST"
+if ! unzip -tq "$TMP_DEST" >/dev/null 2>&1; then
+    err "archive failed CRC check, retaining prior archive: $DEST"
+    exit 1
+fi
+if ! mv -f "$TMP_DEST" "$DEST"; then
+    err "archive replacement failed, retaining prior archive: $DEST"
     exit 1
 fi
 

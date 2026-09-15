@@ -206,13 +206,21 @@ on performSmartRule(theRecords)
           -- AI may return "null" as a string or missing value
           if theDate is missing value then set theDate to ""
           if theDate is "null" then set theDate to ""
-          -- Validate yyyy-mm-dd format (10 chars, dashes at positions 5 & 8)
+          -- Validate a real proleptic-Gregorian date before persisting it.
           if theDate is not "" then
+            set validDate to true
             if (count of theDate) is not 10 ¬
               or character 5 of theDate is not "-" ¬
               or character 8 of theDate is not "-" then
-              set theDate to ""
+              set validDate to false
+            else
+              try
+                do shell script "/usr/bin/python3 -c " & quoted form of "import datetime, sys; datetime.date.fromisoformat(sys.argv[1])" & " " & quoted form of theDate
+              on error
+                set validDate to false
+              end try
             end if
+            if not validDate then set theDate to ""
           end if
         end try
 

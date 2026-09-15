@@ -74,6 +74,25 @@ class LegacyHeaderPath(unittest.TestCase):
         self.assertEqual(
             out, "## Today's Notes\n\n- 7:00am: b\n- 8:00am: c\n- 9:00am: a")
 
+    def test_sort_reaches_timed_bullets_after_indented_continuation(self):
+        note = ("## Today's Notes\n\n"
+                "- 3:00pm: later\n"
+                "  prose continues on the next line\n"
+                "- 9:00am: earlier\n")
+        out = run(note, "- 1:00pm: middle")
+        self.assertLess(out.index("- 9:00am:"), out.index("- 1:00pm:"))
+        self.assertLess(out.index("- 1:00pm:"), out.index("- 3:00pm:"))
+        self.assertIn("  prose continues on the next line", out)
+
+    def test_sort_preserves_manual_prose_and_blank_separators(self):
+        note = ("## Today's Notes\n\n- 3:00pm: later\n"
+                "  continuation\n\nManual paragraph.\n\n"
+                "- 9:00am: earlier\n")
+        out = run(note, "- 1:00pm: middle")
+        self.assertIn("\n\nManual paragraph.\n\n", out)
+        self.assertIn("- 3:00pm: later\n  continuation", out)
+        self.assertEqual(out.count("Manual paragraph."), 1)
+
     def test_sort_moves_whole_blocks_never_bare_sublines(self):
         note = ("## Today's Notes\n\n"
                 "- 3:00pm: 🔗 [Later clip](x-devonthink-item://L)\n"

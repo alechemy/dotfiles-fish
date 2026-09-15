@@ -263,9 +263,14 @@ const EVENT_BULLET_RE = /^- (\d{1,2}:\d{2}(?:am|pm)): \u{1F4C5}\uFE0F? (.+)$/u
 // manual line must never classify machine (the merge would delete it).
 const MACHINE_SUBLINE_RE =
   /^\s+- (?:\[?[✏\u{1F4DD}\u{1F464}⚠]\uFE0F? )|^\s{4,}- \d{4}-\d{2}-\d{2} — /u
-const LINKED_TITLE_RE = /^\[(.+?)\]\(([^)\s]*)\)(.*)$/
-// A note-less event's title link renders italicized (*[title](dtnote://…)*).
-const ITALIC_LINKED_TITLE_RE = /^\*\[(.+?)\]\(([^)\s]*)\)\*(.*)$/
+const LINKED_TITLE_RE = /^\[((?:\\.|[^\]\\])+)\]\(([^)\s]*)\)(.*)$/
+const ITALIC_LINKED_TITLE_RE = /^\*\[((?:\\.|[^\]\\])+)\]\(([^)\s]*)\)\*(.*)$/
+
+function linkedTitleParts(rest) {
+  const match = ITALIC_LINKED_TITLE_RE.exec(rest) || LINKED_TITLE_RE.exec(rest)
+  if (!match) return null
+  return [match[1].replace(/\\([\\\[\]])/g, '$1'), match[2], match[3]]
+}
 const EMPTY_BULLET_RE = /^\s*[-*]\s*$/
 const REDACTED_TITLE = 'Private event'
 
@@ -307,8 +312,8 @@ function parseEventBullet(line) {
   if (!m) return null
   const minutes = timedBulletMinutes(line)
   const rest = m[2]
-  const lm = ITALIC_LINKED_TITLE_RE.exec(rest) || LINKED_TITLE_RE.exec(rest)
-  if (lm) return { minutes: minutes, title: lm[1], redacted: false }
+  const lm = linkedTitleParts(rest)
+  if (lm) return { minutes: minutes, title: lm[0], redacted: false }
   if (rest === REDACTED_TITLE) return { minutes: minutes, title: null, redacted: true }
   return null
 }

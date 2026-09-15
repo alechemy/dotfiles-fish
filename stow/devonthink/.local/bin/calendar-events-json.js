@@ -112,7 +112,7 @@ function run(argv) {
   const endParts = endStr.split('-').map(Number)
   const dayStart = new Date(parts[0], parts[1] - 1, parts[2]).getTime() / 1000
   const dayEnd =
-    new Date(endParts[0], endParts[1] - 1, endParts[2]).getTime() / 1000 + 86400
+    new Date(endParts[0], endParts[1] - 1, endParts[2] + 1).getTime() / 1000
   const start = $.NSDate.dateWithTimeIntervalSince1970(dayStart)
   const end = $.NSDate.dateWithTimeIntervalSince1970(dayEnd)
   const pred = store.predicateForEventsWithStartDateEndDateCalendars(start, end, $())

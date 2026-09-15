@@ -363,6 +363,11 @@ The [4.4 API review](docs/devonthink-4.4-plan.md#dt44-05-compare-native-web-extr
 | `com.user.singlefile-watcher.plist` | `~/Library/LaunchAgents/` | Keeps the watcher alive. `RunAtLoad=true`, `KeepAlive=true`. |
 | `capture-with-singlefile` | `~/.local/bin/` | Existing script — drives running Chromium via AppleScript, triggers SingleFile via `Cmd+D` keystroke, returns the output file path. Unchanged. |
 
+The ingester compresses a temporary copy outside Downloads. Compression failures
+fall back to a fresh copy of the original, which stays in staging until import
+succeeds. The watcher starts its event stream before sweeping the backlog and
+processes both through one serial ingestion loop.
+
 ### Records produced
 
 Both scenarios converge on the same three-record set:
@@ -440,6 +445,12 @@ Default blocklist is `youtube.com`, `youtu.be`, `spotify.com`. Edit the file to 
 Most pipeline components — the ingest smart rules, Python scripts, shell watchers — write to a single central log at `~/Library/Logs/devonthink-pipeline.log`. See the [Pipeline Logging](#pipeline-logging) section for the format and how to grep it. Exceptions: `import-granola.py` and `import-github-stars.py` keep their own log files, `create-daily-note.sh` writes to `~/Library/Logs/dt-daily-note.log`, and the Util/formatting rules (`Process: Jots`, `Format: Boox Comments`, `Lint Markdown`, H1 sync) log only to DT's Log window. The SingleFile watcher's raw stdout/stderr also lands at `/tmp/singlefile-watcher.log` (launchd's capture) in case the pipeline log itself fails to write.
 
 `dt-watchdog.sh` (every 5 minutes) is the consumer that makes failures visible: it scans the newly-written regions of the central log, `dt-daily-note.log`, and `github-stars-import.log` for `ERROR`/`WARN`/`ALERT` lines and raises a macOS notification per new failure signature (digit-stripped, re-notified at most daily; state in `~/.local/state/devonthink/watchdog-scan/`). It also verifies the two fswatch watcher agents have live processes (kickstarting and alerting when not) and flags `.html` files stuck in `~/Downloads/SingleFile/` for more than 15 minutes.
+
+Briefing, entity filing, and Boox processing write `last-success` only after
+healthy completion or queue progress. An empty processing queue counts as healthy;
+a pending queue with an unavailable model does not. Battery, idle, and memory
+pressure gates still defer work without treating the skip as an execution error.
+The existing watchdog thresholds allow for these deferrals.
 
 ## Pipeline Logging
 
@@ -862,7 +873,7 @@ The repository manages native database archives as well as the scripts and seede
 
 [`dt-database-archive.sh`](../stow/devonthink/.local/bin/dt-database-archive.sh) is scheduled by [`com.user.dt-database-archive`](../stow/devonthink/Library/LaunchAgents/com.user.dt-database-archive.plist.template) at 03:30 local time each day. It does not run at agent load. Normal invocations skip until seven days have elapsed since the last recorded success, then check the power and driver-role gates. Battery or UPS power skips the attempt; unknown power status follows the shared helper's fail-open policy. DEVONthink must already be running with Lorebook open. These conditions can make an archive older than seven days; a scheduled tick is not proof of a backup.
 
-The job asks DEVONthink to verify the database and proceeds only when it reports zero errors. It then compresses the database to `Lorebook-YYYY-MM-DD.dtBase2.zip`, requires a nonempty file, and tests ZIP integrity with `unzip -tq`. Only after those checks does it update `~/.local/state/devonthink/dt-database-archive.last-success` and prune matching archives to the four most recently modified files.
+The job asks DEVONthink to verify the database and proceeds only when it reports zero errors. It compresses the database to a unique hidden partial file, requires a nonempty file, and tests ZIP integrity with `unzip -tq`. It then atomically replaces `Lorebook-YYYY-MM-DD.dtBase2.zip`, preserving any previous same-day archive if compression or verification fails. Retention ignores partial files. Only after replacement does it update `~/.local/state/devonthink/dt-database-archive.last-success` and prune matching archives to the four most recently modified files.
 
 Setup loads the job only on the driver and boots it out on followers. `--force` bypasses the cadence, power, and role gates, but still requires the open database and still performs verification and rotation. The date-only destination means a second forced run on the same day targets the same filename, not a new recovery point. See the [runbook](docs/runbook.md#database-restore) before using it.
 
