@@ -22,11 +22,13 @@
 
 set -u
 
-input=$(cat 2>/dev/null || true)
+input=$(cat 2>/dev/null) || exit 0
+printf '%s' "$input" | jq -e 'type == "object"' >/dev/null 2>&1 || exit 0
 
-cwd=$(printf '%s' "$input" | jq -r '.cwd // empty' 2>/dev/null || true)
+cwd=$(printf '%s' "$input" | jq -r '.cwd // empty' 2>/dev/null) || exit 0
 { [ -n "$cwd" ] && [ -d "$cwd" ]; } || cwd=$PWD
-transcript=$(printf '%s' "$input" | jq -r '.transcript_path // .transcriptPath // empty' 2>/dev/null || true)
+transcript=$(printf '%s' "$input" | jq -r '.transcript_path // .transcriptPath // empty' 2>/dev/null) || exit 0
+[ -z "$transcript" ] || [ -f "$transcript" ] || exit 0
 
 command -v git >/dev/null 2>&1 || exit 0
 
@@ -49,19 +51,32 @@ commit_offset() {
     return 1
   fi
 }
-t_claude=$(printf '%s' "$input" | jq -r '.transcript_path // empty' 2>/dev/null || true)
+t_claude=$(printf '%s' "$input" | jq -r '.transcript_path // empty' 2>/dev/null) || exit 0
 if [ -n "$t_claude" ] && [ -f "$t_claude" ]; then
   state=${XDG_STATE_HOME:-$HOME/.local/state}/agent-hooks
   offset_file="$state/$(printf '%s' "$t_claude" | cksum | awk '{print $1 "-" $2}').strip.offset"
-  size=$(wc -c <"$t_claude" 2>/dev/null | tr -d '[:space:]')
-  case $size in '' | *[!0-9]*) size=0 ;; esac
+  size=$(set -o pipefail; wc -c <"$t_claude" 2>/dev/null | tr -d '[:space:]') || exit 0
+  case $size in '' | *[!0-9]*) exit 0 ;; esac
   prev=$(cat "$offset_file" 2>/dev/null || true)
   case $prev in '' | *[!0-9]*) prev=0 ;; esac
   [ "$prev" -le "$size" ] || prev=0
-  if [ "$prev" -gt 0 ] &&
-    ! tail -c +"$((prev + 1))" "$t_claude" 2>/dev/null | grep -Eq '"name"[[:space:]]*:[[:space:]]*"(Edit|Write|MultiEdit|NotebookEdit)"'; then
-    commit_offset 2>/dev/null || true
-    exit 0
+  # Preserve trailing newlines so the checkpoint counts the exact validated
+  # bytes, not an earlier wc boundary that an append may have since completed.
+  region=$(tail -c +"$((prev + 1))" "$t_claude" 2>/dev/null && printf '.') || exit 0
+  region=${region%.}
+  region_size=$(set -o pipefail; printf '%s' "$region" | wc -c | tr -d '[:space:]') || exit 0
+  case $region_size in '' | *[!0-9]*) exit 0 ;; esac
+  size=$((prev + region_size))
+  # An unreadable or incomplete append is not a successful no-edit scan.
+  printf '%s' "$region" | jq empty >/dev/null 2>&1 || exit 0
+  if [ "$prev" -gt 0 ]; then
+    if grep -E '"name"[[:space:]]*:[[:space:]]*"(Edit|Write|MultiEdit|NotebookEdit)"' <<<"$region" >/dev/null 2>&1; then
+      :
+    else
+      [ "$?" -eq 1 ] || exit 0
+      commit_offset 2>/dev/null || true
+      exit 0
+    fi
   fi
 fi
 
@@ -69,19 +84,23 @@ fi
 # with no tool_result items; isMeta entries are hook/system injections, not prompts).
 turn_start=""
 edited=""
-if [ -n "$transcript" ] && [ -f "$transcript" ]; then
-  turn_start=$(jq -r '
+if [ -n "$transcript" ]; then
+  # Parse one successful read. Later file changes cannot turn a read failure into
+  # an empty target list or change the baseline halfway through processing.
+  snapshot=$(cat "$transcript" 2>/dev/null) || exit 0
+  jq empty <<<"$snapshot" >/dev/null 2>&1 || exit 0
+  turn_start=$(set -o pipefail; jq -r '
     select(.type=="user" and ((.isMeta // false) | not))
     | select(.message.content
         | (type=="string") or (type=="array" and ([.[]?.type] | index("tool_result") | not)))
     | .timestamp // empty
-  ' "$transcript" 2>/dev/null | tail -n 1)
-  edited=$(jq -r --arg ts "$turn_start" '
+  ' <<<"$snapshot" 2>/dev/null | tail -n 1) || exit 0
+  edited=$(set -o pipefail; jq -r --arg ts "$turn_start" '
     select(.type=="assistant" and ($ts=="" or .timestamp >= $ts))
     | .message.content[]?
     | select(.type=="tool_use" and (.name|test("^(Edit|Write|MultiEdit|NotebookEdit)$")))
     | (.input.file_path // .input.notebook_path // empty)
-  ' "$transcript" 2>/dev/null | sort -u)
+  ' <<<"$snapshot" 2>/dev/null | sort -u) || exit 0
 fi
 
 files=()
@@ -107,10 +126,12 @@ else
     { git -C "$root" diff --name-only -z HEAD 2>/dev/null || true
       git -C "$root" ls-files --others --exclude-standard -z 2>/dev/null || true; }
   )
-  if [ -n "$transcript" ] && [ -f "$transcript" ]; then
+  if [ -n "$transcript" ]; then
     for c in ${candidates[@]+"${candidates[@]}"}; do
       rel="${c#"$root"/}"
-      { grep -qF -- "$c" "$transcript" 2>/dev/null || grep -qF -- "$rel" "$transcript" 2>/dev/null; } && files+=("$c")
+      case "$snapshot" in
+        *"$c"* | *"$rel"*) files+=("$c") ;;
+      esac
     done
   else
     files=(${candidates[@]+"${candidates[@]}"})
@@ -125,12 +146,12 @@ fi
 # every Edit/Write tool result. Base64 keeps the embedded newlines on one line.
 baselines=""
 if [ -n "$edited" ]; then
-  baselines=$(jq -r --arg ts "$turn_start" '
+  baselines=$(set -o pipefail; jq -r --arg ts "$turn_start" '
     select(.toolUseResult | type=="object")
     | select($ts=="" or .timestamp >= $ts)
     | select(.toolUseResult.structuredPatch != null and .toolUseResult.filePath != null)
     | [.toolUseResult.filePath, (.toolUseResult.originalFile // "" | @base64)] | @tsv
-  ' "$transcript" 2>/dev/null | awk -F'\t' '!seen[$1]++')
+  ' <<<"$snapshot" 2>/dev/null | awk -F'\t' '!seen[$1]++') || exit 0
 fi
 
 # Built-in preservation (TODO/FIXME/doc/pragmas) plus a standing keep-set; honor an

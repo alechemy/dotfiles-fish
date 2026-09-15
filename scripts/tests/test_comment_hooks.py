@@ -135,6 +135,134 @@ class CommentHookTests(unittest.TestCase):
         self.assertEqual(self.hook().returncode, 0)
         self.assertFalse(marker.exists())
 
+    def append_edit(self):
+        with self.log.open("a") as stream:
+            stream.write(json.dumps({"type": "assistant", "message": {"content": [
+                {"type": "tool_use", "name": "Edit", "input": {"file_path": str(self.target)}}]},
+                "timestamp": "2026-09-01T00:00:02Z"}) + "\n")
+
+    def test_failed_tail_is_not_a_successful_no_edit_checkpoint(self):
+        self.transcript()
+        self.assertEqual(self.hook().returncode, 0)
+        checkpoint = self.offsets()[0]
+        before = checkpoint.read_bytes()
+        self.target.write_text("original = 1\nadded = 2  \n")
+        self.append_edit()
+        self.stub("tail", "#!/bin/sh\nexit 7\n")
+        self.assertEqual(self.hook().returncode, 0)
+        self.assertEqual(checkpoint.read_bytes(), before)
+        self.assertIn("added = 2  \n", self.target.read_text())
+        (self.bin / "tail").unlink()
+        self.assertEqual(self.hook().returncode, 0)
+        self.assertEqual(self.target.read_text(), "original = 1\nadded = 2\n")
+        self.assertEqual(checkpoint.read_text().strip(), str(self.log.stat().st_size))
+
+    def test_incomplete_or_malformed_append_retains_checkpoint_for_repaired_retry(self):
+        self.transcript()
+        self.assertEqual(self.hook().returncode, 0)
+        checkpoint = self.offsets()[0]
+        before = checkpoint.read_bytes()
+        valid = self.log.read_text()
+        for append in ('{"type":', '{"name":"Edit", bad-json}\n'):
+            with self.subTest(append=append):
+                self.target.write_text("original = 1\nadded = 2  \n")
+                self.log.write_text(valid + append)
+                self.assertEqual(self.hook().returncode, 0)
+                self.assertEqual(checkpoint.read_bytes(), before)
+                self.assertIn("added = 2  \n", self.target.read_text())
+        self.log.write_text(valid)
+        self.append_edit()
+        self.assertEqual(self.hook().returncode, 0)
+        self.assertEqual(self.target.read_text(), "original = 1\nadded = 2\n")
+        self.assertEqual(checkpoint.read_text().strip(), str(self.log.stat().st_size))
+
+    def test_append_completed_during_tail_uses_validated_byte_boundary(self):
+        self.transcript()
+        self.assertEqual(self.hook().returncode, 0)
+        checkpoint = self.offsets()[0]
+        valid = self.log.read_text()
+        self.append_edit()
+        row = self.log.read_text()[len(valid):]
+        self.log.write_text(valid + row[:20])
+        remainder = self.root / "remainder"
+        remainder.write_text(row[20:])
+        real_tail = shutil.which("tail")
+        self.stub("tail", "#!/usr/bin/env python3\nimport os, sys\nfrom pathlib import Path\n"
+                  + f"remainder = Path({str(remainder)!r})\n"
+                  + "if remainder.exists():\n"
+                  + f"    with Path({str(self.log)!r}).open('a') as stream: stream.write(remainder.read_text())\n"
+                  + "    remainder.unlink()\n"
+                  + f"os.execv({real_tail!r}, [{real_tail!r}, *sys.argv[1:]])\n")
+        self.target.write_text("original = 1\nadded = 2  \n")
+        self.assertEqual(self.hook().returncode, 0)
+        self.assertEqual(checkpoint.read_text().strip(), str(self.log.stat().st_size))
+        self.assertEqual(self.target.read_text(), "original = 1\nadded = 2\n")
+        (self.bin / "tail").unlink()
+        self.append_edit()
+        self.target.write_text("original = 1\nadded = 3  \n")
+        self.assertEqual(self.hook().returncode, 0)
+        self.assertEqual(checkpoint.read_text().strip(), str(self.log.stat().st_size))
+        self.assertEqual(self.target.read_text(), "original = 1\nadded = 3\n")
+
+    def test_failed_snapshot_read_preserves_files_and_checkpoint(self):
+        self.transcript()
+        self.assertEqual(self.hook().returncode, 0)
+        checkpoint = self.offsets()[0]
+        before = checkpoint.read_bytes()
+        self.target.write_text("original = 1\nadded = 2  \n")
+        self.append_edit()
+        self.stub("cat", '#!/bin/sh\nif [ "$1" = ' + repr(str(self.log))
+                  + ' ]; then exit 7; fi\nexec /bin/cat "$@"\n')
+        self.assertEqual(self.hook().returncode, 0)
+        self.assertEqual(checkpoint.read_bytes(), before)
+        self.assertIn("added = 2  \n", self.target.read_text())
+        (self.bin / "cat").unlink()
+        self.assertEqual(self.hook().returncode, 0)
+        self.assertEqual(self.target.read_text(), "original = 1\nadded = 2\n")
+
+    def test_failed_jq_processing_stage_never_mutates_or_checkpoints(self):
+        self.transcript()
+        self.assertEqual(self.hook().returncode, 0)
+        checkpoint = self.offsets()[0]
+        before = checkpoint.read_bytes()
+        self.target.write_text("original = 1\nadded = 2  \n")
+        self.append_edit()
+        real_jq = shutil.which("jq")
+        for query in ('select(.type=="user"', 'select(.type=="assistant"',
+                      'select(.toolUseResult'):
+            with self.subTest(query=query):
+                self.stub("jq", "#!/usr/bin/env python3\nimport os, sys\n"
+                          + f"if any({query!r} in arg for arg in sys.argv[1:]): sys.exit(7)\n"
+                          + f"os.execv({real_jq!r}, [{real_jq!r}, *sys.argv[1:]])\n")
+                self.assertEqual(self.hook().returncode, 0)
+                self.assertEqual(checkpoint.read_bytes(), before)
+                self.assertIn("added = 2  \n", self.target.read_text())
+        (self.bin / "jq").unlink()
+        self.assertEqual(self.hook().returncode, 0)
+        self.assertEqual(self.target.read_text(), "original = 1\nadded = 2\n")
+
+    def test_valid_copilot_snapshot_retains_changed_path_intersection(self):
+        self.transcript([{"type": "message", "content": "Edited target.py"}])
+        self.payload = json.dumps({"cwd": str(self.repo), "transcriptPath": str(self.log)})
+        self.target.write_text("original = 1\nadded = 2  \n")
+        unrelated = self.repo / "unrelated.py"
+        unrelated.write_text("unrelated = 3  \n")
+        self.assertEqual(self.hook().returncode, 0)
+        self.assertEqual(self.target.read_text(), "original = 1\nadded = 2\n")
+        self.assertEqual(unrelated.read_text(), "unrelated = 3  \n")
+
+    def test_supplied_missing_or_invalid_transcript_never_falls_back_to_dirty_files(self):
+        self.transcript()
+        self.target.write_text("original = 1\nadded = 2  \n")
+        self.log.unlink()
+        self.assertEqual(self.hook().returncode, 0)
+        self.assertEqual(self.offsets(), [])
+        self.assertIn("added = 2  \n", self.target.read_text())
+        self.log.write_text('{"type":')
+        self.assertEqual(self.hook().returncode, 0)
+        self.assertEqual(self.offsets(), [])
+        self.assertIn("added = 2  \n", self.target.read_text())
+
     def test_failed_increment_retains_prior_checkpoint_and_retries(self):
         self.transcript()
         self.assertEqual(self.hook().returncode, 0)
