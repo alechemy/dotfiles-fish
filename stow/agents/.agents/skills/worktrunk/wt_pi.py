@@ -172,19 +172,24 @@ def open_task(root, branch, *, focus=True, resume=True):
     state = task_state(root)
     panes = task_panes(root)
     if panes:
-        matching = [pane for pane in panes if pane["tab_id"] == state.get("tab_id")]
-        if not matching:
+        if any(pane["tab_id"] != state.get("tab_id") for pane in panes):
             raise WorkflowError("This worktree already has terminals outside its recorded task tab. Resolve them before reopening.")
-        if focus:
-            herdr("tab", "focus", matching[0]["tab_id"])
         agents = herdr("agent", "list")["agents"]
-        if any(agent["pane_id"] == state.get("pane_id") for agent in agents):
-            return {"action": "reused", "path": str(root), "tab_id": matching[0]["tab_id"]}
-        if not any(pane["pane_id"] == state.get("pane_id") for pane in matching):
-            raise WorkflowError("The task's Pi pane was closed. Close the remaining task tab before reopening.")
         pane_ids = {pane["pane_id"] for pane in panes}
-        if any(agent["pane_id"] in pane_ids for agent in agents) or activity(root):
+        if any(agent["pane_id"] in pane_ids and agent["pane_id"] != state.get("pane_id")
+               for agent in agents):
             raise WorkflowError("Another agent is active in this worktree. Quit it before resuming the task's Pi pane.")
+        recorded_agent = any(agent["pane_id"] == state.get("pane_id") for agent in agents)
+        # Exempt only records that identify the recorded pane. Missing pane
+        # identity (including old records) remains unverified until refreshed.
+        if activity(root, owned_pane=state.get("pane_id") if recorded_agent else None):
+            raise WorkflowError("Another agent is active in this worktree. Quit it before resuming the task's Pi pane.")
+        if state.get("pane_id") not in pane_ids:
+            raise WorkflowError("The task's Pi pane was closed. Close the remaining task tab before reopening.")
+        if focus:
+            herdr("tab", "focus", state["tab_id"])
+        if recorded_agent:
+            return {"action": "reused", "path": str(root), "tab_id": state["tab_id"]}
         herdr("agent", "start", f"pi-{uuid.uuid4().hex[:16]}", "--kind", "pi", "--pane", state["pane_id"],
               "--", "--continue")
         return {"action": "resumed", "path": str(root), "tab_id": state["tab_id"], "pane_id": state["pane_id"]}
@@ -257,7 +262,7 @@ def marker(root, branch):
     return json.loads(result.stdout)
 
 
-def activity(root, *, token=None, pid=None, status=None):
+def activity(root, *, token=None, pid=None, status=None, owned_pane=None):
     root, _, gitdir = repository(root)
     result = git(root, "symbolic-ref", "--quiet", "--short", "HEAD", check=False)
     branch = result.stdout.strip() or None
@@ -290,7 +295,8 @@ def activity(root, *, token=None, pid=None, status=None):
             started = process_started(pid)
             if started is None:
                 raise WorkflowError("The reporting Pi process is no longer running.")
-            sessions[token] = {"pid": pid, "started": started, "updated": time.time(), "status": status}
+            sessions[token] = {"pid": pid, "started": started, "updated": time.time(), "status": status,
+                               "pane_id": os.environ.get("HERDR_PANE_ID")}
         current = marker(root, branch)
         current_value = current.get("marker") if isinstance(current, dict) else None
         previous = state["marker"]
@@ -303,7 +309,9 @@ def activity(root, *, token=None, pid=None, status=None):
                 run(["wt", "-C", str(root), "config", "state", "marker", "clear", "--branch", branch])
             previous = desired
         write_json(directory / "activity.json", {"sessions": sessions, "marker": previous, "branch": branch})
-        return len(sessions)
+        owned = sum(1 for session in sessions.values()
+                    if owned_pane is not None and session.get("pane_id") == owned_pane)
+        return len(sessions) - min(1, owned)
 
 
 def check_remove(root):

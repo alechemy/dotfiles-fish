@@ -224,17 +224,91 @@ class WorktrunkTests(unittest.TestCase):
         with self.assertRaises(workflow.WorkflowError):
             workflow.validate_branch(self.repo, "pi-subagents/fixture")
 
-    def test_resume_refuses_an_agent_in_another_task_pane(self):
+    def bound_task(self):
         target = self.create()
         _, _, gitdir = workflow.repository(target)
         workflow.write_json(gitdir / "wt-pi/task.json", {"version": 1, "path": str(target),
                                                        "tab_id": "task", "pane_id": "original"})
-        panes = [{"tab_id": "task", "pane_id": "original"}, {"tab_id": "other", "pane_id": "active"}]
+        return target
+
+    def test_mixed_tabs_refused_before_focus_or_agent_lookup(self):
+        target = self.bound_task()
+        panes = [{"tab_id": "task", "pane_id": "original"},
+                 {"tab_id": "other", "pane_id": "foreign"}]
         with patch.object(workflow, "task_panes", return_value=panes), \
-                patch.object(workflow, "herdr", return_value={"agents": [{"pane_id": "active"}]}) as api:
+                patch.object(workflow, "herdr") as api:
+            with self.assertRaisesRegex(workflow.WorkflowError, "outside"):
+                workflow.open_task(target, "feature/test")
+            api.assert_not_called()
+
+    def test_simultaneous_agents_refused_before_focus_or_reuse(self):
+        target = self.bound_task()
+        panes = [{"tab_id": "task", "pane_id": "original"},
+                 {"tab_id": "task", "pane_id": "foreign"}]
+        for agents in ([{"pane_id": "foreign"}],
+                       [{"pane_id": "original"}, {"pane_id": "foreign"}]):
+            with self.subTest(agents=agents), \
+                    patch.object(workflow, "task_panes", return_value=panes), \
+                    patch.object(workflow, "herdr", return_value={"agents": agents}) as api:
+                with self.assertRaisesRegex(workflow.WorkflowError, "Another agent"):
+                    workflow.open_task(target, "feature/test")
+                api.assert_called_once_with("agent", "list")
+
+    def test_extra_native_sessions_refused_before_reuse(self):
+        target = self.bound_task()
+        with patch.object(workflow, "task_panes", return_value=[{"tab_id": "task", "pane_id": "original"}]), \
+                patch.object(workflow, "herdr", return_value={"agents": [{"pane_id": "original"}]}) as api, \
+                patch.object(workflow, "activity", return_value=2):
             with self.assertRaisesRegex(workflow.WorkflowError, "Another agent"):
-                workflow.open_task(target, "feature/test", focus=False)
+                workflow.open_task(target, "feature/test")
             api.assert_called_once_with("agent", "list")
+
+    def test_external_record_not_exempt_when_owned_pane_has_no_record(self):
+        target = self.bound_task()
+        workflow.activity(target, token="a" * 32, pid=os.getpid(), status="working")
+        with patch.object(workflow, "task_panes", return_value=[{"tab_id": "task", "pane_id": "original"}]), \
+                patch.object(workflow, "herdr", return_value={"agents": [{"pane_id": "original"}]}) as api:
+            with self.assertRaisesRegex(workflow.WorkflowError, "Another agent"):
+                workflow.open_task(target, "feature/test")
+            api.assert_called_once_with("agent", "list")
+
+    def test_only_matching_native_pane_identity_is_exempt(self):
+        target = self.bound_task()
+        with patch.dict(os.environ, {"HERDR_PANE_ID": "original"}):
+            workflow.activity(target, token="a" * 32, pid=os.getpid(), status="working")
+        self.assertEqual(workflow.activity(target, owned_pane="original"), 0)
+        self.assertEqual(workflow.activity(target, owned_pane="foreign"), 1)
+        self.assertEqual(workflow.activity(target), 1)
+        # A live legacy record with no pane identity must fail closed too.
+        _, _, gitdir = workflow.repository(target)
+        path = gitdir / "wt-pi/activity.json"
+        state = workflow.read_json(path)
+        state["sessions"]["a" * 32].pop("pane_id")
+        workflow.write_json(path, state)
+        self.assertEqual(workflow.activity(target, owned_pane="original"), 1)
+
+    def test_multiple_native_sessions_in_owned_pane_block_reuse(self):
+        target = self.bound_task()
+        with patch.dict(os.environ, {"HERDR_PANE_ID": "original"}):
+            for token in ("a" * 32, "b" * 32):
+                workflow.activity(target, token=token, pid=os.getpid(), status="working")
+        self.assertEqual(workflow.activity(target), 2)
+        self.assertEqual(workflow.activity(target, owned_pane="original"), 1)
+        with patch.object(workflow, "task_panes", return_value=[{"tab_id": "task", "pane_id": "original"}]), \
+                patch.object(workflow, "herdr", return_value={"agents": [{"pane_id": "original"}]}) as api:
+            with self.assertRaisesRegex(workflow.WorkflowError, "Another agent"):
+                workflow.open_task(target, "feature/test")
+            api.assert_called_once_with("agent", "list")
+
+    def test_owned_agent_reused_after_all_checks(self):
+        target = self.bound_task()
+        with patch.object(workflow, "task_panes", return_value=[{"tab_id": "task", "pane_id": "original"}]), \
+                patch.object(workflow, "herdr", return_value={"agents": [{"pane_id": "original"}]}) as api, \
+                patch.object(workflow, "activity", return_value=0) as active:
+            self.assertEqual(workflow.open_task(target, "feature/test")["action"], "reused")
+            active.assert_called_once_with(target, owned_pane="original")
+            self.assertEqual(api.call_args_list, [unittest.mock.call("agent", "list"),
+                                                unittest.mock.call("tab", "focus", "task")])
 
     def test_failed_launch_retains_the_tab_binding_for_recovery(self):
         target = self.create()

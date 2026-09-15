@@ -108,6 +108,13 @@ of to-dos), then an idempotent **single-`add` sweep** (`open -g`) mops up any st
 is the sole path when no token is set. Every write is DB-confirmed. Re-run anytime — it only
 adds what's absent (~2 s for two dozen to-dos, vs. ~17 s pre-batching).
 
+To-do titles must be unique across the requested project, including across headings.
+The helper uses the exact title as its idempotency key. An existing active title in any
+heading counts as present. Duplicate requested titles are rejected before database or app
+access; rename them explicitly rather than expecting heading-based identity. Unknown CLI
+options are rejected. `--dry-run` reads project state but does not load the auth token or
+invoke the app.
+
 The helper is **project-scoped** — every to-do gets a `list-id`, so it can't place a
 project-less to-do into Inbox/Anytime/Someday. For a one-off unfiled to-do, don't
 hand-roll a URL (that's how the `+`-encoding trap in rule 6 bites); use AppleScript
