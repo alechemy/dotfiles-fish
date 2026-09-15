@@ -5,6 +5,15 @@ set -e
 DOTFILES="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 STOW_DIR="$DOTFILES/stow"
 
+# Apple's Git shim needs the Command Line Tools even for rev-parse. Check
+# before invoking Git, but leave installation to the user so no mutation can
+# precede the linked-worktree refusal below.
+if ! xcode-select -p &>/dev/null; then
+    echo "Xcode Command Line Tools not installed. Run xcode-select --install," >&2
+    echo "wait for installation to finish, then re-run ./scripts/setup.sh." >&2
+    exit 1
+fi
+
 git_dir="$(git -C "$DOTFILES" rev-parse --git-dir)" || exit 1
 common_dir="$(git -C "$DOTFILES" rev-parse --git-common-dir)" || exit 1
 if [ "$git_dir" != "$common_dir" ]; then
@@ -139,16 +148,6 @@ sudo -v
 # prompt is just a fingerprint tap, so the keep-alive is not worth the risk.
 
 echo "Setting up dotfiles..."
-
-# 0. Xcode Command Line Tools (Homebrew + git rely on these). If absent,
-#    the user gets a modal install dialog. Block here rather than letting
-#    later steps fail mid-flight or, worse, block silently in a launchd
-#    context after the user walks away.
-if ! xcode-select -p &>/dev/null; then
-    info "Xcode Command Line Tools not installed. Launching the installer..."
-    xcode-select --install || true
-    fail "Wait for the Xcode CLT install to finish, then re-run ./scripts/setup.sh"
-fi
 
 # 0a. Keep xcode-select pointed at Xcode.app when it's installed (CLT alone
 #     omits xctrace, full SDKs, Instruments). Self-heal a stale pointer to a
@@ -528,15 +527,15 @@ EOF
         success "Seeded ~/.aerospace.toml from source"
     fi
 
-    # Always-on user LaunchAgents. Stowed above by the main loop; bootstrap now
-    # so they're live without waiting for the next login. RunAtLoad means each
-    # also fires once immediately. The DEVONthink agents are loaded separately
-    # in the opt-in block below.
+    # Always-on and scheduled user LaunchAgents. Stowed above by the main loop;
+    # bootstrap now instead of waiting for login. Only agents with RunAtLoad
+    # fire immediately. DEVONthink agents load in the opt-in block below.
     load_launch_agent "$HOME/Library/LaunchAgents/com.user.mount-nas.plist" "NAS auto-mount"
     load_launch_agent "$HOME/Library/LaunchAgents/com.user.check-stale-dev-servers.plist" "stale-dev-servers"
     load_launch_agent "$HOME/Library/LaunchAgents/com.user.aerospace-gaps-heartbeat.plist" "aerospace-gaps heartbeat"
     load_launch_agent "$HOME/Library/LaunchAgents/com.user.caddy.plist" "Caddy (oMLX CSP proxy)"
     load_launch_agent "$HOME/Library/LaunchAgents/com.user.npm-tools-update.plist" "npm-tools update"
+    load_launch_agent "$HOME/Library/LaunchAgents/com.user.runnability-sync.plist" "runnability sync"
     load_launch_agent "$HOME/Library/LaunchAgents/com.user.btd700-audio-watcher.plist" "BTD 700 audio watcher"
 
     # Chromium -> Safari bookmark bridge for Alfred. Gate on the Bookmarks file
@@ -576,6 +575,7 @@ EOF
         ssh-keygen -t ed25519 -C "git signing key" -f "$HOME/.ssh/id_signing" -N "" -q
         success "Created ~/.ssh/id_signing — add the .pub to GitHub as a Signing Key"
     fi
+    "$DOTFILES/scripts/build-git-allowed-signers.sh"
 
     # Regenerate Karabiner JSON from the EDN source. The repo tracks
     # karabiner.edn (Goku's source format); the runtime karabiner.json is

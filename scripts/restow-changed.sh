@@ -120,18 +120,57 @@ rebuild() {
         echo "restow-changed: rebuilt via scripts/$script $*"
     else
         echo "restow-changed: scripts/$script $* failed; re-run it by hand" >&2
+        return 1
     fi
+}
+
+# A script-only update can create an output that setup previously skipped.
+# Restow its package only when the output was added or removed; edits to an
+# already-linked output need no Stow operation. Opt-in checks still run below.
+rebuild_stowed() {
+    local script="$1" output present root rest pkg i=0
+    local before=()
+    shift
+    for output in "$@"; do
+        present=0
+        if [ -e "$DOTFILES/$output" ] || [ -L "$DOTFILES/$output" ]; then
+            present=1
+        fi
+        before+=("$present")
+    done
+    rebuild "$script" || return 1
+    for output in "$@"; do
+        present=0
+        if [ -e "$DOTFILES/$output" ] || [ -L "$DOTFILES/$output" ]; then
+            present=1
+        fi
+        if [ "$present" != "${before[$i]}" ]; then
+            root="${output%%/*}"
+            rest="${output#*/}"
+            pkg="${rest%%/*}"
+            changed="$(printf '%s\n%s %s\n' "$changed" "$root" "$pkg" | sort -u)"
+        fi
+        i=$((i + 1))
+    done
 }
 
 op_ok() { command -v op >/dev/null 2>&1 && op vault list >/dev/null 2>&1; }
 
 plist_changed=
-if grep -q '\.plist\.template$' <<<"$changed_files"; then
+if grep -Eq '^(stow|stow-work|stow-local)/[^/]+/Library/LaunchAgents/[^/]+\.plist\.template$|^scripts/build-launchd-plists\.sh$' <<<"$changed_files"; then
     plist_changed=1
-    rebuild build-launchd-plists.sh
+    plist_outputs=()
+    while IFS= read -r template; do
+        plist_outputs+=("${template%.template}")
+    done < <(cd "$DOTFILES" && find stow stow-work stow-local \
+        -path '*/Library/LaunchAgents/*.plist.template' 2>/dev/null)
+    rebuild_stowed build-launchd-plists.sh ${plist_outputs[@]+"${plist_outputs[@]}"}
 fi
-if grep -q '^stow/vscode/.*settings\.template\.json$' <<<"$changed_files"; then
-    rebuild build-vscode-config.sh
+if grep -Eq '^stow/vscode/.*settings\.template\.json$|^scripts/build-vscode-config\.sh$' <<<"$changed_files"; then
+    rebuild_stowed build-vscode-config.sh stow/vscode/Library/Application\ Support/VSCodium/User/settings.json
+fi
+if grep -Eq '^stow/git/(\.gitconfig|\.config/git/allowed_signers)$|^scripts/build-git-allowed-signers\.sh$' <<<"$changed_files"; then
+    rebuild build-git-allowed-signers.sh
 fi
 if grep -Eq '^stow/pi/\.pi/agent/settings\.fragment\.json$|^scripts/merge-pi-settings\.sh$' <<<"$changed_files"; then
     rebuild merge-pi-settings.sh
@@ -145,19 +184,37 @@ fi
 if grep -Eq '^stow/worktrunk/|^scripts/setup-worktrunk\.sh$' <<<"$changed_files"; then
     rebuild setup-worktrunk.sh
 fi
-if grep -q '^stow/zed/.*settings\.template\.jsonc$' <<<"$changed_files"; then
+if grep -Eq '^stow/zed/.*settings\.template\.jsonc$|^scripts/build-zed-config\.sh$' <<<"$changed_files"; then
     if op_ok; then
-        rebuild build-zed-config.sh
+        rebuild_stowed build-zed-config.sh stow/zed/.config/zed/settings.json
     else
-        echo "restow-changed: zed template changed but 1Password CLI is unavailable; run scripts/build-zed-config.sh by hand" >&2
+        echo "restow-changed: zed build inputs changed but 1Password CLI is unavailable; run scripts/build-zed-config.sh by hand" >&2
     fi
 fi
-if grep -q '^stow/streamrip/.*config\.template\.toml$' <<<"$changed_files"; then
-    if op_ok; then
-        rebuild build-streamrip-config.sh
+if grep -Eq '^stow/streamrip/.*config\.template\.toml$|^scripts/build-streamrip-config\.sh$' <<<"$changed_files"; then
+    if ! is_active stow streamrip; then
+        echo "restow-changed: skipped streamrip rebuild (opt-in, not active here)"
+    elif op_ok; then
+        rebuild_stowed build-streamrip-config.sh stow/streamrip/.config/streamrip/config.toml
     else
-        echo "restow-changed: streamrip template changed but 1Password CLI is unavailable; run scripts/build-streamrip-config.sh by hand" >&2
+        echo "restow-changed: streamrip build inputs changed but 1Password CLI is unavailable; run scripts/build-streamrip-config.sh by hand" >&2
     fi
+fi
+for script in build-context7-config.sh build-things-config.sh; do
+    if grep -Fxq "scripts/$script" <<<"$changed_files"; then
+        if op_ok; then
+            if [ "$script" = build-context7-config.sh ]; then
+                rebuild_stowed "$script" stow/fish/.config/fish/conf.d/context7.fish
+            else
+                rebuild "$script"
+            fi
+        else
+            echo "restow-changed: $script changed but 1Password CLI is unavailable; run scripts/$script by hand" >&2
+        fi
+    fi
+done
+if grep -Eq '^launchd/com\.user\.iogpu-wired-limit\.plist\.template$|^scripts/install-iogpu-limit\.sh$' <<<"$changed_files"; then
+    echo "restow-changed: root LaunchDaemon inputs changed; run scripts/install-iogpu-limit.sh by hand (requires sudo); no daemon was reloaded" >&2
 fi
 if grep -Eq '^devonthink/utils/dtnote-handler\.applescript$|^scripts/build-dtnote-handler\.sh$' <<<"$changed_files"; then
     if [ -d "$HOME/Applications/DTNote.app" ]; then

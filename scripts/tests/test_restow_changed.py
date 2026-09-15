@@ -26,10 +26,12 @@ class RestowChangedTests(unittest.TestCase):
                         PATH=f"{self.bin}:{os.environ['PATH']}", CALL_LOG=str(self.log),
                         GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL=os.devnull)
         shutil.copy2(SCRIPT, self.repo / "scripts/restow-changed.sh")
+        self.stub(self.bin / "op", 'exit 1')
         self.stub(self.bin / "stow", 'printf "stow %s\\n" "$*" >> "$CALL_LOG"')
         for name in ("merge-pi-settings.sh", "build-dtnote-handler.sh", "build-launchd-plists.sh",
                      "build-vscode-config.sh", "build-zed-config.sh", "build-streamrip-config.sh",
-                     "setup-herdr.sh", "setup-worktrunk.sh"):
+                     "build-context7-config.sh", "build-things-config.sh",
+                     "build-git-allowed-signers.sh", "setup-herdr.sh", "setup-worktrunk.sh"):
             self.stub(self.repo / "scripts" / name, f'echo "{name}${{1:+ $*}}" >> "$CALL_LOG"')
         self.write("stow/pi/.pi/agent/settings.fragment.json", "{}")
         self.git("init", "-q")
@@ -63,12 +65,107 @@ class RestowChangedTests(unittest.TestCase):
                                  self.old, new or self.commit()], env=self.env,
                                 capture_output=True, text=True, timeout=10)
         self.assertEqual(result.returncode, 0, result.stderr)
+        self.stderr = result.stderr
         return self.log.read_text().splitlines() if self.log.exists() else []
 
     def test_script_only_change_rebuilds_without_stow(self):
         with (self.repo / "scripts/merge-pi-settings.sh").open("a") as stream:
             stream.write("# changed\n")
         self.assertEqual(self.run_hook(), ["merge-pi-settings.sh", "merge-pi-settings.sh --models"])
+
+    def test_generated_builder_only_changes(self):
+        for script in ("build-launchd-plists.sh", "build-vscode-config.sh",
+                       "build-git-allowed-signers.sh"):
+            with self.subTest(script=script):
+                with (self.repo / "scripts" / script).open("a") as stream:
+                    stream.write("# changed\n")
+                self.assertEqual(self.run_hook(), [script])
+                self.log.unlink()
+                self.old = self.git("rev-parse", "HEAD")
+
+    def test_secret_builders_keep_auth_gate(self):
+        for script in ("build-zed-config.sh", "build-context7-config.sh", "build-things-config.sh"):
+            with self.subTest(script=script):
+                with (self.repo / "scripts" / script).open("a") as stream:
+                    stream.write("# changed\n")
+                new = self.commit()
+                self.assertEqual(self.run_hook(new), [])
+                self.assertIn("1Password CLI is unavailable", self.stderr)
+                self.stub(self.bin / "op", 'test "$*" = "vault list"')
+                self.assertEqual(self.run_hook(new), [script])
+                self.log.unlink()
+                self.stub(self.bin / "op", 'exit 1')
+                self.old = new
+
+    def test_builder_only_additions_queue_package_but_rewrites_do_not(self):
+        outputs = {
+            "build-context7-config.sh": "stow/fish/.config/fish/conf.d/context7.fish",
+            "build-zed-config.sh": "stow/zed/.config/zed/settings.json",
+            "build-vscode-config.sh": "stow/vscode/Library/Application Support/VSCodium/User/settings.json",
+            "build-launchd-plists.sh": "stow/example/Library/LaunchAgents/com.example.plist",
+        }
+        self.write("stow/example/Library/LaunchAgents/com.example.plist.template", "fixture")
+        self.old = self.commit()
+        self.stub(self.bin / "op", 'test "$*" = "vault list"')
+        for script, output in outputs.items():
+            with self.subTest(script=script):
+                path = self.repo / output
+                self.stub(self.repo / "scripts" / script,
+                          f'echo "{script}" >> "$CALL_LOG"\n'
+                          f'mkdir -p "{path.parent}"\nprintf fictional > "{path}"')
+                new = self.commit()
+                calls = self.run_hook(new)
+                self.assertEqual(calls[0], script)
+                self.assertEqual(len(calls), 2)
+                self.assertTrue(calls[1].endswith(" " + output.split("/")[1]))
+                self.log.unlink()
+                self.assertEqual(self.run_hook(new), [script])
+                self.log.unlink()
+                # Include the fictional generated output in the next baseline
+                # so only the next builder changes in this disposable fixture.
+                self.old = self.commit()
+
+    def test_failed_builder_never_queues_new_output(self):
+        path = self.repo / "stow/fish/.config/fish/conf.d/context7.fish"
+        self.stub(self.bin / "op", 'test "$*" = "vault list"')
+        self.stub(self.repo / "scripts/build-context7-config.sh",
+                  f'mkdir -p "{path.parent}"; echo fictional > "{path}"; exit 1')
+        self.assertEqual(self.run_hook(), [])
+        self.assertIn("failed; re-run it by hand", self.stderr)
+
+    def test_streamrip_builder_requires_active_package_and_auth(self):
+        output = self.write("stow/streamrip/.config/streamrip/config.toml", "fictional")
+        self.old = self.commit()
+        with (self.repo / "scripts/build-streamrip-config.sh").open("a") as stream:
+            stream.write("# changed\n")
+        new = self.commit()
+        self.stub(self.bin / "op", 'echo op >> "$CALL_LOG"')
+        self.assertEqual(self.run_hook(new), [])
+        target = self.home / ".config/streamrip/config.toml"
+        target.parent.mkdir(parents=True)
+        target.symlink_to(output)
+        self.stub(self.bin / "op", 'exit 1')
+        self.assertEqual(self.run_hook(new), [])
+        self.assertIn("1Password CLI is unavailable", self.stderr)
+        self.stub(self.bin / "op", 'test "$*" = "vault list"')
+        self.assertEqual(self.run_hook(new), ["build-streamrip-config.sh"])
+
+    def test_root_daemon_changes_only_print_manual_installer(self):
+        for path in ("launchd/com.user.iogpu-wired-limit.plist.template",
+                     "scripts/install-iogpu-limit.sh"):
+            with self.subTest(path=path):
+                self.write(path, "fixture")
+                self.assertEqual(self.run_hook(), [])
+                self.assertIn("run scripts/install-iogpu-limit.sh by hand", self.stderr)
+                self.assertNotIn("old agent definition", self.stderr)
+                self.old = self.git("rev-parse", "HEAD")
+
+    def test_user_agent_template_rebuilds_and_reminds_without_reload(self):
+        self.write("stow/example/Library/LaunchAgents/com.example.plist.template", "fixture")
+        calls = self.run_hook()
+        self.assertEqual(calls[0], "build-launchd-plists.sh")
+        self.assertTrue(calls[1].endswith(" example"))
+        self.assertIn("old agent definition", self.stderr)
 
     def test_fragment_change_rebuilds_before_stow(self):
         self.write("stow/pi/.pi/agent/settings.fragment.json", '{"theme":"dark"}')
