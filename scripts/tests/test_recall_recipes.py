@@ -77,6 +77,42 @@ class RecallRecipeTests(unittest.TestCase):
         self.assertNotIn("fictional-unrelated-workspace", result.stderr)
         self.assertNotIn("workspace_header", result.stderr)
 
+    def test_coding_receipt_is_local_scoped_and_preserves_unresolved_work(self):
+        context = self.home / ".context"
+        wanted = self.handoff(context, "widget-launch-handoff.md", self.work)
+        receipt = (
+            "\n## Coding-task review receipt\n"
+            "Integration target: release/integration\n"
+            "Base / merge-base: fixture-base / fixture-merge-base\n"
+            "Reviewed HEAD: fixture-head\n"
+            "Scope: committed base...HEAD; staged, unstaged, untracked excluded\n"
+            "Tested dirty state: .context/fixture-validation.txt\n"
+            "Validation: fictional unit suite passed before later edits\n"
+            "Unresolved: recheck after rebase; prior evidence is stale\n"
+            "Session/run references: fixture-session / fixture-run\n"
+            "Service ownership: none; shared services must remain untouched\n"
+            "Next action: review and test current state\n")
+        with wanted.open("a") as stream:
+            stream.write(receipt)
+        unrelated = self.handoff(context, "unrelated-handoff.md", "/tmp/other-workspace")
+        with unrelated.open("a") as stream:
+            stream.write("DO NOT SELECT THIS RECEIPT\n")
+        result = self.run_bash(recipes(RECALL)[0])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.splitlines(), [str(wanted)])
+        self.assertIn(receipt, wanted.read_text())
+        self.assertNotIn("DO NOT SELECT", result.stdout)
+        # Required evidence stays in one owner rather than duplicate recall rules.
+        handoff = HANDOFF.read_text()
+        recall = RECALL.read_text()
+        for contract in ("Noncoding handoffs need no Git fields", "integration target",
+                         "merge-base", "reviewed HEAD", "tested dirty state", "Unresolved findings",
+                         "session/run references", "Service ownership", "One next action"):
+            self.assertIn(contract, handoff)
+        self.assertIn("../code-review/references/scope.md", handoff)
+        self.assertIn("../handoff/SKILL.md#coding-task-review-receipt", recall)
+        self.assertIn("Mark evidence stale after edits or rebases", recall)
+
     def test_missing_context_is_empty(self):
         result = self.run_bash(recipes(RECALL)[0])
         self.assertEqual(result.returncode, 0, result.stderr)

@@ -25,11 +25,28 @@ Sibling paths use `{{ repo_path }}/../{{ repo }}.{{ branch | sanitize }}`. Exist
 
 From the intended task's Pi pane, Ctrl+B then `f` opens its Hunk review. Save a human inline comment with Ctrl+S. Ctrl+B then Shift+F sends unsent comments explicitly. Each worktree has a separate review and recipient. The existing blocked/busy checks and Ctrl+S submission patch remain in effect. See [Herdr's Hunk workflow](herdr.md#hunk-review-integration).
 
-The default Hunk shortcut shows working-tree changes. To review committed task changes, reload that worktree's review with the intended comparison, for example:
+The default Hunk shortcut uses automatic scope: dirty or untracked changes select
+working-tree mode; a clean branch with a resolved base and commits ahead selects branch
+mode. Otherwise it falls back to working-tree mode. Ctrl+B then Shift+B explicitly
+selects committed branch review. Staged, working-tree, latest-commit, and branch scopes are
+separate. Verify the displayed base against the intended integration target; invalid
+or missing-base fallback is not whole-branch review. For an explicit comparison:
 
 ```sh
-hunk session reload --repo /path/to/task-worktree -- diff main...HEAD
+hunk session reload --repo /path/to/task-worktree -- diff release/integration...HEAD
 ```
+
+The committed comparison excludes staged, unstaged, and untracked changes. Review
+those separately when they belong to the task. Follow `hunk skill path` for live
+interaction and the shared code-review scope rules for Git-only review.
+
+Before sending feedback or completing a task, keep a local
+[coding-task receipt](../stow/agents/.agents/skills/handoff/SKILL.md#coding-task-review-receipt)
+with the target, base/merge-base, reviewed HEAD, scope/exclusions, tested dirty state,
+validation, unresolved findings, session/run references, service ownership, and next
+action. Recheck it after edits or rebases. Record unresolved conclusions before a
+successful send clears comments. Reference existing artifacts; do not copy private
+transcripts or entire comment threads.
 
 Prepare commits with Pi or Git under the existing signing, message, and secrets-scan rules. The seeded configuration makes `wt merge` a clean-tree, fast-forward-only local integration that keeps the task worktree. Explicit flags preserve that behavior even after editing your preferences:
 
@@ -59,7 +76,9 @@ The helper never kills a process or closes a pane during removal. Its checks can
 | 💬 | Interactive Pi sessions are idle. |
 | ❗ | An interactive Pi session has a blocking extension UI prompt. |
 
-Blocked takes precedence over working, then idle. Each extension instance has a random identity. The helper serializes per-worktree updates and aggregates surviving sessions, so one session's shutdown cannot erase another's state. It identifies processes by PID and process start time, which avoids treating sleep as session exit or PID reuse as continued activity. A 30-second heartbeat refreshes status. Shutdown removes only that instance's record. `wt pi list` prunes dead records before running `wt list`.
+Blocked takes precedence over working, then idle. Each extension instance has a random identity. The helper serializes per-worktree updates and aggregates surviving sessions, so one session's shutdown cannot erase another's state. It identifies processes by PID and process start time, which avoids treating sleep as session exit or PID reuse as continued activity. Native records also carry the Herdr pane ID. Reopening exempts at most one record that
+identifies the recorded task pane; extra sessions or missing pane identity block reuse. Older
+live records gain this field on their next report. A 30-second heartbeat refreshes status. Shutdown removes only that instance's record. `wt pi list` prunes dead records before running `wt list`.
 
 A manual Worktrunk marker that differs from the integration's last marker takes precedence. Clearing a manual marker allows the next lifecycle event or heartbeat to resume activity reporting. A SIGKILL can leave a marker until the next update or `wt pi list`. Changing the branch beneath a live Pi session requires quitting that session before starting another; shutdown also clears owned markers after a detached checkout.
 
@@ -68,6 +87,12 @@ The extension ignores print, JSON, and RPC modes. Herdr and Subagents remain aut
 Worktrunk 0.77.0's advertised Pi plugin is an Oh My Pi hook. Its installer writes `hooks/pre/worktrunk.ts`, which native Pi does not discover. This repository's native extension is independently owned; do not install the upstream Oh My Pi hook as a replacement.
 
 ## Subagents
+
+**Current restriction:** Do not use managed Subagents write worktrees that can enter
+automatic cleanup until W01's reviewed binary and stale-patch preservation acceptance
+passes. The installed guarded build is not yet verified to preserve that work. W01
+implementation remains blocked pending scope approval. Human `wt pi` task worktrees
+are separate: they retain branches and refuse dirty checkout removal.
 
 Pi's settings fragment explicitly selects `subagents.worktreeProvider = "worktrunk"`. The guarded Subagents build already implements this allocator; no delegation adapter or package patch is added.
 

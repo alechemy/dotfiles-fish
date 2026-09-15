@@ -32,7 +32,7 @@ for file in "$context/"*-handoff.md; do
 done
 ```
 
-Read only matching sanitized handoffs. Prefer the newest `Updated:` header that covers the requested window and topic. Verify claims against current state. A sufficient handoff avoids transcript extraction; inspect transcripts only for gaps. Legacy handoffs without scope headers, especially in `~/.context/`, need user confirmation before reading. Do not sweep unrelated handoff bodies to infer their scope.
+Read only matching sanitized handoffs. Prefer the newest `Updated:` header that covers the requested window and topic. Verify claims against current state. For coding tasks, use the [handoff review receipt](../handoff/SKILL.md#coding-task-review-receipt): compare the integration target, reviewed HEAD, and tested dirty state before relying on its review or validation. Mark evidence stale after edits or rebases. Preserve unresolved conclusions and service ownership in the recall capsule; a matching HEAD alone does not verify dirty test inputs. A sufficient handoff avoids transcript extraction; inspect transcripts only for gaps. Legacy handoffs without scope headers, especially in `~/.context/`, need user confirmation before reading. Do not sweep unrelated handoff bodies to infer their scope.
 
 ## 2. Keep audits metadata-only
 

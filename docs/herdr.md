@@ -68,6 +68,7 @@ The `jhochenbaum.hunkdiff` Herdr plugin uses the existing `/opt/homebrew/bin/hun
 | Ctrl+B, then f | Open or reuse the worktree's Hunk review split. |
 | Ctrl+B, then Shift+A | Review staged changes. |
 | Ctrl+B, then Shift+C | Review the latest commit. |
+| Ctrl+B, then Shift+B | Review committed branch changes. |
 | Ctrl+B, then Shift+F | Send unsent human comments to the associated agent. |
 
 In Hunk, select a line, press `c`, write a note, and save it with Ctrl+S. Send before closing Hunk. Sending is explicit; agent annotations are excluded. Successful sends record comment IDs and remove those comments from Hunk, preventing duplicate delivery. These are local review comments, not GitHub PR reviews.
@@ -75,6 +76,47 @@ In Hunk, select a line, press `c`, write a note, and save it with Ctrl+S. Send b
 One review and recipient are tracked per worktree. Opening or reusing the review from a different Pi pane selects that pane as the recipient. Automatic opening and status-driven recipient reassignment are disabled, so another session finishing in the same checkout cannot take over the review. Separate worktrees remain independent.
 
 The local patch submits Pi feedback with Ctrl+S after Herdr's bracketed paste. Enter remains a newline. It rejects missing recipients and Pi panes that are busy, blocked, or in an unknown state; failed sends retain the comments. If submission fails after the paste, inspect Pi's draft before retrying. Other agents retain Herdr's normal submission behavior.
+
+### Review scope and receipts
+
+These actions are distinct. The default `review` uses automatic scope: dirty or
+untracked files select working-tree mode; otherwise it selects branch mode when a base
+resolves and commits are ahead, or falls back to working-tree mode. `review:staged`
+shows index changes, `review:commit` shows the latest commit, and `review:branch`
+explicitly compares committed branch changes with a base. None should be described as
+covering every task change without checking its displayed target and exclusions. Hunk's working-tree mode
+includes untracked files by default; plain `git diff` does not. A committed
+`<base>...HEAD` comparison excludes staged, unstaged, and untracked changes. Use the [code-review scope rules](../stow/agents/.agents/skills/code-review/references/scope.md)
+for exact Git comparisons and inventory.
+
+The plugin's `[review] base` preference selects a branch-review base. When unset, the
+reviewed 0.3.0 resolver tries a usable upstream (`@{u}`), then `origin/HEAD`, then local
+`main`, `master`, or `trunk`. Upstream and remote-default candidates ending in the current
+branch name are skipped. A local conventional base can still equal HEAD. An invalid
+configured base warns and tries automatic resolution; if no base resolves, branch mode
+falls back to working-tree mode. That fallback is not successful whole-branch review.
+Always verify the displayed target against the intended integration target, especially
+for a non-`main` target or divergent history.
+
+To override the comparison explicitly, first validate the intended ref and merge-base,
+then reload the exact task worktree's session:
+
+```sh
+hunk session reload --repo /path/to/task-worktree -- diff release/integration...HEAD
+```
+
+First invoke the review action from the intended Pi pane. Explicit invocation selects
+the feedback recipient; a shell alias in an unrelated pane is not equivalent. Sending
+from an agent pane selects that pane for the send; sending from the review pane uses
+the recorded recipient. Verify the recipient before sending. Use
+`hunk skill path` for the installed interaction instructions instead of treating this
+reference as a complete CLI manual. Headless Git review needs no Hunk TUI.
+
+Before successful feedback delivery clears comments, record unresolved conclusions in
+a local [coding-task handoff receipt](../stow/agents/.agents/skills/handoff/SKILL.md#coding-task-review-receipt).
+Keep the integration target, merge-base, reviewed HEAD, scope, tested dirty state,
+validation results, and next action tied to that evidence. Recheck after edits or
+rebases. Reference existing local artifacts rather than copying patches or transcripts.
 
 ### Plugin ownership and updates
 
@@ -99,9 +141,18 @@ Run the focused checks without touching the default server:
 ```sh
 python3 -m unittest discover -s scripts/tests -p 'test_herdr_setup.py'
 python3 -m unittest discover -s scripts/tests -p 'test_restow_changed.py'
-node --test scripts/tests/test_herdr_ui_state.mjs
+node --test scripts/tests/test_herdr_ui_state.mjs scripts/tests/test_hunk_patch.mjs
+python3 -m unittest discover -s scripts/tests -p 'test_hunk_scopes.py'
+HUNK_PLUGIN_ROOT=/path/to/reviewed/plugin node --test scripts/tests/test_hunk_runtime.mjs
 python3 scripts/tests/herdr-smoke.py --hunk
 ```
+
+The offline Hunk tests check Git scope contracts and exact tracked patch bodies. The
+opt-in runtime test requires the installer-pinned source plus its existing dependencies;
+it verifies source/patch identity and compiles into a disposable directory. It exercises
+the actual resolver, dispatcher, status handler, index, submission adapter, and key
+installer with fake Herdr/Hunk I/O. It makes no service or model calls and reads no live
+review state. It does not prove TUI rendering or physical keyboard delivery.
 
 The smoke test uses a disposable HOME, a named Herdr server, a synthetic Pi session, and a PTY. It makes no model calls. It checks Enter and Shift+Enter newline behavior, Cmd+Enter and Ctrl+S submission, explicit confirmation and cancellation, blocked-state reporting, split/tab keys, detach persistence, and exact native session identity after a server restart. Its temporary path stays short enough for macOS Unix-domain sockets. With `--hunk`, it also links the installed plugin into the disposable profile, starts a separate loopback Hunk daemon, creates a synthetic Git change and a human inline comment through the TUI, and checks explicit sending, blocked-dialog retention, Pi receipt, comment cleanup, and deduplication. It checks repeated configuration preserves user preferences. Omit `--hunk` to test Herdr without the plugin.
 

@@ -42,7 +42,17 @@ Preserve existing dirty work in the source checkout. New worktrees start from co
 
 From the intended Pi pane, Ctrl+B then `f` opens Hunk. Save human comments with Ctrl+S and explicitly send them with Ctrl+B then Shift+F. Each worktree has its own recipient. Keep comments local unless remote publication is explicitly authorized.
 
-Open the installed Hunk skill with `hunk skill path` for agent-side review commands. Ensure the review includes committed task changes when needed, for example by reloading that exact worktree's session with `diff main...HEAD`.
+Open the installed Hunk skill with `hunk skill path` for agent-side review commands and
+completion checks. Ctrl+B then Shift+B selects committed branch review. Verify its
+base against the intended integration target; an invalid-base fallback is not whole-task
+review. Reload the exact worktree with an explicit comparison when needed. Branch
+`<base>...HEAD` excludes staged, unstaged, and untracked changes; review those separately
+under the [code-review scope rules](../code-review/references/scope.md).
+
+Before completion or successful feedback delivery clears comments, retain unresolved
+conclusions and a local [coding-task receipt](../handoff/SKILL.md#coding-task-review-receipt).
+Record reviewed and tested state separately and recheck after edits or rebases. Reference
+existing evidence rather than copying patches, private transcripts, or all comments.
 
 Prepare commits explicitly, inspect recent commit style, and run the relevant checks. The seeded Worktrunk configuration disables automatic commits, rebasing, and removal during merge. For an explicit conservative local integration:
 

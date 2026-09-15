@@ -25,6 +25,7 @@ const bindings = [
   ["prefix+f", "review", "hunk: review changes"],
   ["prefix+shift+f", "send-review", "hunk: send review to agent"],
   ["prefix+shift+c", "review:commit", "hunk: review the last commit"],
+  ["prefix+shift+b", "review:branch", "hunk: review branch changes"],
   ["prefix+shift+a", "review:staged", "hunk: review staged changes"],
 ].map(([key, action, description]) => ({ key, action: `jhochenbaum.hunkdiff.${action}`, description }));
 const result = installKeys(resolveHerdrConfigPath(process.env), bindings);
