@@ -5,15 +5,26 @@ function log
 end
 
 log "Cleaning brew git repo..."
-cd (brew --repo) && git prune && git gc
+set -l repo (brew --repo)
+or exit 1
+cd "$repo"; or exit 1
+git prune; or exit 1
+git gc; or exit 1
 
 log "Running brew cleanup..."
-brew cleanup
+brew cleanup; or exit 1
 
 log "Running brew autoremove..."
-brew autoremove
+brew autoremove; or exit 1
 
-log "Clearing git cache..."
-rm -rf (brew --cache)
+log "Clearing brew cache..."
+set -l cache (brew --cache)
+or exit 1
+# Refuse an empty or root path even if a broken brew command reports success.
+if not string match -q '/*' -- "$cache"; or string match -qr '^/+$' -- "$cache"
+    echo "brew-cleanup: invalid cache path" >&2
+    exit 1
+end
+rm -rf -- "$cache"; or exit 1
 
 echo (set_color --bold green) "Done!" (set_color normal)
