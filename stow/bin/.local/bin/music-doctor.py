@@ -1144,37 +1144,17 @@ def fix_compilation_mismatch(finding: dict, ctx: FixContext) -> None:
 
 
 def fix_empty_folder(finding: dict, ctx: FixContext) -> None:
-    """Remove an artist or album folder that has no audio descendants.
-
-    The finding `empty_album_folder` fires when the recursive walk found no
-    audio anywhere under the folder, so a top-level cover.* and any leftover
-    AppleDouble sidecars are also dead and go with it. Re-walk here as a
-    last-mile safety check in case the filesystem changed between scan and
-    fix — refuse to delete if any audio extension is now present.
-    """
+    """Remove only genuinely empty directories, never unreviewed contents."""
     for p in finding["targets"]:
-        if not os.path.isdir(p):
-            ctx.skipped.append(f"{finding['hash']}: {p} not a directory")
+        if not os.path.isdir(p) or os.path.islink(p):
+            ctx.skipped.append(f"{finding['hash']}: {p} not a plain directory")
             continue
         try:
-            audio_present = []
-            for root, dirs, files in os.walk(p):
-                dirs[:] = [d for d in dirs if not is_hidden(d)]
-                for fn in files:
-                    if is_hidden(fn):
-                        continue
-                    if os.path.splitext(fn)[1].lower() in AUDIO_EXTS:
-                        audio_present.append(os.path.join(root, fn))
-                if audio_present:
-                    break
-            if audio_present:
-                ctx.skipped.append(
-                    f"{finding['hash']}: {p} has audio now ({audio_present[0]}); "
-                    "refusing to delete"
-                )
+            if os.listdir(p):
+                ctx.skipped.append(f"{finding['hash']}: {p} has contents; refusing to delete")
                 continue
             if ctx.apply:
-                shutil.rmtree(p)
+                os.rmdir(p)  # Fails safely if another process adds contents.
             ctx.changed.append(f"rmdir: {p}")
         except Exception as e:  # noqa: BLE001
             ctx.skipped.append(f"{finding['hash']}: {p}: {e}")

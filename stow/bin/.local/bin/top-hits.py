@@ -740,6 +740,9 @@ def cmd_resolve(args):
     chart = read_json(state_path("charts", f"{year}.json"))
     if not chart:
         raise SystemExit(f"ERROR: no chart for {year}; run `top-hits.py chart {year}` first.")
+    existing = load_manifest(year) if args.rank else None
+    if args.rank and not set(args.rank) <= set(range(1, TOP_N + 1)):
+        raise SystemExit("ERROR: requested rank is outside the chart")
     overrides = read_json(state_path("overrides", f"{year}.json"), default={})
     qb = Qobuz()
     rows = []
@@ -766,11 +769,10 @@ def cmd_resolve(args):
         "resolved_at": now_iso(), "entries": rows,
     }
     if args.rank:
-        existing = read_json(state_path("manifests", f"{year}.json"))
-        if existing:
-            by_rank = {r["rank"]: r for r in existing["entries"]}
-            by_rank.update({r["rank"]: r for r in rows})
-            manifest["entries"] = [by_rank[k] for k in sorted(by_rank)]
+        by_rank = {r["rank"]: r for r in existing["entries"]}
+        by_rank.update({r["rank"]: r for r in rows})
+        manifest["entries"] = [by_rank[k] for k in sorted(by_rank)]
+    validate_manifest(manifest)
     path = state_path("manifests", f"{year}.json")
     write_json(path, manifest)
     review = write_review(manifest)
@@ -855,6 +857,7 @@ def year_lock(year, stage):
     except OSError:
         handle.seek(0)
         holder = handle.read().strip()
+        handle.close()
         raise SystemExit(f"ERROR: another top-hits process holds {year} ({holder or 'unknown'}); refusing to run {stage} concurrently.")
     handle.seek(0)
     handle.truncate()
@@ -867,10 +870,18 @@ def library_album_dir(manifest):
     return os.path.join(LIBRARY_ROOT, "Compilations", safe_filename(manifest["album"]))
 
 
+def validate_manifest(manifest):
+    ranks = [r.get("rank") for r in manifest.get("entries", [])]
+    if (any(type(rank) is not int for rank in ranks)
+            or sorted(ranks) != list(range(1, TOP_N + 1))):
+        raise SystemExit("ERROR: manifest must contain each chart rank exactly once")
+
+
 def load_manifest(year):
     manifest = read_json(state_path("manifests", f"{year}.json"))
     if not manifest:
         raise SystemExit(f"ERROR: no manifest for {year}; run `top-hits.py resolve {year}` first.")
+    validate_manifest(manifest)
     return manifest
 
 
@@ -883,6 +894,7 @@ def save_progress(progress):
 
 
 def not_ready_rows(manifest):
+    validate_manifest(manifest)
     return [r for r in manifest["entries"] if r["status"] not in READY_STATUSES]
 
 
@@ -1260,24 +1272,50 @@ def cmd_assemble(args):
         raise SystemExit(4)
 
 
+def verified_library_files(manifest):
+    """Require the exact rank multiset and the tagged recording's title, artist, duration."""
+    from mutagen.mp4 import MP4
+    if not_ready_rows(manifest):
+        raise SystemExit("ERROR: manifest has undecided rows")
+    filed = library_album_dir(manifest)
+    wanted = {r["rank"]: r for r in manifest["entries"] if r["status"] != "skip"}
+    found = {}
+    for path in find_audio(filed):
+        try:
+            audio = MP4(path)
+            rank = audio.get("trkn", [(0, 0)])[0][0]
+            if rank not in wanted or rank in found:
+                raise ValueError(f"unexpected or duplicate rank {rank}")
+            row = wanted[rank]
+            artist, title = artist_and_title(row, row["qobuz"]["performer"])
+            if norm((audio.get("\xa9nam") or [""])[0]) != norm(title):
+                raise ValueError(f"rank {rank}: title mismatch")
+            if norm((audio.get("\xa9ART") or [""])[0]) != norm(artist):
+                raise ValueError(f"rank {rank}: artist mismatch")
+            duration = row["qobuz"].get("duration")
+            if not duration or abs(audio.info.length - duration) > 4:
+                raise ValueError(f"rank {rank}: unknown or mismatched duration")
+            found[rank] = path
+        except Exception as e:
+            raise SystemExit(f"ERROR: cannot verify {filed}: {e}") from e
+    if set(found) != set(wanted) or not found:
+        raise SystemExit(f"ERROR: {filed} lacks expected ranks; cannot verify")
+    return found
+
+
 # ----------------------------------------------------------------- stage: adopt
 def cmd_adopt(args):
     """Mark a year assembled from the album already filed in the library (repairs a clobbered progress record)."""
-    from mutagen.mp4 import MP4
+    with year_lock(args.year, "adopt"):
+        _adopt_locked(args)
+
+
+def _adopt_locked(args):
     year = args.year
     manifest = load_manifest(year)
     progress = load_progress(year)
     filed = library_album_dir(manifest)
-    files = find_audio(filed) if os.path.isdir(filed) else []
-    wanted = {r["rank"]: r for r in manifest["entries"] if r["status"] != "skip"}
-    found = {}
-    for path in files:
-        rank = MP4(path).get("trkn", [(0, 0)])[0][0]
-        if rank in wanted:
-            found[rank] = path
-    missing = sorted(set(wanted) - set(found))
-    if missing:
-        raise SystemExit(f"ERROR: {filed} lacks ranks {missing}; cannot adopt.")
+    found = verified_library_files(manifest)
     for rank, path in found.items():
         rec = progress["ranks"].setdefault(str(rank), {"attempts": 0})
         rec.update({"verified": True, "path": path, "error": None, "verified_at": rec.get("verified_at") or now_iso()})
@@ -1288,6 +1326,23 @@ def cmd_adopt(args):
     if os.path.isdir(staging):
         shutil.rmtree(staging, ignore_errors=True)
     print(f"{year}: adopted {len(found)} tracks at {filed}; staging cleared" + (f"; perm fixes pending: {progress['perm_failures']}" if progress["perm_failures"] else ""))
+
+
+def replace_recording(source, target, old_paths):
+    """Publish on the destination filesystem before removing any old recording."""
+    import tempfile
+    fd, staged = tempfile.mkstemp(prefix=".top-hits-", dir=os.path.dirname(target))
+    os.close(fd)
+    try:
+        shutil.copy2(source, staged)
+        os.replace(staged, target)
+        for old in old_paths:
+            if os.path.abspath(old) != os.path.abspath(target):
+                os.remove(old)
+        os.remove(source)
+    finally:
+        if os.path.exists(staged):
+            os.remove(staged)
 
 
 # ------------------------------------------------------------------ stage: redo
@@ -1330,10 +1385,12 @@ def cmd_redo(args):
             continue
         _, title = tag_file(files[0], row, manifest, cover_bytes)
         target = os.path.join(library_dir, f"{rank:02d} {safe_filename(title)}.m4a")
-        for old in existing.get(rank, []):
-            if os.path.abspath(old) != os.path.abspath(target):
-                os.remove(old)
-        shutil.move(files[0], target)
+        try:
+            replace_recording(files[0], target, existing.get(rank, []))
+        except OSError as e:
+            failures.append((rank, f"replacement failed: {e}"))
+            print(f"FAILED ({e}); staged download retained")
+            continue
         shutil.rmtree(dest, ignore_errors=True)
         progress["ranks"][str(rank)] = {"attempts": 1, "verified": True, "path": target, "error": None,
                                         "verified_at": now_iso(), "redone_at": now_iso()}

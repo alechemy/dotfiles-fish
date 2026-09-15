@@ -362,9 +362,19 @@ def preserve_extras(folder, archive_dir, artist, album, dry_run):
     if not moved:
         return None
 
+    def component(value):
+        value = re.sub(r'[\/\\:*?"<>|\x00-\x1f]', "_", str(value or ""))
+        return value.strip().rstrip(".").strip() or "Unknown"
+
     dest_root = os.path.join(
-        archive_dir, datetime.now().strftime("%Y-%m-%d"), artist, album
+        archive_dir, datetime.now().strftime("%Y-%m-%d"), component(artist), component(album)
     )
+    archive_real = os.path.realpath(archive_dir)
+    # Check all paths first, including existing symlinked destination parents.
+    for rel, _ in moved:
+        dest = os.path.realpath(os.path.join(dest_root, rel))
+        if dest == archive_real or os.path.commonpath([archive_real, dest]) != archive_real:
+            raise ValueError("extras destination escapes imports directory")
     print(f"  -> preserving {len(moved)} extra(s) -> {dest_root}")
     if dry_run:
         for rel, _ in moved:
