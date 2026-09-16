@@ -99,7 +99,7 @@ wt pi list
 
 Its native Pi markers distinguish working, idle, and blocked sessions. Herdr also shows Subagents activity text, which can indicate child work even when the root Pi session looks idle.
 
-Keep one writer per checkout. Managed Subagents write worktrees that can enter automatic cleanup are currently restricted: the installed guarded build can delete a checkout even when its captured binary patch cannot be replayed. Do not use that cleanup path until the reviewed preservation fix passes its binary, stale-patch, and failure-retention tests. This is separate from the human `wt pi` helper, which retains branches and refuses dirty work. Do not bulk-clean either kind of retained task.
+Keep one writer per checkout. Managed Subagents write worktrees that can enter automatic cleanup are currently restricted: the installed guarded build can delete a checkout even when its captured binary patch cannot be replayed. The isolated preservation candidate has passed those tests, but it is not installed. Do not use that cleanup path until full SDK loader verification and separately approved installation/activation are complete. This is separate from the human `wt pi` helper, which retains branches and refuses dirty work. Do not bulk-clean either kind of retained task.
 
 ### Check delegated work without confusing root and child status
 

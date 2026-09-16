@@ -68,7 +68,44 @@ Evidence relative to `pi-web-access`: `index.ts`, `credential-source.ts`, `gemin
 
 The local delegation build uses the `pi-subagents` source checkout at `~/Developer/pi-subagents`, branch `feat/copilot-local-scout`, building on the existing same-provider guard. Its installed package belongs at `~/.pi/agent/local/copilot-delegation/node_modules/pi-subagents`. The settings fragment uses a relative local package source so a normal merge cannot silently replace the guard with the published npm release. The prior `~/.pi/agent/local/copilot-scout` and `~/.pi/agent/local/provider-guard` installations remain available for rollback. The active installation directory retains its tarball and `build-receipt.json`; the private pre-trial settings backup remains in the earlier scout directory. The installed files were compared byte-for-byte with the tarball and reviewed source; the installed Pi SDK loaded the package in an isolated, credential-free loader check.
 
-The fragment explicitly selects the installed build's official Worktrunk allocator. Subagents retains lifecycle ownership of `pi-subagents/` branches and suppresses Worktrunk project hooks during allocation. Re-run `node scripts/tests/worktrunk-subagents-smoke.mjs` after changing either package; it validates the allocator without launching a child model and verifies that unrecorded edits survive cleanup. This does not extend the guard's model/provider permissions.
+The fragment explicitly selects the installed build's official Worktrunk allocator. Subagents retains lifecycle ownership of `pi-subagents/` branches and suppresses Worktrunk project hooks during allocation. Before installing a changed package, run
+`node scripts/tests/worktrunk-subagents-smoke.mjs --candidate-root /path/to/reviewed/pi-subagents`.
+The candidate is mandatory: the test never falls back to the active installation.
+It imports only the candidate's worktree modules with existing loader dependencies
+and uses disposable repositories and an isolated environment, without a child model.
+The preservation matrix checks binary replay, stale or corrupt evidence, capture
+and validation failures, and setup-failure retention for native and Worktrunk
+allocation. A candidate pass does not activate that build or extend its
+model/provider permissions. Keep the installed managed-cleanup restriction until
+the accepted candidate is separately approved and deployed.
+
+A preservation-only recovery candidate is retained at source commit
+`11a0d35342788be29f307160a75c96a10869befa` in the local Subagents source repository.
+Its tested runtime commit is `c5b64a0c5c5991843f49ad3d6b6cd86ba471b1b0`; the
+follow-up restores only three receipt-verified baseline documentation files.
+The recovery directory is
+`~/Developer/pi-subagents.w01-preservation/tmp/w01-evidence/recovery-11a0d3534278`.
+It contains the package, committed-source archive, inventories, signed lineage,
+validation records, `SHA256SUMS`, and `RECOVERY.md`. Preserve these together and
+back them up before rebuilding a machine; a local commit ID alone is not a
+remote recovery source.
+
+The package SHA-256 is
+`a8ac66f22c5483fb42181de850cbcb3287c84f89aa406a8a782ba921abeba394`.
+The source archive SHA-256 is
+`ae3579e12a31a03cac05c61ed921852aa7729d9e8494f0d97b5a3e369bf23630`.
+All 304 package files match that source; only the two reviewed preservation
+modules differ from the old installed artifact. The source archive includes
+baseline tests, the preserved role definition, and documentation omitted from
+the initial code-only snapshot. Packing used offline mode with lifecycle scripts
+disabled; it did not install anything.
+
+This candidate is **not installed or activated**. The preservation matrix,
+provider/role regressions, and synthetic integration checks passed, but a full
+credential-free SDK loader check and fresh-machine restoration are still pending.
+Do not treat archive hashes as dependency-closure or host-runtime proof. Follow
+`RECOVERY.md`, retain the old package and receipt for rollback, and obtain separate
+approval before installation, package-source changes, or a Pi restart.
 
 The guard permits top-level Copilot-to-local launches only for canonical `scout` and `local-editor` roles. The configured exception is `subagents.modelScope.localDelegation`, with `rootProvider: "github-copilot"` and exact per-role model allowlists. Global scope remains enforced and strict with `allow: ["inherit-provider"]`. Provider-specific role defaults select Qwen; the scope authorizes or rejects the selected model. The local exception does not apply to nested callers, other roles, or other root providers. Both roles are fresh-context leaves with no fallbacks or ambient extensions. Scout is read-only. Local editor adds `edit` and `write`, but not shell access; the Copilot parent reviews the diff and runs validation. Original launch identity prevents resume even after routing policy changes. Broad implementation, ambiguous changes, and substantive review stay on Copilot.
 

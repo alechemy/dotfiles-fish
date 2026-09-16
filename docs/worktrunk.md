@@ -89,10 +89,11 @@ Worktrunk 0.77.0's advertised Pi plugin is an Oh My Pi hook. Its installer write
 ## Subagents
 
 **Current restriction:** Do not use managed Subagents write worktrees that can enter
-automatic cleanup until W01's reviewed binary and stale-patch preservation acceptance
-passes. The installed guarded build is not yet verified to preserve that work. W01
-implementation remains blocked pending scope approval. Human `wt pi` task worktrees
-are separate: they retain branches and refuse dirty checkout removal.
+automatic cleanup. The isolated W01 candidate passed its preservation tests, but the
+installed package has not been replaced. Full SDK loader verification and separately
+approved installation/activation remain pending. Candidate test success alone does
+not lift this restriction. Human `wt pi` task worktrees are separate: they retain
+branches and refuse dirty checkout removal.
 
 Pi's settings fragment explicitly selects `subagents.worktreeProvider = "worktrunk"`. The guarded Subagents build already implements this allocator; no delegation adapter or package patch is added.
 
@@ -134,11 +135,19 @@ python3 -m unittest discover -s scripts/tests -p 'test_worktrunk.py'
 python3 -m unittest discover -s scripts/tests -p 'test_restow_changed.py'
 python3 -m unittest discover -s scripts/tests -p 'test_merge_pi_settings.py'
 node --test scripts/tests/test_worktrunk_activity.mjs
-node scripts/tests/worktrunk-subagents-smoke.mjs
+node scripts/tests/worktrunk-subagents-smoke.mjs --candidate-root /path/to/reviewed/pi-subagents
 python3 scripts/tests/herdr-smoke.py --worktrunk
 ```
 
-All checks use synthetic data. Worktrunk tests use disposable Git repositories and homes. The Subagents smoke test exercises the installed guarded allocator without launching a model, checks that Worktrunk project hooks are suppressed, and confirms that unrecorded child edits survive cleanup.
+All checks use synthetic data. Worktrunk tests use disposable Git repositories and
+homes. The Subagents smoke test requires an explicit reviewed source candidate;
+it does not default to the installed package. It loads only worktree modules,
+uses an isolated environment, and launches no model. Its native and Worktrunk
+cases check exact binary replay, unsafe evidence retention, setup-failure
+retention, hook suppression, and explicit discard boundaries. Existing Pi/Jiti
+loader dependencies are read-only inputs; `--pi-loader-root` can select their
+existing Pi package root containing `package.json`. Passing the candidate test does not install or
+activate it, and does not lift the installed managed-cleanup restriction.
 
 The Herdr smoke uses a named test server, isolated HOME, PTY, and separate loopback Hunk daemon. It opens two real task worktrees and Pi sessions, verifies tab reuse, native idle/blocked/shutdown markers, task-specific human feedback, duplicate-send prevention, dirty-tree refusal, and branch-preserving removal. It also retains the original Pi submission, confirmation, detach, and native session-restore checks. It never stops the default Herdr server or calls a model.
 
