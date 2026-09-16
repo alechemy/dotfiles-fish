@@ -185,6 +185,8 @@ Current consumers:
 - `stow/fish/.config/fish/conf.d/context7.fish` — op read (`scripts/build-context7-config.sh`); exports the optional `CONTEXT7_API_KEY` so the official `@upstash/context7-pi` extension gets authenticated higher rate limits in terminal Pi sessions. The extension remains usable anonymously when the key is absent. Version `0.1.2` is source-reviewed and pinned in Pi's settings fragment; it registers two native tools, its `context7-docs` skill, and the `/c7-docs` command without an MCP server.
 - `~/.zshenv` — op read (`scripts/build-things-config.sh`); exports `THINGS_AUTH_TOKEN` for the Things URL-scheme automation. Output lives outside the stow tree, so there is no package; the script chmods it 600.
 
+For Context7 key rotation, update the `credential` field of `mcp-server-context7` in the Private 1Password vault, then run `~/.dotfiles/scripts/build-context7-config.sh` from the primary checkout. The builder references the item by ID, so update the existing item rather than replacing it. Open a new terminal and restart Pi to inherit the new export; rebuilding the file does not update existing processes. Keep the resolved key out of documentation and tool output.
+
 A separate `__HOME__` expansion pattern exists for launch-agent plist templates under `stow/*/Library/LaunchAgents/*.plist.template`, handled by `scripts/build-launchd-plists.sh`.
 
 ### Git signing trust
