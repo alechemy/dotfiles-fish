@@ -33,4 +33,5 @@ shd101wyy.markdown-preview-enhanced
 tamasfe.even-better-toml
 usernamehw.errorlens
 vscode-icons-team.vscode-icons
+vsls-contrib.codetour
 yoavbls.pretty-ts-errors
