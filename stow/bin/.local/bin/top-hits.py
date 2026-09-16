@@ -45,6 +45,7 @@ import json
 import os
 import re
 import shutil
+import shlex
 import statistics
 import subprocess
 import sys
@@ -55,6 +56,9 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
+import _music_nas  # noqa: E402
+
 STATE_DIR = os.path.expanduser(os.environ.get("TOP_HITS_STATE", "~/.local/state/top-hits"))
 STREAMRIP_CONFIG = os.path.expanduser("~/Library/Application Support/streamrip/config.toml")
 QOBUZ_BASE_URL = "https://www.qobuz.com/api.json/0.2"
@@ -62,11 +66,11 @@ WIKI_API = "https://en.wikipedia.org/w/api.php"
 USER_AGENT = "top-hits/0.1 (personal music library tooling)"
 TOP_N = 50
 DOWNLOADS_DIR = os.path.expanduser(os.environ.get("TOP_HITS_DOWNLOADS", "~/StreamripDownloads/top-hits"))
-LOCAL_RIP = os.path.expanduser("~/Developer/streamrip/.venv/bin/rip")
-LIBRARY_ROOT = "/Volumes/Media/Music"
+LOCAL_RIP = os.path.expanduser(os.environ.get("LOCAL_RIP", "~/Developer/streamrip/.venv/bin/rip"))
+LIBRARY_ROOT = None  # CLI resolves private config; tests may supply a disposable root.
 ORGANIZER = os.path.expanduser("~/.local/bin/music-organize.py")
 RUNNABILITY = os.path.expanduser("~/.local/bin/runnability.py")
-NAS_HOSTS = ("admin@192.168.50.54", "admin@100.89.43.9")
+
 COVER_FONTS = (
     "/System/Library/Fonts/Supplemental/DIN Condensed Bold.ttf",
     "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
@@ -1272,18 +1276,20 @@ def safe_filename(name):
 
 def nas_chmod(library_dirs):
     host = None
-    for candidate in NAS_HOSTS:
+    config = _music_nas.load()
+    for candidate in config["ssh_hosts"]:
         if subprocess.run(["ssh", "-n", "-o", "ConnectTimeout=5", "-o", "BatchMode=yes", candidate, "true"],
                           capture_output=True).returncode == 0:
             host = candidate
             break
-    if not host:
-        return [f"ssh <nas> \"chmod 775 '{os.path.dirname(d)}'; chmod -R 775 '{d}'\"" for d in library_dirs]
     failed = []
     for d in library_dirs:
-        nas_dir = d.replace("/Volumes/Media", "/share/Media", 1)
+        nas_dir = _music_nas.remote_path(d, config)
         esc = lambda p: p.replace("'", "'\\''")
         cmd = f"chmod 775 '{esc(os.path.dirname(nas_dir))}'; chmod -R 775 '{esc(nas_dir)}'"
+        if host is None:
+            failed.append(f"ssh {shlex.quote(config['ssh_hosts'][0])} {shlex.quote(cmd)}")
+            continue
         ok = False
         for _ in range(2):
             if subprocess.run(["ssh", "-n", "-o", "ConnectTimeout=10", host, cmd], capture_output=True).returncode == 0:
@@ -1291,7 +1297,7 @@ def nas_chmod(library_dirs):
                 break
             time.sleep(3)
         if not ok:
-            failed.append(f"ssh {host} \"{cmd}\"")
+            failed.append(f"ssh {shlex.quote(host)} {shlex.quote(cmd)}")
     return failed
 
 
@@ -1784,6 +1790,12 @@ def main(argv=None):
     p.add_argument("--require", choices=["resolved", "downloaded", "assembled"])
     p.set_defaults(func=cmd_status)
     args = parser.parse_args(argv)
+    if args.cmd not in {"chart", "resolve", "approve"}:
+        global LIBRARY_ROOT
+        try:
+            LIBRARY_ROOT = _music_nas.library_root()
+        except _music_nas.ConfigError as e:
+            parser.error(str(e))
     args.func(args)
 
 

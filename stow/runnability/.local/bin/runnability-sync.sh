@@ -5,7 +5,8 @@
 # no on-arrival scoring hook, so this run is what scores them.
 
 "$HOME/.local/bin/should-run-background-job" || exit 0
-[ -d /Volumes/Media/Music ] || exit 0
+LIBRARY_ROOT=$(/usr/bin/python3 "$HOME/.local/bin/_music_nas.py" get local_library_root) || exit 1
+[ -d "$LIBRARY_ROOT" ] || exit 0
 
 # uv invoked by absolute path: launchd's PATH has no /opt/homebrew/bin, and the
 # lint forbids resolving runnability.py's uv shebang from a launchd shell.

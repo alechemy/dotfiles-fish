@@ -7,7 +7,7 @@
 # ///
 """Library health checks for a Music.app-shaped library tree.
 
-Walks a library root (default /Volumes/Media/Music), reads tags via mutagen,
+Walks a library root from the private NAS config and reads tags via mutagen,
 runs a battery of checks for corruption, inconsistent metadata, duplicates,
 empty folders, misplaced files, and quality issues, and writes findings to a
 SQLite store at ~/.local/share/music-doctor/db.sqlite3.
@@ -54,6 +54,7 @@ from typing import Any, Iterable, Optional
 
 # Reuse compilation detection from the shared tagging helpers.
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import _music_nas  # noqa: E402
 from _music_tags import compilation_signal, norm_artist  # noqa: E402
 
 from mutagen.flac import FLAC  # noqa: E402
@@ -61,7 +62,7 @@ from mutagen.mp3 import MP3  # noqa: E402
 from mutagen.mp4 import MP4  # noqa: E402
 
 # ----------------------------------------------------------------- constants
-DEFAULT_LIBRARY_ROOT = "/Volumes/Media/Music"
+DEFAULT_LIBRARY_ROOT = None  # Resolved only for filesystem commands without an override.
 DEFAULT_DB_PATH = os.path.expanduser("~/.local/share/music-doctor/db.sqlite3")
 
 AUDIO_EXTS = {".m4a", ".flac", ".mp3"}
@@ -1562,7 +1563,14 @@ CURRENT_YEAR = date.today().year
 
 
 def main(argv: Optional[list[str]] = None) -> int:
-    args = build_parser().parse_args(argv)
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    needs_library = args.cmd in {"scan", "fix"} or (args.cmd == "stats" and not args.from_db)
+    if needs_library:
+        try:
+            args.library_root = _music_nas.library_root(args.library_root)
+        except _music_nas.ConfigError as e:
+            parser.error(str(e))
     conn = open_db(args.db)
     try:
         dispatch = {
