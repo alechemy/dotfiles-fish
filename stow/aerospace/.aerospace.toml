@@ -259,6 +259,10 @@ run = 'move-node-to-workspace 4'
 
 # Floating Windows
 [[on-window-detected]]
+if.app-id = 'org.localsend.localsendApp'
+run = 'layout floating'
+
+[[on-window-detected]]
 if.app-id = 'com.apple.systempreferences'
 run = 'layout floating'
 
