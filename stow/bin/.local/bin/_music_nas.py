@@ -32,8 +32,15 @@ def _text(value, name):
     return value
 
 
-def _host(value, name):
+def _address(value, name):
     _text(value, name)
+    if "%" in value:
+        raise ConfigError(f"{name}: scoped IPv6 addresses are unsupported")
+    return value
+
+
+def _host(value, name):
+    _address(value, name)
     try:
         ipaddress.ip_address(value)
         return
@@ -72,8 +79,9 @@ def validate(config, *, worker=False):
     _keys(mount, ("host", "user", "shares", "home_gateway"), "mount")
     _host(mount["host"], "mount.host")
     _user(mount["user"], "mount.user")
+    gateway = _address(mount["home_gateway"], "mount.home_gateway")
     try:
-        ipaddress.ip_address(_text(mount["home_gateway"], "mount.home_gateway"))
+        ipaddress.ip_address(gateway)
     except ValueError:
         raise ConfigError("mount.home_gateway: expected an IP address") from None
     shares = mount["shares"]
@@ -92,7 +100,7 @@ def validate(config, *, worker=False):
         if len(parts) != 2:
             raise ConfigError("ssh_hosts: expected user@host")
         _user(parts[0], "ssh_hosts user")
-        address = parts[1]
+        address = _address(parts[1], "ssh_hosts host")
         if address.startswith("[") and address.endswith("]"):
             try:
                 ipaddress.IPv6Address(address[1:-1])

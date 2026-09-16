@@ -87,6 +87,24 @@ class ConfigTests(unittest.TestCase):
         with self.assertRaises(nas.ConfigError):
             nas.load()
 
+    def test_scoped_ipv6_is_rejected_in_every_address_field(self):
+        for zone in ("eth0", "invalid scope", '"host syntax"', "';command", "$(command)", "scope;command"):
+            for field in ("host", "home_gateway", "ssh_hosts"):
+                with self.subTest(zone=zone, field=field):
+                    config = copy.deepcopy(self.config)
+                    address = "fe80::1%" + zone
+                    if field == "ssh_hosts":
+                        config[field] = ["user@[" + address + "]"]
+                    else:
+                        config["mount"][field] = address
+                    with self.assertRaises(nas.ConfigError):
+                        nas.validate(config)
+        config = copy.deepcopy(self.config)
+        config["mount"]["host"] = "2001:db8::1"
+        config["mount"]["home_gateway"] = "2001:db8::2"
+        config["ssh_hosts"] = ["user@[2001:db8::3]"]
+        self.assertEqual(nas.validate(config), config)
+
     def test_getter_preserves_order_and_paths_as_data(self):
         self.config["ssh_hosts"] = ["music@first.example.invalid", "music@second.example.invalid", "music@third.example.invalid"]
         self.config["remote"]["rip"] = "/srv/example tools/it's $(not-a-command); rip"
@@ -130,10 +148,13 @@ class ConfigTests(unittest.TestCase):
         result = subprocess.run(["/bin/bash", str(script)], env=self.env, capture_output=True, text=True, timeout=10)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("skipping mounts", result.stdout)
+        self.assertEqual(result.stderr, "")
+        self.assertEqual(len(result.stdout.splitlines()), 1)
         self.path.write_text('{"version": 2}')
         result = subprocess.run(["/bin/bash", str(script)], env=self.env, capture_output=True, text=True, timeout=10)
         self.assertEqual(result.returncode, 1)
         self.assertIn("no mount attempted", result.stdout)
+        self.assertIn("ERROR:", result.stderr)
 
     def test_fish_missing_config_and_local_overrides(self):
         helper = self.root / ".local/bin/_music_nas.py"

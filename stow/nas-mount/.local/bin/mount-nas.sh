@@ -23,12 +23,13 @@ log() {
 }
 
 NAS_CONFIG_HELPER="$HOME/.local/bin/_music_nas.py"
-/usr/bin/python3 "$NAS_CONFIG_HELPER" check
+config_error=$(/usr/bin/python3 "$NAS_CONFIG_HELPER" check 2>&1)
 config_status=$?
 if [ "$config_status" -eq 3 ]; then
     log "private NAS config is absent; skipping mounts."
     exit 0
 elif [ "$config_status" -ne 0 ]; then
+    printf '%s\n' "$config_error" >&2
     log "private NAS config is invalid; no mount attempted."
     exit 1
 fi

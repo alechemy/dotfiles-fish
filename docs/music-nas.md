@@ -39,6 +39,8 @@ versions fail validation.
 Paths must be absolute, non-root, and have no `..` components. Spaces and shell
 punctuation in paths are data, not commands. Values cannot contain control
 characters or line separators. Host and user fields reject command syntax.
+Scoped IPv6 addresses containing `%` are unsupported in SMB hosts, gateway
+addresses, and SSH destinations. Unscoped IPv6 addresses remain valid.
 Share names allow letters, digits, spaces, dots, underscores, and hyphens,
 starting with a letter or digit. SMB URLs percent-encode share names.
 
