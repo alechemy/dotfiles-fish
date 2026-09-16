@@ -10,7 +10,7 @@
 
 Analyzes audio once into a SQLite feature store, then scores tracks with a
 pure function over stored features so weights can be re-tuned without
-re-reading audio. Plan: ~/.dotfiles/.context/workout-runnability-plan.md
+re-reading audio.
 
   analyze    extract features (BPM, beat confidence, danceability, energy)
              into ~/.local/state/runnability/features.db; skips rows whose

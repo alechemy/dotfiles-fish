@@ -29,7 +29,12 @@ previous stage's output, so any stage can be rerun:
 Overrides (applied by resolve, survive re-resolves):
     overrides/<year>.json   {"<rank>": {"qobuz_id": "123"} | {"skip": "reason"}}
 
-Design and version policy: ~/.dotfiles/.context/top-hits-plan.md
+Selection prefers original explicit studio album cuts, except when the chart
+names a remix or a feature requires it. Karaoke, tribute, and instrumental
+substitutes are rejected; edits, live/acoustic versions, speed changes, later
+releases, compilations, and remasters are penalized. Non-pop chart entries and
+repeat appearances across years are retained. Duplication with source albums
+in the library is intentional.
 """
 
 from __future__ import annotations
