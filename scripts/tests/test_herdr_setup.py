@@ -179,7 +179,8 @@ class GhosttyHerdrKeysTests(unittest.TestCase):
     def test_forwarded_keys_match_herdr_bindings(self):
         config = (ROOT / "stow/ghostty/.config/ghostty/config").read_text()
         herdr = (ROOT / "stow/herdr/_seed/.config/herdr/config.toml").read_text()
-        aliases = {"enter": "\r", "left_bracket": "[", "right_bracket": "]"}
+        aliases = {"enter": "\r", "left_bracket": "[", "right_bracket": "]",
+                   "semicolon": ";"}
         for key, codepoint, modifier in re.findall(
                 r"^keybind = ([^=]+)=text:\\x1b\[(\d+);(\d+)u$", config, re.M):
             if key in {"cmd+enter", "shift+enter"}:
@@ -206,6 +207,44 @@ class GhosttyHerdrKeysTests(unittest.TestCase):
         overrides = dict(re.findall(r"^keybind = ([^=]+)=(.*)$", shell, re.M))
         self.assertEqual(bindings["cmd+w"], "close_window")
         self.assertEqual(overrides["cmd+w"], "close_surface")
+
+    def test_ctrl_semicolon_enters_herdr_prefix_only_in_herdr_profile(self):
+        config = (ROOT / "stow/ghostty/.config/ghostty/config").read_text()
+        shell = (ROOT / "stow/ghostty/.config/ghostty/shell.conf").read_text()
+        herdr = (ROOT / "stow/herdr/_seed/.config/herdr/config.toml").read_text()
+        self.assertIn(r"keybind = ctrl+semicolon=text:\x1b[59;5u", config)
+        self.assertIn("keybind = ctrl+semicolon=unbind\n", shell)
+        self.assertIn('prefix = "ctrl+;"\n', herdr)
+        self.assertNotIn('prefix = "ctrl+b"', herdr)
+
+    def test_prefix_w_closes_pane_without_workspace_picker_collision(self):
+        herdr = (ROOT / "stow/herdr/_seed/.config/herdr/config.toml").read_text()
+        self.assertIn('close_pane = ["prefix+w", "prefix+x", "cmd+w"]', herdr)
+        self.assertIn('workspace_picker = "cmd+ctrl+w"', herdr)
+        self.assertEqual(herdr.count('"prefix+w"'), 1)
+
+    def test_cmd_n_opens_plain_ghostty_profile(self):
+        config = (ROOT / "stow/ghostty/.config/ghostty/config").read_text()
+        shell = (ROOT / "stow/ghostty/.config/ghostty/shell.conf").read_text()
+        herdr = (ROOT / "stow/herdr/_seed/.config/herdr/config.toml").read_text()
+        self.assertIn(r"keybind = cmd+n=text:\x1b[110;9u", config)
+        self.assertIn("keybind = cmd+n=new_window\n", shell)
+        self.assertIn('key = "cmd+n"\ntype = "shell"\n', herdr)
+        self.assertIn('"$HOME/.local/bin/ghostty-shell"', herdr)
+
+    def test_plain_window_launcher_uses_separate_shell_profile(self):
+        with tempfile.TemporaryDirectory(prefix="ghostty shell ") as directory:
+            root = Path(directory)
+            stub = root / "open"
+            stub.write_text('#!/bin/sh\nprintf "%s\\n" "$@"\n')
+            stub.chmod(0o755)
+            env = dict(os.environ, HOME=str(root), PATH=f"{root}:{os.environ['PATH']}")
+            result = subprocess.run(
+                ["bash", str(ROOT / "stow/ghostty/.local/bin/ghostty-shell")],
+                env=env, capture_output=True, text=True, check=True, timeout=10)
+            self.assertEqual(result.stdout.splitlines(), [
+                "-na", "Ghostty", "--args", f"--config-file={root}/.config/ghostty/shell.conf",
+            ])
 
     def test_submit_bindings_remain_owned_by_pi(self):
         config = (ROOT / "stow/ghostty/.config/ghostty/config").read_text()

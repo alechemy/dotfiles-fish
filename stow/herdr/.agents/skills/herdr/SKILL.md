@@ -11,9 +11,11 @@ Control ordinary sessions only from inside Herdr, with `HERDR_ENV=1`. Use inheri
 
 ## Local conventions
 
-Ghostty owns windows; Herdr owns the panes and tabs inside them. Herdr starts Fish, and Pi runs normally in those shells. `ghostty-shell` opens a separate Ghostty instance with native splits and no Herdr.
+Ghostty owns windows; Herdr owns the panes and tabs inside them. Herdr starts Fish, and Pi runs normally in those shells. Cmd+N from Herdr invokes `ghostty-shell` to open a separate Ghostty instance with native splits and no Herdr. Launching the default profile with `open -na Ghostty` attaches another Herdr window.
 
 The installed `pi-subagents` package owns delegation and its provider restrictions. Prefer its `project.open` action for project-owned Pi sessions and `inspector.open` for existing async children. An inspector is a dashboard, not a child-session attachment. Do not bypass the delegation guard by starting a substitute agent through the terminal.
+
+Herdr uses Ctrl+; as its prefix instead of stock Ctrl+B, paralleling AeroSpace's Hyper+; service mode. Prefix `w` closes the pane, with stock `x` retained as an alias; workspace navigation uses Cmd+Ctrl+W. Other stock prefix actions remain available. Cmd+Shift+H/J/K/L focuses panes, while Hyper+H/J/K/L focuses AeroSpace windows.
 
 Pi uses Enter for a newline and Cmd+Enter or Ctrl+S to submit. Herdr's `agent prompt` sends Enter, so do not use it to submit to Pi with these bindings. For an explicitly requested prompt to an existing idle Pi pane, inspect its agent state first, send the quoted text with `herdr pane send-text "$pane_id" "$prompt"`, then submit with `herdr pane send-keys "$pane_id" ctrl+s`. A write receipt is not proof of a started turn. Never send prompts or approval keys into a blocked dialog.
 
@@ -21,7 +23,7 @@ Keep one writer per checkout and use worktrees for concurrent writers. Keep back
 
 ## Hunk reviews
 
-The `jhochenbaum.hunkdiff` plugin opens the existing Homebrew Hunk in a review split. Ctrl+B, then `f` opens or reuses the review from the intended recipient's Pi pane; Ctrl+B, then Shift+F sends human comments explicitly. One recipient is tracked per worktree. Automatic status-based reassignment is disabled. The local plugin patch handles Pi's Ctrl+S submission and retains comments when delivery fails or Pi is blocked or busy.
+The `jhochenbaum.hunkdiff` plugin opens the existing Homebrew Hunk in a review split. Ctrl+;, then `f` opens or reuses the review from the intended recipient's Pi pane; Ctrl+;, then Shift+F sends human comments explicitly. One recipient is tracked per worktree. Automatic status-based reassignment is disabled. The local plugin patch handles Pi's Ctrl+S submission and retains comments when delivery fails or Pi is blocked or busy.
 
 For agent-side inspection and annotations, run `hunk skill path` and read that installed skill. Keep review comments local unless the user explicitly authorizes remote publication.
 

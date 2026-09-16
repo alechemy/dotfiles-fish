@@ -40,10 +40,10 @@ Preserve existing dirty work in the source checkout. New worktrees start from co
 
 ## Review and integration
 
-From the intended Pi pane, Ctrl+B then `f` opens Hunk. Save human comments with Ctrl+S and explicitly send them with Ctrl+B then Shift+F. Each worktree has its own recipient. Keep comments local unless remote publication is explicitly authorized.
+From the intended Pi pane, Ctrl+; then `f` opens Hunk. Save human comments with Ctrl+S and explicitly send them with Ctrl+; then Shift+F. Each worktree has its own recipient. Keep comments local unless remote publication is explicitly authorized.
 
 Open the installed Hunk skill with `hunk skill path` for agent-side review commands and
-completion checks. Ctrl+B then Shift+B selects committed branch review. Verify its
+completion checks. Ctrl+; then Shift+B selects committed branch review. Verify its
 base against the intended integration target; an invalid-base fallback is not whole-task
 review. Reload the exact worktree with an explicit comparison when needed. Branch
 `<base>...HEAD` excludes staged, unstaged, and untracked changes; review those separately

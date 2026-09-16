@@ -1,6 +1,6 @@
 # Herdr in Ghostty
 
-Ghostty starts Herdr by default. Herdr owns persistent workspaces, tabs, and panes; each pane starts Fish. Run `pi` in a pane as usual. Separate Ghostty windows attach to the same default Herdr server. Use Herdr workspaces to separate projects, and named sessions only when independent servers are needed.
+Ghostty starts Herdr by default. Herdr owns persistent workspaces, tabs, and panes; each pane starts Fish. Run `pi` in a pane as usual. Cmd+N from Herdr opens a separate plain Fish window through `ghostty-shell`, with native Ghostty shortcuts. Windows launched with the default profile attach to the same Herdr server. Use Herdr workspaces to separate projects, and named sessions only when independent servers are needed.
 
 ## Everyday keys
 
@@ -14,20 +14,22 @@ Ghostty starts Herdr by default. Herdr owns persistent workspaces, tabs, and pan
 | Cmd+1 through Cmd+9 | Switch Herdr tabs. |
 | Cmd+Shift+[ or Cmd+Shift+] | Switch to the previous or next tab. |
 | Cmd+W | Close the Ghostty window, leaving Herdr running. |
-| Ctrl+B, then X | Terminate the Herdr pane. |
+| Ctrl+;, then `w` | Terminate the Herdr pane. |
 | Cmd+Option+W | Close the Herdr tab. |
 | Cmd+Ctrl+N | Create a workspace. |
 | Cmd+Ctrl+W | Open workspace navigation. |
-| Cmd+N | Open another Ghostty window attached to Herdr. |
+| Cmd+N | Open a plain Fish window with native Ghostty shortcuts. |
 | Cmd+Shift+W | Close the Ghostty window, leaving Herdr running. |
-| Ctrl+B, then Q | Detach, leaving Herdr running. |
-| Ctrl+B, then ? | Show Herdr's complete keybindings. |
+| Ctrl+;, then `q` | Detach, leaving Herdr running. |
+| Ctrl+;, then `?` | Show Herdr's complete keybindings. |
 
-Cmd+W closes only the outer window. Cmd+N reattaches to the running Herdr session. Ctrl+B, then X terminates a pane without a confirmation prompt.
+Cmd+W closes only the outer window. Ctrl+;, then `w` terminates a pane without a confirmation prompt; the stock `x` action remains an alias. Workspace navigation uses Cmd+Ctrl+W instead of prefix `w`. To attach another Herdr window, run `open -na Ghostty` to launch the default profile.
 
-Ghostty forwards the Herdr shortcuts as CSI-u sequences, and Herdr binds those modified keys directly. The Ctrl+B prefix bindings remain available. Pi keeps Enter and Shift+Enter for newlines and Cmd+Enter or Ctrl+S for submission. Ghostty sends Shift+Enter as CSI-u to preserve its modifier; ESC followed by Return means Alt+Enter and triggers Pi's follow-up submission.
+Ghostty forwards the Herdr shortcuts as CSI-u sequences, and Herdr binds those modified keys directly. Ctrl+; replaces the stock Ctrl+B prefix to parallel AeroSpace's Hyper+; service mode. Release it before pressing the action key. Prefix `w` closes a pane instead of opening workspace navigation; the other stock prefix actions remain available. Ctrl+B passes through to the pane. Pi keeps Enter and Shift+Enter for newlines and Cmd+Enter or Ctrl+S for submission. Ghostty sends Shift+Enter as CSI-u to preserve its modifier; ESC followed by Return means Alt+Enter and triggers Pi's follow-up submission.
 
 Use `ghostty-shell` for an ordinary Ghostty instance with the original native split shortcuts. Its `shell.conf` overrides both the launch command and Herdr-specific key forwarding. To return permanently to native splits, replace the Herdr command and mapped keybindings in Ghostty's config with the corresponding entries from `shell.conf`.
+
+Cmd+D splits only the focused pane. Herdr 0.9.0 has no full-height column insertion around an existing row stack. For a new layout, split right first, focus left, then split down. `layout.apply` is not a live rearrangement substitute because it replaces pane processes.
 
 Mouse selection, split resizing, workspace navigation, and pane menus remain available. The sidebar sorts agents by priority and includes Subagents status text. Notifications go through the outer terminal; Herdr sounds are disabled. The UI uses Ghostty's terminal palette.
 
@@ -35,7 +37,7 @@ Mouse selection, split resizing, workspace navigation, and pane menus remain ava
 
 Homebrew installs `herdr` through `Brewfile`. The existing Homebrew update schedule owns binary upgrades. Herdr's own version check is disabled; it does not manage the Homebrew installation. Agent-detection manifest updates retain their upstream default.
 
-`scripts/setup-herdr.sh` copies `stow/herdr/_seed/.config/herdr/config.toml` only when the live config is absent, validates it, installs the official Pi integration, and runs the Hunk plugin installer. Setup calls it after Stow. The restow hook also calls it when the Herdr package, setup scripts, or Hunk patch changes. Existing Herdr preferences remain app-owned; later seed changes do not overwrite them. The Hunk installer owns only its marked keybinding block.
+`scripts/setup-herdr.sh` copies `stow/herdr/_seed/.config/herdr/config.toml` only when the live config is absent, validates it, installs the official Pi integration, and runs the Hunk plugin installer. Setup calls it after Stow. The restow hook also calls it when the Herdr package, setup scripts, or Hunk patch changes. Existing Herdr preferences remain app-owned; later seed changes do not overwrite them. To adopt the semicolon prefix in an existing config, set `prefix = "ctrl+;"` under `[keys]`, reload Herdr's config, and reload Ghostty's config for the matching key forwarding. The plain-window shortcut is a `[[keys.command]]` shell action invoking `ghostty-shell`; its native profile restores Cmd+N to Ghostty's `new_window` action. Changes to these bindings must also be applied explicitly to an existing live config. The Hunk installer owns only its marked keybinding block.
 
 The `herdr` Stow package links the local UI-state extension and the shared Herdr skill. `_seed` is excluded. The `ghostty` package links the launch/keybinding configuration and `ghostty-shell`.
 
@@ -65,11 +67,11 @@ The `jhochenbaum.hunkdiff` Herdr plugin uses the existing `/opt/homebrew/bin/hun
 
 | Key | Action |
 | --- | --- |
-| Ctrl+B, then f | Open or reuse the worktree's Hunk review split. |
-| Ctrl+B, then Shift+A | Review staged changes. |
-| Ctrl+B, then Shift+C | Review the latest commit. |
-| Ctrl+B, then Shift+B | Review committed branch changes. |
-| Ctrl+B, then Shift+F | Send unsent human comments to the associated agent. |
+| Ctrl+;, then `f` | Open or reuse the worktree's Hunk review split. |
+| Ctrl+;, then Shift+A | Review staged changes. |
+| Ctrl+;, then Shift+C | Review the latest commit. |
+| Ctrl+;, then Shift+B | Review committed branch changes. |
+| Ctrl+;, then Shift+F | Send unsent human comments to the associated agent. |
 
 In Hunk, select a line, press `c`, write a note, and save it with Ctrl+S. Send before closing Hunk. Sending is explicit; agent annotations are excluded. Successful sends record comment IDs and remove those comments from Hunk, preventing duplicate delivery. These are local review comments, not GitHub PR reviews.
 
@@ -154,7 +156,7 @@ the actual resolver, dispatcher, status handler, index, submission adapter, and 
 installer with fake Herdr/Hunk I/O. It makes no service or model calls and reads no live
 review state. It does not prove TUI rendering or physical keyboard delivery.
 
-The smoke test uses a disposable HOME, a named Herdr server, a synthetic Pi session, and a PTY. It makes no model calls. It checks Enter and Shift+Enter newline behavior, Cmd+Enter and Ctrl+S submission, explicit confirmation and cancellation, blocked-state reporting, split/tab keys, detach persistence, and exact native session identity after a server restart. Its temporary path stays short enough for macOS Unix-domain sockets. With `--hunk`, it also links the installed plugin into the disposable profile, starts a separate loopback Hunk daemon, creates a synthetic Git change and a human inline comment through the TUI, and checks explicit sending, blocked-dialog retention, Pi receipt, comment cleanup, and deduplication. It checks repeated configuration preserves user preferences. Omit `--hunk` to test Herdr without the plugin.
+The smoke test uses a disposable HOME, a named Herdr server, a synthetic Pi session, and a PTY. It makes no model calls. It checks Enter and Shift+Enter newline behavior, Cmd+Enter and Ctrl+S submission, explicit confirmation and cancellation, blocked-state reporting, Ctrl+; prefix delivery, prefix `w` pane closure, Cmd+N dispatch to a stubbed plain-window launcher, split/tab keys, detach persistence, and exact native session identity after a server restart. Its temporary path stays short enough for macOS Unix-domain sockets. With `--hunk`, it also links the installed plugin into the disposable profile, starts a separate loopback Hunk daemon, creates a synthetic Git change and a human inline comment through the TUI, and checks explicit sending, blocked-dialog retention, Pi receipt, comment cleanup, and deduplication. It checks repeated configuration preserves user preferences. Omit `--hunk` to test Herdr without the plugin.
 
 These checks do not exercise macOS sleep/wake, desktop notification delivery, or physical keyboard input through Ghostty. Ghostty's own config validator checks both profiles.
 

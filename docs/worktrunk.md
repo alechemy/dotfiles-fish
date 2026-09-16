@@ -23,11 +23,11 @@ Sibling paths use `{{ repo_path }}/../{{ repo }}.{{ branch | sanitize }}`. Exist
 
 ## Review, integrate, and remove
 
-From the intended task's Pi pane, Ctrl+B then `f` opens its Hunk review. Save a human inline comment with Ctrl+S. Ctrl+B then Shift+F sends unsent comments explicitly. Each worktree has a separate review and recipient. The existing blocked/busy checks and Ctrl+S submission patch remain in effect. See [Herdr's Hunk workflow](herdr.md#hunk-review-integration).
+From the intended task's Pi pane, Ctrl+; then `f` opens its Hunk review. Save a human inline comment with Ctrl+S. Ctrl+; then Shift+F sends unsent comments explicitly. Each worktree has a separate review and recipient. The existing blocked/busy checks and Ctrl+S submission patch remain in effect. See [Herdr's Hunk workflow](herdr.md#hunk-review-integration).
 
 The default Hunk shortcut uses automatic scope: dirty or untracked changes select
 working-tree mode; a clean branch with a resolved base and commits ahead selects branch
-mode. Otherwise it falls back to working-tree mode. Ctrl+B then Shift+B explicitly
+mode. Otherwise it falls back to working-tree mode. Ctrl+; then Shift+B explicitly
 selects committed branch review. Staged, working-tree, latest-commit, and branch scopes are
 separate. Verify the displayed base against the intended integration target; invalid
 or missing-base fallback is not whole-branch review. For an explicit comparison:

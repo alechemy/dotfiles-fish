@@ -120,7 +120,7 @@ restriction above.
 
 Wait until Pi settles. From **the Pi pane that should receive your feedback**, press:
 
-**Ctrl+B, release, then `f`.**
+**Ctrl+;, release, then `f`.**
 
 Hunk opens or reuses a review split for that worktree. Starting from the intended Pi pane establishes the feedback recipient.
 
@@ -137,7 +137,7 @@ For example:
 
 Saving the note does **not** submit it to Pi. To send your saved comments, press:
 
-**Ctrl+B, release, then Shift+F.**
+**Ctrl+;, release, then Shift+F.**
 
 The integration submits the human comments to the associated Pi session. Successful delivery removes those comments from Hunk to prevent duplicate sending.
 
@@ -152,7 +152,7 @@ working-tree mode. A clean branch with a usable base and commits ahead selects
 branch mode; otherwise it falls back to working-tree mode. Verify the displayed
 comparison rather than treating an empty view as proof that the task is reviewed.
 
-From the intended Pi pane, **Ctrl+B, then Shift+B** requests committed branch review.
+From the intended Pi pane, **Ctrl+;, then Shift+B** requests committed branch review.
 Shift+A reviews the index; Shift+C reviews the latest commit. These scopes are not
 interchangeable. The installer preserves existing key conflicts, so check Herdr's
 shortcut help if the binding is unavailable.
@@ -286,7 +286,7 @@ The launcher focuses its existing tab or resumes Pi when appropriate. Use `open`
 
 For a break, **detach rather than clean up**:
 
-- **Ctrl+B, then `q`** detaches while processes keep running.
+- **Ctrl+;, then `q`** detaches while processes keep running.
 - **Cmd+Shift+W** closes the Ghostty window while Herdr remains running.
 - Opening Ghostty again attaches to the default Herdr server.
 
@@ -305,17 +305,17 @@ Restarting the Herdr server is different. It stops processes and attempts layout
 | Pi editor | `/hotkeys` | Show Pi shortcuts. |
 | Pi editor | `/subagents-fleet` | Inspect delegated-run status in the retained guarded build. |
 | Pi editor | `/subagents-doctor` | Run diagnostics on demand. |
-| Intended Pi pane | Ctrl+B, then `f` | Open its Hunk review. |
-| Herdr | Ctrl+B, then Shift+A | Review staged changes. |
-| Herdr | Ctrl+B, then Shift+C | Review the latest commit. |
-| Intended Pi pane | Ctrl+B, then Shift+B | Review committed branch changes; check the base. |
+| Intended Pi pane | Ctrl+;, then `f` | Open its Hunk review. |
+| Herdr | Ctrl+;, then Shift+A | Review staged changes. |
+| Herdr | Ctrl+;, then Shift+C | Review the latest commit. |
+| Intended Pi pane | Ctrl+;, then Shift+B | Review committed branch changes; check the base. |
 | Task shell | `hunk log` | Browse commit history. |
 | Hunk | `c`, then Ctrl+S | Write and save a comment. |
-| Herdr | Ctrl+B, then Shift+F | Send saved human comments. |
+| Herdr | Ctrl+;, then Shift+F | Send saved human comments. |
 | Task shell | `wt merge main --no-commit --no-rebase --no-remove` | Integrate locally. |
 | Herdr | Cmd+Option+W | Close the task tab. |
 | Another checkout | `wt pi remove <branch>` | Remove an inactive task checkout. |
-| Herdr | Ctrl+B, then `?` | Show Herdr shortcuts. |
+| Herdr | Ctrl+;, then `?` | Show Herdr shortcuts. |
 
 If task creation fails halfway, inspect the retained tab and `wt pi list` before retrying. If reopening reports another active agent, resolve that existing session rather than starting another writer.
 

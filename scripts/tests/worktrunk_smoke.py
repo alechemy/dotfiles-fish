@@ -6,7 +6,7 @@ import shlex
 import subprocess
 
 
-def exercise_worktrunk(root, env, workspace, main_pane, api, wait, key, drain):
+def exercise_worktrunk(root, env, workspace, main_pane, api, wait, key, drain, prefix):
     control = api("tab", "create", "--workspace", workspace, "--cwd", str(root), "--no-focus")
     control_pane = control["root_pane"]["pane_id"]
 
@@ -43,7 +43,7 @@ def exercise_worktrunk(root, env, workspace, main_pane, api, wait, key, drain):
         api("tab", "focus", task["tab_id"])
         api("agent", "focus", task["pane_id"])
         drain(1)
-        key(b"\x02f")
+        key(prefix + b"f")
 
         def hunk(*args):
             result = subprocess.run(["hunk", "session", *args, "--repo", str(path), "--json"],
@@ -72,13 +72,13 @@ def exercise_worktrunk(root, env, workspace, main_pane, api, wait, key, drain):
             key(b"/smoke-confirm\x13")
             wait(lambda: (root / "waiting.json").exists(), "task confirmation opened")
             wait(lambda: marker(path) == "❗", "native blocked marker")
-            key(b"\x02F")
+            key(prefix + b"F")
             drain(0.5)
             assert len(comments()) == 1
             assert not (root / "confirm.json").exists()
             key(b"\x1b")
             wait(lambda: marker(path) == "💬", "native idle after dialog")
-        key(b"\x02F")
+        key(prefix + b"F")
         receipt = root / f"input-{path.name}.json"
         wait(receipt.exists, "task-specific feedback receipt")
         assert note in json.loads(receipt.read_text())["text"]
@@ -87,7 +87,7 @@ def exercise_worktrunk(root, env, workspace, main_pane, api, wait, key, drain):
             assert note not in other.read_text()
         wait(lambda: not comments(), "task comment cleanup")
         receipt.unlink()
-        key(b"\x02F")
+        key(prefix + b"F")
         drain(0.5)
         assert not receipt.exists(), "Repeated send delivered duplicate task feedback"
     task = tasks[1]

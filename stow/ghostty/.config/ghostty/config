@@ -13,8 +13,10 @@ shell-integration-features = no-cursor
 macos-window-shadow = false
 macos-option-as-alt = true
 macos-titlebar-style = tabs
+keybind = ctrl+semicolon=text:\x1b[59;5u
 keybind = cmd+enter=text:\x1b[13;9u
 keybind = shift+enter=text:\x1b[13;2u
+keybind = cmd+n=text:\x1b[110;9u
 keybind = cmd+t=text:\x1b[116;9u
 keybind = cmd+shift+t=text:\x1b[116;10u
 keybind = cmd+d=text:\x1b[100;9u

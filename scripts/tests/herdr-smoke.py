@@ -49,6 +49,11 @@ def main():
         }))
         config = root / "config.toml"
         shutil.copy2(ROOT / "stow/herdr/_seed/.config/herdr/config.toml", config)
+        binary_dir = root / ".local/bin"
+        binary_dir.mkdir(parents=True)
+        launcher = binary_dir / "ghostty-shell"
+        launcher.write_text('#!/bin/sh\nprintf "requested\\n" > "$HOME/plain-window-requested"\n')
+        launcher.chmod(0o755)
         env = {key: value for key, value in os.environ.items()
                if not key.startswith(("PI_", "HERDR_", "WORKTRUNK_", "GIT_"))
                and key != "AI_AGENT"}
@@ -87,8 +92,6 @@ def main():
             helper_dir = root / ".agents/skills/worktrunk"
             helper_dir.mkdir(parents=True)
             shutil.copy2(ROOT / "stow/agents/.agents/skills/worktrunk/wt_pi.py", helper_dir)
-            binary_dir = root / ".local/bin"
-            binary_dir.mkdir(parents=True)
             shutil.copy2(ROOT / "stow/bin/.local/bin/wt-pi", binary_dir)
             env.update(PATH=f"{binary_dir}:{env['PATH']}",
                        WORKTRUNK_WORKTREE_PATH=str(root / "trees/{{ branch | sanitize }}"),
@@ -143,6 +146,9 @@ export default function (pi) {
 ''')
         master, slave = pty.openpty()
         fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 45, 160, 0, 0))
+        desired_config = config.read_text()
+        assert 'prefix = "ctrl+;"' in desired_config
+        config.write_text(desired_config.replace('prefix = "ctrl+;"', 'prefix = "ctrl+b"'))
         client = subprocess.Popen(["herdr", "--session", "smoke"], env=env, cwd=root,
                                   stdin=slave, stdout=slave, stderr=slave, start_new_session=True)
         os.close(slave)
@@ -189,9 +195,16 @@ export default function (pi) {
             api("pane", "run", pane, f"pi --offline --no-skills --no-context-files --session {session}")
             wait(lambda: (root / "ready.json").exists(), "Pi interactive startup")
             assert json.loads((root / "ready.json").read_text())["mode"] == "tui"
+            config.write_text(desired_config)
+            subprocess.run(["herdr", "--session", "smoke", "server", "reload-config"],
+                           env=env, capture_output=True, check=True, timeout=10)
+            drain(0.5)
             key(b"first\rsecond")
             assert not (root / "input.json").exists(), "Enter submitted instead of inserting a newline"
             ghostty = (ROOT / "stow/ghostty/.config/ghostty/config").read_text()
+            prefix_text = next(line.split("=text:", 1)[1] for line in ghostty.splitlines()
+                               if line.startswith("keybind = ctrl+semicolon=text:"))
+            prefix = prefix_text.encode().decode("unicode_escape").encode()
             shift_enter = next(line.split("=text:", 1)[1] for line in ghostty.splitlines()
                                if line.startswith("keybind = shift+enter=text:"))
             key(shift_enter.encode().decode("unicode_escape").encode() + b"third")
@@ -203,9 +216,13 @@ export default function (pi) {
             key(b"control-submit\x13")
             wait(lambda: (root / "input.json").exists(), "Ctrl+S submission")
             assert json.loads((root / "input.json").read_text())["text"] == "control-submit"
+            (root / "input.json").unlink()
+            key(b"ab\x02!\x13")
+            wait(lambda: (root / "input.json").exists(), "Ctrl+B editor movement after prefix reload")
+            assert json.loads((root / "input.json").read_text())["text"] == "a!b"
             if args.hunk_plugin_root:
                 (root / "input.json").unlink()
-                key(b"\x02f")
+                key(prefix + b"f")
                 wait(lambda: len(api("pane", "list", "--workspace", workspace)["panes"]) == 2,
                      "Hunk review shortcut")
                 hunk_pane = next(p["pane_id"] for p in api("pane", "list", "--workspace", workspace)["panes"]
@@ -238,7 +255,7 @@ export default function (pi) {
             state = api("pane", "get", pane)["pane"]["agent_status"]
             assert state == "blocked", f"Confirmation reported {state}, not blocked"
             if args.hunk_plugin_root:
-                key(b"\x02F")
+                key(prefix + b"F")
                 drain(1)
                 assert len(comments()) == 1, "Blocked delivery cleared the comment"
                 assert not (root / "input.json").exists(), "Feedback entered a confirmation dialog"
@@ -249,14 +266,14 @@ export default function (pi) {
             wait(lambda: api("pane", "get", pane)["pane"]["agent_status"] in ("idle", "done"),
                  "blocked state cleared")
             if args.hunk_plugin_root:
-                key(b"\x02F")
+                key(prefix + b"F")
                 wait(lambda: (root / "input.json").exists(), "Hunk feedback submitted to Pi")
                 text = json.loads((root / "input.json").read_text())["text"]
                 assert "Please keep this synthetic value unchanged." in text
                 assert "fixture.py" in text
                 wait(lambda: not comments(), "delivered comment cleared")
                 (root / "input.json").unlink()
-                key(b"\x02F")
+                key(prefix + b"F")
                 drain(1)
                 assert not (root / "input.json").exists(), "Feedback was delivered twice"
                 api("pane", "close", hunk_pane)
@@ -271,14 +288,27 @@ export default function (pi) {
             assert json.loads((root / "confirm.json").read_text())["approved"] is True
             if args.worktrunk:
                 from worktrunk_smoke import exercise_worktrunk
-                exercise_worktrunk(root, env, workspace, pane, api, wait, key, drain)
+                exercise_worktrunk(root, env, workspace, pane, api, wait, key, drain, prefix)
+            new_window = next(line.split("=text:", 1)[1] for line in ghostty.splitlines()
+                              if line.startswith("keybind = cmd+n=text:"))
+            key(new_window.encode().decode("unicode_escape").encode())
+            wait(lambda: (root / "plain-window-requested").exists(), "Cmd+N plain Ghostty launcher")
+            assert len(api("pane", "list", "--workspace", workspace)["panes"]) == 1
+            assert len(api("tab", "list", "--workspace", workspace)["tabs"]) == 1
             key(b"\x1b[116;9u")
             wait(lambda: len(api("pane", "list", "--workspace", workspace)["panes"]) == 2,
                  "Cmd+T split")
+            key(prefix + b"w")
+            wait(lambda: len(api("pane", "list", "--workspace", workspace)["panes"]) == 1,
+                 "prefix w closes focused pane")
+            assert api("pane", "list", "--workspace", workspace)["panes"][0]["pane_id"] == pane
+            key(b"\x1b[116;9u")
+            wait(lambda: len(api("pane", "list", "--workspace", workspace)["panes"]) == 2,
+                 "replacement Cmd+T split")
             key(b"\x1b[116;10u")
             wait(lambda: len(api("tab", "list", "--workspace", workspace)["tabs"]) == 2,
                  "Cmd+Shift+T tab")
-            key(b"\x02q")
+            key(prefix + b"q")
             client.wait(timeout=10)
             assert len(api("pane", "list", "--workspace", workspace)["panes"]) == 3
             subprocess.run(["herdr", "--session", "smoke", "session", "stop", "smoke"],
