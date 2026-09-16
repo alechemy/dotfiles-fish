@@ -8,18 +8,18 @@
     top: $top-margin$mm,
     bottom: $bottom-margin$mm,
   ),
-  numbering: "1",
-  number-align: center + bottom,
+  numbering: none,
   fill: white,
 )
 #set text(font: "$prose-font$", size: $body-size$pt, fill: black, lang: "en")
 #set par(justify: false, leading: $leading$em, spacing: $paragraph-spacing$em)
 #set heading(numbering: none)
-#show heading: set block(below: $heading-spacing$em)
+#show heading: set block(above: $heading-above$em, below: $heading-spacing$em)
 #show heading: set text(font: "$heading-font$", weight: "semibold")
 #show heading.where(level: 1): set text(size: $heading-1-size$pt)
 #show heading.where(level: 2): set text(size: $heading-2-size$pt)
 #show heading.where(level: 3): set text(size: $heading-3-size$pt)
+#show quote.where(block: true): set block(spacing: $quote-spacing$em)
 #set raw(theme: none, tab-size: 4)
 #show raw: it => {
   set text(
@@ -34,7 +34,7 @@
   let body = lines.join(linebreak())
   if it.block {
     block(width: 100%, breakable: true, inset: (x: 6pt, y: 4pt),
-      stroke: (left: 0.5pt + black), above: 0.7em, below: 0.7em, {
+      stroke: (left: 0.5pt + black), spacing: $code-block-spacing$ * $body-size$pt, {
         set par(justify: false, leading: 0.55em)
         body
       })

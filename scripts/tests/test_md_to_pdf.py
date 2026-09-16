@@ -416,6 +416,15 @@ class InstalledRendererTests(TemporaryFiles):
         return MODULE.run(["gs", "-q", "-dSAFER", "-dBATCH", "-dNOPAUSE", "-sDEVICE=txtwrite",
                            "-sOutputFile=-", str(output)]).decode().replace("\u200b", "")
 
+    def test_multipage_pdf_has_no_page_numbers(self):
+        content = "Reading content.\n\n" * 80
+        self.source.write_text(content)
+        args = MODULE.parser().parse_args([str(self.source)])
+        output, _, _ = MODULE.convert(args)
+        pages = re.findall(rb"/Type\s*/Page\b", output.read_bytes())
+        self.assertGreater(len(pages), 1)
+        self.assertEqual(self.extract_text(output).split(), content.split())
+
     def test_inline_code_stays_in_the_surrounding_paragraph(self):
         self.source.write_text("Before `token` after.\n")
         args = MODULE.parser().parse_args([str(self.source)])
@@ -456,12 +465,34 @@ class InstalledRendererTests(TemporaryFiles):
         positions = {text: y for y, text in lines.items()}
         leading = positions['Alpha second line.'] - positions['Alpha first line.']
         paragraph = positions['Beta paragraph.'] - positions['Alpha second line.']
+        section = positions['Sample heading'] - positions['Beta paragraph.']
         heading = positions['Gamma paragraph.'] - positions['Sample heading']
         body_size = PROFILE['body-size']
         self.assertGreater(leading / body_size, 1.35)
         self.assertLess(leading / body_size, 1.55)
         self.assertGreaterEqual((paragraph - leading) / body_size, 0.25)
-        self.assertGreaterEqual((heading - leading) / body_size, 0.2)
+        self.assertGreaterEqual((heading - leading) / body_size, 0.4)
+        self.assertGreaterEqual(section - paragraph, 8)
+
+    def test_code_and_quotes_have_outer_spacing(self):
+        self.source.write_text('Before code.\n\n```text\nCode snippet\n```\n\nAfter code.\n\n'
+                               'Before quote.\n\n> Quoted paragraph.\n\nAfter quote.\n')
+        args = MODULE.parser().parse_args([str(self.source)])
+        output, _, _ = MODULE.convert(args)
+        self.extract_text(output)
+        xml = MODULE.run(['gs', '-q', '-dSAFER', '-dBATCH', '-dNOPAUSE', '-sDEVICE=txtwrite',
+                          '-dTextFormat=0', '-sOutputFile=-', str(output)])
+        lines = {}
+        for char in ET.fromstring(xml).iter('char'):
+            y = int(char.attrib['bbox'].split()[1])
+            lines[y] = lines.get(y, '') + char.attrib['c']
+        positions = {text.replace('\u200b', ''): y for y, text in lines.items()}
+        for before, block, after, minimum in (
+                ('Before code.', 'Code snippet', 'After code.', 26),
+                ('Before quote.', 'Quoted paragraph.', 'After quote.', 30)):
+            with self.subTest(block=block):
+                self.assertGreaterEqual(positions[block] - positions[before], minimum)
+                self.assertGreaterEqual(positions[after] - positions[block], minimum)
 
     def test_source_pairing_remains_available(self):
         try:

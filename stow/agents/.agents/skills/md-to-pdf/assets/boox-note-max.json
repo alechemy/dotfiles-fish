@@ -15,7 +15,10 @@
   "heading-3-size": 11.5,
   "leading": 0.72,
   "paragraph-spacing": 1.1,
-  "heading-spacing": 0.8,
+  "heading-above": 1.8,
+  "heading-spacing": 1.0,
+  "code-block-spacing": 1.8,
+  "quote-spacing": 2.4,
   "prose-font": "Source Serif 4",
   "heading-font": "Source Sans 3",
   "code-font": "Source Code Pro"

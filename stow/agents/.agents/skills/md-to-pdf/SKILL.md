@@ -25,11 +25,11 @@ The installed shell command is equivalent:
 md-to-pdf "/path/to/document.md" --edition
 ```
 
-The default profile is `boox-note-max`. It uses a 204 × 272 mm page, 10.5 pt Tiempos Text prose, and a 38 mm right margin. Use `--annotation-side left` only when requested. The margin stays on the same side on every page.
+The default profile is `boox-note-max`. It uses a 204 × 272 mm page, 10.5 pt Tiempos Text prose, and a 38 mm right margin. Use `--annotation-side left` only when requested. The margin stays on the same side on every page. PDFs omit page numbers so footer text does not interfere with BOOX automatic cropping.
 
 The default pairing is `tiempos-berkeley`: Tiempos Text for prose, Tiempos Headline for titles and headings, and regular-width Berkeley Mono for code. The fonts must already be installed locally. Diagram labels stay in Source Sans 3. Use `--fonts source` for the original Source pairing. Font changes create distinct fingerprinted editions.
 
-Code uses 8.5 pt Berkeley Mono. Prose uses 0.72 em leading and 1.1 em paragraph spacing. Headings have 0.8 em spacing beneath them. Keep the annotation margin and font sizes unchanged unless requested.
+Code uses 8.5 pt Berkeley Mono. Prose uses 0.72 em leading and 1.1 em paragraph spacing. Headings have 1.8 em above and 1 em below, relative to the heading size. Code blocks have 1.8 prose em of space on both sides vertically, and block quotes have 2.4 em. Keep the annotation margin and font sizes unchanged unless requested.
 
 Use `-o "/existing/directory/reading.pdf"` for a requested destination. With `--edition`, the converter adds the build fingerprint before `.pdf`. Without `--edition`, the output is a replaceable working build, but the converter still refuses to overwrite an untracked or externally modified PDF.
 

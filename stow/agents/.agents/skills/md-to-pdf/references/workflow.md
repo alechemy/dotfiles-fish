@@ -78,14 +78,16 @@ The layout profile lives in `assets/boox-note-max.json`, and the Pandoc template
 | Tables | 9.5 pt, without automatic shrinking. |
 | Prose leading | 0.72 em of additional interline space. |
 | Paragraph spacing | 1.1 em between line edges. |
-| Spacing beneath headings | 0.8 em. |
+| Heading spacing | 1.8 em above and 1 em below, relative to the heading size. |
+| Code block spacing | 1.8 prose em above and below, or 18.9 pt. |
+| Block quote spacing | 2.4 prose em above and below, or 25.2 pt. |
 | Annotation margin | 38 mm on the right, configurable to the left. |
 | Opposite margin | 18 mm. |
 | Top and bottom | 16 mm and 20 mm. |
 
 Font sizes for prose, code, tables, headings, and title metadata are all controlled by the profile. When comparing a reference PDF, measure its font sizes and page dimensions together. Whole-page display scales different page sizes differently, and nominal point sizes do not account for differences in font x-height.
 
-The template uses black text on white, page numbers, and native PDF heading navigation. Images retain their original colors. Code wraps using invisible break opportunities between characters, without adding visible hyphens. Standard ligatures and contextual alternates are disabled in code so operators remain separate characters. These break opportunities may appear in copied PDF text, so use the Markdown source when copying executable code. Tabs in fenced code expand to four-column tab stops.
+The template uses black text on white and native PDF heading navigation. It omits page numbers so footer text does not interfere with BOOX automatic cropping. Images retain their original colors. Code wraps using invisible break opportunities between characters, without adding visible hyphens. Standard ligatures and contextual alternates are disabled in code so operators remain separate characters. These break opportunities may appear in copied PDF text, so use the Markdown source when copying executable code. Tabs in fenced code expand to four-column tab stops.
 
 Use whole-page display on the BOOX and disable automatic margin cropping. Otherwise, the reader can remove the space intended for handwriting.
 
@@ -134,7 +136,7 @@ From the dotfiles root:
 python3 -m unittest discover -s scripts/tests -p test_md_to_pdf.py
 ```
 
-Tests cover Pandoc parsing and template expansion, dependency fingerprints, safe publication, unchanged outputs, annotation protection, path restrictions, and isolated compiler arguments. The PDF-rendering tests require Typst and the relevant installed fonts. The default-pairing test verifies embedded font families and literal code operators, including SVG labels that could otherwise fall back to the prose font. A separate render checks the Source alternative. The spacing regression measures line positions in a rendered PDF to distinguish paragraph and heading gaps from ordinary line spacing. Mermaid tests also exercise the installed renderer, unchanged-build behavior, private error handling, and network blocking against a local test server. The inline-code layout regression also uses Ghostscript to extract rendered text and check that code stays in the surrounding paragraph. These tests skip explicitly when their prerequisites are absent. A skipped render test does not verify typography or pagination.
+Tests cover Pandoc parsing and template expansion, dependency fingerprints, safe publication, unchanged outputs, annotation protection, path restrictions, and isolated compiler arguments. The PDF-rendering tests require Typst and the relevant installed fonts. A multipage regression checks that extracted PDF text contains only the source content, without page numbers. The default-pairing test verifies embedded font families and literal code operators, including SVG labels that could otherwise fall back to the prose font. A separate render checks the Source alternative. The spacing regressions measure line positions in rendered PDFs to check paragraph gaps, separation above and below headings, and outer spacing around code blocks and block quotes. Mermaid tests also exercise the installed renderer, unchanged-build behavior, private error handling, and network blocking against a local test server. The inline-code layout regression also uses Ghostscript to extract rendered text and check that code stays in the surrounding paragraph. These tests skip explicitly when their prerequisites are absent. A skipped render test does not verify typography or pagination.
 
 ## Upstream references
 
