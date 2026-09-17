@@ -509,10 +509,26 @@ supported display transformations. These checks do not lock out unrelated file
 writers. Recorded completion is not current completion: missing files or unavailable storage block unattended work until
 reconciled, without automatically redownloading a previously assembled album.
 
-Runnability stores a file identity with each analysis. Existing feature rows
-without that identity require reanalysis before tag writes. Replaced or changed
-files are rejected before writing rather than stamped as current. The check
-uses file metadata, not a content hash or a cross-process file lock.
+Runnability stores a versioned file identity with each analysis: device, inode,
+size, nanosecond modification time, and a full-file SHA-256 digest. SMB can
+report different change times and birth times for an unchanged file when it is
+opened, so those timestamps must not participate in identity checks. Hashing
+checks the open file and its path afterward to detect mutation or replacement.
+The check runs before and after analysis and again before tag saving. It is not
+a cross-process file lock; unrelated writers can still race a check and save.
+
+Existing rows with a missing or metadata-only identity require one reanalysis
+before tag writes. Identity checks read the full file, including when deciding
+whether cached analysis is current, so nightly scans incur NAS read traffic even
+for unchanged tracks. Per-track analysis failures remain stored for retry;
+writing only considers successful analysis rows.
+
+During tag writing, Ctrl-C requests a graceful stop. The command cancels queued
+tracks, waits for active writes, and records their resulting identities before
+exiting with status 130. Repeated Ctrl-C requests keep waiting rather than
+interrupting database updates. Each successful write commits its identity
+immediately. A forced process kill, crash, or database failure can still leave
+stale rows; reanalyze the affected files before retrying a write.
 
 ### AeroSpace scripting: identify apps by PID, not name
 

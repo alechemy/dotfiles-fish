@@ -14,32 +14,35 @@ re-reading audio.
 
   analyze    extract features (BPM, beat confidence, danceability, energy)
              into ~/.local/state/runnability/features.db; skips rows whose
-             path+size+mtime are already present (--reanalyze overrides)
+             file metadata and SHA-256 match (--reanalyze overrides)
   score      rank tracks by runnability from stored features (no file writes)
   write      write RUNNABILITY / BPM_FOLDED / tmpo tags into files whose
-             values changed, then refresh the store's size+mtime keys
+             values changed, then refresh the store's file identity
   status     feature-store coverage summary
 
 Weights and gates live in ~/.config/runnability/config.toml (stowed from
 stow/runnability/). Models auto-download to ~/.local/share/runnability/models.
 
 Analysis costs ~6 s/track single-core; batch runs gate on
-should-run-background-job unless --force.
+should-run-background-job unless --force. During write, Ctrl-C cancels queued
+tracks, waits for active writes and database updates, then exits with status 130.
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import os
 import pathlib
+import signal
 import sqlite3
 import subprocess
 import sys
 import tomllib
 import urllib.request
-from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
+from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, ThreadPoolExecutor, as_completed, wait
 from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
@@ -108,9 +111,18 @@ def open_db() -> sqlite3.Connection:
     return conn
 
 
+def _stat_identity(st):
+    return st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns
+
+
 def file_identity(path):
-    st = os.stat(path)
-    return json.dumps([st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns, st.st_ctime_ns])
+    with open(path, "rb") as audio:
+        identity = _stat_identity(os.fstat(audio.fileno()))
+        digest = hashlib.file_digest(audio, "sha256").hexdigest()
+        if (_stat_identity(os.fstat(audio.fileno())) != identity
+                or _stat_identity(os.stat(path)) != identity):
+            raise ValueError("file changed during identity check; reanalyze")
+    return json.dumps({"version": 2, "stat": identity, "sha256": digest})
 
 
 _worker_models: dict | None = None
@@ -157,10 +169,11 @@ def _analyze_one(abspath: str, relpath: str) -> dict:
 
     m = _worker_models
     row: dict = {"relpath": relpath, "error": None}
-    st = os.stat(abspath)
-    row["size"], row["mtime"] = st.st_size, st.st_mtime
-    row["file_identity"] = file_identity(abspath)
+    row.update(size=0, mtime=0, file_identity=None)
     try:
+        st = os.stat(abspath)
+        row["size"], row["mtime"] = st.st_size, st.st_mtime
+        row["file_identity"] = file_identity(abspath)
         try:
             tags = MP4(abspath)
             row["duration"] = tags.info.length
@@ -245,11 +258,16 @@ def cmd_analyze(args) -> int:
             rel = str(p.resolve().relative_to(LIBRARY_ROOT))
         except ValueError:
             rel = str(p)
-        if not args.reanalyze and known.get(rel) == file_identity(p):
-            continue
+        if not args.reanalyze and known.get(rel):
+            try:
+                if known[rel] == file_identity(p):
+                    continue
+            except (OSError, ValueError):
+                pass
         todo.append((str(p), rel))
     print(f"{len(paths)} candidates, {len(todo)} to analyze", file=sys.stderr)
     if not todo:
+        conn.close()
         return 0
 
     model_paths = ensure_models()
@@ -273,6 +291,7 @@ def cmd_analyze(args) -> int:
                 f"dance={row.get('danceability', 0):.2f}"
             )
             print(f"[{done}/{len(todo)}] {row['relpath']}: {tag}", file=sys.stderr)
+    conn.close()
     return 0
 
 
@@ -538,26 +557,56 @@ def cmd_write(args) -> int:
 
     counts: dict[str, int] = {}
     done = 0
-    with ThreadPoolExecutor(max_workers=args.workers) as pool:
-        futs = [pool.submit(_write_one, *j, args.dry_run) for j in jobs]
-        for fut in as_completed(futs):
-            rel, status, size, mtime, identity, err = fut.result()
-            counts[status] = counts.get(status, 0) + 1
-            done += 1
-            if err:
-                print(f"ERROR {rel}: {err}", file=sys.stderr)
-            elif status == "written":
-                conn.execute(
-                    "UPDATE features SET size=?, mtime=?, file_identity=? WHERE relpath=?",
-                    (size, mtime, identity, rel),
-                )
-                if done % 50 == 0:
-                    conn.commit()
-            if done % 500 == 0:
-                print(f"[{done}/{len(jobs)}] {counts}", file=sys.stderr)
-    conn.commit()
-    print(json.dumps(counts, sort_keys=True))
-    conn.close()
+    interrupted = False
+    announced = False
+
+    def request_stop(signum, frame):
+        nonlocal interrupted
+        interrupted = True
+
+    previous_handler = signal.signal(signal.SIGINT, request_stop)
+    try:
+        with ThreadPoolExecutor(max_workers=args.workers) as pool:
+            pending = set()
+            for index, job in enumerate(jobs):
+                if interrupted:
+                    counts["cancelled"] = len(jobs) - index
+                    break
+                pending.add(pool.submit(_write_one, *job, args.dry_run))
+            while pending:
+                if interrupted:
+                    for fut in tuple(pending):
+                        if fut.cancel():
+                            pending.remove(fut)
+                            counts["cancelled"] = counts.get("cancelled", 0) + 1
+                    if not announced:
+                        print("Interrupted; queued tracks cancelled, waiting for active tag writes and database updates.", file=sys.stderr)
+                        announced = True
+                completed, _ = wait(pending, timeout=0.2, return_when=FIRST_COMPLETED)
+                for fut in completed:
+                    rel, status, size, mtime, identity, err = fut.result()
+                    counts[status] = counts.get(status, 0) + 1
+                    done += 1
+                    if err:
+                        print(f"ERROR {rel}: {err}", file=sys.stderr)
+                    elif status == "written":
+                        conn.execute(
+                            "UPDATE features SET size=?, mtime=?, file_identity=? WHERE relpath=?",
+                            (size, mtime, identity, rel),
+                        )
+                        conn.commit()
+                    pending.remove(fut)
+                    if done % 500 == 0:
+                        print(f"[{done}/{len(jobs)}] {counts}", file=sys.stderr)
+        conn.commit()
+        print(json.dumps(counts, sort_keys=True))
+    finally:
+        try:
+            conn.close()
+        finally:
+            signal.signal(signal.SIGINT, previous_handler)
+    if interrupted:
+        return 130
     return 1 if counts.get("error") or counts.get("stale") or counts.get("missing") else 0
 
 

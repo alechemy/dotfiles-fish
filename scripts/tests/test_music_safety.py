@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Offline regression fixtures. Mutagen is stubbed; no personal audio is read."""
 import importlib.util
+from concurrent.futures import Future
 from contextlib import contextmanager
 import json
 import shlex
@@ -226,6 +227,155 @@ class MetadataSafety(unittest.TestCase):
                                     env=dict(os.environ, HOME=tmp), capture_output=True, text=True, timeout=10)
             self.assertEqual(result.returncode, 1)
             self.assertEqual(json.loads(queue.read_text()), [entry])
+
+    def test_runnability_identity_ignores_smb_ctime_changes(self):
+        runn = load("runnability")
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "song.m4a"
+            path.write_bytes(b"music")
+            st = path.stat()
+            attrs = {key: getattr(st, key) for key in
+                     ("st_dev", "st_ino", "st_size", "st_mtime_ns", "st_ctime_ns")}
+            with patch.object(runn.os, "stat", return_value=types.SimpleNamespace(**attrs)):
+                before = runn.file_identity(path)
+            attrs["st_ctime_ns"] += 1000000000
+            with patch.object(runn.os, "stat", return_value=types.SimpleNamespace(**attrs)):
+                self.assertEqual(runn.file_identity(path), before)
+
+    def test_runnability_rejects_edit_with_unchanged_metadata(self):
+        runn = load("runnability")
+        with tempfile.TemporaryDirectory() as tmp:
+            runn.LIBRARY_ROOT = Path(tmp)
+            path = Path(tmp) / "song.m4a"
+            path.write_bytes(b"old")
+            st = path.stat()
+            with patch.object(runn.os, "stat", return_value=st):
+                identity = runn.file_identity(path)
+                path.write_bytes(b"new")
+                os.utime(path, ns=(st.st_atime_ns, st.st_mtime_ns))
+                with patch.object(runn, "_write_mp4") as writer:
+                    result = runn._write_one("song.m4a", 80, None, None, identity, False)
+            self.assertEqual(result[1], "stale")
+            writer.assert_not_called()
+            self.assertEqual(path.read_bytes(), b"new")
+
+    def test_runnability_rejects_replacement_during_hashing(self):
+        runn = load("runnability")
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "song.m4a"
+            path.write_bytes(b"old")
+            st = path.stat()
+            other = Path(tmp) / "replacement"
+            other.write_bytes(b"new")
+            os.utime(other, ns=(st.st_atime_ns, st.st_mtime_ns))
+            file_digest = runn.hashlib.file_digest
+
+            def replace_after_hash(audio, algorithm):
+                digest = file_digest(audio, algorithm)
+                other.replace(path)
+                return digest
+
+            with patch.object(runn.hashlib, "file_digest", side_effect=replace_after_hash):
+                with self.assertRaisesRegex(ValueError, "changed during identity check"):
+                    runn.file_identity(path)
+
+    def test_runnability_rejects_mutation_during_hashing(self):
+        runn = load("runnability")
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "song.m4a"
+            path.write_bytes(b"old")
+            file_digest = runn.hashlib.file_digest
+
+            def change_after_hash(audio, algorithm):
+                digest = file_digest(audio, algorithm)
+                path.write_bytes(b"changed")
+                return digest
+
+            with patch.object(runn.hashlib, "file_digest", side_effect=change_after_hash):
+                with self.assertRaisesRegex(ValueError, "changed during identity check"):
+                    runn.file_identity(path)
+
+    def test_runnability_mp4_save_distinguishes_ctime_drift_from_content_change(self):
+        for changed in (False, True):
+            with self.subTest(changed=changed), tempfile.TemporaryDirectory() as tmp:
+                runn = load("runnability")
+                runn.LIBRARY_ROOT = Path(tmp)
+                path = Path(tmp) / "song.m4a"
+                path.write_bytes(b"old")
+                identity = runn.file_identity(path)
+                st = path.stat()
+                attrs = {key: getattr(st, key) for key in
+                         ("st_dev", "st_ino", "st_size", "st_mtime_ns", "st_ctime_ns")}
+
+                class Audio(dict):
+                    pass
+
+                audio = Audio()
+                audio.save = Mock()
+
+                def read_tags(*args):
+                    attrs["st_ctime_ns"] += 1000000000
+                    if changed:
+                        path.write_bytes(b"new")
+                        os.utime(path, ns=(st.st_atime_ns, st.st_mtime_ns))
+                    return audio
+
+                runn._mutagen["mutagen.mp4"].MP4.side_effect = read_tags
+                runn._mutagen["mutagen.mp4"].MP4FreeForm.side_effect = lambda value: value
+                with patch.dict(sys.modules, runn._mutagen), patch.object(runn.os, "stat", side_effect=lambda *a, **kw: types.SimpleNamespace(**attrs)):
+                    if changed:
+                        with self.assertRaisesRegex(ValueError, "changed before tag save"):
+                            runn._write_mp4(path, 80, None, None, False, identity)
+                        audio.save.assert_not_called()
+                    else:
+                        self.assertTrue(runn._write_mp4(path, 80, None, None, False, identity))
+                        audio.save.assert_called_once_with()
+
+    def test_runnability_analysis_records_identity_read_failure(self):
+        runn = load("runnability")
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "song.m4a"
+            path.write_bytes(b"music")
+            modules = dict(runn._mutagen, numpy=types.ModuleType("numpy"))
+            with patch.dict(sys.modules, modules), patch.object(runn, "file_identity", side_effect=ValueError("file changed during identity check; reanalyze")):
+                row = runn._analyze_one(str(path), "song.m4a")
+            self.assertIn("changed during identity check", row["error"])
+            self.assertIsNone(row["file_identity"])
+
+    def test_runnability_reanalyzes_legacy_identity_and_preserves_analysis_errors(self):
+        for error in (None, "ValueError: file changed during analysis; reanalyze"):
+            with self.subTest(error=error), tempfile.TemporaryDirectory() as tmp:
+                runn = load("runnability")
+                root = Path(tmp).resolve()
+                runn.LIBRARY_ROOT = root
+                runn.DB_PATH = root / "features.db"
+                path = root / "song.m4a"
+                path.write_bytes(b"music")
+                st = path.stat()
+                legacy = json.dumps([st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns, st.st_ctime_ns])
+                conn = runn.open_db()
+                conn.execute("INSERT INTO features (relpath, size, mtime, analyzed_at, file_identity) VALUES (?, ?, ?, ?, ?)",
+                             ("song.m4a", st.st_size, st.st_mtime, "fixture", legacy))
+                conn.commit()
+                conn.close()
+                future = Future()
+                future.set_result(dict(relpath="song.m4a", size=st.st_size, mtime=st.st_mtime,
+                                       file_identity=runn.file_identity(path), error=error,
+                                       bpm=100.0, beat_confidence=1.0, danceability=0.5))
+                args = types.SimpleNamespace(force=True, paths=[str(path)], reanalyze=False, workers=1)
+                with patch.object(runn, "ProcessPoolExecutor") as pool, patch.object(runn, "ensure_models", return_value={}):
+                    worker = pool.return_value.__enter__.return_value
+                    worker.submit.return_value = future
+                    self.assertEqual(runn.cmd_analyze(args), 0)
+                    worker.submit.assert_called_once_with(runn._analyze_one, str(path), "song.m4a")
+                conn = runn.open_db()
+                self.assertEqual(conn.execute("SELECT file_identity, error FROM features").fetchone(),
+                                 (runn.file_identity(path), error))
+                conn.close()
+                if error is None:
+                    with patch.object(runn, "ensure_models") as models:
+                        self.assertEqual(runn.cmd_analyze(args), 0)
+                        models.assert_not_called()
 
     def test_runnability_rejects_replaced_file_even_with_same_size_and_mtime(self):
         runn = load("runnability")
