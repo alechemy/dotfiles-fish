@@ -2,21 +2,22 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<key>Disabled</key>
-	<false/>
 	<key>Label</key>
-	<string>com.user.npm-tools-update</string>
+	<string>com.user.software-update-audit</string>
 	<key>ProgramArguments</key>
 	<array>
-		<string>/bin/bash</string>
-		<string>__HOME__/.local/bin/update-npm-tools.sh</string>
+		<string>/usr/bin/python3</string>
+		<string>__HOME__/.local/bin/software_updates.py</string>
+		<string>audit</string>
 	</array>
 	<key>RunAtLoad</key>
 	<true/>
 	<key>StartCalendarInterval</key>
 	<dict>
+		<key>Weekday</key>
+		<integer>0</integer>
 		<key>Hour</key>
-		<integer>3</integer>
+		<integer>10</integer>
 		<key>Minute</key>
 		<integer>15</integer>
 	</dict>

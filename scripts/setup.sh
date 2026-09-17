@@ -284,8 +284,8 @@ if brew tap | grep -q '^domt4/autoupdate$'; then
     if brew autoupdate status 2>&1 | grep -q 'installed and running'; then
         info "brew autoupdate already running, leaving schedule untouched"
     else
-        info "Starting brew autoupdate (daily, --upgrade --cleanup --immediate --sudo --ac-only)..."
-        brew autoupdate start 86400 --upgrade --cleanup --immediate --sudo --ac-only
+        info "Starting brew autoupdate (daily, --upgrade --cleanup --immediate --sudo --ac-only --no-notify)..."
+        brew autoupdate start 86400 --upgrade --cleanup --immediate --sudo --ac-only --no-notify
         success "brew autoupdate scheduled"
     fi
     # The tap only writes StartInterval (24h from agent load); pin the run to
@@ -534,7 +534,7 @@ EOF
     load_launch_agent "$HOME/Library/LaunchAgents/com.user.check-stale-dev-servers.plist" "stale-dev-servers"
     load_launch_agent "$HOME/Library/LaunchAgents/com.user.aerospace-gaps-heartbeat.plist" "aerospace-gaps heartbeat"
     load_launch_agent "$HOME/Library/LaunchAgents/com.user.caddy.plist" "Caddy (oMLX CSP proxy)"
-    load_launch_agent "$HOME/Library/LaunchAgents/com.user.npm-tools-update.plist" "npm-tools update"
+    /usr/bin/python3 "$DOTFILES/scripts/setup-software-updates.py"
     load_launch_agent "$HOME/Library/LaunchAgents/com.user.runnability-sync.plist" "runnability sync"
     load_launch_agent "$HOME/Library/LaunchAgents/com.user.btd700-audio-watcher.plist" "BTD 700 audio watcher"
 
@@ -888,8 +888,13 @@ fi
 # 7. Install mise tool versions
 if command -v mise &> /dev/null; then
     info "Installing mise tool versions..."
-    mise install --yes
+    (cd "$HOME" && mise install --yes)
     success "Mise tool versions installed"
+fi
+
+if [[ "$(uname)" == "Darwin" ]]; then
+    load_launch_agent "$HOME/Library/LaunchAgents/com.user.npm-tools-update.plist" "global Mise update"
+    load_launch_agent "$HOME/Library/LaunchAgents/com.user.software-update-audit.plist" "software update audit"
 fi
 
 # 7b. claude-agent-acp — the Zed ACP bridge referenced from

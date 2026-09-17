@@ -280,6 +280,10 @@ Pi Web Access reads the separately stowed `~/.pi/web-search.json`. The tracked f
 
 Pi's fragment selects the guarded Subagents build's official `worktreeProvider: "worktrunk"`. Worktrunk only allocates those worktrees; Subagents retains setup, evidence, resume, and cleanup. The human launcher reserves that namespace and never bypasses the delegation guard. Capture only the reviewed allocator name through `subagents.worktreeProvider`, not private worktree paths or project hook commands. Conservative user defaults disable automatic commit, rebase, and removal during merge. The task cleanup helper retains branches and refuses active, dirty, or unreviewed ignored state.
 
+### Software updates
+
+[Software updates](software-updates.md) documents the range-limited daily Mise job, weekly read-only audit, local reports and rollout procedure. `scripts/setup-software-updates.py` wraps the existing Homebrew job to record attempts, successful completions and deferrals, and moves notifications to failure-only accounting. It preserves the generated updater and schedule.
+
 ### Local Homebrew tap (apps with no upstream cask)
 
 When an app has no Homebrew cask (or only a third-party one we don't want to depend on), the repo carries its own cask under `homebrew/Casks/<token>.rb` and exposes it through a **local-only tap** named `alec/local`, so it installs through the normal `brew bundle` path like any other app.
@@ -405,7 +409,7 @@ The failure this prevents: one failed `mise upgrade` raised **four** notificatio
 Two rules for new code:
 
 - Anything appending to this log **without** going through a writer must emit one physical line per record, or TAB-indent its continuations. A raw multi-line append is read as one failure per line.
-- When a tool's output is captured into a log message, suppress its progress rendering (`mise` needs `--quiet`). A redraw burst is CR-separated **on a single physical line**, so resolve it to the text after the last CR — `sanitize_output` in `update-npm-tools.sh`. Folding CRs to newlines instead spends the entire line budget on progress frames and pushes the real error out of the record.
+- When a tool's output is captured into a log message, suppress its progress rendering (`mise` needs `--quiet`). A redraw burst is CR-separated **on a single physical line**, so resolve it to the text after the last CR — `sanitize_output` in `update-npm-tools.sh`. Folding CRs to newlines instead spends the entire line budget on progress frames and pushes the real error out of the record. The global updater now logs only projected outcomes and failure categories; its shell entrypoint retains this filter to bound console diagnostics.
 
 `devonthink/tests/test_pipeline_log_records.py` covers both writers, the scanner's grouping, and the redraw collapse.
 

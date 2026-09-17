@@ -137,11 +137,7 @@ defaults write -g NSDocumentSaveNewDocumentsToCloud -bool false
 
 echo "Applying Third Party App settings..."
 
-# Quit running apps when auto-updating via MacUpdater
-if [ -d "/Applications/MacUpdater.app" ]; then
-    defaults write com.corecode.MacUpdater HiddenOptionQuitAppsForAutoUpdate -bool YES
-    defaults write com.corecode.MacUpdater HiddenOptionAutoUpdateAfterManualScan -bool YES
-fi
+sudo defaults write /Library/Preferences/com.apple.commerce AutoUpdate -bool true
 
 # Disable dark-mode PDF rendering in DEVONthink
 if [ -d "/Applications/DEVONthink.app" ]; then
