@@ -1,5 +1,9 @@
 # Chrome DevTools adapter pilot
 
+## Retirement
+
+[Agent-browser](agent-browser.md) replaces this proposed integration and the active Claude Chrome DevTools plugin. The Pi adapter was never activated. The outcome and adoption gates below are historical records, not prerequisites for the replacement.
+
 ## Outcome
 
 The finite browser checks passed on Pi `0.85.1` with signed Google Chrome `152.0.7977.83`. Both synthetic adapter modes also passed. Browser calls used the published adapter's `initializeMcp` and `executeCall` through Pi's installed `loadExtensions`, with catalog assertions on the same connection. This is an isolated fictional test, not a live Pi model or TUI session. Live adoption and Claude fallback retirement remain deferred. Keep native Context7, Things and the agent-reader overlay.

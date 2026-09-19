@@ -72,7 +72,7 @@ fi
 {
   echo "$BEGIN"
   echo "# Auto-generated from 1Password ($OP_REF) by scripts/build-things-config.sh."
-  echo "# Gives zsh (the shell Claude Code's Bash tool runs) THINGS_AUTH_TOKEN, used"
+  echo "# Exports THINGS_AUTH_TOKEN to zsh for the shared Things skill, used"
   echo "# by the 'things' skill for Things URL writes (update/json/cancel)."
   echo "export THINGS_AUTH_TOKEN='$KEY'"
   echo "$END"

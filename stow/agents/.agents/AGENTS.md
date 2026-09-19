@@ -28,6 +28,7 @@
 
 ## Engineering
 
+- Claude Code is retired. Do not install or configure it, its editor integrations, or compatibility files. Preserve historical transcript support and Pi's model/provider configuration.
 - Read the relevant implementation, callers, and tests before editing.
 - Reuse existing code, standard libraries, platform features, and installed dependencies when they meet the requirements and fit the project's conventions.
 - Prefer the smallest maintainable change, not the fewest lines or files. Add abstractions, dependencies, and configuration only for a current requirement or a concrete reduction in complexity.

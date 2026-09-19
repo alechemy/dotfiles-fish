@@ -1,7 +1,6 @@
 alefragnani.project-manager
 angular.ng-template
 antfu.file-nesting
-anthropic.claude-code
 be5invis.vscode-custom-css
 bradlc.vscode-tailwindcss
 charliermarsh.ruff

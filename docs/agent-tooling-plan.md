@@ -15,7 +15,7 @@ Closeout status: Closed at the bounded configuration, privacy, and retained-help
 - Test setup and hooks in disposable repositories and homes. Do not run full machine setup against this Mac for validation.
 - Review exact package source before introducing or upgrading executable integrations. Pin installed versions without describing a version pin as a completed source review.
 - Preserve DEVONthink's official server, exclusions and redaction. No interactive AppleScript, JXA, or direct-database bypass is allowed.
-- Preserve Claude and Copilot compatibility until their remaining workflows are covered and retirement is explicitly approved.
+- Claude Code retirement is approved and complete. Preserve historical transcript access and Pi's model/provider configuration. The separate Copilot CLI adapter is unchanged.
 - Use one writer per working tree. Add regression tests before fixes when practical. Commit only intentional changes after the repository's checks and staged secrets gate.
 
 ## Decisions
@@ -72,7 +72,7 @@ Acceptance: A fresh setup and an existing setup can reach the same declared pack
 
 ### 4. Pilot Chrome DevTools through the MCP adapter
 
-Status: Complete for the isolated pilot. Pi `0.85.1`, adapter `2.32.1` and signed Chrome `152.0.7977.83` passed the fixed fictional browser checks. Live adoption, normal Pi/TUI verification and Claude fallback retirement remain deferred. See [the pilot record](agent-browser-pilot.md).
+Status: Superseded by [agent-browser](agent-browser.md), adopted directly as the default interactive browser tool. Claude Code and its plugin configuration are retired. The completed isolated pilot and its checklist below remain historical evidence; its Pi adapter was never activated. See [the pilot record](agent-browser-pilot.md).
 
 - [x] Review an exact published adapter version, its package dependencies, configuration precedence, command execution, tool filtering, approvals, lifecycle, and output spill behavior.
 - [x] Review and pin an exact official Chrome DevTools server version. Compare the full MCP path with the experimental official CLI against the required browser tasks. Adapter 2.32.1 and Chrome server 1.8.0 remain pinned test inputs, not live packages.
@@ -87,7 +87,7 @@ Acceptance: The fixed tasks pass through official Pi extension loading and actua
 
 ### 5. Evaluate private work MCP in Pi
 
-Status: Source and synthetic evaluation accepted; live migration deferred. The existing definition and client are retained. The private evaluation records the candidate, source limitations and approval gates. An exact server/dependency review and separately approved backend canary remain necessary.
+Status: Source and synthetic evaluation accepted; live migration deferred. The private definition is retained as inactive data; Claude Code and its merger are retired. The private evaluation records the candidate, source limitations and approval gates. An exact server/dependency review and separately approved backend canary remain necessary.
 
 - [x] Inventory existing work definitions using sanitized structural metadata only.
 - [x] Evaluate adapter transport and authentication configuration without printing endpoints, environment values, or credentials. Credential validity, permissions and hosted runtime behavior remain unverified.

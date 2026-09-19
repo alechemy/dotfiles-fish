@@ -54,7 +54,6 @@ If `setup.sh` halts early, fix the reported issue and re-run — it's idempotent
 
 ### Other local repositories
 
-- [ ] **`~/Developer/claude-agent-acp`** — `setup.sh` clones and builds this automatically (step 7b), so normally you don't need to do anything. If the build failed (look for a `WARNING: claude-agent-acp build failed` line), run it manually: `cd ~/Developer/claude-agent-acp && mise exec -- npm install && mise exec -- npm run build`. Without `dist/index.js`, the "Claude Code by Rohan Patra" agent entry in Zed won't function.
 - [ ] Any other `~/Developer/*` repos you actively work in.
 
 ## 5. Bring over from the old machine
@@ -147,7 +146,7 @@ Easiest way to surface the prompts: open DEVONthink, then manually run each scri
 - [ ] DEVONthink launches and shows your databases (after pointing it at the Lorebook).
 - [ ] `op vault list`, `gh auth status`, and `tailscale status` all report signed in.
 - [ ] VSCodium opens with custom CSS/JS applied (the `vscode-custom-css` extension requires running its "Enable Custom CSS and JS" command + a full quit; see `stow/vscode/Library/Application Support/VSCodium/User/settings.template.json` line ~344).
-- [ ] Zed launches without complaining about the `claude-agent-acp` path.
+- [ ] Pi loads the shared skills, including `agent-browser`.
 
 ## 10. Things that can break silently
 

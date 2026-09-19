@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Adopt the deterministic comment gate in a repo: drop the opt-in marker the agent
-# strippers key on (Claude Code `Stop` / Copilot `agentStop`), then print ready-to-paste
+# stripper keys on (Copilot `agentStop`), then print ready-to-paste
 # pre-commit / lefthook / CI snippets for the non-bypassable commit gate.
 #
 # Usage: comment-gate-init [repo-dir]   (defaults to the current directory)
@@ -20,8 +20,8 @@ else
   cat >"$marker" <<'TOML'
 # Opt into deterministic comment stripping for this repo.
 #
-# Presence of this file enables the in-session agent stripper (Claude Code Stop /
-# Copilot agentStop hooks) and marks the repo for the commit/CI gate below. The
+# Presence of this file enables the Copilot agentStop stripper and marks the
+# repo for the commit/CI gate below. The
 # in-session stripper only removes comments on lines the agent added this session;
 # the commit/CI gate has no such baseline and strips every staged file whole.
 #
@@ -39,7 +39,7 @@ fi
 
 cat <<'EOF'
 
-In-session stripping is now active for this repo (Claude Code & Copilot CLI).
+In-session stripping is now active for Copilot CLI in this repo. Pi has no comment hook.
 For the non-bypassable commit gate, wire ONE local hook and mirror it in CI. Each
 runs uncomment plus a Markdown-aware trailing-whitespace trim (uncomment leaves
 trailing whitespace where it removes an inline comment; it does not reformat), so

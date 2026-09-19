@@ -384,13 +384,6 @@ if ! jq -e '
     info "Pi provider logins are machine-local. Run pi, then /login for OpenAI, GitHub Copilot, and Anthropic."
 fi
 
-# Merge the optional gitignored work MCP fragment into ~/.claude.json. No op is
-# needed; ~/.claude.json is app-owned runtime state, so this merges rather than
-# stows it.
-chmod +x "$DOTFILES/scripts/merge-claude-mcp.sh"
-"$DOTFILES/scripts/merge-claude-mcp.sh" \
-    || info "WARNING: Claude Code MCP-server merge failed; check jq and ~/.claude.json."
-
 # The focused DEVONthink skill starts the official stdio server per request. The
 # separate HTTP login item exposes the full tool set and has no retained client.
 if [ -d "/Applications/DEVONthink.app" ]; then
@@ -895,39 +888,6 @@ fi
 if [[ "$(uname)" == "Darwin" ]]; then
     load_launch_agent "$HOME/Library/LaunchAgents/com.user.npm-tools-update.plist" "global Mise update"
     load_launch_agent "$HOME/Library/LaunchAgents/com.user.software-update-audit.plist" "software update audit"
-fi
-
-# 7b. claude-agent-acp — the Zed ACP bridge referenced from
-#     stow/zed/.config/zed/settings.template.jsonc. Upstream gitignores dist/,
-#     so a clone alone is not enough; we also build it. node/npm come from
-#     mise, hence the `mise exec` invocations.
-#
-#     URL provenance: verified against the existing local clone at
-#     ~/Developer/claude-agent-acp via `git config --get remote.origin.url`.
-#     If upstream moves, re-confirm there before editing.
-ACP_DIR="$HOME/Developer/claude-agent-acp"
-ACP_REPO="https://github.com/rohan-patra/claude-agent-acp"
-if [ ! -d "$ACP_DIR/.git" ]; then
-    info "Cloning claude-agent-acp..."
-    mkdir -p "$HOME/Developer"
-    if git clone "$ACP_REPO" "$ACP_DIR"; then
-        success "claude-agent-acp cloned"
-    else
-        info "WARNING: failed to clone claude-agent-acp; Zed agent will be broken until cloned manually"
-    fi
-fi
-
-if [ -d "$ACP_DIR" ] && [ ! -f "$ACP_DIR/dist/index.js" ]; then
-    info "Building claude-agent-acp (npm install + npm run build)..."
-    if command -v mise &>/dev/null; then
-        if (cd "$ACP_DIR" && mise exec -- npm install --no-fund --no-audit && mise exec -- npm run build); then
-            success "claude-agent-acp built"
-        else
-            info "WARNING: claude-agent-acp build failed; Zed agent will be unavailable until built manually"
-        fi
-    else
-        info "WARNING: mise not on PATH; skipping claude-agent-acp build"
-    fi
 fi
 
 # 8. VSCodium Setup

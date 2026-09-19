@@ -69,6 +69,18 @@ class CommentHookTests(unittest.TestCase):
     def offsets(self):
         return list((self.home / "state/agent-hooks").glob("*.offset"))
 
+    def test_marker_recipe_only_advertises_the_retained_hook(self):
+        marker = self.repo / ".uncommentrc.toml"
+        marker.unlink()
+        result = subprocess.run(
+            ["bash", str(BIN / "comment-gate-init"), str(self.repo)],
+            env=self.env, capture_output=True, text=True, timeout=10,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn("Claude", result.stdout + marker.read_text())
+        self.assertIn("Copilot CLI", result.stdout)
+        self.assertIn("Pi has no comment hook", result.stdout)
+
     def test_all_preservation_values_are_untouched_in_scoped_edit(self):
         names = ("IMPORTANT", "NOTE", "WARNING", "SAFETY", "SECURITY", "keep")
         for name in names:

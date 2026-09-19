@@ -162,33 +162,6 @@
     "model_parameters": []
   },
   "agent_servers": {
-    "claude-acp": {
-      "type": "registry",
-      "env": {
-        "CLAUDE_CODE_EXECUTABLE": "/opt/homebrew/bin/claude",
-        "GIT_PAGER": "cat"
-      },
-      "default_config_options": {
-        "mode": "bypassPermissions"
-      },
-      "favorite_config_option_values": {
-        "model": ["opus"],
-        "mode": ["bypassPermissions"]
-      }
-    },
-    "Claude Code by Rohan Patra": {
-      "type": "custom",
-      "command": "node",
-      "args": ["${HOME}/Developer/claude-agent-acp/dist/index.js"],
-      "default_config_options": {
-        "model": "default",
-        "effort_level": "xhigh",
-        "mode": "bypassPermissions"
-      },
-      "favorite_config_option_values": {
-        "model": ["opus"]
-      }
-    },
     "copilot-acp": {
       "type": "custom",
       "command": "/opt/homebrew/bin/copilot",

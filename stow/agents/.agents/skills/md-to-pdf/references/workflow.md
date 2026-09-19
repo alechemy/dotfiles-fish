@@ -25,10 +25,10 @@ After adding this skill and its command to a dotfiles checkout, link them with S
 
 ```bash
 cd ~/.dotfiles/stow
-stow --restow --no-folding --ignore='.DS_Store' --ignore='__pycache__' --target="$HOME" agents bin claude
+stow --restow --no-folding --ignore='.DS_Store' --ignore='__pycache__' --target="$HOME" agents bin
 ```
 
-Pi discovers the shared skill under `~/.agents/skills/md-to-pdf`. Reload skills or start a new session if it was added after startup. Claude uses the compatibility link to the same directory.
+Pi discovers the shared skill under `~/.agents/skills/md-to-pdf`. Reload skills or start a new session if it was added after startup.
 
 ## Usage
 

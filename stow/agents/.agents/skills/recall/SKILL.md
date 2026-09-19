@@ -42,7 +42,7 @@ Only user-requested content recall permits bounded sanitized excerpts. No generi
 
 ## 3. Discover sessions through the filter
 
-`agent-reader` alone parses session formats. The stdlib-only `recall-filter.py` consumes its normalized JSON on stdin and releases an allowlisted projection. It does not open files or invoke integrations. Use the installed helper path below in Pi, Claude, or Copilot. Before the new helper is stowed, use its repository source path.
+`agent-reader` alone parses session formats. The stdlib-only `recall-filter.py` consumes its normalized JSON on stdin and releases an allowlisted projection. It does not open files or invoke integrations. Use the installed helper path below in Pi; the parser still supports historical Claude and Copilot sessions. Before the new helper is stowed, use its repository source path.
 
 Run pipelines in Bash with `pipefail`, upstream stderr suppressed, and shell tracing disabled. Never run either upstream command on its own or merge stderr into stdout. Do not save raw output to logs or artifacts. On a nonzero pipeline status, disregard its result and report an extraction failure without replaying raw diagnostics.
 

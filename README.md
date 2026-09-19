@@ -59,12 +59,12 @@ This installs Homebrew + all dependencies from `Brewfile`, builds generated conf
 │   ├── aerospace-*.sh|py         # AeroSpace gap/window helpers
 │   └── macos.sh                  # macOS system defaults
 ├── stow/                    # Stow packages (auto-linked by setup.sh; devonthink + streamrip opt-in)
+│   ├── agent-browser/       # Explicit browser automation defaults
 │   ├── agents/              # Canonical global agent instructions and shared skills
 │   ├── aerospace/           # Tiling window manager
 │   ├── bin/                 # ~/.local/bin scripts
 │   ├── borders/             # JankyBorders window borders
 │   ├── chromium-bookmarks/  # Chromium → Safari bookmark bridge for Alfred
-│   ├── claude/              # Claude Code compatibility adapter, skills, hooks
 │   ├── copilot/             # Copilot CLI compatibility adapter
 │   ├── devonthink/          # DEVONthink automation (opt-in)
 │   ├── dropzone/            # Dropzone action bundles
