@@ -23,9 +23,11 @@ re-reading audio.
 Weights and gates live in ~/.config/runnability/config.toml (stowed from
 stow/runnability/). Models auto-download to ~/.local/share/runnability/models.
 
-Analysis costs ~6 s/track single-core; batch runs gate on
-should-run-background-job unless --force. During write, Ctrl-C cancels queued
-tracks, waits for active writes and database updates, then exits with status 130.
+Analysis costs ~6 s/track single-core; batch runs check
+should-run-background-job every five seconds unless --force. On battery they
+stop submitting tracks and finish active work, preserving completed results.
+During write, Ctrl-C cancels queued tracks, waits for active writes and database
+updates, then exits with status 130.
 """
 
 from __future__ import annotations
@@ -40,9 +42,10 @@ import signal
 import sqlite3
 import subprocess
 import sys
+import time
 import tomllib
 import urllib.request
-from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, ThreadPoolExecutor, as_completed, wait
+from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, ThreadPoolExecutor, wait
 from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
@@ -241,12 +244,29 @@ def collect_paths(args) -> list[pathlib.Path]:
     ]
 
 
+class _PowerGate:
+    def __init__(self, force):
+        self.force = force
+        self.checked_at = float("-inf")
+        self.result = True
+
+    def allowed(self, refresh=False):
+        if self.force or not GATE.exists():
+            return True
+        now = time.monotonic()
+        if refresh or now - self.checked_at >= 5:
+            self.result = subprocess.run([str(GATE)]).returncode == 0
+            self.checked_at = now
+        return self.result
+
+
 def cmd_analyze(args) -> int:
-    if not args.force and GATE.exists():
-        if subprocess.run([str(GATE)]).returncode != 0:
-            print("on battery; skipping (use --force to override)", file=sys.stderr)
-            return 0
+    gate = _PowerGate(args.force)
+    if not gate.allowed():
+        return 0
     paths = collect_paths(args)
+    if not gate.allowed(refresh=True):
+        return 0
     conn = open_db()
     known = {
         r[0]: r[1]
@@ -254,6 +274,9 @@ def cmd_analyze(args) -> int:
     }
     todo = []
     for p in paths:
+        if not gate.allowed():
+            conn.close()
+            return 0
         try:
             rel = str(p.resolve().relative_to(LIBRARY_ROOT))
         except ValueError:
@@ -266,32 +289,49 @@ def cmd_analyze(args) -> int:
                 pass
         todo.append((str(p), rel))
     print(f"{len(paths)} candidates, {len(todo)} to analyze", file=sys.stderr)
-    if not todo:
+    if not todo or not gate.allowed(refresh=True):
         conn.close()
         return 0
 
-    model_paths = ensure_models()
-    done = 0
-    with ProcessPoolExecutor(
-        max_workers=args.workers, initializer=_worker_init, initargs=(model_paths,)
-    ) as pool:
-        futs = {pool.submit(_analyze_one, a, r): r for a, r in todo}
-        for fut in as_completed(futs):
-            row = fut.result()
-            row["analyzed_at"] = datetime.now(timezone.utc).isoformat()
-            cols = ",".join(row)
-            conn.execute(
-                f"INSERT OR REPLACE INTO features ({cols}) VALUES ({','.join(':'+c for c in row)})",
-                row,
-            )
-            conn.commit()
-            done += 1
-            tag = f"ERROR {row['error']}" if row["error"] else (
-                f"bpm={row.get('bpm', 0):.1f} conf={row.get('beat_confidence', 0):.2f} "
-                f"dance={row.get('danceability', 0):.2f}"
-            )
-            print(f"[{done}/{len(todo)}] {row['relpath']}: {tag}", file=sys.stderr)
-    conn.close()
+    try:
+        model_paths = ensure_models()
+        if not gate.allowed(refresh=True):
+            return 0
+        done = 0
+        stopped = False
+        index = 0
+        with ProcessPoolExecutor(
+            max_workers=args.workers, initializer=_worker_init, initargs=(model_paths,)
+        ) as pool:
+            pending = set()
+            while pending or index < len(todo):
+                if not stopped and not gate.allowed():
+                    stopped = True
+                    print("on battery; finishing active analysis, deferring remaining tracks", file=sys.stderr)
+                while not stopped and index < len(todo) and len(pending) < args.workers:
+                    pending.add(pool.submit(_analyze_one, *todo[index]))
+                    index += 1
+                if not pending:
+                    break
+                completed, _ = wait(pending, timeout=1, return_when=FIRST_COMPLETED)
+                for fut in completed:
+                    row = fut.result()
+                    row["analyzed_at"] = datetime.now(timezone.utc).isoformat()
+                    cols = ",".join(row)
+                    conn.execute(
+                        f"INSERT OR REPLACE INTO features ({cols}) VALUES ({','.join(':'+c for c in row)})",
+                        row,
+                    )
+                    conn.commit()
+                    done += 1
+                    tag = f"ERROR {row['error']}" if row["error"] else (
+                        f"bpm={row.get('bpm', 0):.1f} conf={row.get('beat_confidence', 0):.2f} "
+                        f"dance={row.get('danceability', 0):.2f}"
+                    )
+                    print(f"[{done}/{len(todo)}] {row['relpath']}: {tag}", file=sys.stderr)
+                    pending.remove(fut)
+    finally:
+        conn.close()
     return 0
 
 
@@ -515,10 +555,9 @@ def _write_one(rel: str, score: int, folded: int | None, tmpo: int | None,
 
 
 def cmd_write(args) -> int:
-    if not args.dry_run and not args.force and GATE.exists():
-        if subprocess.run([str(GATE)]).returncode != 0:
-            print("on battery; skipping (use --force to override)", file=sys.stderr)
-            return 0
+    gate = _PowerGate(args.force or args.dry_run)
+    if not gate.allowed():
+        return 0
     cfg = load_config()
     quant = int(cfg.get("output", {}).get("quantize", 1))
     target = cfg["cadence"]["target_spm"]
@@ -555,9 +594,13 @@ def cmd_write(args) -> int:
         folded = round(fold_bpm(bpm, target)) if bpm else None
         jobs.append((r["relpath"], score, folded, tmpo, r["file_identity"]))
 
+    if not gate.allowed(refresh=True):
+        conn.close()
+        return 0
     counts: dict[str, int] = {}
     done = 0
     interrupted = False
+    on_battery = False
     announced = False
 
     def request_stop(signum, frame):
@@ -568,20 +611,26 @@ def cmd_write(args) -> int:
     try:
         with ThreadPoolExecutor(max_workers=args.workers) as pool:
             pending = set()
-            for index, job in enumerate(jobs):
-                if interrupted:
-                    counts["cancelled"] = len(jobs) - index
-                    break
-                pending.add(pool.submit(_write_one, *job, args.dry_run))
-            while pending:
-                if interrupted:
+            index = 0
+            while pending or index < len(jobs):
+                if not on_battery and not gate.allowed():
+                    on_battery = True
+                if interrupted or on_battery:
+                    counts["cancelled"] = counts.get("cancelled", 0) + len(jobs) - index
+                    index = len(jobs)
                     for fut in tuple(pending):
                         if fut.cancel():
                             pending.remove(fut)
                             counts["cancelled"] = counts.get("cancelled", 0) + 1
                     if not announced:
-                        print("Interrupted; queued tracks cancelled, waiting for active tag writes and database updates.", file=sys.stderr)
+                        reason = "Interrupted" if interrupted else "On battery"
+                        print(f"{reason}; queued tracks cancelled, waiting for active tag writes and database updates.", file=sys.stderr)
                         announced = True
+                while not (interrupted or on_battery) and index < len(jobs) and len(pending) < args.workers:
+                    pending.add(pool.submit(_write_one, *jobs[index], args.dry_run))
+                    index += 1
+                if not pending:
+                    break
                 completed, _ = wait(pending, timeout=0.2, return_when=FIRST_COMPLETED)
                 for fut in completed:
                     rel, status, size, mtime, identity, err = fut.result()

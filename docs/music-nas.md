@@ -69,8 +69,12 @@ in the login Keychain through Finder, as before.
 
 Runnability-sync keeps its power gate first. It then reads the private library
 root with Apple-signed `/usr/bin/python3` and checks that directory before
-running the existing explicit `uv` commands. Neither launchd plist embeds
-private topology. The local streamrip credential template is unchanged.
+running the existing explicit `uv` commands. Analyze and write recheck power
+every five seconds and before starting workers. On battery, they stop submitting
+tracks and finish active work, including database updates. Remaining tracks wait
+for the next run. `--force` bypasses these checks; write dry runs also bypass them.
+Neither launchd plist embeds private topology. The local streamrip credential
+template is unchanged.
 
 ## Getter and remote deployment
 
