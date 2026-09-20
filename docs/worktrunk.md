@@ -21,6 +21,9 @@ The helper requires the calling pane to belong to the same repository. It preser
 
 Sibling paths use `{{ repo_path }}/../{{ repo }}.{{ branch | sanitize }}`. Existing repositories stay where they are. Work repositories retain the `~/Work` layout. The picker uses noninteractive Delta output; Git's normal pager remains Hunk.
 
+The [Fish shortcuts](agentic-coding-workflow.md#fish-shortcuts) cover task launch,
+reopening, navigation, Hunk review, integration, and guarded removal.
+
 ## Review, integrate, and remove
 
 From the intended task's Pi pane, Ctrl+; then `f` opens its Hunk review. Save a human inline comment with Ctrl+S. Ctrl+; then Shift+F sends unsent comments explicitly. Each worktree has a separate review and recipient. The existing blocked/busy checks and Ctrl+S submission patch remain in effect. See [Herdr's Hunk workflow](herdr.md#hunk-review-integration).

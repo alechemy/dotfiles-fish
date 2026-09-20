@@ -78,6 +78,65 @@ Review the commands or resources before approving them. The launcher deliberatel
 
 These `wt pi new` and `wt pi open` commands are **human-shell launchers**. Pi uses its managed session and delegation tools rather than running those launchers itself.
 
+## Fish shortcuts
+
+Interactive Fish shells load these abbreviations from
+`stow/fish/.config/fish/conf.d/abbrs.fish`. Space or Enter expands them to the full
+command, so arguments and flags remain visible and editable.
+
+| Shortcut | Expansion | Purpose |
+| --- | --- | --- |
+| `pn` | `wt pi new` | Create a task worktree and start Pi in its cmux workspace. |
+| `po` | `wt pi open` | Select or resume the recorded task workspace and conversation. |
+| `pl` | `wt pi list` | Refresh and display worktree activity. |
+| `ws` | `wt switch` | Open the picker, or navigate to a supplied branch. |
+| `wb` | `wt switch -` | Return the shell to its previous worktree. |
+| `hd` | `hunk diff` | Review uncommitted changes, including untracked files. |
+| `hs` | `hunk diff --staged` | Review staged changes. |
+| `hc` | `hunk show HEAD` | Review the latest commit. |
+| `hwatch` | `hunk diff --watch` | Review uncommitted changes with automatic reload. |
+| `prm` | `wt pi remove` | Remove an inactive task checkout through the guarded helper. |
+| `wmerge` | `wt merge --no-commit --no-rebase --no-remove` | Integrate locally without automatic commits, rebasing, or checkout removal. |
+
+`hb <base>` is a Fish function in `stow/fish/.config/fish/functions/hb.fish`.
+It requires exactly one explicit commit-ish base, verifies that it shares an
+ancestor with HEAD, then runs `hunk diff <base>...HEAD`. Invalid refs and unrelated
+histories stop before Hunk opens. This scope excludes staged, unstaged, and
+untracked changes; use `hd` to review unfinished work separately.
+
+For example, from a native cmux repository shell:
+
+```fish
+pn feature/export --base main
+pl
+po feature/export
+```
+
+In a second terminal at the task worktree, use `hwatch` while Pi edits or
+`hb main` to review committed branch changes. `po` selects the task's cmux
+workspace; `ws` only navigates the current shell and does not start Pi.
+Send saved Hunk feedback with Ctrl+Shift+F when the bound Pi session is idle.
+
+Use `wmerge main` from a clean task checkout after review and verification.
+Project hooks still run and require inspection for remote writes. After stopping
+Pi and task services and closing the task workspace, use `prm feature/export`
+from another worktree. Cleanup retains the branch and all existing refusal checks.
+
+New shells load the abbreviations automatically. To refresh an existing shell:
+
+```fish
+source ~/.config/fish/conf.d/abbrs.fish
+```
+
+Fish autoloads `hb` after its new file is linked. From the primary dotfiles
+checkout, link newly added Fish files with
+`stow --restow --no-folding --dir=stow --target="$HOME" fish`. Do not run Stow
+from a linked task checkout.
+
+Run the isolated shortcut regressions with
+`/usr/bin/python3 -m unittest discover -s scripts/tests -p test_dev_shortcuts.py`.
+They use disposable Git history and a Hunk stub, without launching task sessions.
+
 ## 3. Tell Pi what success means
 
 In the new Pi pane, write something like:
