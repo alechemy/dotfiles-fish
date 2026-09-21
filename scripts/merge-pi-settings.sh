@@ -44,11 +44,21 @@ tmp=$(mktemp "$TARGET_DIR/.$kind.json.XXXXXX")
 trap 'rm -f "$tmp"' EXIT
 
 if ! jq -S -n --slurpfile current "$current_input" --slurpfile fragment "$FRAGMENT" \
-    --argjson missing "$missing_target" '
+    --argjson missing "$missing_target" --arg kind "$kind" '
     def one_object:
         if length == 1 and (.[0] | type) == "object" then .[0]
         else error("expected exactly one JSON object") end;
-    (if $missing then {} else ($current | one_object) end) * ($fragment | one_object)
+    ($fragment | one_object) as $managed |
+    (if $missing then {} else ($current | one_object) end) * $managed |
+    if $kind == "models" and (.providers | type) == "object" then
+        .providers |= with_entries(
+            .key as $provider |
+            ($managed.providers[$provider].modelOverrides // {}) as $overrides |
+            if (.value.models | type) == "array" then
+                .value.models |= map(. * ($overrides[.id] // {}))
+            else . end
+        )
+    else . end
     ' >"$tmp" 2>/dev/null; then
     echo "merge-pi-settings: inputs must each contain exactly one JSON object; left live $kind untouched" >&2
     exit 1
