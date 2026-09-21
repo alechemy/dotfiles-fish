@@ -279,6 +279,12 @@ Pi's fragment selects the guarded Subagents build's official `worktreeProvider: 
 
 [Software updates](software-updates.md) documents the range-limited daily Mise job, weekly read-only audit, local reports and rollout procedure. `scripts/setup-software-updates.py` wraps the existing Homebrew job to record attempts, successful completions and deferrals, and moves notifications to failure-only accounting. It preserves the generated updater and schedule.
 
+### Homebrew automatic updates
+
+`stow/homebrew/.homebrew/brew.env` sets `HOMEBREW_UPGRADE_GREEDY_CASKS=microsoft-teams`. Homebrew reads it on each invocation, including the existing daily 06:00 `brew autoupdate` job. The Teams-only exception includes it in upgrades despite the cask's `auto_updates true` flag. Other self-updating casks retain their default behavior.
+
+Homebrew's Teams installer excludes Microsoft AutoUpdate, which [Teams on Mac needs for automatic updates](https://learn.microsoft.com/en-us/microsoftteams/teams-client-update#updating-teams-on-mac-devices). The exception makes Homebrew responsible for Teams updates. The scheduled job still requires AC power and may prompt for an administrator password through its existing GUI helper.
+
 ### Local Homebrew tap (apps with no upstream cask)
 
 When an app has no Homebrew cask (or only a third-party one we don't want to depend on), the repo carries its own cask under `homebrew/Casks/<token>.rb` and exposes it through a **local-only tap** named `alec/local`, so it installs through the normal `brew bundle` path like any other app.
