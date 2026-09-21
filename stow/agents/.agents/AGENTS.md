@@ -31,6 +31,7 @@
 - Claude Code is retired. Do not install or configure it, its editor integrations, or compatibility files. Preserve historical transcript support and Pi's model/provider configuration.
 - Read the relevant implementation, callers, and tests before editing.
 - Reuse existing code, standard libraries, platform features, and installed dependencies when they meet the requirements and fit the project's conventions.
+- Before patching a dependency, check applicable stable and prerelease releases and inspect their published fixes. The npm `latest` tag alone is not a complete update check.
 - Prefer the smallest maintainable change, not the fewest lines or files. Add abstractions, dependencies, and configuration only for a current requirement or a concrete reduction in complexity.
 - Preserve validation, error handling, security, accessibility, and operational constraints. Explain any proposed reduction in scope rather than silently implementing it.
 - When delegating, pass the relevant requirements and constraints explicitly; do not assume children inherit these instructions.
@@ -80,6 +81,7 @@
 
 ## Missing CLI tools
 
+- Request CLI help from the underlying executable. Project wrappers may install dependencies, regenerate files, or reset shared caches before forwarding `--help`; inspect their side effects before invoking them.
 - Run required CLIs directly instead of checking whether they are installed. If one is missing, report it rather than substituting another tool, installing anything, or running a package through one-off `npx`.
 
 ## When something goes wrong

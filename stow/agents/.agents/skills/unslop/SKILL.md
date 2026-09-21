@@ -48,7 +48,7 @@ Removing patterns is half the job. Sterile, voiceless writing is just as obvious
 
 7. **AI vocabulary.** Additionally, crucial, delve, enduring, enhance, fostering, garner, interplay, intricate, landscape (abstract), pivotal, showcase, tapestry (abstract), testament, underscore, vibrant. Replace with plain words.
 8. **Fancy ways to say "is".** "serves as", "stands as", "boasts", "features". Just say "is" or "has".
-9. **"Not just X, but Y."** State the point directly instead.
+9. **Formulaic contrast.** "Not just X, but Y", "This is X, not Y", "It's not X, it's Y". State the point directly. Preserve necessary distinctions without the stock framing.
 10. **Rule of three.** Forcing ideas into groups of three. Use the natural number.
 11. **Synonym cycling.** Protagonist, main character, central figure, hero all in one paragraph. Pick one, repeat it.
 12. **False ranges.** "from X to Y" where X and Y aren't on a meaningful scale. List topics directly.
