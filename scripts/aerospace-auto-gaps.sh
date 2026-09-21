@@ -56,7 +56,7 @@ TRIGGER="${1:-unlabeled}"
 log() { printf '%s %s\n' "$(date '+%F %T')" "$*" >>"$LOG_FILE"; }
 
 # App snapshot of workspace $1 from a tree_snapshot on stdin, e.g.
-# "Ghostty:12010(h_tiles),Finder:88(floating)". Logged with every
+# "cmux:12010(h_tiles),Finder:88(floating)". Logged with every
 # apply/mismatch so a flapping window can be identified from the log alone —
 # and, via the id, whether an episode was an AX dropout (same id returns) or a
 # recreated window (new id).
@@ -245,12 +245,10 @@ for pass in 1 2 3 4 5; do
     fi
     printf '%s\n' "$cur_ids" >"$IDS_FILE"
 
-    # Map count to the outer-left/right value that keeps window width constant.
-    case "$count" in
-        0|1) target=$gap_centered ;;
-        2)   target=$gap_split ;;
-        *)   target=$gap_full ;;
-    esac
+    # Give a lone cmux window the two-window width because its own horizontal
+    # splits need more room than the normal centered single-window preset.
+    sole_app=$(printf '%s\n' "$tree" | tiled_in "$ws" | awk -F'|' 'NR == 1 {print $3}')
+    target=$(gap_for_tiled_count "$count" "$sole_app")
 
     # Decide whether the runtime needs rebuilding from source. The padding and
     # layout checks restore the source accordion-padding and default root

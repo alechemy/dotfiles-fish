@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the configured restart cleanup against disposable gap state."""
+"""Test AeroSpace gap behavior without touching live state."""
 
 from pathlib import Path
 import re
@@ -8,6 +8,7 @@ import tempfile
 import unittest
 
 REPO = Path(__file__).resolve().parents[2]
+GAPS_LIB = REPO / "scripts/aerospace-gaps-lib.sh"
 
 
 class AeroSpaceStartupTests(unittest.TestCase):
@@ -34,6 +35,30 @@ class AeroSpaceStartupTests(unittest.TestCase):
                 self.assertFalse(suppression.exists())
                 self.assertEqual(unrelated.read_text(), "preserve\n")
                 self.assertEqual(other.read_text(), "8\n")
+
+
+class AeroSpaceGapPresetTests(unittest.TestCase):
+    def gap_for(self, count, app=""):
+        command = f"""
+            . {str(GAPS_LIB)!r}
+            gap_full=8
+            gap_split=120
+            gap_centered=240
+            gap_for_tiled_count "$1" "$2"
+        """
+        result = subprocess.run(["/bin/bash", "-c", command, "--", str(count), app],
+                                capture_output=True, text=True, timeout=10)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return int(result.stdout.strip())
+
+    def test_lone_cmux_window_uses_two_window_gap(self):
+        self.assertEqual(self.gap_for(1, "cmux"), 120)
+
+    def test_other_counts_and_apps_keep_existing_presets(self):
+        self.assertEqual(self.gap_for(0), 240)
+        self.assertEqual(self.gap_for(1, "Mail"), 240)
+        self.assertEqual(self.gap_for(2, "cmux"), 120)
+        self.assertEqual(self.gap_for(3, "cmux"), 8)
 
 
 if __name__ == "__main__":

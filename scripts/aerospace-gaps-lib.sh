@@ -31,6 +31,22 @@ count_tiled_windows() {
     tree_snapshot | tiled_in "$1" | wc -l | tr -d ' '
 }
 
+gap_for_tiled_count() {
+    local count="$1" sole_app="${2:-}"
+    case "$count" in
+        0) printf '%s\n' "$gap_centered" ;;
+        1)
+            if [ "$sole_app" = "cmux" ]; then
+                printf '%s\n' "$gap_split"
+            else
+                printf '%s\n' "$gap_centered"
+            fi
+            ;;
+        2) printf '%s\n' "$gap_split" ;;
+        *) printf '%s\n' "$gap_full" ;;
+    esac
+}
+
 # Sets gap_full (>=3 windows), gap_split (2), gap_centered (0-1).
 # Returns non-zero if the screen width cannot be determined.
 compute_gap_presets() {
