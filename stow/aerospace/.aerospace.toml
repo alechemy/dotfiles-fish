@@ -222,6 +222,10 @@ if.app-id = 'dev.zed.Zed-Preview'
 run = 'move-node-to-workspace 1'
 
 [[on-window-detected]]
+if.app-id = 'com.apple.dt.Devices'
+run = 'move-node-to-workspace 1'
+
+[[on-window-detected]]
 if.app-name-regex-substring = 'Teams'
 run = 'move-node-to-workspace 2'
 
