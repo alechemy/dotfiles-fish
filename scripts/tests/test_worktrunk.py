@@ -7,9 +7,11 @@ import json
 import os
 from pathlib import Path
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
 from unittest.mock import patch
@@ -72,9 +74,20 @@ class WorktrunkTests(unittest.TestCase):
         finally:
             os.chdir(previous)
 
-    def own(self, target):
-        _, _, gitdir = workflow.repository(target)
-        workflow.write_json(gitdir / "wt-pi/task.json", {"version": 1, "path": str(target)})
+    def own_cmux(self, target, *, session="session-1"):
+        _, common, gitdir = workflow.repository(target)
+        state = {"version": 2, "backend": "cmux", "path": str(target),
+                 "repository": str(common), "branch": "feature/test",
+                 "workspace_id": "workspace-1", "surface_id": "surface-1"}
+        if session:
+            state["session_id"] = session
+        workflow.write_json(gitdir / "wt-pi/task.json", state)
+        return state
+
+    def cmux_tree(self, target):
+        return {"windows": [{"id": "window-1", "workspaces": [{"id": "workspace-1", "panes": [
+            {"id": "pane-1", "surfaces": [{"id": "surface-1", "type": "terminal", "cwd": str(target)}]}
+        ]}]}]}
 
     def test_sibling_allocation_leaves_existing_changes_alone(self):
         (self.repo / "fixture").write_text("local work\n")
@@ -224,107 +237,232 @@ class WorktrunkTests(unittest.TestCase):
         with self.assertRaises(workflow.WorkflowError):
             workflow.validate_branch(self.repo, "pi-subagents/fixture")
 
-    def bound_task(self):
+    def test_cmux_unknown_creation_outcome_cannot_be_retried(self):
         target = self.create()
-        _, _, gitdir = workflow.repository(target)
-        workflow.write_json(gitdir / "wt-pi/task.json", {"version": 1, "path": str(target),
-                                                       "tab_id": "task", "pane_id": "original"})
-        return target
-
-    def test_mixed_tabs_refused_before_focus_or_agent_lookup(self):
-        target = self.bound_task()
-        panes = [{"tab_id": "task", "pane_id": "original"},
-                 {"tab_id": "other", "pane_id": "foreign"}]
-        with patch.object(workflow, "task_panes", return_value=panes), \
-                patch.object(workflow, "herdr") as api:
-            with self.assertRaisesRegex(workflow.WorkflowError, "outside"):
-                workflow.open_task(target, "feature/test")
+        state = self.own_cmux(target, session=None)
+        state.pop("workspace_id")
+        state.pop("surface_id")
+        state["launch"] = {"token": "a" * 32, "status": "creating", "requested_at": time.time()}
+        workflow.write_task_state(target, state)
+        with patch.object(workflow, "cmux") as api:
+            with self.assertRaisesRegex(workflow.WorkflowError, "unknown outcome"):
+                workflow.open_cmux_task(target, "feature/test")
             api.assert_not_called()
 
-    def test_simultaneous_agents_refused_before_focus_or_reuse(self):
-        target = self.bound_task()
-        panes = [{"tab_id": "task", "pane_id": "original"},
-                 {"tab_id": "task", "pane_id": "foreign"}]
-        for agents in ([{"pane_id": "foreign"}],
-                       [{"pane_id": "original"}, {"pane_id": "foreign"}]):
-            with self.subTest(agents=agents), \
-                    patch.object(workflow, "task_panes", return_value=panes), \
-                    patch.object(workflow, "herdr", return_value={"agents": agents}) as api:
-                with self.assertRaisesRegex(workflow.WorkflowError, "Another agent"):
-                    workflow.open_task(target, "feature/test")
-                api.assert_called_once_with("agent", "list")
-
-    def test_extra_native_sessions_refused_before_reuse(self):
-        target = self.bound_task()
-        with patch.object(workflow, "task_panes", return_value=[{"tab_id": "task", "pane_id": "original"}]), \
-                patch.object(workflow, "herdr", return_value={"agents": [{"pane_id": "original"}]}) as api, \
-                patch.object(workflow, "activity", return_value=2):
-            with self.assertRaisesRegex(workflow.WorkflowError, "Another agent"):
-                workflow.open_task(target, "feature/test")
-            api.assert_called_once_with("agent", "list")
-
-    def test_external_record_not_exempt_when_owned_pane_has_no_record(self):
-        target = self.bound_task()
-        workflow.activity(target, token="a" * 32, pid=os.getpid(), status="working")
-        with patch.object(workflow, "task_panes", return_value=[{"tab_id": "task", "pane_id": "original"}]), \
-                patch.object(workflow, "herdr", return_value={"agents": [{"pane_id": "original"}]}) as api:
-            with self.assertRaisesRegex(workflow.WorkflowError, "Another agent"):
-                workflow.open_task(target, "feature/test")
-            api.assert_called_once_with("agent", "list")
-
-    def test_only_matching_native_pane_identity_is_exempt(self):
-        target = self.bound_task()
-        with patch.dict(os.environ, {"HERDR_PANE_ID": "original"}):
-            workflow.activity(target, token="a" * 32, pid=os.getpid(), status="working")
-        self.assertEqual(workflow.activity(target, owned_pane="original"), 0)
-        self.assertEqual(workflow.activity(target, owned_pane="foreign"), 1)
-        self.assertEqual(workflow.activity(target), 1)
-        # A live legacy record with no pane identity must fail closed too.
-        _, _, gitdir = workflow.repository(target)
-        path = gitdir / "wt-pi/activity.json"
-        state = workflow.read_json(path)
-        state["sessions"]["a" * 32].pop("pane_id")
-        workflow.write_json(path, state)
-        self.assertEqual(workflow.activity(target, owned_pane="original"), 1)
-
-    def test_multiple_native_sessions_in_owned_pane_block_reuse(self):
-        target = self.bound_task()
-        with patch.dict(os.environ, {"HERDR_PANE_ID": "original"}):
-            for token in ("a" * 32, "b" * 32):
-                workflow.activity(target, token=token, pid=os.getpid(), status="working")
-        self.assertEqual(workflow.activity(target), 2)
-        self.assertEqual(workflow.activity(target, owned_pane="original"), 1)
-        with patch.object(workflow, "task_panes", return_value=[{"tab_id": "task", "pane_id": "original"}]), \
-                patch.object(workflow, "herdr", return_value={"agents": [{"pane_id": "original"}]}) as api:
-            with self.assertRaisesRegex(workflow.WorkflowError, "Another agent"):
-                workflow.open_task(target, "feature/test")
-            api.assert_called_once_with("agent", "list")
-
-    def test_owned_agent_reused_after_all_checks(self):
-        target = self.bound_task()
-        with patch.object(workflow, "task_panes", return_value=[{"tab_id": "task", "pane_id": "original"}]), \
-                patch.object(workflow, "herdr", return_value={"agents": [{"pane_id": "original"}]}) as api, \
-                patch.object(workflow, "activity", return_value=0) as active:
-            self.assertEqual(workflow.open_task(target, "feature/test")["action"], "reused")
-            active.assert_called_once_with(target, owned_pane="original")
-            self.assertEqual(api.call_args_list, [unittest.mock.call("agent", "list"),
-                                                unittest.mock.call("tab", "focus", "task")])
-
-    def test_failed_launch_retains_the_tab_binding_for_recovery(self):
+    def test_cmux_creation_retains_returned_workspace_after_binding_failure(self):
         target = self.create()
-        self.own(target)
-        responses = [
-            {"pane": {"workspace_id": "workspace", "cwd": str(self.repo)}},
-            {"tab": {"tab_id": "task"}, "root_pane": {"pane_id": "original"}},
-            workflow.WorkflowError("Synthetic Pi start failure"),
-        ]
-        with patch.object(workflow, "task_panes", return_value=[]), \
-                patch.object(workflow, "herdr", side_effect=responses):
+        state = self.own_cmux(target, session=None)
+        state.pop("workspace_id")
+        state.pop("surface_id")
+        workflow.write_task_state(target, state)
+        with patch.object(workflow, "cmux", return_value={"workspace_id": "workspace-created"}) as api, \
+                patch.object(workflow, "wait_for_cmux_binding",
+                             side_effect=workflow.WorkflowError("Synthetic binding failure")):
             with self.assertRaisesRegex(workflow.WorkflowError, "Synthetic"):
-                workflow.open_task(target, "feature/test", focus=False)
-        self.assertEqual(workflow.task_state(target)["pane_id"], "original")
-        self.assertEqual(workflow.task_state(target)["tab_id"], "task")
-        self.assertTrue(target.exists())
+                workflow.create_cmux_task(target, "feature/test", state, focus=False, resume=False)
+        command = api.call_args.args
+        self.assertEqual(command[:5], ("new-workspace", "--name", "feature/test", "--cwd", str(target)))
+        self.assertIn("wt-pi _start", command[command.index("--command") + 1])
+        self.assertEqual(command[-2:], ("--focus", "false"))
+        saved = workflow.task_state(target)
+        self.assertEqual(saved["workspace_id"], "workspace-created")
+        self.assertNotIn("surface_id", saved)
+        with self.assertRaisesRegex(workflow.WorkflowError, "incomplete"):
+            workflow.cmux_bound_surface(saved)
+
+    def test_cmux_parent_preserves_faster_child_binding(self):
+        target = self.create()
+        state = self.own_cmux(target, session=None)
+        state.pop("workspace_id")
+        state.pop("surface_id")
+        workflow.write_task_state(target, state)
+
+        def create_and_bind(*_args, **_kwargs):
+            latest = workflow.task_state(target)
+            latest["workspace_id"] = "workspace-created"
+            latest["surface_id"] = "surface-created"
+            latest["session_id"] = "session-created"
+            latest["launch"] = {**latest["launch"], "status": "bound", "pid": os.getpid(),
+                                "started": workflow.process_started(os.getpid())}
+            workflow.write_task_state(target, latest)
+            return {"workspace_id": "workspace-created"}
+
+        with patch.object(workflow, "cmux", side_effect=create_and_bind), \
+                patch.object(workflow, "wait_for_cmux_binding", side_effect=lambda root, _workspace: workflow.task_state(root)):
+            workflow.create_cmux_task(target, "feature/test", state, focus=False, resume=False)
+        saved = workflow.task_state(target)
+        self.assertEqual(saved["surface_id"], "surface-created")
+        self.assertEqual(saved["session_id"], "session-created")
+        self.assertEqual(saved["launch"]["status"], "bound")
+
+    def test_cmux_start_binds_exact_environment_before_exec(self):
+        target = self.create()
+        state = self.own_cmux(target, session=None)
+        state.pop("workspace_id")
+        state.pop("surface_id")
+        state["launch"] = {"token": "a" * 32, "status": "creating", "requested_at": time.time()}
+        workflow.write_task_state(target, state)
+        with self.cwd(target), patch.dict(os.environ, {"CMUX_WORKSPACE_ID": "workspace-new",
+                                                       "CMUX_SURFACE_ID": "surface-new"}), \
+                patch.object(workflow.os, "execvp", side_effect=workflow.WorkflowError("exec stopped")) as execute:
+            with self.assertRaisesRegex(workflow.WorkflowError, "exec stopped"):
+                workflow.start_cmux_pi("a" * 32)
+        saved = workflow.task_state(target)
+        self.assertEqual(saved["workspace_id"], "workspace-new")
+        self.assertEqual(saved["surface_id"], "surface-new")
+        self.assertEqual(saved["launch"]["status"], "bound")
+        execute.assert_called_once_with("pi", ["pi", "--name", "feature/test"])
+
+    def test_cmux_reuses_only_the_bound_live_session(self):
+        target = self.create()
+        state = self.own_cmux(target)
+        workflow.activity(target, token="a" * 32, pid=os.getpid(), status="idle",
+                          backend="cmux", session_id="session-1", workspace_id="workspace-1",
+                          surface_id="surface-1")
+        calls = []
+        with patch.object(workflow, "cmux_tree", return_value=self.cmux_tree(target)), \
+                patch.object(workflow, "cmux_saved_session_active", return_value=False), \
+                patch.object(workflow, "cmux", side_effect=lambda *args, **kwargs: calls.append(args) or {}):
+            result = workflow.open_cmux_task(target, "feature/test")
+        self.assertEqual(result["action"], "reused")
+        self.assertEqual(calls, [("select-workspace", "--workspace", state["workspace_id"])])
+
+    def test_restored_exact_pi_session_rebinds_new_cmux_ids(self):
+        target = self.create()
+        self.own_cmux(target)
+        restored = {"windows": [{"id": "window-new", "workspaces": [{"id": "workspace-new", "panes": [
+            {"id": "pane-new", "surfaces": [{"id": "surface-new", "type": "terminal", "cwd": str(target)}]}
+        ]}]}]}
+        with patch.object(workflow, "cmux_tree", return_value=restored):
+            workflow.activity(target, token="a" * 32, pid=os.getpid(), status="idle",
+                              backend="cmux", session_id="session-1", workspace_id="workspace-new",
+                              surface_id="surface-new")
+        state = workflow.task_state(target)
+        self.assertEqual(state["workspace_id"], "workspace-new")
+        self.assertEqual(state["surface_id"], "surface-new")
+
+    def test_cmux_refuses_stale_or_foreign_ownership(self):
+        target = self.create()
+        self.own_cmux(target)
+        with patch.object(workflow, "cmux_tree", return_value={"windows": []}):
+            with self.assertRaisesRegex(workflow.WorkflowError, "stale"):
+                workflow.open_cmux_task(target, "feature/test")
+        workflow.activity(target, token="b" * 32, pid=os.getpid(), status="idle",
+                          backend="standalone")
+        with patch.object(workflow, "cmux_tree", return_value=self.cmux_tree(target)):
+            with self.assertRaisesRegex(workflow.WorkflowError, "Another agent"):
+                workflow.open_cmux_task(target, "feature/test")
+
+    def test_cmux_feedback_is_delivered_once_with_a_receipt(self):
+        target = self.create()
+        self.own_cmux(target)
+        socket_path = self.root / "feedback.sock"
+        received = []
+        ready = threading.Event()
+
+        def receiver():
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as server:
+                server.bind(str(socket_path))
+                server.listen(1)
+                ready.set()
+                connection, _ = server.accept()
+                with connection:
+                    request = json.loads(connection.makefile().readline())
+                    received.append(request)
+                    connection.sendall((json.dumps({"request_id": request["request_id"],
+                                                    "status": "delivered"}) + "\n").encode())
+
+        thread = threading.Thread(target=receiver)
+        thread.start()
+        ready.wait(5)
+        workflow.activity(target, token="a" * 32, pid=os.getpid(), status="idle",
+                          backend="cmux", session_id="session-1", workspace_id="workspace-1",
+                          surface_id="surface-1", feedback_socket=str(socket_path),
+                          feedback_token="secret")
+        comment = {"id": "comment-1", "source": "user", "path": "fixture", "side": "new",
+                   "line": 1, "summary": "Change this"}
+        first = workflow.deliver_feedback(target, {"comments": [comment]})
+        thread.join(5)
+        second = workflow.deliver_feedback(target, {"comments": [comment]})
+        self.assertEqual(first, {"status": "delivered", "delivered_ids": ["comment-1"]})
+        self.assertEqual(second, {"status": "already-delivered", "delivered_ids": ["comment-1"]})
+        self.assertEqual(len(received), 1)
+        self.assertEqual(received[0]["session_id"], "session-1")
+        self.assertIn("Change this", received[0]["text"])
+
+    def test_edited_comment_with_same_id_is_delivered_again(self):
+        target = self.create()
+        self.own_cmux(target)
+        socket_path = self.root / "feedback-edit.sock"
+        received = []
+
+        def serve_once():
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as server:
+                socket_path.unlink(missing_ok=True)
+                server.bind(str(socket_path))
+                server.listen(1)
+                ready.set()
+                connection, _ = server.accept()
+                with connection:
+                    request = json.loads(connection.makefile().readline())
+                    received.append(request)
+                    connection.sendall((json.dumps({"request_id": request["request_id"],
+                                                    "status": "delivered"}) + "\n").encode())
+
+        workflow.activity(target, token="a" * 32, pid=os.getpid(), status="idle",
+                          backend="cmux", session_id="session-1", workspace_id="workspace-1",
+                          surface_id="surface-1", feedback_socket=str(socket_path),
+                          feedback_token="secret")
+        original = {"id": "comment-1", "source": "user", "path": "fixture", "summary": "First"}
+        edited = {**original, "summary": "Second"}
+        for comment in (original, edited):
+            ready = threading.Event()
+            thread = threading.Thread(target=serve_once)
+            thread.start()
+            ready.wait(5)
+            workflow.deliver_feedback(target, {"comments": [comment]})
+            thread.join(5)
+        self.assertEqual([request["text"].splitlines()[-1].strip() for request in received], ["First", "Second"])
+
+    def test_uncertain_feedback_blocks_automatic_resend(self):
+        target = self.create()
+        self.own_cmux(target)
+        socket_path = self.root / "feedback-uncertain.sock"
+        ready = threading.Event()
+
+        def receiver():
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as server:
+                server.bind(str(socket_path))
+                server.listen(1)
+                ready.set()
+                connection, _ = server.accept()
+                with connection:
+                    connection.makefile().readline()
+
+        thread = threading.Thread(target=receiver)
+        thread.start()
+        ready.wait(5)
+        workflow.activity(target, token="a" * 32, pid=os.getpid(), status="idle",
+                          backend="cmux", session_id="session-1", workspace_id="workspace-1",
+                          surface_id="surface-1", feedback_socket=str(socket_path),
+                          feedback_token="secret")
+        comment = {"id": "comment-1", "source": "user", "path": "fixture", "summary": "Change this"}
+        with self.assertRaisesRegex(workflow.WorkflowError, "uncertain"):
+            workflow.deliver_feedback(target, {"comments": [comment]})
+        thread.join(5)
+        with self.assertRaisesRegex(workflow.WorkflowError, "previous delivery is uncertain"):
+            workflow.deliver_feedback(target, {"comments": [comment]})
+
+    def test_cmux_busy_recipient_refuses_feedback(self):
+        target = self.create()
+        self.own_cmux(target)
+        workflow.activity(target, token="a" * 32, pid=os.getpid(), status="working",
+                          backend="cmux", session_id="session-1", workspace_id="workspace-1",
+                          surface_id="surface-1", feedback_socket=str(self.root / "missing.sock"),
+                          feedback_token="secret")
+        comment = {"id": "comment-1", "source": "user", "path": "fixture", "summary": "Change this"}
+        with self.assertRaisesRegex(workflow.WorkflowError, "busy"):
+            workflow.deliver_feedback(target, {"comments": [comment]})
 
     def test_agents_cannot_use_human_launcher(self):
         for key in ("PI_CODING_AGENT", "PI_SESSION_ID", "AI_AGENT"):
@@ -334,13 +472,13 @@ class WorktrunkTests(unittest.TestCase):
 
     def test_removal_checks_ignored_files_and_retains_unmerged_branch(self):
         target = self.create()
-        self.own(target)
+        self.own_cmux(target)
         (target / ".gitignore").write_text("private.local\n")
         self.git("add", ".gitignore", cwd=target)
         self.git("commit", "-qm", "ignore", cwd=target)
         (target / "private.local").write_text("synthetic private data")
         args = type("Args", (), {"branch": "feature/test", "discard_ignored": False})()
-        with self.cwd(self.repo), patch.object(workflow, "require_herdr"), patch.object(workflow, "check_remove"):
+        with self.cwd(self.repo), patch.object(workflow, "check_remove"):
             with self.assertRaisesRegex(workflow.WorkflowError, "ignored"):
                 workflow.remove(args)
             self.assertTrue(target.exists())
@@ -349,20 +487,48 @@ class WorktrunkTests(unittest.TestCase):
         self.assertFalse(target.exists())
         self.git("rev-parse", "--verify", "refs/heads/feature/test")
 
-    def test_live_panes_block_removal(self):
+    def test_failed_review_tracking_blocks_removal_until_reconciled(self):
         target = self.create()
-        with patch.object(workflow, "require_herdr"), patch.object(workflow, "task_panes", return_value=[{}]):
-            with self.assertRaisesRegex(workflow.WorkflowError, "Herdr panes"):
-                workflow.check_remove(target)
-        self.assertTrue(target.exists())
+        state = self.own_cmux(target)
+        token = "c" * 32
+        payload = {"id": "comment-1", "source": "user", "fingerprint": "invalid"}
+        with self.assertRaisesRegex(workflow.WorkflowError, "Invalid Hunk"):
+            workflow.review_event(target, "upsert", os.getpid(), payload, token)
+        self.assertEqual(workflow.unsent_feedback(target), (0, 1))
+        with patch.object(workflow, "require_cmux"), patch.object(workflow, "activity", return_value=0), \
+                patch.object(workflow, "cmux_task_surfaces", return_value=[]):
+            with self.assertRaisesRegex(workflow.WorkflowError, "Unsent or uncertain"):
+                workflow.check_remove(target, state)
+        payload["fingerprint"] = "a" * 64
+        workflow.review_event(target, "upsert", os.getpid(), payload, "d" * 32)
+        self.assertEqual(workflow.unsent_feedback(target), (1, 0))
+        workflow.review_event(target, "remove", os.getpid(), {"id": "comment-1"}, "e" * 32)
+        self.assertEqual(workflow.unsent_feedback(target), (0, 0))
+
+    def test_cmux_surface_and_unsent_feedback_block_removal(self):
+        target = self.create()
+        state = self.own_cmux(target)
+        with patch.object(workflow, "require_cmux"), patch.object(workflow, "activity", return_value=0), \
+                patch.object(workflow, "cmux_task_surfaces", return_value=[("window", "workspace", "pane", "surface")]):
+            with self.assertRaisesRegex(workflow.WorkflowError, "cmux surfaces"):
+                workflow.check_remove(target, state)
+        with patch.object(workflow, "require_cmux"), patch.object(workflow, "activity", return_value=0), \
+                patch.object(workflow, "cmux_task_surfaces", return_value=[]), \
+                patch.object(workflow, "unsent_feedback", return_value=(1, 0)):
+            with self.assertRaisesRegex(workflow.WorkflowError, "Unsent"):
+                workflow.check_remove(target, state)
 
     def test_real_detached_process_blocks_removal(self):
         target = self.create()
         process = subprocess.Popen(["sleep", "30"], cwd=target, start_new_session=True)
         try:
-            with patch.object(workflow, "require_herdr"), patch.object(workflow, "task_panes", return_value=[]):
+            state = self.own_cmux(target)
+            with patch.object(workflow, "require_cmux"), \
+                    patch.object(workflow, "activity", return_value=0), \
+                    patch.object(workflow, "cmux_task_surfaces", return_value=[]), \
+                    patch.object(workflow, "unsent_feedback", return_value=(0, 0)):
                 with self.assertRaisesRegex(workflow.WorkflowError, "process"):
-                    workflow.check_remove(target)
+                    workflow.check_remove(target, state)
         finally:
             process.terminate()
             process.wait(timeout=5)

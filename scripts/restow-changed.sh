@@ -178,8 +178,8 @@ fi
 if grep -Eq '^stow/pi/\.pi/agent/models\.fragment\.json$|^scripts/merge-pi-settings\.sh$' <<<"$changed_files"; then
     rebuild merge-pi-settings.sh --models
 fi
-if grep -Eq '^stow/herdr/|^scripts/(setup-herdr\.sh|install-herdr-hunk-diff\.sh|configure-herdr-hunk\.mjs|patches/herdr-hunk-diff\.patch)$' <<<"$changed_files"; then
-    rebuild setup-herdr.sh
+if grep -Eq '^scripts/(setup-cmux\.sh|cmux/worktrunk-feedback\.ts)$' <<<"$changed_files"; then
+    rebuild setup-cmux.sh --install-pi-hook
 fi
 if grep -Eq '^stow/worktrunk/|^scripts/setup-worktrunk\.sh$' <<<"$changed_files"; then
     rebuild setup-worktrunk.sh

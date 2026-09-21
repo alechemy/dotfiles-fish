@@ -8,7 +8,7 @@ Personal dotfiles for macOS, managed with [GNU Stow](https://www.gnu.org/softwar
 | Package manager | Homebrew |
 | Dotfile manager | GNU Stow |
 | Runtime manager | Mise |
-| Terminal | Ghostty |
+| Terminal workspace | cmux |
 | Prompt | Starship |
 | Editor | Zed |
 | Window management | AeroSpace |
@@ -71,7 +71,7 @@ This installs Homebrew + all dependencies from `Brewfile`, builds generated conf
 │   ├── editorconfig/        # ~/.editorconfig
 │   ├── espanso/             # Text expansion
 │   ├── fish/                # Fish shell config, functions, plugins
-│   ├── ghostty/             # Terminal emulator
+│   ├── cmux/                # libghostty terminal settings for cmux
 │   ├── git/                 # Git config + global excludes
 │   ├── karabiner/           # Keyboard remapping (goku EDN source)
 │   ├── linearmouse/         # Ploopy Knob scroll config (seeded, not stowed)

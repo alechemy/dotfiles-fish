@@ -1,6 +1,6 @@
 # Dotfiles agent instructions
 
-Personal macOS dotfiles managed with GNU Stow. Packages under `stow/` mirror `$HOME`; `scripts/setup.sh` reconstructs the machine. Key tools are Fish, Homebrew, Mise, Pi, Ghostty, and Zed.
+Personal macOS dotfiles managed with GNU Stow. Packages under `stow/` mirror `$HOME`; `scripts/setup.sh` reconstructs the machine. Key tools are Fish, Homebrew, Mise, Pi, cmux, and Zed.
 
 ## Read before changing
 

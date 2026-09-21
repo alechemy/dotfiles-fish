@@ -1,82 +1,36 @@
 # Agentic coding workflow
 
-## The mental model
+## The model
 
-Your workflow separates code, terminals, and conversations:
+The local workflow separates checkout, terminal, conversation, review, and editing ownership:
 
-- **Worktrunk** gives each task its own checkout and Git branch.
-- **Herdr** keeps the task's terminals running and organizes them into tabs.
-- **Pi** works on the code and maintains the conversation.
-- **Hunk** lets you inspect changes and send line-specific feedback to Pi.
-- **Ghostty** displays the whole thing.
+- **Worktrunk** gives each human task its own checkout and branch.
+- **cmux** owns task workspaces and terminal surfaces.
+- **Pi** owns implementation, conversations, and delegation.
+- **Hunk** owns local review comments.
+- **VSCodium** remains available for code navigation and manual editing.
+- **libghostty** renders cmux terminals using the stowed terminal settings; the standalone Ghostty app is retired.
 
-A typical project looks like this:
+A typical repository has one control shell in the primary checkout and one cmux workspace per task worktree. A workspace is terminal state; a worktree is a directory. Closing one does not remove the other.
 
-```text
-Ghostty window
-└── Herdr workspace: myapp
-    ├── Control tab
-    │   └── Fish shell in the primary checkout
-    ├── Task tab: feature/export
-    │   ├── Pi in the export worktree
-    │   └── Hunk reviewing that worktree
-    └── Task tab: fix/search
-        └── Pi in a separate search worktree
-```
+## Start and return to tasks
 
-**A tab is a terminal layout. A worktree is a directory containing code.** Closing a tab does not delete the worktree. Changing a shell's directory does not relocate an already-running Pi session.
-
-The walkthrough below uses a fictional `~/Work/myapp` repository with a `main` branch. Substitute your repository's path and target branch. These commands are for you to run.
-
-## 1. Open the project's workspace
-
-Your Ghostty configuration already starts or attaches to Herdr. You normally do **not** type `herdr` again inside it.
-
-Press **Cmd+Ctrl+W** and select the project's existing workspace.
-
-For a project without a workspace, run this in a Fish shell inside Herdr:
-
-```fish
-herdr workspace create --cwd ~/Work/myapp --label myapp --focus
-```
-
-The new workspace starts with a shell in that directory. Keep this first tab as your control shell for task creation, status, and cleanup.
-
-You can click tabs and panes to focus them and drag split borders to resize them. The first keyboard shortcuts worth learning are:
-
-| Key | Action |
-| --- | --- |
-| Cmd+Shift+T | Create a tab. |
-| Cmd+D | Split right. |
-| Cmd+T | Split down. |
-| Cmd+Shift+H/J/K/L | Focus left/down/up/right. |
-| Cmd+Shift+Enter | Zoom or unzoom the current pane. |
-| Cmd+1 through Cmd+9 | Select a tab. |
-
-Notice that **Cmd+T splits down** in your setup. It does not create a tab.
-
-## 2. Give the task its own checkout
-
-Suppose the feature is CSV export.
-
-In the control shell:
+Open a native cmux terminal in the repository, then run:
 
 ```fish
 wt pi new feature/export --base main
+wt pi new fix/search --base main --no-focus
+wt pi open feature/export
+wt pi list
 ```
 
-This creates a branch from local `main`, allocates a sibling checkout, opens a named Herdr tab, and starts a fresh Pi session there.
+`new` allocates a sibling worktree and branch, creates a named cmux workspace, binds its initial terminal surface, and starts a fresh named Pi conversation. It does not copy uncommitted source-checkout changes. `open` selects the recorded workspace, reuses its live Pi session, or resumes the exact recorded conversation. Names and focus are display state, not identity.
 
-The original checkout stays untouched. Its uncommitted changes do not accompany the new task. The new Pi conversation also does not inherit the conversation you were having elsewhere.
+The launcher is for human shells. Pi uses managed delegation or an explicitly requested `project.open`; it does not run `wt pi new` or clear the launch guard. Worktrunk project-command approval and Pi project trust remain separate decisions. Review both before accepting them.
 
-Answer any startup trust or login prompts yourself. Two separate approvals may matter:
+A failed or timed-out launch keeps the checkout and any recorded cmux identity. Unknown launch outcomes cannot be retried automatically because the original workspace might still start. Inspect the retained state instead of creating another writer.
 
-- Worktrunk approval allows the repository's configured preparation commands.
-- Pi trust allows project-local Pi configuration and executable extensions.
-
-Review the commands or resources before approving them. The launcher deliberately refuses unapproved Worktrunk project commands.
-
-These `wt pi new` and `wt pi open` commands are **human-shell launchers**. Pi uses its managed session and delegation tools rather than running those launchers itself.
+For ordinary shell navigation, use `wt switch`, `wt switch <branch>`, and `wt switch -`.
 
 ## Fish shortcuts
 
@@ -137,266 +91,112 @@ Run the isolated shortcut regressions with
 `/usr/bin/python3 -m unittest discover -s scripts/tests -p test_dev_shortcuts.py`.
 They use disposable Git history and a Hunk stub, without launching task sessions.
 
-## 3. Tell Pi what success means
+## Work with Pi
 
-In the new Pi pane, write something like:
+In Pi:
 
-> Add CSV export to the filtered results page. Export only the visible columns, preserve the current sort order, and handle commas, quotes, and line breaks correctly. Follow the existing download pattern and add focused tests. Leave the changes uncommitted for review.
+- Enter and Shift+Enter insert newlines.
+- Cmd+Enter or Ctrl+S submits.
+- `/subagents-fleet` shows foreground and recent asynchronous runs.
+- `/subagents-doctor` runs delegation diagnostics.
+- `/subagent-cost` reports current parent and child cost.
 
-In your configuration:
+An idle root session can still have active children. Check Fleet before treating a task as settled. The installed guarded Subagents build retains its provider, role, tool, and cleanup restrictions. Managed write worktrees that can enter automatic cleanup remain restricted until their separate preservation candidate is installed and approved. This is independent of human `wt pi` worktrees.
 
-- **Enter** inserts a newline.
-- **Cmd+Enter** or **Ctrl+S** submits the prompt.
+Keep one writer per checkout. A second terminal may run tests or services, but do not launch another editing agent against the same worktree.
 
-Herdr reports whether Pi is working, idle, or blocked waiting for an answer. Idle means the turn has settled, not that the implementation is correct.
+## Review in Hunk
 
-From the control shell, this gives a cross-task overview:
-
-```fish
-wt pi list
-```
-
-Its native Pi markers distinguish working, idle, and blocked sessions. Herdr also shows Subagents activity text, which can indicate child work even when the root Pi session looks idle.
-
-Keep one writer per checkout. Managed Subagents write worktrees that can enter automatic cleanup are currently restricted: the installed guarded build can delete a checkout even when its captured binary patch cannot be replayed. The isolated preservation candidate has passed those tests, but it is not installed. Do not use that cleanup path until full SDK loader verification and separately approved installation/activation are complete. This is separate from the human `wt pi` helper, which retains branches and refuses dirty work. Do not bulk-clean either kind of retained task.
-
-### Check delegated work without confusing root and child status
-
-An idle root can still have active children. In the currently retained guarded
-Subagents 0.65 build, `/subagents-fleet` opens foreground and recent asynchronous
-runs, including completed entries. Ctrl+Alt+F is also registered in that build;
-do not assume the same default after an upgrade. Use Fleet to locate the relevant
-run before treating the whole task as settled.
-
-`/subagents-doctor` runs diagnostics on demand. `/subagent-cost` reports current
-parent/child cost. These are checks, not reasons to keep another polling dashboard
-running. Fleet also offers steering, stop, and inspector actions; those are not
-all read-only. Transcript views need explicit content scope and are not suitable
-for metadata-only audits. None of these commands relaxes the managed-worktree
-restriction above.
-
-## 4. Review the changes in Hunk
-
-Wait until Pi settles. From **the Pi pane that should receive your feedback**, press:
-
-**Ctrl+;, release, then `f`.**
-
-Hunk opens or reuses a review split for that worktree. Starting from the intended Pi pane establishes the feedback recipient.
-
-In Hunk:
-
-1. Select a relevant line.
-2. Press `c`.
-3. Write a specific comment.
-4. Press **Ctrl+S** to save it.
-
-For example:
-
-> This exports the unfiltered collection. Use the same filtered and sorted rows that the table displays.
-
-Saving the note does **not** submit it to Pi. To send your saved comments, press:
-
-**Ctrl+;, release, then Shift+F.**
-
-The integration submits the human comments to the associated Pi session. Successful delivery removes those comments from Hunk to prevent duplicate sending.
-
-If Pi is busy or showing a blocking dialog, delivery is refused and the comments remain. Resolve that state, then send again. If a failure happened after pasting into Pi, inspect its draft before retrying.
-
-These comments are local. They are not published GitHub reviews.
-
-### Review the whole task, including committed work
-
-The default shortcut chooses scope automatically. Dirty or untracked files select
-working-tree mode. A clean branch with a usable base and commits ahead selects
-branch mode; otherwise it falls back to working-tree mode. Verify the displayed
-comparison rather than treating an empty view as proof that the task is reviewed.
-
-From the intended Pi pane, **Ctrl+;, then Shift+B** requests committed branch review.
-Shift+A reviews the index; Shift+C reviews the latest commit. These scopes are not
-interchangeable. The installer preserves existing key conflicts, so check Herdr's
-shortcut help if the binding is unavailable.
-
-Hunk's `[review] base` can select the integration target. Without it, the reviewed
-resolver tries a usable upstream, `origin/HEAD`, then local `main`, `master`, or
-`trunk`. An invalid configured base can fall back to automatic resolution, and a
-missing base can fall back to working-tree mode. Neither fallback proves that the
-intended branch was reviewed. See [the exact scope rules](herdr.md#review-scope-and-receipts).
-
-For a non-`main` integration target, validate the ref and merge-base, then reload the
-exact worktree's session with an explicit comparison:
+Open Hunk in the task worktree using the scope you intend to inspect:
 
 ```fish
-hunk session reload --repo /path/to/task-worktree -- diff release/integration...HEAD
+hunk diff
+hunk diff --staged
+hunk show HEAD
+hunk diff main...HEAD
 ```
 
-This shows committed changes since the shared ancestor. It excludes staged,
-unstaged, and untracked work, which need a separate working-tree review when they
-belong to the task. Explicitly open review from the intended Pi pane first; an
-unrelated shell does not establish the right feedback recipient.
+Working tree, staged changes, latest commit, and whole-branch comparison are different scopes. `main...HEAD` excludes staged, unstaged, and untracked work, so inspect those separately when they belong to the task. For another integration target, validate the ref and merge base and use that exact comparison.
 
-Use `hunk skill path` for the installed agent interaction guide. For your own
-history browsing, run `hunk log` in the task shell. Headless Git review does not
-need a Hunk TUI or daemon.
+Create and save human inline comments in Hunk. Ctrl+Shift+F invokes **Send human feedback to task Pi**. The extension:
 
-Before sending feedback clears comments, save unresolved findings in a local
-[coding-task receipt](../stow/agents/.agents/skills/handoff/SKILL.md#coding-task-review-receipt).
-Record the integration target, base/merge-base, reviewed HEAD, scope/exclusions,
-tested dirty state, checks, service ownership, and next action. Link existing
-artifacts rather than copying private transcripts or patches. Recheck the receipt
-after further edits or a rebase.
+1. snapshots the current review;
+2. selects only saved `source: user` notes;
+3. verifies one exact idle Pi recipient for the worktree's recorded cmux workspace, surface, and session;
+4. sends through that Pi process's private local receiver;
+5. removes comments only after a matching delivery receipt and unchanged review revision.
 
-## 5. Iterate, then commit deliberately
+Busy, blocked, disconnected, changed, ambiguous, and uncertain states retain comments. A delivery that might have reached Pi is not retried automatically. Inspect the conversation before resolving it manually. Local Hunk comments are not GitHub review comments and do not authorize remote writes.
 
-After Pi addresses the comments, inspect the updated diff and request any missing checks.
+Before clearing important review feedback or completing a task, retain unresolved findings in a local [coding-task receipt](../stow/agents/.agents/skills/handoff/SKILL.md#coding-task-review-receipt). Record the target, base or merge base, reviewed HEAD, scope and exclusions, tested dirty state, checks, unresolved findings, service ownership, and next action. Reference existing artifacts rather than copying private transcripts.
 
-When satisfied, tell Pi:
+## Commit and integrate
 
-> Run the relevant checks and review the final diff. Commit only this task's changes, following the repository's recent commit-message style. Keep signing and hooks enabled. Do not push.
+Prepare commits explicitly under the repository's signing, message, hook, and secrets-scan rules. A local commit neither integrates nor publishes the task.
 
-Your Git configuration signs commits. For dotfiles, the commit process also needs the staged betterleaks scan and `git diff --check`.
-
-A commit records the task on its branch. It does not integrate it into `main` or publish it.
-
-## 6. Integrate locally
-
-From a shell in the **task checkout**, with Pi settled and no other writer active:
+For conservative local integration, run this from the clean task checkout:
 
 ```fish
 wt merge main --no-commit --no-rebase --no-remove
 ```
 
-You can create that shell with Cmd+D, then confirm its directory and branch with `pwd` and `git status`.
-
-The command means:
-
-- Integrate the current task branch **into `main`**.
-- Do not automatically commit or squash anything.
-- Do not rewrite commits through an automatic rebase.
-- Keep the task checkout afterward.
-
-This direction differs from `git merge main`, which would bring `main` into the current branch.
-
-The working tree must be clean, and `main` must be able to fast-forward:
-
-```text
-Before:  A──B           main
-             └──C──D   feature/export
-
-After:   A──B──C──D     main, feature/export
-```
-
-If another task has advanced `main` along a different path, the command refuses. That is the point of the conservative settings.
-
-Rebasing is a separate decision. If you choose it, the task-side command is:
+The target must fast-forward. If a separate rebase is needed, use:
 
 ```fish
 git rebase --no-update-refs main
 ```
 
-Then resolve any conflicts, rerun checks, review the result, and retry integration. `--no-update-refs` prevents your global Git preference from also moving other local branches.
+Resolve conflicts, rerun relevant checks, and review the new result. Remote writes still require explicit current-turn authorization. Inspect project hooks because they can also perform remote writes.
 
-Local integration and publication remain separate. Pi needs an explicit current-turn instruction to push or create a PR. Review configured hooks too, because hooks can perform remote operations.
-
-## 7. Close the task, then remove its checkout
+## Stop and remove a task
 
 Use this order:
 
-1. Send outstanding Hunk comments.
-2. Finish any resulting Pi work. If it changed the code after integration, review, commit, and integrate those changes too.
-3. Submit `/quit` in Pi and stop task dev servers with their own shutdown commands. If needed, `ports kill <port>` sends TERM to one verified listener; `--force` explicitly permits KILL after the bounded wait. It refuses ambiguous or changed owners. Removing a checkout never substitutes for stopping its services.
-4. Close the task tab with **Cmd+Option+W**.
-5. Return to the control shell.
-
-Then run:
+1. Send or preserve outstanding Hunk comments.
+2. Finish, review, commit, and integrate any resulting edits.
+3. Quit Pi and stop task services through their own shutdown commands.
+4. Close the cmux task workspace.
+5. From another worktree's native cmux shell, run:
 
 ```fish
 wt pi remove feature/export
 ```
 
-The helper refuses removal while it finds active panes, Pi sessions, relevant processes, uncommitted changes, or ignored files.
+Removal refuses live Pi records, cmux surfaces that still own the task, unsent or uncertain feedback, current-user processes whose cwd remains below the worktree, uncommitted files, and unexplained ignored files. It never closes a workspace or kills a process. Use `--discard-ignored` only after inspecting and preserving anything needed.
 
-If ignored files block removal, inspect them first. They might be disposable dependencies, but they might also contain local data. Use `--discard-ignored` only after making that distinction.
-
-**Removal retains the branch**, including any unmerged commits. After confirming integration, you can separately delete the branch from the primary checkout:
+The helper retains the branch, including unmerged commits. Delete it separately only after confirming integration or intentional discard:
 
 ```fish
 git branch -d feature/export
 ```
 
-Do not use generic bulk cleanup on Subagents-owned `pi-subagents/` worktrees. The helper's checks reduce mistakes, but they are not a lock against every external writer.
+Direct `wt remove` and `git worktree remove` bypass these checks. Never bulk-remove Subagents-owned `pi-subagents/` worktrees.
 
-## Parallel work and coming back later
+## Recovery
 
-To start an independent second task without switching focus:
+cmux's official Pi hook owns lifecycle display, notifications, and application-level conversation restoration. The Worktrunk extension separately owns worktree markers and verified Hunk delivery.
 
-```fish
-wt pi new fix/search --base main --no-focus
-```
+After cmux restores an application session, only the exact Pi session already recorded for a task may rebind it to one unambiguous replacement workspace and surface after the old pair disappears. A missing, conflicting, or stale identity fails closed. Conversation restoration does not imply that an earlier process or dev server survived.
 
-Its separate checkout prevents the two Pi sessions from editing the same files. It does not eliminate merge conflicts later.
-
-To return to an existing task:
-
-```fish
-wt pi open feature/export
-```
-
-The launcher focuses its existing tab or resumes Pi when appropriate. Use `open`, not another `new`. This applies while the task worktree still exists, before removal.
-
-For a break, **detach rather than clean up**:
-
-- **Ctrl+;, then `q`** detaches while processes keep running.
-- **Cmd+Shift+W** closes the Ghostty window while Herdr remains running.
-- Opening Ghostty again attaches to the default Herdr server.
-
-Restarting the Herdr server is different. It stops processes and attempts layout and Pi conversation restoration. A resumed conversation is not a continuously running process.
+For dotfiles, only the primary checkout owns live HOME links. Integrate experimental changes there before running setup or Stow.
 
 ## Compact reference
 
 | Where | Command or key | Purpose |
 | --- | --- | --- |
-| Control shell | `wt pi new <branch> --base main` | Start an isolated task. |
-| Control shell | `wt pi open <branch>` | Return to or resume a task. |
-| Control shell | `wt pi list` | Inspect task activity. |
+| cmux repository shell | `wt pi new <branch> --base main` | Start an isolated task. |
+| cmux repository shell | `wt pi open <branch>` | Select or resume a task. |
+| Any repository shell | `wt pi list` | Refresh and display task activity. |
 | Fish shell | `wt switch` | Open the worktree picker. |
-| Fish shell | `wt switch <branch>` | Move that shell to a worktree. |
-| Pi editor | Cmd+Enter or Ctrl+S | Submit a message. |
-| Pi editor | `/hotkeys` | Show Pi shortcuts. |
-| Pi editor | `/subagents-fleet` | Inspect delegated-run status in the retained guarded build. |
-| Pi editor | `/subagents-doctor` | Run diagnostics on demand. |
-| Intended Pi pane | Ctrl+;, then `f` | Open its Hunk review. |
-| Herdr | Ctrl+;, then Shift+A | Review staged changes. |
-| Herdr | Ctrl+;, then Shift+C | Review the latest commit. |
-| Intended Pi pane | Ctrl+;, then Shift+B | Review committed branch changes; check the base. |
-| Task shell | `hunk log` | Browse commit history. |
-| Hunk | `c`, then Ctrl+S | Write and save a comment. |
-| Herdr | Ctrl+;, then Shift+F | Send saved human comments. |
+| Pi | Cmd+Enter or Ctrl+S | Submit a message. |
+| Pi | `/subagents-fleet` | Inspect delegated runs. |
+| Hunk | `c`, then Ctrl+S | Save a human comment. |
+| Hunk | Ctrl+Shift+F | Send saved human comments to the bound idle Pi. |
 | Task shell | `wt merge main --no-commit --no-rebase --no-remove` | Integrate locally. |
-| Herdr | Cmd+Option+W | Close the task tab. |
-| Another checkout | `wt pi remove <branch>` | Remove an inactive task checkout. |
-| Herdr | Ctrl+;, then `?` | Show Herdr shortcuts. |
+| Another cmux worktree | `wt pi remove <branch>` | Remove an inactive task checkout. |
 
-If task creation fails halfway, inspect the retained tab and `wt pi list` before retrying. If reopening reports another active agent, resolve that existing session rather than starting another writer.
+## Verification limits
 
-For dotfiles specifically, **only the primary checkout owns your live HOME links**. Integrate experimental changes before applying them. Never run setup or Stow from a task worktree.
+Synthetic tests cover task identity, duplicate-launch refusal, restore rebinding, feedback targeting and receipts, uncertainty, cleanup refusal, and branch retention. Physical cmux key delivery, desktop notifications, authenticated GitHub browser behavior, and sleep/wake remain user-assisted checks. These gaps do not relax cleanup or delivery safeguards.
 
-## Bounded physical check
-
-Automated fixtures cover submission logic, review scope, recipient selection,
-human-task retention, and explicit force without model calls. They do not establish physical
-Ghostty key delivery, an unfocused desktop notification, or macOS sleep/wake.
-
-Those three checks are deferred until an agreed ten-minute session with one
-disposable task. Server restart is a separate process-ending operation, not part
-of that session. Never stop the default Herdr server for testing. A declined
-session leaves these coverage limits recorded; it does not invalidate the
-repeatable fixture results.
-
-## References
-
-These commands were checked against Herdr 0.9.0, Worktrunk 0.77.0, Pi 0.85.1, and Hunk 0.22.0, together with the tracked local configuration.
-
-- [Herdr configuration and workflow](herdr.md).
-- [Worktrunk integration and cleanup rules](worktrunk.md).
-- [Dotfiles architecture and safety rules](dotfiles-reference.md).
-- [Upstream Worktrunk merge documentation](https://worktrunk.dev/merge/), also consulted through Context7's `/max-sixty/worktrunk` documentation.
+See [cmux integration](cmux.md), [Worktrunk integration](worktrunk.md), and [dotfiles architecture](dotfiles-reference.md).

@@ -11,8 +11,8 @@
 # anyway, so we snap back to the (now empty) workspace afterward.
 #
 # Everything keys off the app PID, not its name: AeroSpace's app-name and the
-# System Events process name disagree on case for some apps (e.g. Ghostty vs
-# ghostty), which would otherwise break sibling exclusion and the hide.
+# System Events process name can disagree on case, which would otherwise break
+# sibling exclusion and the hide.
 
 set -e
 

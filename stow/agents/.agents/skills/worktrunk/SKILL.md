@@ -1,6 +1,6 @@
 ---
 name: worktrunk
-description: Manage task worktrees with Worktrunk alongside Pi, Herdr, and Hunk. Use for creating isolated tasks, reopening task terminals, inspecting worktree status, integrating branches, or cleaning up completed worktrees.
+description: Manage task worktrees with Worktrunk alongside Pi, cmux, and Hunk. Use for creating isolated tasks, reopening task terminals, inspecting worktree status, integrating branches, or cleaning up completed worktrees.
 ---
 
 # Worktrunk
@@ -9,7 +9,7 @@ Run `wt --version` and the relevant command's `--help` before using unfamiliar o
 
 ## Ownership
 
-Worktrunk allocates worktrees. Herdr owns terminals. Pi owns implementation and delegation. Hunk owns local review comments.
+Worktrunk allocates worktrees. cmux owns human task workspaces and terminals. Pi owns implementation and delegation. Hunk owns local review comments.
 
 Keep one writer per checkout. A Bash tool's `wt switch` cannot change the running Pi session's working directory. Start a separate session at the chosen worktree instead.
 
@@ -17,7 +17,7 @@ The installed Subagents build uses its official Worktrunk allocator. It reserves
 
 ## Human task terminals
 
-These commands are for the human's Fish shell inside the repository's Herdr workspace:
+These commands are for the human's Fish shell inside a native cmux terminal whose cwd is in the repository:
 
 ```fish
 wt pi new feature/auth
@@ -26,7 +26,7 @@ wt pi open feature/auth
 wt pi list
 ```
 
-`wt pi new` creates a fresh branch and starts Pi in a named task tab. `open` focuses the existing task tab or resumes Pi. Neither command submits a task prompt or answers a trust dialog. A failed launch retains its worktree and tab; inspect them before retrying. `open` only accepts worktrees allocated by `new`.
+`wt pi new` creates a fresh branch and starts Pi in a named cmux workspace. `open` selects the exact recorded workspace or resumes the recorded Pi conversation in its exact terminal surface. Neither command submits a task prompt or answers a trust dialog. A failed launch retains its worktree and partial workspace binding; inspect them before retrying. `open` only accepts worktrees allocated by `new`, refuses stale or ambiguous cmux identifiers, and never chooses a destination from focus or titles.
 
 Do not invoke this human launcher from an agent or unset its agent-detection environment variables. Use Subagents `project.open` with the intended cwd for an explicitly requested independent project session, or ordinary managed delegation. Worktree allocation alone does not authorize a new agent process.
 
@@ -40,10 +40,10 @@ Preserve existing dirty work in the source checkout. New worktrees start from co
 
 ## Review and integration
 
-From the intended Pi pane, Ctrl+; then `f` opens Hunk. Save human comments with Ctrl+S and explicitly send them with Ctrl+; then Shift+F. Each worktree has its own recipient. Keep comments local unless remote publication is explicitly authorized.
+Open Hunk for the intended task worktree, save human comments, and invoke **Send human feedback to task Pi** with Ctrl+Shift+F. The extension sends only `source: user` notes to the one recorded, idle Pi session. A verified receipt is required before Hunk removes comments. Busy, stale, multiple-recipient, disconnected, and uncertain-delivery states retain comments and fail closed. Keep comments local unless remote publication is explicitly authorized.
 
 Open the installed Hunk skill with `hunk skill path` for agent-side review commands and
-completion checks. Ctrl+; then Shift+B selects committed branch review. Verify its
+completion checks. Use an explicit `<base>...HEAD` comparison for committed branch review. Verify its
 base against the intended integration target; an invalid-base fallback is not whole-task
 review. Reload the exact worktree with an explicit comparison when needed. Branch
 `<base>...HEAD` excludes staged, unstaged, and untracked changes; review those separately
@@ -64,18 +64,18 @@ The tree must be clean and the target must fast-forward. If rebasing is needed, 
 
 ## Cleanup
 
-Send outstanding Hunk comments before closing the task tab. Stop its Pi session and dev servers. From another worktree's shell:
+Send outstanding Hunk comments before closing the task workspace. Stop its Pi session and dev servers, then close the workspace. From another worktree's cmux shell:
 
 ```fish
 wt pi remove feature/auth
 ```
 
-The helper requires its own task ownership record and refuses live Pi sessions, Herdr panes, processes with a cwd beneath the target, uncommitted changes, and ignored files. It retains the branch even when unmerged. Inspect and preserve ignored files before deliberately passing `--discard-ignored`. Delete a retained branch separately only after confirming that its work is integrated or intentionally discarded.
+The helper requires its own task ownership record and refuses live Pi sessions, cmux surfaces, unsent or uncertain Hunk feedback, processes with a cwd beneath the target, uncommitted changes, and ignored files. It retains the branch even when unmerged. Inspect and preserve ignored files before deliberately passing `--discard-ignored`. Delete a retained branch separately only after confirming that its work is integrated or intentionally discarded.
 
-These checks cover processes visible to the current user and panes on the inherited Herdr server. They are not a filesystem lock against external writers, processes that moved their cwd, or another user. Direct `wt remove` and `git worktree remove` bypass the helper's additional checks. Never bulk-remove `pi-subagents/` worktrees with either command.
+These checks cover processes visible to the current user, the connected cmux inventory, and saved local review ownership. They are not a filesystem lock against external writers, processes that moved their cwd, or another user. Direct `wt remove` and `git worktree remove` bypass the helper's additional checks. Never bulk-remove `pi-subagents/` worktrees with either command.
 
 ## Status and dotfiles
 
-The native Pi extension reports working, idle, and blocked markers without prompts or transcript contents. Only interactive sessions participate. Multiple sessions in a worktree aggregate; one shutdown cannot clear another's marker. `wt pi list` removes dead or reused-PID records before displaying status. Herdr remains the detailed status display, including headless Subagents activity.
+The native Pi extension reports working, idle, and blocked markers without prompts or transcript contents. In cmux it also records exact workspace, surface, and Pi session identities and exposes a private per-session feedback socket. Only interactive sessions participate. Multiple sessions in a worktree aggregate; one shutdown cannot clear another's marker. `wt pi list` removes dead or reused-PID records before displaying status. cmux's official Pi hook owns application-level lifecycle display and session restoration; Worktrunk's extension owns worktree markers and authenticated Hunk delivery. Subagents remains authoritative for headless child activity.
 
 Run dotfiles setup and Stow only from the primary checkout. Its restow hooks skip linked worktrees, including older branches with unguarded worker scripts. Commit experimental dotfiles changes and integrate them into the primary checkout before applying them to HOME.

@@ -21,8 +21,8 @@ Host-side companions (both tracked in this repo), needed for a good feel on macO
 
 - **LinearMouse** — 1 line/detent, no acceleration, scoped to the knob
   (VID `0x5043` / PID `0x63C3`). Seed: `stow/linearmouse/_seed/`.
-- **Ghostty** — `mouse-scroll-multiplier = discrete:1` (a terminal otherwise
-  applies its default ×3 discrete multiplier on top). In `stow/ghostty/`.
+- **cmux/libghostty** — `mouse-scroll-multiplier = discrete:1` (the terminal otherwise
+  applies its default ×3 discrete multiplier on top). In `stow/cmux/`.
 
 ## Build
 

@@ -206,7 +206,7 @@ run = ['exec-and-forget bash -c "$HOME/.dotfiles/scripts/aerospace-auto-gaps.sh 
 
 # Workspace Assignments
 [[on-window-detected]]
-if.app-id = 'com.mitchellh.ghostty'
+if.app-id = 'com.cmuxterm.app'
 run = 'move-node-to-workspace 1'
 
 [[on-window-detected]]

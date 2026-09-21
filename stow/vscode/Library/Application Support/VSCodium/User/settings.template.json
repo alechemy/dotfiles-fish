@@ -127,7 +127,7 @@
   // ----------------------------------------
   "workbench.colorTheme": "Night Owl",
   // Terminal colors are theme-independent on purpose: the ANSI palette mirrors
-  // Ghostty's Catppuccin Macchiato, but the background is Mocha's crust:
+  // cmux's Catppuccin Macchiato, but the background is Mocha's crust:
   // Macchiato's own #24273a is lighter than Night Owl's editor background and
   // leaves the panel with no contrast against it.
   "workbench.colorCustomizations": {

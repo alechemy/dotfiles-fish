@@ -6,7 +6,7 @@ Detailed architecture, invariants, and operational notes for this repository. `A
 
 Personal dotfiles managed with GNU Stow on macOS. All packages under `stow/` mirror the `$HOME` directory structure and are auto-linked by `setup.sh`. `stow-work/` holds work-specific config: gitignored apart from `.gitkeep`, so a fresh `git clone` leaves it empty and `setup.sh` skips it. After a file-copy from another machine the package has content and `setup.sh` auto-stows it (see step 4a in `scripts/setup.sh`).
 
-**Key tools:** Fish shell, Homebrew, Mise (runtime versions), Pi (coding-agent harness), Starship (prompt), Ghostty (terminal), Zed (editor).
+**Key tools:** Fish shell, Homebrew, Mise (runtime versions), Pi (coding-agent harness), Starship (prompt), cmux (terminal workspace), and Zed (editor).
 
 ## Hardware setup
 
@@ -77,7 +77,7 @@ codium --list-extensions | sort > ~/.dotfiles/stow/vscode/extensions.txt
 
 ### Stow Package Layout
 
-Each directory under `stow/` must mirror the path relative to `$HOME`. For example, a file that should live at `~/.config/ghostty/config` goes at `stow/ghostty/.config/ghostty/config`. Stow creates symlinks from `$HOME` back into this repo.
+Each directory under `stow/` must mirror the path relative to `$HOME`. For example, the libghostty settings that cmux reads from `~/.config/ghostty/config` live at `stow/cmux/.config/ghostty/config`. Stow creates symlinks from `$HOME` back into this repo.
 
 `setup.sh` runs `stow --restow --no-folding` for every directory in `stow/` automatically, except the opt-in packages (`devonthink`, `streamrip`), which are prompted for separately. The `--no-folding` flag prevents Stow from symlinking entire directories (it creates individual file symlinks instead), which avoids conflicts with tools that write new files into their config directories.
 
@@ -271,7 +271,7 @@ Pi Web Access reads the separately stowed `~/.pi/web-search.json`. The tracked f
 
 ### Worktrunk task worktrees
 
-[Worktrunk integration](worktrunk.md) documents the complete Pi, Herdr, and Hunk workflow. Homebrew owns `worktrunk`; Fish loads its official wrapper. `setup-worktrunk.sh` seeds the app-owned user config copy-if-absent. The `worktrunk` Stow package links the native Pi activity extension, while `bin` exposes `wt pi` through `wt-pi` and `agents` owns its shared skill and Python helper. Approvals, task bindings, activity records, and Worktrunk runtime state stay outside Stow and Git.
+[Worktrunk integration](worktrunk.md) documents the complete Pi, cmux, and Hunk workflow. Homebrew owns `worktrunk`; Fish loads its official wrapper. `setup-worktrunk.sh` seeds the app-owned user config copy-if-absent. The `worktrunk` Stow package links the native Pi activity extension, while `bin` exposes `wt pi` through `wt-pi` and `agents` owns its shared skill and Python helper. Approvals, task bindings, activity records, and Worktrunk runtime state stay outside Stow and Git.
 
 Pi's fragment selects the guarded Subagents build's official `worktreeProvider: "worktrunk"`. Worktrunk only allocates those worktrees; Subagents retains setup, evidence, resume, and cleanup. The human launcher reserves that namespace and never bypasses the delegation guard. Capture only the reviewed allocator name through `subagents.worktreeProvider`, not private worktree paths or project hook commands. Conservative user defaults disable automatic commit, rebase, and removal during merge. The task cleanup helper retains branches and refuses active, dirty, or unreviewed ignored state.
 
@@ -430,11 +430,11 @@ For tier 1 scripts, even when the launchd plist provides the interpreter explici
 
 Multiple Pi sessions can run against this repo at once, so HEAD may not be the commit you made earlier in your own session. Before any `git commit --amend`, run `git log -1` and confirm HEAD is the exact commit you intend to rewrite; if it isn't, make a new commit instead. To repair a wrong amend: `git reset --soft HEAD@{1}` restores the clobbered commit and re-stages only your changes.
 
-### Herdr: persistent Pi workspaces in Ghostty
+### cmux: persistent Pi task workspaces
 
-Ghostty starts Herdr by default through a Fish login shell. Herdr owns agent panes and tabs; Ghostty forwards the existing split and navigation shortcuts as CSI-u keys. `ghostty-shell` opens the native-split profile. [Herdr workflow](herdr.md) documents all keys, lifecycle boundaries, integration ownership, and isolated verification.
+cmux owns local task workspaces and terminal surfaces. Its Stow package owns the `~/.config/ghostty/config` file that cmux reads for libghostty terminal settings; the standalone Ghostty app is not installed. [The cmux runbook](cmux.md) documents startup, exact task identity, Pi restoration, Hunk feedback, cleanup, and recovery.
 
-Homebrew owns the binary. `scripts/setup-herdr.sh` seeds the app-owned config copy-if-absent, installs the official Pi integration, and installs the pinned, locally patched Herdr–Hunk plugin through `scripts/install-herdr-hunk-diff.sh`. The plugin uses the existing Homebrew Hunk; its source cache, review state, and seeded preferences remain outside Stow. Only its marked shortcut block is merged into Herdr's live config. Setup and the Herdr restow handler call it. The `herdr` package stows a shared skill and the small Pi UI-prompt status bridge; it never stows runtime state or the live config. Saved pane-screen history remains disabled. Start the server from Ghostty, not a background service, to retain the GUI Keychain context.
+Homebrew owns cmux and Hunk. `scripts/setup-cmux.sh` removes known transitional app-specific command overrides, installs the reviewed native Hunk feedback extension, and installs only cmux's official Pi hook when requested. Normal setup and the cmux restow handler pass that flag. The official hook owns cmux lifecycle state, notifications, and application-level conversation restoration. The repository's Worktrunk Pi extension separately owns task markers and verified feedback delivery. Runtime sessions, review state, task records, local backups, and cmux's app-owned preferences remain outside Stow and Git.
 
 ### tmux: test config on an isolated socket
 
@@ -537,7 +537,7 @@ stale rows; reanalyze the affected files before retrying a write.
 
 ### AeroSpace scripting: identify apps by PID, not name
 
-When a script bridges AeroSpace and System Events (e.g. to hide or focus a specific app), key off the **PID**, not the app name. AeroSpace's `%{app-name}` and the System Events process name disagree for some apps — notably case (`Ghostty` vs `ghostty`) — so a name comparison silently mismatches: it fails to exclude the target when picking a sibling, and `set visible of (process whose name is …)` can no-op against the wrong identity. Use AeroSpace's `%{app-pid}` and hide/match via System Events `unix id` (`first application process whose unix id is <pid>`), which is namespace-safe. Reference: `scripts/aerospace-hide.sh`.
+When a script bridges AeroSpace and System Events (e.g. to hide or focus a specific app), key off the **PID**, not the app name. AeroSpace's `%{app-name}` and the System Events process name can disagree in case, so a name comparison silently mismatches: it fails to exclude the target when picking a sibling, and `set visible of (process whose name is …)` can no-op against the wrong identity. Use AeroSpace's `%{app-pid}` and hide/match via System Events `unix id` (`first application process whose unix id is <pid>`), which is namespace-safe. Reference: `scripts/aerospace-hide.sh`.
 
 Context for that script: AeroSpace emulates workspaces by hiding/showing windows that all share one macOS Space, so a native Cmd-H on the *frontmost* app makes macOS activate the next global-MRU app — often on another workspace — and AeroSpace follows focus there, yanking you off your workspace. Hiding a *non-frontmost* app moves no focus, so the handler focuses a same-workspace sibling first, then hides the target by PID. AeroSpace exposes no hide/unhide callback, and `reload-config` (the only way to apply a gap change) re-syncs the visible workspace to the focused window's workspace — a no-op when they already agree, but the reason gap recomputes must not run while focus is mid-transition.
 

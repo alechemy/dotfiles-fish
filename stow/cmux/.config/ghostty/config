@@ -1,0 +1,16 @@
+command = /usr/bin/env -u HERDR_AGENT -u HERDR_ENV -u HERDR_PANE_ID -u HERDR_PROCESS_DETECTION -u HERDR_TAB_ID -u HERDR_WORKSPACE_ID -u HERDR_SOCKET_PATH -u HERDR_BIN_PATH /opt/homebrew/bin/fish -l
+font-family = Operator Mono SSm Lig
+font-size = 14.0
+background-opacity = 1.0
+background-blur = true
+alpha-blending = linear-corrected
+theme = Catppuccin Macchiato
+cursor-style = bar
+cursor-style-blink = false
+adjust-cursor-thickness = 1
+shell-integration-features = no-cursor
+macos-option-as-alt = true
+keybind = cmd+enter=text:\x1b[13;9u
+keybind = shift+enter=text:\x1b[13;2u
+clipboard-paste-protection = false
+mouse-scroll-multiplier = discrete:1

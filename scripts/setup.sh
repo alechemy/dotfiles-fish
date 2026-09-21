@@ -238,7 +238,6 @@ if brew trust --help >/dev/null 2>&1; then
             atlassian/acli/acli \
             felixkratz/formulae/borders \
             felixkratz/formulae/sketchybar \
-            modem-dev/tap/hunk \
             yqrashawn/goku/goku \
         && brew trust --cask nikitabobko/tap/aerospace wontaeyang/hrm/hrm alec/local/feishin; then
         success "Third-party tap entries trusted"
@@ -442,6 +441,7 @@ if command -v stow &> /dev/null; then
 
     # For each package, back up any non-symlink conflicts (e.g. ~/.gitconfig
     # created by git on first use), then stow.
+    python3 "$DOTFILES/scripts/migrate-cmux-config-link.py" "$DOTFILES"
     cd "$STOW_DIR"
     for package in *; do
         if [ -d "$package" ]; then
@@ -459,7 +459,7 @@ if command -v stow &> /dev/null; then
     # LinearMouse's config is app-rewritten (an atomic-rename save de-stows a
     # symlink), so seed it copy-if-absent rather than stow it.
     "$DOTFILES/scripts/seed-linearmouse-config.sh"
-    "$DOTFILES/scripts/setup-herdr.sh"
+    "$DOTFILES/scripts/setup-cmux.sh" --install-pi-hook
     "$DOTFILES/scripts/setup-worktrunk.sh"
 
     # 4a. Opt-in work config (stow-work/work/).
@@ -767,14 +767,6 @@ EOF
         else
             info "Skipping DEVONthink pipeline."
         fi
-    fi
-
-    # Warn if Ghostty has a config in Application Support that would shadow the stowed one
-    GHOSTTY_APPSUPPORT="$HOME/Library/Application Support/com.mitchellh.ghostty/config"
-    if [ -f "$GHOSTTY_APPSUPPORT" ] && [ ! -L "$GHOSTTY_APPSUPPORT" ]; then
-        echo ""
-        info "WARNING: $GHOSTTY_APPSUPPORT exists and will shadow ~/.config/ghostty/config"
-        info "Remove it so Ghostty uses your stowed config: rm \"$GHOSTTY_APPSUPPORT\""
     fi
 
     # Warn if the Navidrome Keychain entry is missing. The sketchybar music

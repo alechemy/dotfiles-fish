@@ -31,7 +31,7 @@ class RestowChangedTests(unittest.TestCase):
         for name in ("merge-pi-settings.sh", "build-dtnote-handler.sh", "build-launchd-plists.sh",
                      "build-vscode-config.sh", "build-zed-config.sh", "build-streamrip-config.sh",
                      "build-context7-config.sh", "build-things-config.sh",
-                     "build-git-allowed-signers.sh", "setup-herdr.sh", "setup-worktrunk.sh"):
+                     "build-git-allowed-signers.sh", "setup-cmux.sh", "setup-worktrunk.sh"):
             self.stub(self.repo / "scripts" / name, f'echo "{name}${{1:+ $*}}" >> "$CALL_LOG"')
         self.write("stow/pi/.pi/agent/settings.fragment.json", "{}")
         self.git("init", "-q")
@@ -204,25 +204,14 @@ class RestowChangedTests(unittest.TestCase):
         self.assertFalse(self.log.exists())
         self.assertIn("linked worktree", result.stderr)
 
-    def test_herdr_seed_change_runs_setup(self):
-        self.write("stow/herdr/_seed/.config/herdr/config.toml", 'onboarding = false\n')
-        calls = self.run_hook()
-        self.assertEqual(calls[0], "setup-herdr.sh")
-        self.assertTrue(calls[1].endswith(" herdr"))
-
-    def test_herdr_setup_script_change_runs_without_stow(self):
-        with (self.repo / "scripts/setup-herdr.sh").open("a") as stream:
+    def test_cmux_setup_change_runs_without_stow(self):
+        with (self.repo / "scripts/setup-cmux.sh").open("a") as stream:
             stream.write("\n")
-        self.assertEqual(self.run_hook(), ["setup-herdr.sh"])
+        self.assertEqual(self.run_hook(), ["setup-cmux.sh --install-pi-hook"])
 
-    def test_hunk_plugin_changes_run_setup_without_stow(self):
-        for name in ("install-herdr-hunk-diff.sh", "configure-herdr-hunk.mjs",
-                     "patches/herdr-hunk-diff.patch"):
-            with self.subTest(name=name):
-                self.write(f"scripts/{name}", "fixture")
-                self.assertEqual(self.run_hook(), ["setup-herdr.sh"])
-                self.log.unlink()
-                self.old = self.git("rev-parse", "HEAD")
+    def test_cmux_hunk_extension_change_runs_setup_without_stow(self):
+        self.write("scripts/cmux/worktrunk-feedback.ts", "fixture")
+        self.assertEqual(self.run_hook(), ["setup-cmux.sh --install-pi-hook"])
 
     def test_noop_and_unrelated_diff_do_nothing(self):
         self.assertEqual(self.run_hook(self.old), [])
