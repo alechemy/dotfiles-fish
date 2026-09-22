@@ -14,11 +14,8 @@
   // Guard against double-injection if the script runs twice
   if (document.querySelector(".theme-toggle")) return;
 
-  // Resolve starting theme from system preference
-  var prefersDark =
-    window.matchMedia &&
-    window.matchMedia("(prefers-color-scheme: dark)").matches;
-  var currentTheme = prefersDark ? "dark" : "light";
+  // Dark is the default; the button switches it back to light on demand.
+  var currentTheme = "dark";
 
   // Apply initial theme to <html> so CSS [data-theme] rules match
   document.documentElement.setAttribute("data-theme", currentTheme);
