@@ -45,10 +45,10 @@ command, so arguments and flags remain visible and editable.
 | `pl` | `wt pi list` | Refresh and display worktree activity. |
 | `ws` | `wt switch` | Open the picker, or navigate to a supplied branch. |
 | `wb` | `wt switch -` | Return the shell to its previous worktree. |
-| `hd` | `hunk diff` | Review uncommitted changes, including untracked files. |
+| `hd` | `hunk diff` | Review unstaged tracked changes and untracked files. |
 | `hs` | `hunk diff --staged` | Review staged changes. |
 | `hc` | `hunk show HEAD` | Review the latest commit. |
-| `hwatch` | `hunk diff --watch` | Review uncommitted changes with automatic reload. |
+| `hwatch` | `hunk diff --watch` | Watch unstaged tracked changes and untracked files. |
 | `prm` | `wt pi remove` | Remove an inactive task checkout through the guarded helper. |
 | `wmerge` | `wt merge --no-commit --no-rebase --no-remove` | Integrate locally without automatic commits, rebasing, or checkout removal. |
 
@@ -56,7 +56,7 @@ command, so arguments and flags remain visible and editable.
 It requires exactly one explicit commit-ish base, verifies that it shares an
 ancestor with HEAD, then runs `hunk diff <base>...HEAD`. Invalid refs and unrelated
 histories stop before Hunk opens. This scope excludes staged, unstaged, and
-untracked changes; use `hd` to review unfinished work separately.
+untracked changes; use `hunk diff HEAD` to review all unfinished work against HEAD, or `hs` and `hd` for separate index and working-tree reviews.
 
 For example, from a native cmux repository shell:
 
@@ -107,16 +107,19 @@ Keep one writer per checkout. A second terminal may run tests or services, but d
 
 ## Review in Hunk
 
-Open Hunk in the task worktree using the scope you intend to inspect:
+When asking Pi for a code review in cmux, the shared skill opens Hunk automatically and places validated findings beside the diff. Ask Pi to show or explain R1 to navigate to a finding. The grouped summary remains in Pi, including findings without valid inline anchors. See [AI findings beside the diff](cmux.md#ai-findings-beside-the-diff) for scope checks, recovery, and private artifact storage.
+
+For a human-led review, open Hunk in the task worktree using the scope you intend to inspect:
 
 ```fish
 hunk diff
+hunk diff HEAD
 hunk diff --staged
 hunk show HEAD
 hunk diff main...HEAD
 ```
 
-Working tree, staged changes, latest commit, and whole-branch comparison are different scopes. `main...HEAD` excludes staged, unstaged, and untracked work, so inspect those separately when they belong to the task. For another integration target, validate the ref and merge base and use that exact comparison.
+Bare `hunk diff` compares tracked working files with the index and includes untracked files. `hunk diff HEAD` shows the net staged and unstaged changes against HEAD, plus untracked files. These differ from staged-only, latest-commit, and whole-branch comparisons. `main...HEAD` excludes staged, unstaged, and untracked work, so inspect those separately when they belong to the task. For another integration target, validate the ref and merge base and use that exact comparison.
 
 Create and save human inline comments in Hunk. Ctrl+Shift+F invokes **Send human feedback to task Pi**. The extension:
 
@@ -190,6 +193,7 @@ For dotfiles, only the primary checkout owns live HOME links. Integrate experime
 | Fish shell | `wt switch` | Open the worktree picker. |
 | Pi | Cmd+Enter or Ctrl+S | Submit a message. |
 | Pi | `/subagents-fleet` | Inspect delegated runs. |
+| Pi | Ask for a code review, then "show R1." | Open an annotated Hunk diff and navigate to a finding. |
 | Hunk | `c`, then Ctrl+S | Save a human comment. |
 | Hunk | Ctrl+Shift+F | Send saved human comments to the bound idle Pi. |
 | Task shell | `wt merge main --no-commit --no-rebase --no-remove` | Integrate locally. |

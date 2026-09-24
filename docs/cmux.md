@@ -38,6 +38,32 @@ Names and focus are never identity. `new` uses `cmux new-workspace --cwd --comma
 
 Allocation and startup failures retain the worktree and any created workspace for inspection. An unresolved workspace-creation request cannot be retried automatically because the original command may still complete.
 
+## AI findings beside the diff
+
+The shared `code-review` skill automatically opens a dedicated Hunk split when the parent Pi session runs in native cmux. Its bundled `hunk_review.py` captures the selected Git comparison before review, binds the viewer to the exact Pi session and cmux terminal, and imports only the parent's validated findings. It preserves the existing independent review axes and grouped terminal summary. Text-only requests and unavailable or unsupported viewers retain the complete text report.
+
+Ask Pi to review a commit or PR as usual, then ask it to show or explain R1. The helper navigates to that finding's saved Hunk comment after checking the reviewed content, displayed patch, and Hunk generation. Other navigation and expression highlights use Hunk's installed skill with the exact verified session ID. Human comments can be read on request without clearing them. The [inline-review reference](../stow/agents/.agents/skills/code-review/references/hunk.md) documents commands, findings schema, recovery, and limits.
+
+A repeated open reuses the same review's pane; it does not adopt another Hunk window. Each different comparison has its own review ID. Findings without valid diff anchors stay in the report. Repeated imports reconcile existing notes, and uncertain writes are not blindly retried. `hunk diff` alone is unstaged-only for tracked files; the all-uncommitted helper mode passes the pinned HEAD explicitly.
+
+Private patches and finding receipts live in `~/.local/state/pi-code-review/`, outside Stow and Git. The helper has no automatic retention cleanup. Native Hunk comparisons retain their normal source navigation; unborn all-uncommitted comparisons and repositories with Git textconv drivers use saved patches. Partial-hunk selections remain text-only. Simultaneous human reloads can race Hunk's CLI, so generation checks before and after writes detect the race without claiming atomic exclusion.
+
+After adding the helper or reference files, restow only the `agents` package from the primary checkout. Apply only the feedback-extension update with `scripts/setup-cmux.sh --hunk-only`; this leaves app-owned cmux settings and Pi hooks untouched. New Hunk processes load the extension. Pi reads the updated skill on its next review invocation. Reload Pi if its skill discovery needs refreshing.
+
+```sh
+stow --restow --no-folding --ignore='__pycache__' --dir=stow --target="$HOME" agents
+scripts/setup-cmux.sh --hunk-only
+/usr/bin/python3 -m unittest discover -s scripts/tests -p test_hunk_review.py
+/usr/bin/python3 -m unittest discover -s scripts/tests -p test_code_review_recipes.py
+node --test scripts/tests/test_hunk_worktrunk_feedback.mjs
+```
+
+The opt-in native check creates one unfocused disposable cmux workspace, exercises all six comparison modes with synthetic findings, verifies navigation and idempotent import, then closes only its own workspace and removes its synthetic artifacts. It makes no model calls or remote writes:
+
+```sh
+/usr/bin/python3 scripts/tests/hunk_review_smoke.py --allow-ui
+```
+
 ## Review feedback
 
 The setup-managed `~/.config/hunk/extensions/worktrunk-feedback.ts` registers **Send human feedback to task Pi** on Ctrl+Shift+F. It snapshots the active review and sends only saved human notes. The Worktrunk helper requires:
