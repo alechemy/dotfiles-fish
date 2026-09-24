@@ -6,7 +6,7 @@ import extension from "../../stow/worktrunk/.pi/agent/extensions/worktrunk.ts";
 delete process.env.CMUX_WORKSPACE_ID;
 delete process.env.CMUX_SURFACE_ID;
 
-function fixture({ mode = "tui", fail = false } = {}) {
+function fixture({ mode = "tui", fail = false, result, execError } = {}) {
   const handlers = new Map();
   const reports = [];
   const warnings = [];
@@ -16,7 +16,8 @@ function fixture({ mode = "tui", fail = false } = {}) {
     on: (name, handler) => handlers.set(name, handler),
     exec: async (command, args, options) => {
       reports.push({ command, args, options });
-      return { code: fail ? 1 : 0 };
+      if (execError) throw execError;
+      return result ?? { code: fail ? 1 : 0, killed: false };
     },
     sendUserMessage: (message) => messages.push(message),
   });
@@ -91,6 +92,31 @@ test("failures warn once without failing the session", async () => {
   await f.emit("session_shutdown");
   assert.equal(f.warnings.length, 1);
   assert.equal(f.warnings[0].includes("wt pi list"), true);
+  assert.match(f.warnings[0], /wt-pi exited with code 1/);
+});
+
+test("timed-out activity reports warn even when Pi returns exit code zero", async () => {
+  const f = fixture({ result: { code: 0, killed: true, stderr: "Private fixture output" } });
+  await f.emit("session_start");
+  await f.emit("agent_start");
+  await f.emit("session_shutdown");
+  assert.equal(f.warnings.length, 1);
+  assert.match(f.warnings[0], /timed out after 2 seconds/);
+  assert.equal(f.warnings[0].includes("Private"), false);
+});
+
+test("execution failures do not expose exception or subprocess output", async () => {
+  for (const options of [
+    { execError: new Error("Private fixture exception") },
+    { result: { code: 2, killed: false, stderr: "Private fixture output" } },
+  ]) {
+    const f = fixture(options);
+    await f.emit("session_start");
+    await f.emit("session_shutdown");
+    assert.equal(f.warnings.length, 1);
+    assert.equal(f.warnings[0].includes("Private"), false);
+    assert.match(f.warnings[0], options.execError ? /could not execute wt-pi/ : /wt-pi exited with code 2/);
+  }
 });
 
 test("cmux identity wins over stale legacy environment variables", async () => {

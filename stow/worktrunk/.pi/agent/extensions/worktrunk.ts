@@ -35,15 +35,20 @@ export default function (pi: ExtensionAPI) {
     if (feedbackSocket) args.push("--feedback-socket", feedbackSocket);
     if (feedbackToken) args.push("--feedback-token", feedbackToken);
     queue = queue.then(async () => {
+      let failure = "could not execute wt-pi";
       try {
         const result = await pi.exec("wt-pi", args, { cwd: ctx.cwd, timeout: 2000 });
-        if (result.code !== 0) throw new Error("Activity update failed");
-        warned = false;
-      } catch {
-        if (!warned && !clear) {
-          ctx.ui.notify("Worktrunk activity is unavailable. Run wt pi list in a shell to diagnose it.", "warning");
-          warned = true;
+        if (result.code === 0 && !result.killed) {
+          warned = false;
+          return;
         }
+        failure = result.killed
+          ? "the activity update timed out after 2 seconds"
+          : `wt-pi exited with code ${result.code}`;
+      } catch {}
+      if (!warned && !clear) {
+        ctx.ui.notify(`Worktrunk activity is unavailable because ${failure}. Run wt pi list in a shell to diagnose it.`, "warning");
+        warned = true;
       }
     });
     return queue;
