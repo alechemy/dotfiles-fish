@@ -181,7 +181,8 @@ exec /bin/mv "$@"
             "tuiMode": "fullscreen", "fullscreenExitOutput": "transcript",
             "packages": ["npm:@upstash/context7-pi@0.1.2", "./local/copilot-delegation/node_modules/pi-subagents", "npm:pi-web-access@0.27.0"],
             "enabledModels": ["openai-codex/gpt-5.6-sol", "github-copilot/claude-opus-5",
-                              "omlx/Qwen3.8-27B-oQ8e-mtp", "openai-codex/gpt-6-astra",
+                              "omlx/Qwen3.8-27B-oQ8e-mtp", "omlx/Qwen3.8-27B-oQ4e-mtp",
+                              "openai-codex/gpt-6-astra",
                               "github-copilot/claude-fable-5.1", "github-copilot/gemini-3.8-flash"],
             "subagents": self.approved_subagent_settings()})
 
@@ -244,10 +245,10 @@ class MergePiModelsTests(MergePiSettingsTests):
         actual = json.loads((REPO / "stow/pi/.pi/agent/models.fragment.json").read_text())
         self.assertEqual(actual, {"providers": {
             "github-copilot": {"modelOverrides": {"gpt-5.6-sol": {"contextWindow": 272000}}},
-            "omlx": {"modelOverrides": {"Qwen3.8-27B-oQ8e-mtp": {
+            "omlx": {"modelOverrides": {model: {
                 "reasoning": True, "compat": {
                     "supportsDeveloperRole": False, "thinkingFormat": "qwen-chat-template"},
-            }}},
+            } for model in ("Qwen3.8-27B-oQ4e-mtp", "Qwen3.8-27B-oQ8e-mtp")}},
         }})
 
     def test_tracked_overrides_apply_to_matching_custom_models(self):
@@ -276,6 +277,20 @@ class MergePiModelsTests(MergePiSettingsTests):
         self.assertEqual(self.run_merge().returncode, 0)
         self.assertEqual(self.target.stat().st_ino, before.st_ino)
 
+    def test_tracked_qwen_overrides_apply_to_both_quantizations(self):
+        models = [{"id": model, "reasoning": False, "contextWindow": 65536,
+                   "maxTokens": 16384, "compat": {"supportsStore": False}}
+                  for model in ("Qwen3.8-27B-oQ4e-mtp", "Qwen3.8-27B-oQ8e-mtp")]
+        self.target.write_text(json.dumps({"providers": {"omlx": {"models": models}}}))
+        shutil.copy2(REPO / "stow/pi/.pi/agent/models.fragment.json", self.fragment)
+        result = self.run_merge()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        for model in models:
+            model["reasoning"] = True
+            model["compat"].update({"supportsDeveloperRole": False,
+                                    "thinkingFormat": "qwen-chat-template"})
+        self.assertEqual(json.loads(self.target.read_text())["providers"]["omlx"]["models"], models)
+
     def test_identical_models_content_restores_private_permissions(self):
         self.assertEqual(self.run_merge().returncode, 0)
         self.target.chmod(0o644)
@@ -298,10 +313,10 @@ class MergePiModelsTests(MergePiSettingsTests):
         self.assertEqual(result.returncode, 0, result.stderr)
         original["providers"]["github-copilot"]["modelOverrides"]["gpt-5.6-sol"]["contextWindow"] = 272000
         original["providers"]["omlx"]["modelOverrides"] = {
-            "Qwen3.8-27B-oQ8e-mtp": {
+            model: {
                 "reasoning": True, "compat": {
                     "supportsDeveloperRole": False, "thinkingFormat": "qwen-chat-template"},
-            },
+            } for model in ("Qwen3.8-27B-oQ4e-mtp", "Qwen3.8-27B-oQ8e-mtp")
         }
         self.assertEqual(json.loads(self.target.read_text()), original)
         self.assertEqual(stat.S_IMODE(self.target.stat().st_mode), 0o600)

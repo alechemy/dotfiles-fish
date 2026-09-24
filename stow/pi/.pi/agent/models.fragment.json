@@ -2,6 +2,13 @@
   "providers": {
     "omlx": {
       "modelOverrides": {
+        "Qwen3.8-27B-oQ4e-mtp": {
+          "reasoning": true,
+          "compat": {
+            "supportsDeveloperRole": false,
+            "thinkingFormat": "qwen-chat-template"
+          }
+        },
         "Qwen3.8-27B-oQ8e-mtp": {
           "reasoning": true,
           "compat": {

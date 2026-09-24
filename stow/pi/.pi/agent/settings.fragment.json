@@ -17,6 +17,7 @@
     "openai-codex/gpt-5.6-sol",
     "github-copilot/claude-opus-5",
     "omlx/Qwen3.8-27B-oQ8e-mtp",
+    "omlx/Qwen3.8-27B-oQ4e-mtp",
     "openai-codex/gpt-6-astra",
     "github-copilot/claude-fable-5.1",
     "github-copilot/gemini-3.8-flash"
