@@ -149,10 +149,29 @@ const extension: ExtensionFactory = (hunk) => {
         ctx.notify("Feedback was delivered, but review state changed; comments were retained.", "warning");
         return;
       }
+      let sessionId: string;
+      try {
+        const listed = await runCommand("hunk", ["session", "list", "--json"]);
+        if (listed.code !== 0) throw new Error("Session lookup failed");
+        const sessions = JSON.parse(listed.stdout).sessions.filter(
+          (session: { pid: number; cwd: string }) => session.pid === process.pid && session.cwd === ctx.cwd,
+        );
+        if (sessions.length !== 1 || typeof sessions[0].sessionId !== "string") {
+          throw new Error("Ambiguous session identity");
+        }
+        sessionId = sessions[0].sessionId;
+      } catch {
+        ctx.notify("Feedback was delivered, but the Hunk session could not be identified; comments were retained.", "warning");
+        return;
+      }
+      if (!sameRevision(ctx.review.snapshot(), snapshot)) {
+        ctx.notify("Feedback was delivered, but review state changed; comments were retained.", "warning");
+        return;
+      }
       for (const commentId of receipt.delivered_ids) {
         const removed = await runCommand(
           "hunk",
-          ["session", "comment", "rm", "--repo", ctx.cwd, commentId, "--json"],
+          ["session", "comment", "rm", sessionId, commentId, "--json"],
         );
         if (removed.code !== 0) {
           ctx.notify("Feedback was delivered, but one or more comments could not be removed.", "warning");

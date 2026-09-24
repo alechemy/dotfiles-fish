@@ -5,7 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 import extension from "../cmux/worktrunk-feedback.ts";
 
-async function fixture(receiptIds = '[item["id"] for item in payload["comments"]]') {
+async function fixture(receiptIds = '[item["id"] for item in payload["comments"]]', sessionCount = 1) {
   const root = await mkdtemp(join(tmpdir(), "hunk-feedback-"));
   const log = join(root, "calls.jsonl");
   const wtPi = join(root, "wt-pi");
@@ -21,7 +21,11 @@ if sys.argv[1] == "feedback":
 `);
   await writeFile(hunk, `#!/bin/sh
 printf '{"command":"hunk","args":"%s"}\\n' "$*" >> '${log}'
-printf '{"ok":true}\\n'
+if [ "$1 $2" = "session list" ]; then
+  printf '%s\\n' '${JSON.stringify({ sessions: Array.from({ length: sessionCount }, (_, index) => ({ pid: process.pid, cwd: root, sessionId: `exact-session-${index}` })) })}'
+else
+  printf '{"ok":true}\\n'
+fi
 `);
   await chmod(wtPi, 0o755);
   await chmod(hunk, 0o755);
@@ -71,8 +75,9 @@ test("sends only human comments and removes them after a verified receipt", asyn
     const recorded = await calls(f.log);
     const feedback = recorded.find((item) => item.command === "wt-pi" && item.args[0] === "feedback");
     assert.deepEqual(JSON.parse(feedback.body).comments.map((item) => item.id), ["human-1"]);
-    assert.equal(recorded.filter((item) => item.command === "hunk").length, 1);
-    assert.match(recorded.find((item) => item.command === "hunk").args, /human-1/);
+    const removals = recorded.filter((item) => item.command === "hunk" && item.args.startsWith("session comment rm"));
+    assert.equal(removals.length, 1);
+    assert.equal(removals[0].args, "session comment rm exact-session-0 human-1 --json");
     assert.equal(recorded.some((item) => item.body?.includes("agent-1")), false);
     assert.equal(recorded.filter((item) => item.args?.includes("--tracking-token")).length, 2);
     assert.match(notices.at(-1), /Delivered 1 human comment/);
@@ -113,6 +118,28 @@ test("rejects duplicate, missing, and extra receipt identities", async (t) => {
         await f.cleanup();
       }
     });
+  }
+});
+
+test("retains delivered notes when its exact Hunk session is missing or ambiguous", async () => {
+  for (const count of [0, 2]) {
+    const f = await fixture(undefined, count);
+    const oldPath = process.env.PATH;
+    process.env.PATH = `${f.root}:${oldPath}`;
+    const notices = [];
+    try {
+      await f.commands.get("worktrunk-send-feedback")({
+        cwd: f.root,
+        review: { snapshot: () => snapshot() },
+        notify: (message) => notices.push(message),
+      });
+      const recorded = await calls(f.log);
+      assert.equal(recorded.some((item) => typeof item.args === "string" && item.args.startsWith("session comment rm")), false);
+      assert.match(notices.at(-1), /could not be identified/);
+    } finally {
+      process.env.PATH = oldPath;
+      await f.cleanup();
+    }
   }
 });
 
