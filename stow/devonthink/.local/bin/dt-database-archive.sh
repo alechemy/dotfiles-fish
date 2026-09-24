@@ -59,7 +59,7 @@ fi
 
 mkdir -p "$DEST_DIR" "$STATE_DIR"
 DEST="$DEST_DIR/${DB_NAME}-$(date +%Y-%m-%d).dtBase2.zip"
-TMP_DEST="$DEST_DIR/.${DB_NAME}-$(date +%Y-%m-%d).dtBase2.zip.partial.$$"
+TMP_DEST="$DEST_DIR/.${DB_NAME}-$(date +%Y-%m-%d).partial.$$.dtBase2.zip"
 
 TMPSCRIPT=$(mktemp /tmp/dt-archive.XXXXXX.scpt)
 trap 'rm -f "$TMPSCRIPT" "$TMP_DEST"' EXIT

@@ -27,6 +27,8 @@ import sys
 import zipfile
 from pathlib import Path
 path = Path(sys.argv[-1])
+if not path.name.endswith(".dtBase2.zip"):
+    sys.exit("Invalid path extension. (-50)")
 mode = os.environ["ARCHIVE_TEST_MODE"]
 if mode in ("compress-fails", "crc-fails"):
     path.write_bytes(b"incomplete archive")
@@ -45,7 +47,7 @@ print("ok")
             dest_dir.mkdir(parents=True)
             dest = dest_dir / f"Lorebook-{date.today().isoformat()}.dtBase2.zip"
             dest.write_bytes(b"previous good archive")
-            orphan = dest_dir / ".Lorebook-orphan.dtBase2.zip.partial.123"
+            orphan = dest_dir / ".Lorebook-orphan.partial.123.dtBase2.zip"
             orphan.write_bytes(b"retention must ignore me")
             env = dict(os.environ, HOME=tmp, PIPELINE_MANUAL="1",
                        PATH=str(helpers) + os.pathsep + os.environ["PATH"])
