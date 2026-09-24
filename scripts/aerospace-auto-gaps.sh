@@ -245,10 +245,7 @@ for pass in 1 2 3 4 5; do
     fi
     printf '%s\n' "$cur_ids" >"$IDS_FILE"
 
-    # Give a lone cmux window the two-window width because its own horizontal
-    # splits need more room than the normal centered single-window preset.
-    sole_app=$(printf '%s\n' "$tree" | tiled_in "$ws" | awk -F'|' 'NR == 1 {print $3}')
-    target=$(gap_for_tiled_count "$count" "$sole_app")
+    target=$(gap_for_tiled_count "$count")
 
     # Decide whether the runtime needs rebuilding from source. The padding and
     # layout checks restore the source accordion-padding and default root

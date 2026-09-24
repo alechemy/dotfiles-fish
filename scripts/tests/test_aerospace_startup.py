@@ -38,27 +38,26 @@ class AeroSpaceStartupTests(unittest.TestCase):
 
 
 class AeroSpaceGapPresetTests(unittest.TestCase):
-    def gap_for(self, count, app=""):
+    def gap_for(self, count):
         command = f"""
             . {str(GAPS_LIB)!r}
             gap_full=8
             gap_split=120
             gap_centered=240
-            gap_for_tiled_count "$1" "$2"
+            gap_for_tiled_count "$1"
         """
-        result = subprocess.run(["/bin/bash", "-c", command, "--", str(count), app],
+        result = subprocess.run(["/bin/bash", "-c", command, "--", str(count)],
                                 capture_output=True, text=True, timeout=10)
         self.assertEqual(result.returncode, 0, result.stderr)
         return int(result.stdout.strip())
 
-    def test_lone_cmux_window_uses_two_window_gap(self):
-        self.assertEqual(self.gap_for(1, "cmux"), 120)
+    def test_single_window_uses_two_window_gap(self):
+        self.assertEqual(self.gap_for(1), 120)
 
-    def test_other_counts_and_apps_keep_existing_presets(self):
+    def test_other_counts_keep_existing_presets(self):
         self.assertEqual(self.gap_for(0), 240)
-        self.assertEqual(self.gap_for(1, "Mail"), 240)
-        self.assertEqual(self.gap_for(2, "cmux"), 120)
-        self.assertEqual(self.gap_for(3, "cmux"), 8)
+        self.assertEqual(self.gap_for(2), 120)
+        self.assertEqual(self.gap_for(3), 8)
 
 
 if __name__ == "__main__":
