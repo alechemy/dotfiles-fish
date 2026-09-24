@@ -37,7 +37,7 @@ class MeasureAgentToolingTests(unittest.TestCase):
         ]}))
         for name, version in declared.items():
             manifest = {"name": name, "version": version, "pi": {"extensions": ["./index.ts"]}}
-            if name != "pi-web-access":
+            if name in ("@upstash/context7-pi", "pi-subagents"):
                 manifest["pi"]["skills"] = ["./skills"]
                 self.put(self.packages / name / "skills" / "one" / "SKILL.md", skill(name.split("/")[-1]))
             self.put(self.packages / name / "package.json", json.dumps(manifest))
@@ -45,6 +45,7 @@ class MeasureAgentToolingTests(unittest.TestCase):
         for name in ("recall", "handoff", "simplify-review", "grill-me", "teach"):
             self.put(self.shared / name / "SKILL.md", skill(name, manual=True))
         sources = {
+            "@sting8k/pi-vcc/src/tools/recall.ts": 'description: "Recall " + "history.", promptSnippet: "Recall", parameters: {},',
             "@upstash/context7-pi/lib/prompts.ts": 'export const RESOLVE_LIBRARY_ID_DESCRIPTION = "Find";\nexport const QUERY_DOCS_DESCRIPTION = `Docs`;',
             "pi-subagents/src/extension/tool-description.ts": "\n".join(
                 f'const {name} = "Guidance";' for name in (
@@ -77,14 +78,14 @@ class MeasureAgentToolingTests(unittest.TestCase):
         shutil.copytree(self.packages / "pi-subagents", local)
         self.put(self.packages / "pi-subagents/src/extension/tool-description.ts", "unreviewed npm source")
         result = measurement.measure(self.repo, self.packages, local)
-        self.assertEqual(result["tool_descriptions"]["count"], 9)
+        self.assertEqual(result["tool_descriptions"]["count"], 10)
         self.put(local / "src/extension/tool-description.ts", "unreviewed local source")
         with self.assertRaisesRegex(ValueError, "source drift"):
             measurement.measure(self.repo, self.packages, local)
 
     def test_default_projection_manual_exclusion_and_utf8(self):
         result = self.measure()
-        self.assertEqual(result["tool_descriptions"]["count"], 9)
+        self.assertEqual(result["tool_descriptions"]["count"], 10)
         self.assertEqual(result["advertised_skill_descriptions"]["count"], 3)
         self.assertEqual(result["manual_skills_excluded"], ["grill-me", "handoff", "recall", "simplify-review", "teach"])
         visible = next(row for row in result["skills"] if row["name"] == "visible")
@@ -98,6 +99,28 @@ class MeasureAgentToolingTests(unittest.TestCase):
         self.assertFalse((self.packages / "@plannotator/pi-extension").exists())
         self.assertNotIn("@plannotator/pi-extension/package.json", measurement.SOURCE_SHA256)
         self.assertFalse(any("plannotator" in name for name in result["input_sha256"]))
+
+    def test_vcc_description_is_measured_and_source_gated(self):
+        result = self.measure()
+        vcc = [row for row in result["tools"] if row["package"] == "@sting8k/pi-vcc"]
+        self.assertEqual(vcc, [{"package": "@sting8k/pi-vcc", "name": "vcc_recall",
+                                "characters": 15, "utf8_bytes": 15}])
+        self.put(self.packages / "@sting8k/pi-vcc/src/tools/recall.ts", "changed registration")
+        with self.assertRaisesRegex(ValueError, "source drift"):
+            self.measure()
+
+    def test_concatenated_description_accepts_only_json_strings(self):
+        self.assertEqual(measurement.concatenated_description(
+            'description: "A " + "café.", promptSnippet: "Hint",'), "A café.")
+        for text in (
+            'description: "A" + call(), promptSnippet: "Hint",',
+            'description: `A`, promptSnippet: "Hint",',
+            'description: "A",',
+            'description: "A", description: "B", promptSnippet: "Hint",',
+            'description: "A" promptSnippet: "Hint",',
+        ):
+            with self.subTest(text=text), self.assertRaises(ValueError):
+                measurement.concatenated_description(text)
 
     def test_shared_skill_invocation_policy(self):
         root = HELPER.parent.parent / "stow/agents/.agents/skills"

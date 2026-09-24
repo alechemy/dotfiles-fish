@@ -10,7 +10,8 @@ import sys
 import textwrap
 
 ROOT = Path(__file__).resolve().parents[1]
-PACKAGES = {"@upstash/context7-pi": "0.1.2", "pi-subagents": "0.65.0", "pi-web-access": "0.27.0"}
+PACKAGES = {"@upstash/context7-pi": "0.1.2", "pi-subagents": "0.65.0", "pi-web-access": "0.27.0",
+            "@sting8k/pi-vcc": "0.8.0"}
 SUBAGENTS_SOURCE = "./local/copilot-delegation/node_modules/pi-subagents"
 SOURCE_SHA256 = {
     "@upstash/context7-pi/package.json": "367f6565087be5e89315d3cb171d9f391017124b598b744662c3500705adcb11",
@@ -27,7 +28,14 @@ SOURCE_SHA256 = {
     "pi-subagents/src/runs/background/wait-config.ts": "51a0faf216a858a6beda0c3f41cb1b48cc3975ac7d8514758fb7ec2397c42c66",
     "pi-subagents/src/intercom/native-supervisor-channel.ts": "a679c78fdb6048849a35626ce68fb75ac3ab801b60844f16ff4c68d6302f4c55",
     "pi-web-access/package.json": "820c77279eaa539e187191fa01deb931250be14a588667c31b96904f04b9bcb1",
-    "pi-web-access/index.ts": "a08fda14e5b37d1b18a2260e36dc7b17f154ace0db4bcaf7ca8a065bcec908cd"
+    "pi-web-access/index.ts": "a08fda14e5b37d1b18a2260e36dc7b17f154ace0db4bcaf7ca8a065bcec908cd",
+    "@sting8k/pi-vcc/package.json": "d89601e602948374221cf7718125116c3bb79df9a7babb7d78909a3d4b03c9f0",
+    "@sting8k/pi-vcc/index.ts": "be1cccbc0ce25b39b5a3649b64b035600b57016c08d0f57424489b72577fb42f",
+    "@sting8k/pi-vcc/src/core/settings.ts": "89066c4ceec53e2f8c498d98c2d788a1f5d266873b65f0945dc90c1422776700",
+    "@sting8k/pi-vcc/src/tools/recall.ts": "0fce5dea65fb6390a0666521e57974ead7d0ad8ba652dd6962ffeea44dc50ef7",
+    "@sting8k/pi-vcc/src/hooks/before-compact.ts": "5d97b089e04ccf9e081775a5216aa2ffb3b9b3630eaba84cc45b98de2528142a",
+    "@sting8k/pi-vcc/src/commands/pi-vcc.ts": "132041aa8e73a14d56a360bfd50ae7413e46f875d768a233594ce1a4e1fecf36",
+    "@sting8k/pi-vcc/src/commands/vcc-recall.ts": "a0b4933965a394f2ba05f4f723f6ce736e20dd2b89c7383fa269cb7000a78245"
 }
 
 
@@ -73,6 +81,16 @@ def literal_after(text, marker, substitutions=None):
             output.append(char)
         index += 1
     raise ValueError("Unterminated string literal")
+
+
+def concatenated_description(text):
+    require(text.count("description:") == 1 and text.count("promptSnippet:") == 1,
+            "Concatenated description markers changed")
+    expression = text.split("description:", 1)[1].split("promptSnippet:", 1)[0].strip()
+    string = r'"(?:[^"\\\r\n]|\\.)*"'
+    require(re.fullmatch(rf'{string}(?:\s*\+\s*{string})*\s*,', expression),
+            "Unsupported concatenated description")
+    return "".join(json.loads(match.group()) for match in re.finditer(string, expression))
 
 
 def skill_field(frontmatter, key):
@@ -204,6 +222,9 @@ def measure(repo, packages_root, subagents_root):
         require(web.count(marker) == 1, "Web tool registration changed")
         definition = web.split(marker, 1)[1].split("parameters:", 1)[0]
         tool("pi-web-access", name, literal_after(definition, "description:", substitutions))
+
+    vcc = sources["@sting8k/pi-vcc/src/tools/recall.ts"].split("parameters:", 1)[0]
+    tool("@sting8k/pi-vcc", "vcc_recall", concatenated_description(vcc))
 
     skills, manual, names = [], [], set()
     roots = [("shared", repo / "stow/agents/.agents/skills", False)]
