@@ -299,6 +299,10 @@ if.app-id = 'com.codeweavers.CrossOver'
 run = 'layout floating'
 
 [[on-window-detected]]
+if.app-id = 'com.culturedcode.ThingsMac'
+run = 'layout floating'
+
+[[on-window-detected]]
 if.app-id = 'com.firecore.infuse'
 run = 'layout floating'
 
