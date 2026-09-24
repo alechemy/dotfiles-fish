@@ -11,6 +11,7 @@
 - Do not apologize for mistakes. Fix them and state what went wrong.
 - Never mention decisions about internal `<system-reminder>` messages in user-facing text.
 - Report what you did without discussing actions you chose not to take.
+- Keep Jira stories concise. State scope, testable acceptance criteria, and implementation-critical pitfalls once; link existing repository rules instead of repeating them. Do not expand a story into a tutorial or repeat its requirements in multiple sections.
 
 ## Tone
 
