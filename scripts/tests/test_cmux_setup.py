@@ -50,6 +50,18 @@ class CmuxSetupTests(unittest.TestCase):
         self.assertEqual(self.config.read_text(), contents)
         self.assertEqual(list(self.config.parent.glob("config.ghostty.backup-*")), [])
 
+    def test_hunk_only_preserves_app_settings_and_updates_only_extension(self):
+        contents = "font-size = 14\n"
+        self.config.write_text(contents)
+        self.run_setup("--hunk-only")
+        self.assertEqual(self.config.read_text(), contents)
+        self.assertEqual(list(self.config.parent.glob("config.ghostty.backup-*")), [])
+        self.assertEqual(self.extension.read_bytes(), (ROOT / "scripts/cmux/worktrunk-feedback.ts").read_bytes())
+        inode = self.extension.stat().st_ino
+        self.run_setup("--hunk-only")
+        self.assertEqual(self.extension.stat().st_ino, inode)
+        self.assertNotEqual(self.run_setup("--hunk-only", "--install-pi-hook", check=False).returncode, 0)
+
     def test_refuses_symlinks_and_unknown_commands(self):
         target = self.root / "target"
         self.config.symlink_to(target)

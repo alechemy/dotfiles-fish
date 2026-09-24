@@ -2,22 +2,27 @@
 set -euo pipefail
 
 install_hook=0
+hunk_only=0
 if [[ ${1:-} == --install-pi-hook ]]; then
   install_hook=1
   shift
+elif [[ ${1:-} == --hunk-only ]]; then
+  hunk_only=1
+  shift
 fi
 if (($#)); then
-  echo "Usage: $0 [--install-pi-hook]" >&2
+  echo "Usage: $0 [--install-pi-hook | --hunk-only]" >&2
   exit 2
 fi
 
 DOTFILES=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-config=${CMUX_GHOSTTY_CONFIG:-"$HOME/Library/Application Support/com.cmuxterm.app/config.ghostty"}
-if [[ -L $config ]]; then
-  echo "Refusing to replace symlinked cmux Ghostty config: $config" >&2
-  exit 1
-fi
-python3 - "$config" <<'PY'
+if ((!hunk_only)); then
+  config=${CMUX_GHOSTTY_CONFIG:-"$HOME/Library/Application Support/com.cmuxterm.app/config.ghostty"}
+  if [[ -L $config ]]; then
+    echo "Refusing to replace symlinked cmux Ghostty config: $config" >&2
+    exit 1
+  fi
+  python3 - "$config" <<'PY'
 from datetime import datetime
 from pathlib import Path
 import os
@@ -47,6 +52,7 @@ backup.write_bytes(path.read_bytes())
 os.chmod(backup, 0o600)
 path.unlink()
 PY
+fi
 
 extension=${CMUX_HUNK_EXTENSION:-"${XDG_CONFIG_HOME:-$HOME/.config}/hunk/extensions/worktrunk-feedback.ts"}
 if [[ -L $extension ]]; then
