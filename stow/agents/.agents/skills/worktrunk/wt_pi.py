@@ -271,10 +271,54 @@ def owner_matches(record, owner):
             and (not owner.get("session_id") or record.get("session_id") == owner.get("session_id")))
 
 
+def bind_task_activity(root, common, gitdir, branch, record):
+    session_id, workspace_id, surface_id = (record.get(key) for key in ("session_id", "workspace_id", "surface_id"))
+    if record.get("backend") != "cmux" or not all((session_id, workspace_id, surface_id)):
+        return
+    task_path = gitdir / "wt-pi/task.json"
+    if not task_path.exists():
+        return
+    with locked(gitdir / "wt-pi/task.lock"):
+        latest = read_json(task_path)
+        if (not isinstance(latest, dict) or latest.get("version") != 2
+                or latest.get("backend") != "cmux" or latest.get("path") != str(root)
+                or latest.get("repository") != str(common) or latest.get("branch") != branch):
+            return
+        intended = latest.get("session_id")
+        if intended and intended != session_id:
+            return
+        ids_match = (latest.get("workspace_id") == workspace_id
+                     and latest.get("surface_id") == surface_id)
+        changed = False
+        if not ids_match:
+            if intended != session_id:
+                return
+            entries = list(cmux_surfaces(cmux_tree()))
+            old = [entry for entry in entries
+                   if entry[1].get("id") == latest.get("workspace_id")
+                   and entry[3].get("id") == latest.get("surface_id")]
+            replacement = [entry for entry in entries
+                           if entry[1].get("id") == workspace_id
+                           and entry[3].get("id") == surface_id]
+            if old or len(replacement) != 1:
+                raise WorkflowError("The restored Pi session has ambiguous cmux ownership.")
+            surface = replacement[0][3]
+            if surface.get("cwd") and not inside(surface["cwd"], root):
+                raise WorkflowError("The restored cmux surface does not belong to this task.")
+            latest["workspace_id"] = workspace_id
+            latest["surface_id"] = surface_id
+            changed = True
+        if not intended:
+            latest["session_id"] = session_id
+            changed = True
+        if changed:
+            write_json(task_path, latest)
+
+
 def activity(root, *, token=None, pid=None, status=None, owner=None, session_id=None,
              backend=None, workspace_id=None, surface_id=None, feedback_socket=None,
              feedback_token=None):
-    root, _, gitdir = repository(root)
+    root, common, gitdir = repository(root)
     result = git(root, "symbolic-ref", "--quiet", "--short", "HEAD", check=False)
     branch = result.stdout.strip() or None
     directory = gitdir / "wt-pi"
@@ -312,43 +356,7 @@ def activity(root, *, token=None, pid=None, status=None, owner=None, session_id=
                       "workspace_id": workspace_id, "surface_id": surface_id,
                       "feedback_socket": feedback_socket, "feedback_token": feedback_token}
             sessions[token] = {key: value for key, value in record.items() if value is not None}
-            if detected_backend == "cmux" and session_id and workspace_id and surface_id:
-                task_path = gitdir / "wt-pi/task.json"
-                task = read_json(task_path)
-                if isinstance(task, dict) and task.get("version") == 2 and task.get("backend") == "cmux":
-                    with locked(gitdir / "wt-pi/task.lock"):
-                        latest = read_json(task_path)
-                        if not isinstance(latest, dict):
-                            raise WorkflowError("The task binding disappeared during activity reporting.")
-                        intended = latest.get("session_id")
-                        changed = False
-                        if intended and intended != session_id:
-                            raise WorkflowError("The Pi session does not match the task's recorded conversation.")
-                        ids_match = (latest.get("workspace_id") == workspace_id
-                                     and latest.get("surface_id") == surface_id)
-                        if not ids_match:
-                            if intended != session_id:
-                                raise WorkflowError("The Pi session does not match the recorded cmux task surface.")
-                            entries = list(cmux_surfaces(cmux_tree()))
-                            old = [entry for entry in entries
-                                   if entry[1].get("id") == latest.get("workspace_id")
-                                   and entry[3].get("id") == latest.get("surface_id")]
-                            replacement = [entry for entry in entries
-                                           if entry[1].get("id") == workspace_id
-                                           and entry[3].get("id") == surface_id]
-                            if old or len(replacement) != 1:
-                                raise WorkflowError("The restored Pi session has ambiguous cmux ownership.")
-                            surface = replacement[0][3]
-                            if surface.get("cwd") and not inside(surface["cwd"], root):
-                                raise WorkflowError("The restored cmux surface does not belong to this task.")
-                            latest["workspace_id"] = workspace_id
-                            latest["surface_id"] = surface_id
-                            changed = True
-                        if not intended:
-                            latest["session_id"] = session_id
-                            changed = True
-                        if changed:
-                            write_json(task_path, latest)
+            bind_task_activity(root, common, gitdir, branch, record)
         current = marker(root, branch)
         current_value = current.get("marker") if isinstance(current, dict) else None
         previous = state["marker"]

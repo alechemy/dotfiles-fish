@@ -327,6 +327,75 @@ class WorktrunkTests(unittest.TestCase):
         self.assertEqual(result["action"], "reused")
         self.assertEqual(calls, [("select-workspace", "--workspace", state["workspace_id"])])
 
+    def test_new_cmux_conversation_reports_activity_without_taking_task_ownership(self):
+        target = self.create()
+        state = self.own_cmux(target)
+        comment = {"id": "comment-1", "source": "user", "path": "fixture", "summary": "Change this"}
+        for workspace, surface in (("workspace-1", "surface-1"), ("workspace-new", "surface-new")):
+            with self.subTest(workspace=workspace), patch.object(workflow, "cmux_tree", return_value=self.cmux_tree(target)):
+                workflow.activity(target, token="a" * 32, pid=os.getpid(), status="idle",
+                                  backend="cmux", session_id="session-new", workspace_id=workspace,
+                                  surface_id=surface)
+                self.assertEqual(workflow.task_state(target), state)
+                self.assertEqual(workflow.marker(target, "feature/test")["marker"], "💬")
+                self.assertEqual(workflow.active_records(target)[0]["session_id"], "session-new")
+                with self.assertRaisesRegex(workflow.WorkflowError, "Another agent"):
+                    workflow.open_cmux_task(target, "feature/test")
+                with self.assertRaisesRegex(workflow.WorkflowError, "exactly one verified"):
+                    workflow.deliver_feedback(target, {"comments": [comment]})
+                with self.assertRaisesRegex(workflow.WorkflowError, "still active"):
+                    workflow.check_remove(target, state)
+                workflow.activity(target, token="a" * 32, status="clear")
+                self.assertIsNone(workflow.marker(target, "feature/test"))
+
+    def test_unbound_task_only_adopts_activity_from_its_recorded_surface(self):
+        target = self.create()
+        state = self.own_cmux(target, session=None)
+        workflow.activity(target, token="a" * 32, pid=os.getpid(), status="idle",
+                          backend="cmux", session_id="session-foreign", workspace_id="workspace-foreign",
+                          surface_id="surface-foreign")
+        self.assertEqual(workflow.task_state(target), state)
+        workflow.activity(target, token="b" * 32, pid=os.getpid(), status="working",
+                          backend="cmux", session_id="session-1", workspace_id="workspace-1",
+                          surface_id="surface-1")
+        self.assertEqual(workflow.task_state(target), {**state, "session_id": "session-1"})
+        self.assertEqual(workflow.activity(target), 2)
+        self.assertEqual(workflow.marker(target, "feature/test")["marker"], "🤖")
+
+    def test_stale_task_identity_does_not_block_activity_or_rebind(self):
+        target = self.create()
+        state = self.own_cmux(target)
+        _, _, gitdir = workflow.repository(target)
+        for field, value in (("branch", "old-branch"), ("path", str(self.repo)),
+                             ("repository", str(self.root / "other.git"))):
+            for session_id in ("session-1", "session-new"):
+                with self.subTest(field=field, session=session_id), patch.object(workflow, "cmux_tree") as tree:
+                    stale = {**state, field: value}
+                    workflow.write_task_state(target, stale)
+                    workflow.activity(target, token="a" * 32, pid=os.getpid(), status="idle",
+                                      backend="cmux", session_id=session_id, workspace_id="workspace-new",
+                                      surface_id="surface-new")
+                    tree.assert_not_called()
+                    self.assertEqual(workflow.read_json(gitdir / "wt-pi/task.json"), stale)
+                    self.assertEqual(workflow.marker(target, "feature/test")["marker"], "💬")
+                    self.assertEqual(workflow.active_records(target)[0]["session_id"], session_id)
+                    with self.assertRaises(workflow.WorkflowError):
+                        workflow.task_state(target)
+                    workflow.activity(target, token="a" * 32, status="clear")
+
+    def test_restored_session_cannot_rebind_while_original_surface_exists(self):
+        target = self.create()
+        state = self.own_cmux(target)
+        tree = self.cmux_tree(target)
+        tree["windows"][0]["workspaces"][0]["panes"][0]["surfaces"].append(
+            {"id": "surface-new", "type": "terminal", "cwd": str(target)})
+        with patch.object(workflow, "cmux_tree", return_value=tree):
+            with self.assertRaisesRegex(workflow.WorkflowError, "ambiguous cmux ownership"):
+                workflow.activity(target, token="a" * 32, pid=os.getpid(), status="idle",
+                                  backend="cmux", session_id="session-1", workspace_id="workspace-1",
+                                  surface_id="surface-new")
+        self.assertEqual(workflow.task_state(target), state)
+
     def test_restored_exact_pi_session_rebinds_new_cmux_ids(self):
         target = self.create()
         self.own_cmux(target)
@@ -340,6 +409,47 @@ class WorktrunkTests(unittest.TestCase):
         state = workflow.task_state(target)
         self.assertEqual(state["workspace_id"], "workspace-new")
         self.assertEqual(state["surface_id"], "surface-new")
+
+    def test_cli_activity_survives_new_conversation_and_stale_task_branch(self):
+        target = self.create()
+        state = self.own_cmux(target)
+        self.git("branch", "-m", "feature/renamed", cwd=target)
+        result = subprocess.run([sys.executable, str(SOURCE), "_activity", "a" * 32,
+                                 str(os.getpid()), "idle", "--backend", "cmux",
+                                 "--session-id", "session-2", "--workspace-id", "workspace-1",
+                                 "--surface-id", "surface-2"], cwd=target,
+                                capture_output=True, text=True, timeout=15)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(workflow.marker(target, "feature/renamed")["marker"], "💬")
+        _, _, gitdir = workflow.repository(target)
+        self.assertEqual(workflow.read_json(gitdir / "wt-pi/task.json"), state)
+        with self.assertRaisesRegex(workflow.WorkflowError, "binding no longer matches"):
+            workflow.task_state(target)
+
+    def test_foreign_cmux_activity_blocks_reopen_feedback_and_removal(self):
+        target = self.create()
+        state = self.own_cmux(target)
+        for session_id in ("session-1", "session-2"):
+            with self.subTest(session_id=session_id):
+                workflow.activity(target, token="a" * 32, pid=os.getpid(), status="idle",
+                                  backend="cmux", session_id=session_id,
+                                  workspace_id="workspace-1", surface_id="surface-1")
+                workflow.activity(target, token="b" * 32, pid=os.getpid(), status="working",
+                                  backend="cmux", session_id="session-2",
+                                  workspace_id="workspace-1", surface_id="surface-2")
+                with patch.object(workflow, "cmux_tree", return_value=self.cmux_tree(target)):
+                    with self.assertRaisesRegex(workflow.WorkflowError, "Another agent"):
+                        workflow.open_cmux_task(target, "feature/test")
+                comment = {"id": "comment-1", "source": "user", "path": "fixture", "summary": "Change this"}
+                with patch.object(workflow.socket, "socket") as receiver:
+                    with self.assertRaisesRegex(workflow.WorkflowError, "exactly one verified"):
+                        workflow.deliver_feedback(target, {"comments": [comment]})
+                    receiver.assert_not_called()
+                with self.assertRaisesRegex(workflow.WorkflowError, "Pi sessions are still active"):
+                    workflow.check_remove(target, state)
+                workflow.activity(target, token="a" * 32, pid=os.getpid(), status="clear")
+                self.assertEqual(workflow.marker(target, "feature/test")["marker"], "🤖")
+                workflow.activity(target, token="b" * 32, pid=os.getpid(), status="clear")
 
     def test_cmux_refuses_stale_or_foreign_ownership(self):
         target = self.create()
