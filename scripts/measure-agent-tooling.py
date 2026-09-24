@@ -11,7 +11,7 @@ import textwrap
 
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGES = {"@upstash/context7-pi": "0.1.2", "pi-subagents": "0.65.0", "pi-web-access": "0.27.0",
-            "@sting8k/pi-vcc": "0.8.0"}
+            "@gotgenes/pi-anthropic-auth": "3.3.1", "@sting8k/pi-vcc": "0.8.0"}
 SUBAGENTS_SOURCE = "./local/copilot-delegation/node_modules/pi-subagents"
 SOURCE_SHA256 = {
     "@upstash/context7-pi/package.json": "367f6565087be5e89315d3cb171d9f391017124b598b744662c3500705adcb11",
@@ -29,6 +29,23 @@ SOURCE_SHA256 = {
     "pi-subagents/src/intercom/native-supervisor-channel.ts": "a679c78fdb6048849a35626ce68fb75ac3ab801b60844f16ff4c68d6302f4c55",
     "pi-web-access/package.json": "820c77279eaa539e187191fa01deb931250be14a588667c31b96904f04b9bcb1",
     "pi-web-access/index.ts": "a08fda14e5b37d1b18a2260e36dc7b17f154ace0db4bcaf7ca8a065bcec908cd",
+    "@gotgenes/pi-anthropic-auth/package.json": "5679a589745f42641a5b4fdae08193d5440e467ce0e5ee690b2fd104b5c51a93",
+    "@gotgenes/pi-anthropic-auth/src/anthropic-message.ts": "6bb7a7763b21686010648ec3788a3435c5d893ecf3196b81a9987589d2ba32e1",
+    "@gotgenes/pi-anthropic-auth/src/billing-header.ts": "69c88b5f1eda91a1e070bdc91f07c10c9a607d0ddfabbea4f007f38bb011de55",
+    "@gotgenes/pi-anthropic-auth/src/billing-version-sync.ts": "f7c20f42eb244bac1300fec8fb56133fd10c621c09c5db93fc28ad77f5083f47",
+    "@gotgenes/pi-anthropic-auth/src/claude-code-version.ts": "ba7d476d487f918c45197bc7e44ccaf8ad2c9efdedd00ad75657fba6fe104a13",
+    "@gotgenes/pi-anthropic-auth/src/constants.ts": "03ac3d5c0d54a3e78ba37fe517da58e3e4632950e3d1d331a80830dd6d50df65",
+    "@gotgenes/pi-anthropic-auth/src/debug.ts": "a06644b3d52c8040b61338820881ab83acda3a0238b177261b9f5d6c4464991b",
+    "@gotgenes/pi-anthropic-auth/src/diagnostics.ts": "edab84a81b0b100aa5a803f1d08ad431c77d0e4ed467e2ea2d51474c6730033c",
+    "@gotgenes/pi-anthropic-auth/src/extension-config.ts": "886446388fb75c0094c78caa4196a58025fe2a72ddab762416792d292723751d",
+    "@gotgenes/pi-anthropic-auth/src/extra-provider-shaping.ts": "ec95df3f3dd34a2a50cc8d790e35f8d774b506634fdb34893db7f654051add87",  # betterleaks:allow
+    "@gotgenes/pi-anthropic-auth/src/host-transport.ts": "6d1634a06cc2cf7be1d53774a9cc2611739cda52b296d944b5abd51d5ecfe517",
+    "@gotgenes/pi-anthropic-auth/src/index.ts": "c4d6a98edeac762a8cbf63696aab654e01ca58ed0e7b63dcbd097c6c5d916aaa",
+    "@gotgenes/pi-anthropic-auth/src/oauth-transport.ts": "42d1e837a9e30bf5125743ae36e3a788e22dfb483a552249664f767a17411fbb",  # betterleaks:allow
+    "@gotgenes/pi-anthropic-auth/src/request-shaping.ts": "efed50553ff7d3cf0f2edc9d77fe9a4404414e1e69fc6408788ccf102046d028",  # betterleaks:allow
+    "@gotgenes/pi-anthropic-auth/src/system-prompt-sections.ts": "9d922f8d9feb7a4b6ef45e12b9b47db04052cdf8a096d4f7dac87d2f30aa9036",
+    "@gotgenes/pi-anthropic-auth/src/system-prompt-shaping.ts": "524d6e877eec2d58b9d0ba9539b89053f7a65bf34f55d33b11611909e517a138",  # betterleaks:allow
+    "@gotgenes/pi-anthropic-auth/src/version-rejection.ts": "aac221a3877251fe90d0afba6d9cba65eedd52d360d44e15a2bbe449b544eef1",
     "@sting8k/pi-vcc/package.json": "d89601e602948374221cf7718125116c3bb79df9a7babb7d78909a3d4b03c9f0",
     "@sting8k/pi-vcc/index.ts": "be1cccbc0ce25b39b5a3649b64b035600b57016c08d0f57424489b72577fb42f",
     "@sting8k/pi-vcc/src/core/settings.ts": "89066c4ceec53e2f8c498d98c2d788a1f5d266873b65f0945dc90c1422776700",

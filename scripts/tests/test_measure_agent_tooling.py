@@ -46,6 +46,7 @@ class MeasureAgentToolingTests(unittest.TestCase):
             self.put(self.shared / name / "SKILL.md", skill(name, manual=True))
         sources = {
             "@sting8k/pi-vcc/src/tools/recall.ts": 'description: "Recall " + "history.", promptSnippet: "Recall", parameters: {},',
+            "@gotgenes/pi-anthropic-auth/src/index.ts": 'pi.registerProvider("anthropic", {});',
             "@upstash/context7-pi/lib/prompts.ts": 'export const RESOLVE_LIBRARY_ID_DESCRIPTION = "Find";\nexport const QUERY_DOCS_DESCRIPTION = `Docs`;',
             "pi-subagents/src/extension/tool-description.ts": "\n".join(
                 f'const {name} = "Guidance";' for name in (
@@ -99,6 +100,17 @@ class MeasureAgentToolingTests(unittest.TestCase):
         self.assertFalse((self.packages / "@plannotator/pi-extension").exists())
         self.assertNotIn("@plannotator/pi-extension/package.json", measurement.SOURCE_SHA256)
         self.assertFalse(any("plannotator" in name for name in result["input_sha256"]))
+
+    def test_anthropic_auth_adds_no_tool_or_skill_descriptions(self):
+        result = self.measure()
+        self.assertEqual(result["declared_versions"]["@gotgenes/pi-anthropic-auth"], "3.3.1")
+        self.assertEqual(result["tool_descriptions"]["count"], 10)
+        self.assertFalse(any(row["package"] == "@gotgenes/pi-anthropic-auth"
+                             for row in result["tools"] + result["skills"]))
+        self.assertIn("@gotgenes/pi-anthropic-auth/src/index.ts", result["input_sha256"])
+        self.put(self.packages / "@gotgenes/pi-anthropic-auth/src/index.ts", "changed registration")
+        with self.assertRaisesRegex(ValueError, "source drift"):
+            self.measure()
 
     def test_vcc_description_is_measured_and_source_gated(self):
         result = self.measure()

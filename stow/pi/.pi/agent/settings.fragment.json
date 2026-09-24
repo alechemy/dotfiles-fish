@@ -12,6 +12,7 @@
     "npm:@upstash/context7-pi@0.1.2",
     "./local/copilot-delegation/node_modules/pi-subagents",
     "npm:pi-web-access@0.27.0",
+    "npm:@gotgenes/pi-anthropic-auth@3.3.1",
     "npm:@sting8k/pi-vcc@0.8.0"
   ],
   "enabledModels": [
