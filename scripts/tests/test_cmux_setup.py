@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """cmux setup contracts."""
 
+import json
 import os
 from pathlib import Path
 import subprocess
@@ -55,6 +56,7 @@ class CmuxSetupTests(unittest.TestCase):
         self.config.write_text(contents)
         self.run_setup("--hunk-only")
         self.assertEqual(self.config.read_text(), contents)
+        self.assertFalse((self.root / ".cmuxterm/automations.json").exists())
         self.assertEqual(list(self.config.parent.glob("config.ghostty.backup-*")), [])
         self.assertEqual(self.extension.read_bytes(), (ROOT / "scripts/cmux/worktrunk-feedback.ts").read_bytes())
         inode = self.extension.stat().st_ino
@@ -118,7 +120,50 @@ class CmuxSetupTests(unittest.TestCase):
         self.run_setup(env=env)
         self.assertFalse(log.exists())
         self.run_setup("--install-pi-hook", env=env)
-        self.assertEqual(log.read_text(), "hooks setup pi --yes\n")
+        self.assertEqual(log.read_text(), "hooks setup pi --yes\nautomation reload\n")
+
+    def test_setup_succeeds_when_cmux_is_not_running_for_reload(self):
+        binary = self.root / "bin/cmux"
+        binary.parent.mkdir()
+        binary.write_text('#!/bin/sh\n[ "$1" != automation ]\n')
+        binary.chmod(0o755)
+        env = {**self.env, "PATH": f"{binary.parent}:{self.env['PATH']}"}
+        result = self.run_setup("--install-pi-hook", env=env)
+        self.assertIn("next app launch", result.stderr)
+        self.assertTrue((self.root / ".cmuxterm/automations.json").exists())
+
+    def test_gap_automation_merge_preserves_other_rules_and_is_idempotent(self):
+        config = self.root / ".cmuxterm/automations.json"
+        config.parent.mkdir()
+        unrelated = {"id": "mine", "when": {"event": "workspace.created"}, "then": []}
+        config.write_text(json.dumps({"version": 1, "rules": [unrelated]}))
+        self.run_setup()
+        rules = json.loads(config.read_text())["rules"]
+        self.assertEqual(rules[0], unrelated)
+        self.assertEqual(rules[1]["id"], "dotfiles.aerospace-gaps")
+        self.assertIn("pane.created", rules[1]["where"]["name"])
+        self.assertIn("workspace.selected", rules[1]["where"]["name"])
+        self.assertEqual(config.stat().st_mode & 0o777, 0o600)
+        inode = config.stat().st_ino
+        self.run_setup()
+        self.assertEqual(config.stat().st_ino, inode)
+        self.assertEqual(len(list(config.parent.glob("*.backup-*"))), 1)
+        rules[1]["enabled"] = False
+        config.write_text(json.dumps({"version": 1, "rules": rules}))
+        self.run_setup()
+        self.assertFalse(json.loads(config.read_text())["rules"][1]["enabled"])
+
+    def test_gap_automation_refuses_invalid_config_and_symlinks(self):
+        config = self.root / ".cmuxterm/automations.json"
+        config.parent.mkdir()
+        config.write_text("invalid json")
+        self.assertNotEqual(self.run_setup(check=False).returncode, 0)
+        self.assertEqual(config.read_text(), "invalid json")
+        config.unlink()
+        target = self.root / "elsewhere.json"
+        config.symlink_to(target)
+        self.assertNotEqual(self.run_setup(check=False).returncode, 0)
+        self.assertFalse(target.exists())
 
 
 if __name__ == "__main__":

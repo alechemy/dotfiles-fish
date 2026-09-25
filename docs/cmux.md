@@ -16,6 +16,18 @@ scripts/setup-cmux.sh --install-pi-hook
 
 The flag additionally runs cmux's official `hooks setup pi --yes`. The official hook owns cmux lifecycle state, notifications, and application restart restoration. `worktrunk.ts` separately owns Worktrunk markers and authenticated Hunk feedback delivery.
 
+## AeroSpace gaps
+
+On the `DELL U4025QW`, each tiled cmux window counts as its number of side-by-side pane columns when deciding whether to remove outer gaps. A two-column cmux window plus one other tiled window reaches three and sets the focused AeroSpace workspace's left and right outer gaps to zero, as does a single three-column cmux window. Stacked panes and tabs within a pane do not add columns. Expansion is immediate; reducing cached column counts waits for two seconds without another matching cmux event. Workspace switches restart that delay, and returning to a wider layout cancels the pending shrink. Ordinary window-count presets and manual gap overrides stay unchanged.
+
+For two side-by-side tiled windows, the worker also divides the available width in proportion to their column counts. Two cmux columns beside an ordinary window get a 2:1 split. Returning to one cmux column restores equal widths after the shrink delay. Sizing runs after the gap reload and targets a window by ID without moving focus. It only reapplies when the pair, column counts, screen width, or gaps change, so ordinary focus events do not undo manual resizing. Stacked, accordion, fullscreen, and larger layouts retain their existing sizes.
+
+`~/.local/bin/aerospace-cmux-gaps.py` reads pane geometry from each native window's selected cmux workspace. It never uses the calling terminal's workspace as the selection. The window-number bridge uses cmux's terminal diagnostics, so a window without a hosted terminal cannot be matched.
+
+cmux's native `dotfiles.aerospace-gaps` automation refreshes a cache of column counts keyed by native window ID on pane and workspace events, then calls the existing gap worker. This preserves cmux-only socket access, since AeroSpace and launchd read only the derived cache. The cache contains no titles or terminal content and is invalidated across boots. Floating windows and other AeroSpace workspaces are excluded by the gap worker. Missing geometry, failed refreshes, or ambiguous identities fall back to ordinary gaps after the same delay. A pending shrink rechecks the layout before applying, and superseded timers cannot change the cache. There is no recurring layout polling; a missed cmux event is corrected by the next matching event.
+
+`scripts/setup-cmux-gaps.py` merges only this rule into the app-owned `~/.cmuxterm/automations.json`, backs up changes, and preserves other rules and a deliberate disabled state. Normal cmux setup installs it. `--install-pi-hook` also reloads automations; otherwise run `cmux automation reload` or restart cmux after setup. To refresh an existing layout immediately, run `/usr/bin/python3 ~/.local/bin/aerospace-cmux-gaps.py --refresh` from a cmux terminal.
+
 ## Task identity and launch
 
 Run task commands from a native cmux terminal inside the repository:

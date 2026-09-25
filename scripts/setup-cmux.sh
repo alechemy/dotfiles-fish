@@ -52,6 +52,7 @@ backup.write_bytes(path.read_bytes())
 os.chmod(backup, 0o600)
 path.unlink()
 PY
+  /usr/bin/python3 "$DOTFILES/scripts/setup-cmux-gaps.py"
 fi
 
 extension=${CMUX_HUNK_EXTENSION:-"${XDG_CONFIG_HOME:-$HOME/.config}/hunk/extensions/worktrunk-feedback.ts"}
@@ -86,4 +87,7 @@ PY
 
 if ((install_hook)); then
   cmux hooks setup pi --yes
+  if ! cmux automation reload; then
+    echo "cmux automations will load on the next app launch." >&2
+  fi
 fi

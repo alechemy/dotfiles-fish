@@ -39,7 +39,7 @@ gap_for_tiled_count() {
     esac
 }
 
-# Sets gap_full (>=3 windows), gap_split (2), gap_centered (0-1).
+# Sets gap_screen_width, gap_full (>=3 windows), gap_split (1-2), gap_centered (0).
 # Returns non-zero if the screen width cannot be determined.
 compute_gap_presets() {
     local width inner base span w
@@ -61,6 +61,7 @@ compute_gap_presets() {
     done
     w=$(( span / 3 ))
 
+    gap_screen_width=$width
     gap_full=$base
     gap_split=$(( (width - 2*w - inner) / 2 ))
     gap_centered=$(( (width - w) / 2 ))

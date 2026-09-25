@@ -246,6 +246,10 @@ for pass in 1 2 3 4 5; do
     printf '%s\n' "$cur_ids" >"$IDS_FILE"
 
     target=$(gap_for_tiled_count "$count")
+    cmux_ids=$(printf '%s\n' "$tree" | tiled_in "$ws" | awk -F'|' 'tolower($3) == "cmux" {print $2}')
+    if [ -n "$cmux_ids" ] && /usr/bin/python3 "$HOME/.local/bin/aerospace-cmux-gaps.py" "$count" $cmux_ids; then
+        target=0
+    fi
 
     # Decide whether the runtime needs rebuilding from source. The padding and
     # layout checks restore the source accordion-padding and default root
@@ -290,6 +294,11 @@ for pass in 1 2 3 4 5; do
 
         aerospace reload-config
         log "apply ws=$ws count=$count gap=$current->$target trigger=$TRIGGER pass=$pass apps=$apps"
+    fi
+
+    if [ "$count" = 2 ] && [ -n "$cmux_ids" ]; then
+        /usr/bin/python3 "$HOME/.local/bin/aerospace-cmux-gaps.py" \
+            --resize "$ws" "$gap_screen_width" "$target" || true
     fi
 
     # Re-sample: if focus moved while we worked, or an event queued behind the
