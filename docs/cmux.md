@@ -40,38 +40,35 @@ Allocation and startup failures retain the worktree and any created workspace fo
 
 ## AI findings beside the diff
 
-The shared `code-review` skill opens a dedicated tuicr split when the parent Pi session runs in native cmux. Its bundled `tuicr_review.py` captures the selected comparison. Complete github.com PR URL reviews open native PR sessions with local findings that the user can submit through `:submit`. Local changes and restricted comparisons use private, remote-free Git snapshots. Staged, unstaged, committed, path-filtered, and untracked scopes retain their meaning without changing the source checkout. Independent review axes and the grouped Pi report are unchanged. Text-only requests and unsupported viewers retain the full report.
+The shared `code-review` skill automatically opens a dedicated Hunk split when the parent Pi session runs in native cmux. Its bundled `hunk_review.py` captures the selected Git comparison before review, binds the viewer to the exact Pi session and cmux terminal, and imports only the parent's validated findings. It preserves the existing independent review axes and grouped terminal summary. Text-only requests and unavailable or unsupported viewers retain the complete text report.
 
-The parent imports validated findings through tuicr's official review CLI, including native range, file, and review comments. Repeated imports reconcile receipts without duplicating notes. Missing anchors remain report-only. A different comparison gets a new review ID; repeated opens reuse only that review's owned pane.
+Ask Pi to review a commit or PR as usual, then ask it to show or explain R1. The helper navigates to that finding's saved Hunk comment after checking the reviewed content, displayed patch, and Hunk generation. Other navigation and expression highlights use Hunk's installed skill with the exact verified session ID. Human comments can be read on request without clearing them. The [inline-review reference](../stow/agents/.agents/skills/code-review/references/hunk.md) documents commands, findings schema, recovery, and limits.
 
-Ask Pi to show or explain R1 to verify and discuss its saved finding. In tuicr, open `:summary`, select R1, and press Enter. tuicr has no live navigation API, so Pi does not move the cursor or highlight expressions. Save human comments normally and ask Pi to read the review feedback. These panes do not use Hunk's Ctrl+Shift+F delivery shortcut, and reading feedback never clears it or authorizes fixes.
+A repeated open reuses the same review's pane; it does not adopt another Hunk window. Each different comparison has its own review ID. Findings without valid diff anchors stay in the report. Repeated imports reconcile existing notes, and uncertain writes are not blindly retried. `hunk diff` alone is unstaged-only for tracked files; the all-uncommitted helper mode passes the pinned HEAD explicitly.
 
-Private patches, snapshot repositories, and isolated tuicr state live under `~/.local/state/pi-code-review/`. Native PR sessions use existing GitHub CLI authentication without copying credentials. They bind the PR repository, number, base/head revisions, and saved diff-content hashes. Remote revision checks surround imports and follow-ups; the helper has no publication command. A review request alone never authorizes a remote draft or submission. tuicr may initially select commits since the last submitted review, so select all commits for a whole-PR review before following or publishing findings.
+Private patches and finding receipts live in `~/.local/state/pi-code-review/`, outside Stow and Git. The helper has no automatic retention cleanup. Native Hunk comparisons retain their normal source navigation; unborn all-uncommitted comparisons and repositories with Git textconv drivers use saved patches. Partial-hunk selections remain text-only. Simultaneous human reloads can race Hunk's CLI, so generation checks before and after writes detect the race without claiming atomic exclusion.
 
-The helper checks source freshness, exact process and pane ownership, session identity, commit range, and saved file inventory. It cannot inspect every transient UI selection or provide an atomic generation guard. It preserves receipts and reports a raced target change rather than retrying blindly. Partial-hunk reviews remain text-only. See the [tuicr reference](../stow/agents/.agents/skills/code-review/references/tuicr.md) for commands, schemas, storage, and limits.
-
-Homebrew owns tuicr. The helper's persisted-state checks are verified against 0.27.0 and fail closed after a binary upgrade until revalidated. Restow `agents` after adding or removing skill files. Pi reads the replacement skill on its next invocation; reload if discovery needs refreshing.
+After adding the helper or reference files, restow only the `agents` package from the primary checkout. Apply only the feedback-extension update with `scripts/setup-cmux.sh --hunk-only`; this leaves app-owned cmux settings and Pi hooks untouched. New Hunk processes load the extension. Pi reads the updated skill on its next review invocation. Reload Pi if its skill discovery needs refreshing.
 
 ```sh
 stow --restow --no-folding --ignore='__pycache__' --dir=stow --target="$HOME" agents
-/usr/bin/python3 -m unittest discover -s scripts/tests -p test_tuicr_review.py
+scripts/setup-cmux.sh --hunk-only
+/usr/bin/python3 -m unittest discover -s scripts/tests -p test_hunk_review.py
 /usr/bin/python3 -m unittest discover -s scripts/tests -p test_code_review_recipes.py
+node --test scripts/tests/test_hunk_worktrunk_feedback.mjs
 ```
 
-The opt-in native check opens one unfocused disposable cmux workspace. It checks all six comparison modes, textconv and unborn cases, range and review comments, human feedback retrieval, idempotency, and reopening without comment loss. It closes only its own workspace and deletes its synthetic artifacts. It makes no model calls or remote writes.
+The opt-in native check creates one unfocused disposable cmux workspace, exercises all six comparison modes with synthetic findings, verifies navigation and idempotent import, then closes only its own workspace and removes its synthetic artifacts. It makes no model calls or remote writes:
 
 ```sh
-/usr/bin/python3 scripts/tests/tuicr_review_smoke.py --allow-ui
-/usr/bin/python3 scripts/tests/tuicr_pr_smoke.py --allow-ui
+/usr/bin/python3 scripts/tests/hunk_review_smoke.py --allow-ui
 ```
 
-The PR smoke runs real tuicr with a synthetic `gh` executable. It checks native session binding, local drafts, human feedback, and stale-head refusal without network requests or remote writes. Authenticated forge access and actual publication are outside that test.
+### Archived tuicr integration
 
-### Roll back the trial
+The tuicr 0.27.0 trial is preserved at commit `0aa9e67` and local tag `code-review-tuicr-0.27.0`, including native GitHub PR sessions, the helper, references, and tests. Hunk is active again after reported slow large-PR loading and freezes when toggling commit visibility.
 
-The replacement started in `f50993c`, titled `agents: replace code-review Hunk integration with tuicr`. Native PR support is the follow-up `agents: bind code reviews to native tuicr PR sessions`. With unrelated work preserved, revert the native-PR commit first and `f50993c` second, then run `scripts/restow-changed.sh HEAD^ HEAD` from the primary checkout to remove the tuicr helper links and restore Hunk's. Reload Pi's skills. The revert retains private review artifacts; close old panes before switching workflows.
-
-Hunk remains installed for the existing Git pager, shell shortcuts, and human-led Worktrunk feedback below. Those are separate from the replaced code-review skill. tuicr can remain installed after rollback.
+To retry the trial, revert the dedicated `agents: restore Hunk code-review integration` commit with unrelated work preserved, then run `scripts/restow-changed.sh HEAD^ HEAD` from the primary checkout and reload Pi's skills. Existing private tuicr review artifacts remain under `~/.local/state/pi-code-review/`; close old review panes before switching workflows. Local Hunk findings do not publish to GitHub.
 
 ## Review feedback
 
