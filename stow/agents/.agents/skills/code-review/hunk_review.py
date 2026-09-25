@@ -256,7 +256,7 @@ def unquote_path(value):
     return value
 
 
-def patch_files(patch):
+def patch_files(patch, *, trim_trailing_context=False):
     # Hunk exports patch resources with LF line endings.
     patch = patch.replace("\r\n", "\n")
     files = {}
@@ -264,6 +264,9 @@ def patch_files(patch):
         if not block.startswith("diff --git "):
             continue
         lines = block.removesuffix("\n").split("\n")
+        if trim_trailing_context:
+            while lines[-1] == " ":
+                lines.pop()
         header = lines[0][11:]
         if header.startswith('"'):
             match = re.match(r'("(?:[^"\\]|\\.)*") (.*)', header)
@@ -401,7 +404,9 @@ def verify_view(directory, state, session):
     if state.get("session") and state["session"] != {"id": session["sessionId"], "generation": generation}:
         raise ReviewError("Hunk reloaded or switched comparisons; prepare a new review.")
     view = hunk("review", session["sessionId"], "--include-patch")["review"]
-    expected = patch_files((directory / "review.patch").read_bytes().decode())
+    saved_patch = (directory / "review.patch").read_bytes().decode()
+    expected = patch_files(saved_patch)
+    trimmed = patch_files(saved_patch, trim_trailing_context=True)
     actual = {}
     for item in view["files"]:
         path = item["path"]
@@ -415,12 +420,13 @@ def verify_view(directory, state, session):
             actual.update(parsed)
         else:
             raise ReviewError("Hunk could not export a complete text patch; retain findings in the report.")
-    if actual != expected:
+    if actual.keys() != expected.keys() or any(
+            actual[path] not in (expected[path], trimmed[path]) for path in expected):
         raise ReviewError("Hunk's displayed diff differs from the reviewed snapshot; no findings were attached.")
     after = hunk("get", session["sessionId"])["session"]
     if publication(after)["generation"] != generation:
         raise ReviewError("Hunk changed while inspecting it; no findings were attached.")
-    return expected
+    return actual
 
 
 def live_session(directory, state):

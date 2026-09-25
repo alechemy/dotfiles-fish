@@ -380,6 +380,52 @@ class ViewerTests(Fixture):
             self.send(self.finding())
         self.assertEqual(self.comments, [])
 
+    def trailing_context_view(self, before="original\n\n\n", after="changed\nsecond\n\n\n"):
+        self.file("sample file.txt", before)
+        self.git("add", "--all")
+        self.git("commit", "--allow-empty", "-qm", "Fixture")
+        self.file("sample file.txt", after)
+        self.state["comparison"]["head"] = review.current_head(self.repo)
+        snapshot = review.snapshot(self.state["repo"], self.state["comparison"])
+        review.save(self.directory / "review.patch", snapshot)
+        self.state["patch_sha256"] = review.digest(snapshot)
+        self.view["files"][0]["patch"] = snapshot.decode().rstrip(" \n")
+
+    def test_trimmed_trailing_blank_context_allows_import_and_navigation(self):
+        self.trailing_context_view()
+        self.assertEqual(self.send(self.finding())["inline"], ["R1"])
+        self.assertEqual(review.show_finding(self.directory, self.state, "R1")["comment"], "note-0")
+
+    def test_trimmed_context_is_not_an_available_comment_anchor(self):
+        self.trailing_context_view()
+        result = self.send(self.finding(start_line=3, end_line=3))
+        self.assertEqual(result["report_only"], ["R1"])
+        self.assertEqual(self.comments, [])
+
+    def test_trimmed_context_does_not_hide_changed_content(self):
+        self.trailing_context_view()
+        self.view["files"][0]["patch"] = self.view["files"][0]["patch"].replace("+changed", "+wrong")
+        with self.assertRaisesRegex(review.ReviewError, "displayed diff differs"):
+            self.send(self.finding())
+        self.assertEqual(self.comments, [])
+
+    def test_missing_nonblank_context_prevents_import(self):
+        self.trailing_context_view("original\nkept\n\n", "changed\nkept\n\n")
+        self.view["files"][0]["patch"] = self.view["files"][0]["patch"].removesuffix("\n kept")
+        with self.assertRaisesRegex(review.ReviewError, "displayed diff differs"):
+            self.send(self.finding(end_line=1))
+        self.assertEqual(self.comments, [])
+
+    def test_missing_blank_addition_or_deletion_prevents_import(self):
+        for before, after, marker in (("original\n", "changed\n\n", "+"),
+                                      ("original\n\n", "changed\n", "-")):
+            with self.subTest(marker=marker):
+                self.trailing_context_view(before, after)
+                self.view["files"][0]["patch"] = self.view["files"][0]["patch"].replace("\n" + marker + "\n", "\n").removesuffix("\n" + marker)
+                with self.assertRaisesRegex(review.ReviewError, "displayed diff differs"):
+                    self.send(self.finding(end_line=1))
+                self.assertEqual(self.comments, [])
+
     def test_raced_source_change_never_reports_success(self):
         self.after_apply = lambda: self.file("sample file.txt", "raced\n")
         with self.assertRaisesRegex(review.ReviewError, "content changed"):
