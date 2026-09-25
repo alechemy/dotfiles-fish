@@ -25,7 +25,7 @@ Inspect the complete diff and relevant implementation, callers, tests, and opera
 
 In an interactive Pi session inside native cmux, use [references/tuicr.md](references/tuicr.md) to prepare the pinned comparison and automatically open or reuse its owned tuicr pane before launching reviewers. The user need not open tuicr manually or request inline delivery separately. Respect a text-only request. Outside this environment, or if the helper cannot represent the exact scope or verify the viewer, keep the original text review and state the limitation. Never broaden the comparison to fit the viewer.
 
-Only the parent manages tuicr. Keep the returned review ID, snapshot, and exact source revisions for synthesis and follow-up discussion. The viewer uses a private snapshot repository; review implementation, callers, and tests in the original repository at the selected versions. Use the helper's explicit session binding rather than whichever tuicr window is active. A viewer failure does not skip any review axis.
+Only the parent manages tuicr. Keep the returned review ID and exact source revisions for synthesis and follow-up discussion. For a complete GitHub PR URL review, use the reference's `--pr-url` route so findings land as local drafts in a native PR session that the user can submit. Local changes and explicitly restricted PR comparisons use private snapshots. Review implementation, callers, and tests in the original repository at the selected versions. Use the helper's explicit session binding rather than whichever tuicr window is active. A viewer failure does not skip any review axis. A request to review a PR does not authorize publishing any review, including a remote draft.
 
 ## Gather requirements and standards
 

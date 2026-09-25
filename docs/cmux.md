@@ -40,13 +40,15 @@ Allocation and startup failures retain the worktree and any created workspace fo
 
 ## AI findings beside the diff
 
-The shared `code-review` skill opens a dedicated tuicr split when the parent Pi session runs in native cmux. Its bundled `tuicr_review.py` captures the selected comparison and builds a private, remote-free Git snapshot. Staged, unstaged, committed, path-filtered, and untracked scopes retain their meaning without changing the source checkout. Independent review axes and the grouped Pi report are unchanged. Text-only requests and unsupported viewers retain the full report.
+The shared `code-review` skill opens a dedicated tuicr split when the parent Pi session runs in native cmux. Its bundled `tuicr_review.py` captures the selected comparison. Complete github.com PR URL reviews open native PR sessions with local findings that the user can submit through `:submit`. Local changes and restricted comparisons use private, remote-free Git snapshots. Staged, unstaged, committed, path-filtered, and untracked scopes retain their meaning without changing the source checkout. Independent review axes and the grouped Pi report are unchanged. Text-only requests and unsupported viewers retain the full report.
 
 The parent imports validated findings through tuicr's official review CLI, including native range, file, and review comments. Repeated imports reconcile receipts without duplicating notes. Missing anchors remain report-only. A different comparison gets a new review ID; repeated opens reuse only that review's owned pane.
 
 Ask Pi to show or explain R1 to verify and discuss its saved finding. In tuicr, open `:summary`, select R1, and press Enter. tuicr has no live navigation API, so Pi does not move the cursor or highlight expressions. Save human comments normally and ask Pi to read the review feedback. These panes do not use Hunk's Ctrl+Shift+F delivery shortcut, and reading feedback never clears it or authorizes fixes.
 
-Private patches, snapshot repositories, and isolated tuicr state live under `~/.local/state/pi-code-review/`. The helper checks source freshness, exact process and pane ownership, session identity, commit range, and saved file inventory. It cannot inspect transient UI filters or provide an atomic generation guard. It preserves receipts and reports a raced target change rather than retrying blindly. Partial-hunk reviews remain text-only. See the [tuicr reference](../stow/agents/.agents/skills/code-review/references/tuicr.md) for commands, schemas, storage, and limits.
+Private patches, snapshot repositories, and isolated tuicr state live under `~/.local/state/pi-code-review/`. Native PR sessions use existing GitHub CLI authentication without copying credentials. They bind the PR repository, number, base/head revisions, and saved diff-content hashes. Remote revision checks surround imports and follow-ups; the helper has no publication command. A review request alone never authorizes a remote draft or submission. tuicr may initially select commits since the last submitted review, so select all commits for a whole-PR review before following or publishing findings.
+
+The helper checks source freshness, exact process and pane ownership, session identity, commit range, and saved file inventory. It cannot inspect every transient UI selection or provide an atomic generation guard. It preserves receipts and reports a raced target change rather than retrying blindly. Partial-hunk reviews remain text-only. See the [tuicr reference](../stow/agents/.agents/skills/code-review/references/tuicr.md) for commands, schemas, storage, and limits.
 
 Homebrew owns tuicr. The helper's persisted-state checks are verified against 0.27.0 and fail closed after a binary upgrade until revalidated. Restow `agents` after adding or removing skill files. Pi reads the replacement skill on its next invocation; reload if discovery needs refreshing.
 
@@ -60,11 +62,14 @@ The opt-in native check opens one unfocused disposable cmux workspace. It checks
 
 ```sh
 /usr/bin/python3 scripts/tests/tuicr_review_smoke.py --allow-ui
+/usr/bin/python3 scripts/tests/tuicr_pr_smoke.py --allow-ui
 ```
+
+The PR smoke runs real tuicr with a synthetic `gh` executable. It checks native session binding, local drafts, human feedback, and stale-head refusal without network requests or remote writes. Authenticated forge access and actual publication are outside that test.
 
 ### Roll back the trial
 
-The replacement is one local commit titled `agents: replace code-review Hunk integration with tuicr`. With unrelated work preserved, revert that commit, then run `scripts/restow-changed.sh HEAD^ HEAD` from the primary checkout to remove the tuicr helper links and restore Hunk's. Reload Pi's skills. The revert retains private review artifacts; close old panes before switching workflows.
+The replacement started in `f50993c`, titled `agents: replace code-review Hunk integration with tuicr`. Native PR support is the follow-up `agents: bind code reviews to native tuicr PR sessions`. With unrelated work preserved, revert the native-PR commit first and `f50993c` second, then run `scripts/restow-changed.sh HEAD^ HEAD` from the primary checkout to remove the tuicr helper links and restore Hunk's. Reload Pi's skills. The revert retains private review artifacts; close old panes before switching workflows.
 
 Hunk remains installed for the existing Git pager, shell shortcuts, and human-led Worktrunk feedback below. Those are separate from the replaced code-review skill. tuicr can remain installed after rollback.
 

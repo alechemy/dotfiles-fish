@@ -66,8 +66,12 @@ class Fixture(unittest.TestCase):
         self.assertEqual(index, (self.repo / ".git/index").read_bytes())
         directory = review.review_directory(result["review"])
         state = review.load_state(directory)
-        self.assertEqual(review.private_git(directory, "remote"), b"")
-        self.assertEqual(list((directory / "snapshot").iterdir()), [directory / "snapshot/.git"])
+        if state.get("pr"):
+            self.assertFalse((directory / "snapshot").exists())
+            self.assertEqual(list((directory / "viewer").iterdir()), [])
+        else:
+            self.assertEqual(review.private_git(directory, "remote"), b"")
+            self.assertEqual(list((directory / "snapshot").iterdir()), [directory / "snapshot/.git"])
         return directory, state
 
 
@@ -321,6 +325,13 @@ class ViewerTests(Fixture):
         with self.assertRaisesRegex(review.ReviewError, "removed or edited"):
             self.send(self.finding())
 
+    def test_submitted_comment_is_not_recreated_as_a_local_draft(self):
+        self.send(self.finding())
+        self.comments[0]["lifecycle_state"] = "submitted"
+        with self.assertRaisesRegex(review.ReviewError, "removed or edited"):
+            self.send(self.finding())
+        self.assertEqual(len(self.comments), 1)
+
     def test_source_race_retains_receipt_and_reports_failure(self):
         self.after_apply = lambda: self.file("sample file.txt", "raced\n")
         with self.assertRaisesRegex(review.ReviewError, "content changed"):
@@ -366,7 +377,152 @@ class ViewerTests(Fixture):
         self.assertEqual(len(self.comments), 2)
 
 
+class GitHubTests(Fixture):
+    def setUp(self):
+        super().setUp()
+        self.file("sample file.txt", "changed\n")
+        self.commit()
+        self.head = self.git("rev-parse", "HEAD").strip()
+        self.url = "https://github.com/fixture/project/pull/88"
+        self.identity = {"base_head": self.base, "head": self.head}
+        self.diff = review.snapshot(str(self.repo), {"mode": "endpoints", "base": self.base, "head": self.head,
+                                                   "paths": [], "include_untracked": False})
+        real_run = review.run
+
+        def run(args, **kwargs):
+            if args[0] == "gh":
+                self.assertEqual(args, ["gh", "pr", "diff", self.url, "--color", "never"])
+                self.assertEqual(kwargs["extra_env"]["GH_HOST"], "github.com")
+                return self.diff
+            return real_run(args, **kwargs)
+
+        for replacement in (patch.object(review, "pr_identity", side_effect=lambda pr: self.identity.copy()),
+                            patch.object(review, "run", side_effect=run)):
+            replacement.start()
+            self.addCleanup(replacement.stop)
+
+    def prepare_pr(self, **options):
+        return self.prepare("endpoints", base=self.base, head=self.head, pr_url=self.url, **options)
+
+    def record(self, directory, state):
+        pr = state["pr"]
+        path = directory / "tuicr-home/reviews/sessions/pr.json"
+        path.parent.mkdir(parents=True)
+        record = {"version": "1.3", "id": "pr-session", "repo_path": "forge:github.com/fixture/project",
+                  "diff_source": "pull_request", "base_commit": self.head, "commit_range": None,
+                  "commit_selection_range": None,
+                  "pr_session_key": {"repository": pr["repository"], "number": 88, "head_sha": self.head},
+                  "files": {name: {"content_hash": value} for name, value in pr["content_hashes"].items()}}
+        review.save(path, review.encoded(record))
+        return path, record
+
+    def test_native_route_preserves_auth_location_without_copying_credentials(self):
+        with patch.dict(os.environ, {"GH_CONFIG_DIR": str(self.home / "private-gh")}):
+            directory, state = self.prepare_pr()
+        self.assertEqual(review.viewer_command(directory, state), ["--no-update-check", "pr", self.url])
+        self.assertEqual(review.viewer_directory(directory, state), directory / "viewer")
+        env = review.viewer_environment(directory, state)
+        self.assertEqual(env["GH_CONFIG_DIR"], str(self.home / "private-gh"))
+        self.assertEqual(env["HOME"], str(directory / "tuicr-home"))
+        self.assertFalse((directory / "tuicr-home/.config/gh").exists())
+        path, _ = self.record(directory, state)
+        binding, files = review.session_record(directory, state, str(path))
+        self.assertEqual(binding["id"], "pr-session")
+        self.assertEqual(set(files), {"sample file.txt"})
+
+    def test_rejects_noncanonical_or_foreign_urls(self):
+        for url in ("http://github.com/a/b/pull/1", "https://github.com.evil/a/b/pull/1",
+                    "https://github.com/../b/pull/1", "https://github.com/a/b/pull/1#diff-x",
+                    "https://gitlab.com/a/b/-/merge_requests/1"):
+            with self.subTest(url=url), self.assertRaises(review.ReviewError):
+                review.github_target(url)
+
+    def test_rejects_partial_scope_and_unpinned_or_wrong_base(self):
+        with self.assertRaisesRegex(review.ReviewError, "complete endpoints"):
+            self.prepare_pr(path=["sample file.txt"])
+        self.identity["head"] = "f" * 40
+        with self.assertRaisesRegex(review.ReviewError, "pinned head"):
+            self.prepare_pr()
+        self.identity["head"] = self.head
+        self.identity["base_head"] = self.head
+        with self.assertRaisesRegex(review.ReviewError, "single merge base"):
+            self.prepare_pr()
+
+    def test_remote_diff_must_match_exact_local_scope(self):
+        self.diff = self.diff.replace(b"+changed", b"+wrong")
+        with self.assertRaisesRegex(review.ReviewError, "GitHub diff differs"):
+            self.prepare_pr()
+
+    def test_remote_base_and_head_changes_are_stale(self):
+        _, state = self.prepare_pr()
+        for field in ("base_head", "head"):
+            original = self.identity[field]
+            self.identity[field] = "e" * 40
+            with self.assertRaisesRegex(review.ReviewError, "PR base or head changed"):
+                review.fresh_pr(state)
+            self.identity[field] = original
+
+    def test_pr_identity_content_and_range_changes_fail_closed(self):
+        directory, state = self.prepare_pr()
+        path, record = self.record(directory, state)
+        for field, value in (("base_commit", "e" * 40), ("pr_session_key", {}),
+                             ("commit_selection_range", [0, 0]), ("files", {"sample file.txt": {"content_hash": 0}})):
+            with self.subTest(field=field):
+                changed = {**record, field: value}
+                review.save(path, review.encoded(changed))
+                with self.assertRaises(review.ReviewError):
+                    review.session_record(directory, state, str(path))
+
+    def test_forge_patch_tampering_is_detected(self):
+        directory, state = self.prepare_pr()
+        (directory / "forge.patch").write_text("wrong")
+        with self.assertRaisesRegex(review.ReviewError, "forge patch changed"):
+            review.fresh(directory, state)
+
+    def test_remote_identity_is_checked_before_writes_and_after_receipts(self):
+        directory, state = self.prepare_pr()
+        path, _ = self.record(directory, state)
+        state["session"] = {"id": "pr-session", "path": str(path)}
+        finding = {"id": "R1", "axis": "Correctness", "priority": "P1", "scope": "line",
+                   "path": "sample file.txt", "side": "new", "start_line": 1, "end_line": 1,
+                   "title": "Synthetic finding.", "body": "Synthetic evidence."}
+        files = review.patch_files(self.diff.decode())
+        payload = review.comment_payload(state, finding, files)
+        receipt = {"id": "note", "author": payload["username"], "path": payload["file"],
+                   "content": payload["content"], "comment_type": payload["type"], "side": "new",
+                   "start_line": 1, "end_line": 1, "lifecycle_state": "local_draft"}
+
+        def add(*args, **kwargs):
+            self.identity["head"] = "f" * 40
+            return receipt
+
+        with patch.object(review, "live_session", return_value=(state["session"], files)), \
+                patch.object(review, "saved_comments", return_value=[]), patch.object(review, "tuicr", side_effect=add) as writer:
+            with self.assertRaisesRegex(review.ReviewError, "PR base or head changed"):
+                review.import_findings(directory, state, {"findings": [finding]})
+            self.assertEqual(review.load_state(directory)["imports"], {"R1": "note"})
+            writer.reset_mock()
+            with self.assertRaisesRegex(review.ReviewError, "PR base or head changed"):
+                review.import_findings(directory, state, {"findings": [finding]})
+            writer.assert_not_called()
+
+
 class CommandTests(unittest.TestCase):
+    def test_github_metadata_uses_explicit_read_only_host_and_identity(self):
+        pr = review.github_target("https://github.com/fixture/project/pull/88")
+        pr["gh_config_dir"] = "/synthetic/auth"
+        response = {"number": 88, "html_url": pr["url"], "head": {"sha": "b" * 40},
+                    "base": {"sha": "a" * 40, "repo": {"full_name": "fixture/project"}}}
+        with patch.object(review, "run", return_value=review.encoded(response)) as command:
+            self.assertEqual(review.pr_identity(pr), {"base_head": "a" * 40, "head": "b" * 40})
+        self.assertEqual(command.call_args.args[0], ["gh", "api", "--hostname", "github.com", "repos/fixture/project/pulls/88"])
+        self.assertEqual(command.call_args.kwargs["extra_env"]["GH_CONFIG_DIR"], "/synthetic/auth")
+        for field, value in (("number", 99), ("html_url", "https://github.com/other/project/pull/88"),
+                             ("head", {"sha": "not-a-commit"})):
+            with patch.object(review, "run", return_value=review.encoded({**response, field: value})):
+                with self.assertRaises(review.ReviewError):
+                    review.pr_identity(pr)
+
     def test_output_limit_stops_a_producer_before_it_finishes(self):
         with patch.object(review, "LIMIT", 128):
             with self.assertRaisesRegex(review.ReviewError, "32 MiB helper limit"):

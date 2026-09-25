@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Keep Pi review findings bound to an isolated tuicr comparison."""
+"""Bind Pi findings to an exact tuicr snapshot or GitHub PR session."""
 
 import argparse
 import base64
@@ -172,6 +172,8 @@ def relative_path(value):
 def comparison(args):
     repo = Path(git(args.repo, "rev-parse", "--show-toplevel").decode().removesuffix("\n")).resolve()
     mode = args.mode
+    if getattr(args, "pr_url", None) and (mode != "endpoints" or args.path or args.include_untracked):
+        raise ReviewError("Native PR sessions require a complete endpoints comparison without path or untracked selections.")
     if mode in ("endpoints", "since") and not args.base:
         raise ReviewError("This comparison requires --base.")
     if mode in ("endpoints", "root") and not args.head:
@@ -197,7 +199,8 @@ def snapshot(repo, target):
     if mode not in ("endpoints", "root") and current_head(repo) != head:
         raise ReviewError("HEAD changed during this mutable review; prepare a new review.")
     options = ["--no-ext-diff", "--no-textconv", "--no-color", "--binary", "--full-index",
-               "--find-renames", "--src-prefix=a/", "--dst-prefix=b/", "--unified=3"]
+               "--find-renames", "--src-prefix=a/", "--dst-prefix=b/", "--unified=3",
+               "--diff-algorithm=myers", "--indent-heuristic", "--inter-hunk-context=0"]
     if mode == "root":
         args = ["diff-tree", "--root", "--no-commit-id", "-p", *options, head]
     else:
@@ -246,12 +249,93 @@ def prepare(args):
     state = {"version": 2, "viewer": "tuicr", "id": review_id, "owner": session_owner, "repo": repo,
              "comparison": target, "patch_sha256": digest(patch), "findings": {}, "imports": {}}
     save(directory / "review.patch", patch)
-    state["snapshot"] = build_snapshot(directory, state)
+    if getattr(args, "pr_url", None):
+        configure_viewer(directory)
+        private_directory(directory / "viewer")
+        state["pr"] = prepare_pr(directory, state, args.pr_url, patch)
+    else:
+        state["snapshot"] = build_snapshot(directory, state)
     fresh(directory, state)
     save_state(directory, state)
     return {"review": review_id, "repo": repo, "comparison": target,
             "patch": str(directory / "review.patch"), "patch_sha256": state["patch_sha256"],
-            "viewer": "tuicr", "snapshot": state["snapshot"]}
+            "viewer": "tuicr", "snapshot": state.get("snapshot"), "pr": state.get("pr")}
+
+
+def github_target(url):
+    match = re.fullmatch(r"https://github\.com/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)/pull/([1-9][0-9]*)/?", url)
+    if not match or any(part in (".", "..") for part in match.groups()[:2]):
+        raise ReviewError("Native PR review currently requires a canonical https://github.com/owner/repo/pull/number URL.")
+    owner, name, number = match.groups()
+    return {"url": f"https://github.com/{owner}/{name}/pull/{number}", "number": int(number),
+            "repository": {"kind": "git_hub", "host": "github.com", "owner": owner, "name": name}}
+
+
+def gh_environment(config):
+    return {"GH_CONFIG_DIR": config, "GH_HOST": "github.com", "GH_PROMPT_DISABLED": "1",
+            "GH_NO_UPDATE_NOTIFIER": "1", "GH_NO_EXTENSION_UPDATE_NOTIFIER": "1",
+            "GH_PAGER": "cat", "GH_DEBUG": "", "DEBUG": "", "GH_TELEMETRY": "0"}
+
+
+def pr_identity(pr):
+    repository = pr["repository"]
+    endpoint = f'repos/{repository["owner"]}/{repository["name"]}/pulls/{pr["number"]}'
+    value = json.loads(run(["gh", "api", "--hostname", "github.com", endpoint],
+                           extra_env=gh_environment(pr["gh_config_dir"])))
+    if (value.get("number") != pr["number"] or value.get("html_url", "").lower() != pr["url"].lower()
+            or value["base"]["repo"]["full_name"].lower() != f'{repository["owner"]}/{repository["name"]}'.lower()):
+        raise ReviewError("GitHub returned a different PR identity.")
+    base, head = value["base"]["sha"], value["head"]["sha"]
+    if not all(isinstance(sha, str) and re.fullmatch(r"[0-9a-f]{40}", sha) for sha in (base, head)):
+        raise ReviewError("GitHub returned invalid PR revisions.")
+    return {"base_head": base, "head": head}
+
+
+def fresh_pr(state):
+    pr = state.get("pr")
+    if pr and pr_identity(pr) != {key: pr[key] for key in ("base_head", "head")}:
+        raise ReviewError("The PR base or head changed; prepare a new review before attaching or publishing findings.")
+
+
+def tuicr_content_hashes(patch):
+    result = {}
+    for block in re.split(r"(?m)(?=^diff --git )", patch.replace("\r\n", "\n")):
+        if not block.startswith("diff --git "):
+            continue
+        files = patch_files(block)
+        if len(files) != 1:
+            raise ReviewError("Unsupported forge diff block.")
+        value, in_hunk = 0xcbf29ce484222325, False
+        for line in block.removesuffix("\n").split("\n"):
+            if line.startswith("@@ "):
+                in_hunk = True
+            elif in_hunk and line.startswith((" ", "+", "-")):
+                for byte in (line + "\n").encode():
+                    value = ((value ^ byte) * 0x100000001b3) & 0xffffffffffffffff
+        result[next(iter(files))] = value
+    return result
+
+
+def prepare_pr(directory, state, url, patch):
+    pr = github_target(url)
+    config = os.environ.get("GH_CONFIG_DIR") or str(Path(os.environ.get("XDG_CONFIG_HOME", str(Path.home() / ".config"))) / "gh")
+    pr["gh_config_dir"] = str(Path(config).expanduser().resolve())
+    pr.update(pr_identity(pr))
+    target = state["comparison"]
+    if pr["head"] != target["head"]:
+        raise ReviewError("The pinned head does not match the PR head.")
+    bases = git(state["repo"], "merge-base", "--all", pr["base_head"], pr["head"]).decode().splitlines()
+    if bases != [target["base"]]:
+        raise ReviewError("The pinned base must be the PR's single merge base; fetch missing history before preparing.")
+    forge_patch = run(["gh", "pr", "diff", pr["url"], "--color", "never"],
+                      extra_env=gh_environment(pr["gh_config_dir"]))
+    if patch_files(forge_patch.decode()) != patch_files(patch.decode()):
+        raise ReviewError("The GitHub diff differs from the pinned comparison; retain the text report.")
+    pr["content_hashes"] = tuicr_content_hashes(forge_patch.decode())
+    pr["patch_sha256"] = digest(forge_patch)
+    save(directory / "forge.patch", forge_patch)
+    fresh_pr({"pr": pr})
+    return pr
 
 
 def fresh(directory, state):
@@ -260,6 +344,10 @@ def fresh(directory, state):
         raise ReviewError("The saved patch changed; do not attach findings to it.")
     if digest(snapshot(state["repo"], state["comparison"])) != state["patch_sha256"]:
         raise ReviewError("The reviewed content changed; prepare a new review before importing or discussing findings.")
+    if "pr" in state:
+        forge_patch = directory / "forge.patch"
+        if forge_patch.is_symlink() or digest(forge_patch.read_bytes()) != state["pr"]["patch_sha256"]:
+            raise ReviewError("The saved forge patch changed; prepare a new review.")
     if "snapshot" in state:
         if private_git(directory, "rev-parse", "HEAD").decode().strip() != state["snapshot"]["head"]:
             raise ReviewError("The isolated snapshot HEAD changed; prepare a new review.")
@@ -351,12 +439,15 @@ def surface_exists(workspace, surface):
     return len(matches) == 1
 
 
-def viewer_environment(directory):
+def viewer_environment(directory, state=None):
     home = directory / "tuicr-home"
-    return {"HOME": str(home), "XDG_CONFIG_HOME": str(home / ".config"),
-            "XDG_DATA_HOME": str(home / ".local/share"), "GIT_CONFIG_GLOBAL": os.devnull,
-            "GIT_CONFIG_NOSYSTEM": "1", "GIT_TERMINAL_PROMPT": "0", "GIT_OPTIONAL_LOCKS": "0",
-            "TUICR_PROFILE": "0", "TUICR_PROFILE_FILE": ""}
+    env = {"HOME": str(home), "XDG_CONFIG_HOME": str(home / ".config"),
+           "XDG_DATA_HOME": str(home / ".local/share"), "GIT_CONFIG_GLOBAL": os.devnull,
+           "GIT_CONFIG_NOSYSTEM": "1", "GIT_TERMINAL_PROMPT": "0", "GIT_OPTIONAL_LOCKS": "0",
+           "TUICR_PROFILE": "0", "TUICR_PROFILE_FILE": ""}
+    if state and state.get("pr"):
+        env.update(gh_environment(state["pr"]["gh_config_dir"]))
+    return env
 
 
 def private_git(directory, *args, data=None):
@@ -366,13 +457,17 @@ def private_git(directory, *args, data=None):
                 *args], data=data, extra_env=viewer_environment(directory))
 
 
-def build_snapshot(directory, state):
-    private_directory(directory / "snapshot")
+def configure_viewer(directory):
     home = private_directory(directory / "tuicr-home")
     config = private_directory(home / ".config/tuicr")
     save(config / "config.toml", b'appearance = "dark"\nignore_whitespace = false\n'
          b'backend = "cli"\nno_update_check = true\nreview_watch_interval_ms = 1000\n'
          b'diff_watch_interval_ms = 0\nshow_commits = false\nusername = "user"\n')
+
+
+def build_snapshot(directory, state):
+    private_directory(directory / "snapshot")
+    configure_viewer(directory)
     object_format = git(state["repo"], "rev-parse", "--show-object-format").decode().strip()
     private_git(directory, "init", "-q", "--template=", "-b", "review", "--object-format=" + object_format)
     target = state["comparison"]
@@ -422,15 +517,21 @@ def build_snapshot(directory, state):
     return result
 
 
+def viewer_directory(directory, state):
+    return directory / ("viewer" if state.get("pr") else "snapshot")
+
+
 def viewer_command(directory, state):
+    if state.get("pr"):
+        return ["--no-update-check", "pr", state["pr"]["url"]]
     snapshot = state["snapshot"]
     return ["--no-update-check", "--revisions", snapshot["base"] + ".." + snapshot["head"]]
 
 
 def tuicr(directory, state, *args, data=None):
     return json.loads(run([state["tuicr_binary"], "review", *args],
-                          cwd=directory / "snapshot", data=encoded(data) if data is not None else None,
-                          extra_env=viewer_environment(directory)))
+                          cwd=viewer_directory(directory, state), data=encoded(data) if data is not None else None,
+                          extra_env=viewer_environment(directory, state)))
 
 
 def launch_command(directory):
@@ -457,11 +558,11 @@ def run_viewer(directory):
     fresh(directory, state)
     save(directory / "process.json", encoded({"pid": os.getpid(), "started": process_started(os.getpid()),
                                                "workspace": workspace, "surface": surface}))
-    os.chdir(directory / "snapshot")
+    os.chdir(viewer_directory(directory, state))
     for key in list(os.environ):
         if key.startswith("GIT_"):
             del os.environ[key]
-    os.environ.update(viewer_environment(directory))
+    os.environ.update(viewer_environment(directory, state))
     args = [state["tuicr_binary"], *viewer_command(directory, state)]
     os.execv(args[0], args)
 
@@ -478,19 +579,39 @@ def session_record(directory, state, path):
     if not path.is_absolute() or home not in path.resolve().parents:
         raise ReviewError("tuicr returned a session outside this review's private storage.")
     session = read_json(path)
-    head = state["snapshot"]["head"]
-    if (session.get("version") != "1.3" or Path(session.get("repo_path", "")).resolve() != (directory / "snapshot").resolve()
-            or session.get("diff_source") != "commit_range" or session.get("commit_range") != [head]
-            or session.get("base_commit") != head or session.get("pr_session_key") is not None):
-        raise ReviewError("The tuicr comparison changed or its session format is unsupported.")
+    if session.get("version") != "1.3":
+        raise ReviewError("The tuicr session format is unsupported.")
+    if state.get("pr"):
+        pr = state["pr"]
+        key = {"repository": pr["repository"], "number": pr["number"], "head_sha": pr["head"]}
+        if (session.get("diff_source") != "pull_request" or session.get("pr_session_key") != key
+                or session.get("base_commit") != pr["head"] or session.get("commit_range") is not None):
+            raise ReviewError("The tuicr PR identity or head changed; prepare a new review.")
+        if session.get("commit_selection_range") is not None:
+            raise ReviewError("tuicr has a narrowed PR commit selection; select all commits before importing findings.")
+    else:
+        head = state["snapshot"]["head"]
+        if (Path(session.get("repo_path", "")).resolve() != (directory / "snapshot").resolve()
+                or session.get("diff_source") != "commit_range" or session.get("commit_range") != [head]
+                or session.get("base_commit") != head or session.get("pr_session_key") is not None):
+            raise ReviewError("The tuicr comparison changed.")
     binding = {"path": str(path), "id": session["id"]}
     if state.get("session") and binding != state["session"]:
         raise ReviewError("The tuicr session was replaced; prepare a new review.")
     files = patch_files((directory / "review.patch").read_bytes().decode())
-    expected_paths = set(files) | {f"Commit Message ({head[:7]})"}
+    expected_paths = set(files) if state.get("pr") else set(files) | {f"Commit Message ({head[:7]})"}
     if set(session["files"]) != expected_paths:
-        raise ReviewError("tuicr's saved file inventory differs from the reviewed snapshot.")
+        raise ReviewError("tuicr's saved file inventory differs from the reviewed comparison.")
+    if state.get("pr"):
+        hashes = {path: value.get("content_hash") for path, value in session["files"].items()}
+        if hashes != state["pr"]["content_hashes"]:
+            raise ReviewError("tuicr's saved PR diff content differs from the reviewed comparison.")
     return binding, files
+
+
+def viewer_sessions(directory, state):
+    selector = ["--all"] if state.get("pr") else ["--repo", str(directory / "snapshot")]
+    return tuicr(directory, state, "list", *selector)
 
 
 def active_binding(directory, state):
@@ -499,10 +620,11 @@ def active_binding(directory, state):
             or marker.get("surface") != state["launch"]["surface"]
             or marker.get("workspace") != state["launch"]["workspace"]):
         raise ReviewError("The tuicr process no longer matches this review's terminal.")
-    sessions = tuicr(directory, state, "list", "--repo", str(directory / "snapshot"))
-    candidates = [item for item in sessions if item.get("active") and item.get("kind") == "local"]
+    sessions = viewer_sessions(directory, state)
+    kind = "pr" if state.get("pr") else "local"
+    candidates = [item for item in sessions if item.get("active") and item.get("kind") == kind]
     if len(candidates) != 1:
-        raise ReviewError("Expected exactly one active tuicr session for this snapshot.")
+        raise ReviewError("Expected exactly one active tuicr session for this review.")
     binding, files = session_record(directory, state, candidates[0]["path"])
     active = read_json(Path(binding["path"]).parent.parent / "active_sessions.json")
     if active.get("version") != "1.0" or [item["pid"] for item in active["sessions"]
@@ -530,13 +652,17 @@ def saved_comments(directory, state):
 
 
 def human_comments(directory, state):
+    fresh_pr(state)
     author = "Pi review " + state["id"]
     receipts = set(state["imports"].values())
-    return {"review": state["id"], "comments": [item for item in saved_comments(directory, state)
-            if item.get("author") != author and item.get("id") not in receipts]}
+    result = {"review": state["id"], "comments": [item for item in saved_comments(directory, state)
+              if item.get("author") != author and item.get("id") not in receipts]}
+    fresh_pr(state)
+    return result
 
 
 def open_viewer(directory, state, reopen=False):
+    fresh_pr(state)
     fresh(directory, state)
     workspace, caller = os.environ.get("CMUX_WORKSPACE_ID"), os.environ.get("CMUX_SURFACE_ID")
     if not workspace or not caller or not surface_exists(workspace, caller):
@@ -575,20 +701,22 @@ def open_viewer(directory, state, reopen=False):
     launch = state["launch"]
     if launch["workspace"] != workspace or launch["caller"] != caller or not launch.get("surface"):
         raise ReviewError("The launch identity is incomplete or belongs to another terminal; inspect it manually.")
-    deadline = time.monotonic() + 15
+    wait_seconds = 60 if state.get("pr") else 15
+    deadline = time.monotonic() + wait_seconds
     while time.monotonic() < deadline:
         marker_path = directory / "process.json"
         if marker_path.exists():
-            sessions = tuicr(directory, state, "list", "--repo", str(directory / "snapshot"))
+            sessions = viewer_sessions(directory, state)
             if any(item.get("active") for item in sessions):
                 binding, _ = active_binding(directory, state)
                 fresh(directory, state)
+                fresh_pr(state)
                 state["session"] = binding
                 launch["status"] = "ready"
                 save_state(directory, state)
                 return {"review": state["id"], "session": binding["path"], "surface": launch["surface"]}
         time.sleep(0.15)
-    raise ReviewError("tuicr did not register within 15 seconds. Inspect its pane, then run open with the same review ID; do not launch another.")
+    raise ReviewError(f"tuicr did not register within {wait_seconds} seconds. Inspect its pane, then run open with the same review ID; do not launch another.")
 
 
 def validate_findings(values):
@@ -661,6 +789,7 @@ def same_comment(comment, payload):
 
 def import_findings(directory, state, values):
     findings = validate_findings(values)
+    fresh_pr(state)
     for finding_id, value in findings.items():
         if finding_id in state["findings"] and state["findings"][finding_id] != value:
             raise ReviewError("An existing finding ID changed. Preserve its evidence; use a new ID for a revised finding.")
@@ -679,7 +808,7 @@ def import_findings(directory, state, values):
         if matches:
             reconciled[finding_id] = matches[0]["id"]
         elif finding_id in state["imports"]:
-            raise ReviewError("An imported note was removed or edited; it will not be recreated automatically.")
+            raise ReviewError("An imported note was removed or edited, or is no longer a local draft; it will not be recreated automatically.")
         elif finding_id in state.get("pending", []):
             raise ReviewError("A previous import may still complete. Its notes are not visible yet; inspect the pane rather than retrying the write.")
         else:
@@ -699,12 +828,14 @@ def import_findings(directory, state, values):
         state["pending"].remove(finding_id)
         save_state(directory, state)
         live_session(directory, state)
+    fresh_pr(state)
     delivered = list(reconciled) + list(pending)
     return {"review": state["id"], "inline": [key for key in delivered if findings[key]["scope"] == "line"],
             "attached": delivered, "report_only": report_only, "artifact": str(directory / "review.json")}
 
 
 def show_finding(directory, state, finding_id):
+    fresh_pr(state)
     session, files = live_session(directory, state)
     finding = state["findings"].get(finding_id)
     if not finding:
@@ -713,7 +844,8 @@ def show_finding(directory, state, finding_id):
     payload = comment_payload(state, finding, files)
     comments = saved_comments(directory, state)
     if not comment_id or not payload or not any(item.get("id") == comment_id and same_comment(item, payload) for item in comments):
-        raise ReviewError("This finding has no unchanged tuicr note; discuss its local report entry.")
+        raise ReviewError("This finding has no unchanged local-draft tuicr note; discuss its saved report entry.")
+    fresh_pr(state)
     return {"review": state["id"], "finding": finding, "session": session["path"], "comment": comment_id,
             "navigation": "In this review pane, open :summary, select " + finding_id + ", and press Enter.",
             "surface": state["launch"]["surface"]}
@@ -730,6 +862,7 @@ def main():
     capture.add_argument("--head")
     capture.add_argument("--path", action="append", default=[])
     capture.add_argument("--include-untracked", action="store_true")
+    capture.add_argument("--pr-url", help="Bind a complete endpoints comparison to a native GitHub PR session")
     for name in ("open", "import", "show", "comments", "status", "_run"):
         command = commands.add_parser(name)
         command.add_argument("--review", required=True)
@@ -762,8 +895,10 @@ def main():
                 elif args.action == "comments":
                     result = human_comments(directory, state)
                 else:
+                    fresh_pr(state)
                     session, _ = live_session(directory, state)
-                    result = {"review": state["id"], "session": session["path"], "comparison": state["comparison"],
+                    fresh_pr(state)
+                    result = {"review": state["id"], "session": session["path"], "comparison": state["comparison"], "pr": state.get("pr"),
                               "findings": list(state["findings"]), "attached": list(state["imports"])}
         print(json.dumps(result, ensure_ascii=True))
     except (ReviewError, OSError, ValueError, KeyError, TypeError) as error:
