@@ -20,10 +20,12 @@ review = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(review)
 
 GH = '''#!/usr/bin/python3
-import json,sys
+import json,os,sys
 from pathlib import Path
 root=Path(__file__).parent
 fixture=json.loads((root/'fixture.json').read_text())
+if os.environ.get('HOME') != fixture['original_home']:
+    sys.exit(1)
 a=sys.argv[1:]
 with (root/'calls.jsonl').open('a') as f:
     f.write(json.dumps(a)+'\\n')
@@ -90,7 +92,7 @@ def main():
         git("commit", "-qm", "Change")
         head = git("rev-parse", "HEAD")
         url = "https://github.com/fixture/project/pull/88"
-        fixture = {"view": {"number": 88, "url": url, "title": "Synthetic PR", "state": "OPEN", "body": "Synthetic review.",
+        fixture = {"original_home": str(Path.home()), "view": {"number": 88, "url": url, "title": "Synthetic PR", "state": "OPEN", "body": "Synthetic review.",
                             "headRefOid": head, "baseRefOid": base, "headRefName": "feature", "baseRefName": "main"},
                    "identity": {"number": 88, "html_url": url, "head": {"sha": head},
                                 "base": {"sha": base, "repo": {"full_name": "fixture/project"}}},

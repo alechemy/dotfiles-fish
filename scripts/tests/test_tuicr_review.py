@@ -368,6 +368,16 @@ class ViewerTests(Fixture):
                 review.open_viewer(self.directory, self.state)
         client.assert_not_called()
 
+    def test_exited_launch_fails_without_waiting_for_registration_timeout(self):
+        self.state.pop("session")
+        with patch.object(review, "fresh"), patch.object(review, "viewer_sessions", return_value=[]), \
+                patch.object(review, "process_started", side_effect=review.ReviewError("Process unavailable")), \
+                patch.object(review.time, "monotonic", side_effect=[0, 0, 61]), \
+                patch.object(review.time, "sleep") as sleep:
+            with self.assertRaisesRegex(review.ReviewError, "launch process.*unavailable"):
+                review.open_viewer(self.directory, self.state)
+        sleep.assert_not_called()
+
     def test_human_comments_are_read_without_clearing_or_requiring_live_pane(self):
         self.send(self.finding())
         human = {"id": "human", "author": "user", "content": "Please explain."}
@@ -424,6 +434,7 @@ class GitHubTests(Fixture):
         env = review.viewer_environment(directory, state)
         self.assertEqual(env["GH_CONFIG_DIR"], str(self.home / "private-gh"))
         self.assertEqual(env["HOME"], str(directory / "tuicr-home"))
+        self.assertEqual(state["pr"]["gh_home"], str(self.home))
         self.assertFalse((directory / "tuicr-home/.config/gh").exists())
         path, _ = self.record(directory, state)
         binding, files = review.session_record(directory, state, str(path))
@@ -508,6 +519,35 @@ class GitHubTests(Fixture):
 
 
 class CommandTests(unittest.TestCase):
+    def test_native_gh_uses_original_home_without_changing_viewer_storage(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            original_home = root / "original user's home"
+            original_home.mkdir()
+            binary = root / "original bin"
+            binary.mkdir()
+            gh = binary / "gh"
+            gh.write_text('#!/usr/bin/python3\nimport json,os,sys\n'
+                          'print(json.dumps({"home":os.environ["HOME"],"args":sys.argv[1:]}))\n')
+            gh.chmod(0o700)
+            directory = root / "review"
+            directory.mkdir()
+            state = {"pr": {"gh_config_dir": str(original_home / ".config/gh"),
+                            "gh_home": str(original_home)}}
+            with patch.dict(os.environ, {"PATH": str(binary) + os.pathsep + os.defpath,
+                                         "HOME": str(original_home)}):
+                for legacy in (False, True):
+                    if legacy:
+                        state["pr"].pop("gh_home")
+                    review.configure_gh(directory, state)
+                    env = {**os.environ, **review.viewer_environment(directory, state)}
+                    result = json.loads(subprocess.check_output(["gh", "pr", "view", "a value"], env=env))
+                    self.assertEqual(result, {"home": str(original_home), "args": ["pr", "view", "a value"]})
+                    self.assertEqual(env["HOME"], str(directory / "tuicr-home"))
+                    self.assertEqual(env["XDG_DATA_HOME"], str(directory / "tuicr-home/.local/share"))
+                    self.assertEqual((directory / "bin/gh").stat().st_mode & 0o777, 0o700)
+            self.assertNotIn("PATH", review.viewer_environment(directory))
+
     def test_github_metadata_uses_explicit_read_only_host_and_identity(self):
         pr = review.github_target("https://github.com/fixture/project/pull/88")
         pr["gh_config_dir"] = "/synthetic/auth"

@@ -12,6 +12,7 @@ import os
 from pathlib import Path, PurePosixPath
 import re
 import selectors
+import shlex
 import shutil
 import signal
 import subprocess
@@ -320,6 +321,7 @@ def prepare_pr(directory, state, url, patch):
     pr = github_target(url)
     config = os.environ.get("GH_CONFIG_DIR") or str(Path(os.environ.get("XDG_CONFIG_HOME", str(Path.home() / ".config"))) / "gh")
     pr["gh_config_dir"] = str(Path(config).expanduser().resolve())
+    pr["gh_home"] = str(Path.home())
     pr.update(pr_identity(pr))
     target = state["comparison"]
     if pr["head"] != target["head"]:
@@ -447,7 +449,19 @@ def viewer_environment(directory, state=None):
            "TUICR_PROFILE": "0", "TUICR_PROFILE_FILE": ""}
     if state and state.get("pr"):
         env.update(gh_environment(state["pr"]["gh_config_dir"]))
+        env["PATH"] = str(directory / "bin") + os.pathsep + os.environ.get("PATH", os.defpath)
     return env
+
+
+def configure_gh(directory, state):
+    binary = shutil.which("gh")
+    if not binary:
+        raise ReviewError("GitHub CLI is unavailable; native PR sessions require gh.")
+    home = state["pr"].get("gh_home", str(Path.home()))
+    wrapper = private_directory(directory / "bin") / "gh"
+    command = f'#!/bin/sh\nHOME={shlex.quote(home)} exec {shlex.quote(str(Path(binary).resolve()))} "$@"\n'
+    save(wrapper, command.encode())
+    wrapper.chmod(0o700)
 
 
 def private_git(directory, *args, data=None):
@@ -689,6 +703,8 @@ def open_viewer(directory, state, reopen=False):
         if run([binary, "--version"]).decode().strip() != "tuicr 0.27.0":
             raise ReviewError("This helper's persisted-session checks require tuicr 0.27.0; verify a newer format before updating the guard.")
         state["tuicr_binary"] = str(Path(binary).resolve())
+        if state.get("pr"):
+            configure_gh(directory, state)
         state["launch"] = {"workspace": workspace, "caller": caller, "status": "requested"}
         save_state(directory, state)
         response = cmux("new-split", "right", "--workspace", workspace, "--surface", caller,
@@ -706,6 +722,13 @@ def open_viewer(directory, state, reopen=False):
     while time.monotonic() < deadline:
         marker_path = directory / "process.json"
         if marker_path.exists():
+            marker = read_json(marker_path)
+            try:
+                started = process_started(marker["pid"])
+            except ReviewError as error:
+                raise ReviewError("The tuicr launch process is unavailable; inspect its pane before preparing a new review.") from error
+            if started != marker.get("started"):
+                raise ReviewError("The tuicr launch process was replaced; inspect its pane before preparing a new review.")
             sessions = viewer_sessions(directory, state)
             if any(item.get("active") for item in sessions):
                 binding, _ = active_binding(directory, state)
