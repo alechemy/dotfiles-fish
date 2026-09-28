@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Opt-in native Hunk/cmux smoke check using a disposable local workspace."""
+"""Opt-in tuicr/cmux integration check in one disposable synthetic workspace."""
 
 import argparse
 import importlib.util
@@ -13,8 +13,8 @@ import time
 import uuid
 
 ROOT = Path(__file__).resolve().parents[2]
-HELPER = ROOT / "stow/agents/.agents/skills/code-review/hunk_review.py"
-spec = importlib.util.spec_from_file_location("hunk_review", HELPER)
+HELPER = ROOT / "stow/agents/.agents/skills/code-review/tuicr_review.py"
+spec = importlib.util.spec_from_file_location("tuicr_review", HELPER)
 review = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(review)
 
@@ -24,10 +24,11 @@ def main():
     parser.add_argument("--allow-ui", action="store_true", required=True,
                         help="Allow creation and cleanup of one unfocused synthetic cmux workspace")
     parser.parse_args()
-    os.environ["PI_SESSION_ID"] = "hunk-smoke-" + uuid.uuid4().hex
+    os.umask(0o077)
+    os.environ["PI_SESSION_ID"] = "tuicr-smoke-" + uuid.uuid4().hex
     directories = []
     workspace = None
-    with tempfile.TemporaryDirectory(prefix="hunk-review-smoke-") as temporary:
+    with tempfile.TemporaryDirectory(prefix="tuicr-review-smoke-") as temporary:
         repo = Path(temporary).resolve()
 
         def git(*args):
@@ -46,7 +47,7 @@ def main():
         (repo / "removed.txt").write_text("removed\n")
         (repo / "binary.dat").write_bytes(b"\x00\x01")
         (repo / "CRLF.txt").write_bytes(b"original\r\n")
-        (repo / "caf\u00e9.txt").write_text("original\n")
+        (repo / "café.txt").write_text("original\n")
         git("add", "--all")
         git("commit", "-qm", "Root fixture")
         base = git("rev-parse", "HEAD")
@@ -55,7 +56,7 @@ def main():
         (repo / "removed.txt").unlink()
         (repo / "binary.dat").write_bytes(b"\x00\x02")
         (repo / "CRLF.txt").write_bytes(b"changed\r\n")
-        (repo / "caf\u00e9.txt").write_text("changed\n")
+        (repo / "café.txt").write_text("changed\n")
         git("add", "--all")
         git("commit", "-qm", "Changed fixture")
         head = git("rev-parse", "HEAD")
@@ -65,15 +66,14 @@ def main():
         (repo / "untracked.txt").write_text("untracked\n")
         (repo / "untracked-binary.dat").write_bytes(b"\x00\x03")
         try:
-            created = review.cmux("workspace", "create", "--cwd", str(repo), "--name", "Hunk integration smoke", "--focus", "false")
+            created = review.cmux("workspace", "create", "--cwd", str(repo), "--name", "tuicr integration smoke", "--focus", "false")
             workspace = created["workspace_id"]
             tree = review.cmux("tree", "--workspace", workspace)
             surfaces = [surface["id"] for window in tree.get("windows", [])
                         for item in window.get("workspaces", []) if item.get("id") == workspace
                         for pane in item.get("panes", []) for surface in pane.get("surfaces", [])
                         if surface.get("type") == "terminal"]
-            if len(surfaces) != 1:
-                raise review.ReviewError("Smoke workspace must have exactly one initial terminal.")
+            assert len(surfaces) == 1
             os.environ.update(CMUX_WORKSPACE_ID=workspace, CMUX_SURFACE_ID=surfaces[0])
             for case in (*review.MODES, "textconv", "unborn"):
                 if case == "textconv":
@@ -93,41 +93,36 @@ def main():
                 directories.append(directory)
                 state = review.load_state(directory)
                 with review.locked(directory):
-                    try:
-                        opened = review.open_viewer(directory, state)
-                    except review.ReviewError:
-                        marker = json.loads((directory / "process.json").read_bytes())
-                        own = [item for item in review.hunk("list")["sessions"] if item["pid"] == marker["pid"]]
-                        if len(own) == 1:
-                            actual = review.hunk("review", own[0]["sessionId"], "--include-patch")["review"]
-                            expected = review.patch_files((directory / "review.patch").read_bytes().decode())
-                            for item in actual["files"]:
-                                parsed = review.patch_files(item.get("patch", ""))
-                                print(json.dumps({"mode": mode, "file": item["path"], "expected": expected.get(item["path"]), "actual": parsed}))
-                        raise
+                    opened = review.open_viewer(directory, state)
                     finding = {"id": "R1", "axis": "Correctness", "priority": "P2", "scope": "line",
                                "path": "sample.txt", "side": "new", "start_line": 1, "end_line": 2,
-                               "title": "Synthetic native integration check.", "body": "This is synthetic review feedback."}
+                               "title": "Synthetic integration check.", "body": "This is synthetic review feedback. \n"}
                     values = {"findings": [finding, {"id": "R2", "axis": "Spec", "priority": "optional", "scope": "review",
-                                                     "title": "Synthetic general finding.", "body": "Keep this in the report."}]}
+                                                     "title": "Synthetic general finding.", "body": "Keep this as a review comment."},
+                                          {"id": "R3", "axis": "Standards", "priority": "P2", "scope": "file",
+                                           "path": "sample.txt", "title": "Synthetic file finding.", "body": "Keep this on the file."},
+                                          {**finding, "id": "R4", "start_line": 999, "end_line": 999}]}
                     for _ in range(2):
                         imported = review.import_findings(directory, state, values)
-                        assert imported["inline"] == ["R1"] and imported["report_only"] == ["R2"]
-                    assert len(review.hunk("comment", "list", opened["session"])["comments"]) == 1
+                        assert imported["inline"] == ["R1"] and imported["attached"] == ["R1", "R2", "R3"]
+                        assert imported["report_only"] == ["R4"]
+                    assert len(review.saved_comments(directory, state)) == 3
                     review.show_finding(directory, state, "R1")
                     assert review.open_viewer(directory, state)["reused"]
-                    assert review.hunk("comment", "list", opened["session"], "--type", "user")["comments"] == []
+                    human = review.tuicr(directory, state, "add", "--session", opened["session"], "--input", "-",
+                                         data={"username": "user", "content": "Synthetic human feedback."})
+                    assert [item["id"] for item in review.human_comments(directory, state)["comments"]] == [human["id"]]
                 review.cmux("close-surface", "--workspace", workspace, "--surface", state["launch"]["surface"])
+                pid = review.read_json(directory / "process.json")["pid"]
+                deadline = time.monotonic() + 10
+                while review.run(["ps", "-p", str(pid), "-o", "lstart="], allowed=(0, 1)).strip():
+                    if time.monotonic() >= deadline:
+                        raise review.ReviewError("Closed smoke process did not exit.")
+                    time.sleep(0.1)
                 if case == "endpoints":
-                    deadline = time.monotonic() + 10
-                    while any(item["sessionId"] == opened["session"] for item in review.hunk("list")["sessions"]):
-                        if time.monotonic() >= deadline:
-                            raise review.ReviewError("Closed smoke session did not deregister.")
-                        time.sleep(0.1)
-                    restored = json.loads(review.run(["/usr/bin/python3", str(HELPER), "open", "--review", state["id"], "--reopen"]))
-                    assert restored["restored"]["inline"] == ["R1"]
-                    assert len(review.hunk("comment", "list", restored["session"])["comments"]) == 1
-                    state = review.load_state(directory)
+                    reopened = review.open_viewer(directory, state, reopen=True)
+                    assert reopened["session"] == opened["session"]
+                    assert len(review.saved_comments(directory, state)) == 4
                     review.cmux("close-surface", "--workspace", workspace, "--surface", state["launch"]["surface"])
                 print(json.dumps({"mode": case, "result": "passed"}))
         finally:

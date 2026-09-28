@@ -105,11 +105,15 @@ An idle root session can still have active children. Check Fleet before treating
 
 Keep one writer per checkout. A second terminal may run tests or services, but do not launch another editing agent against the same worktree.
 
-## Review in Hunk
+## Review beside Pi
 
-When asking Pi for a code review in cmux, the shared skill opens Hunk automatically and places validated findings beside the diff. Ask Pi to show or explain R1 to navigate to a finding. The grouped summary remains in Pi, including findings without valid inline anchors. See [AI findings beside the diff](cmux.md#ai-findings-beside-the-diff) for scope checks, recovery, and private artifact storage.
+When asking Pi for a code review in cmux, the shared skill opens tuicr automatically. A complete GitHub PR URL review uses a native PR session; local or restricted comparisons use an isolated snapshot. Validated findings become local comments in that session. Ask Pi to show or explain R1 to verify and discuss it, then use tuicr's `:summary` picker to jump to the comment. Save human comments and ask Pi to read the review feedback. The grouped summary remains in Pi, including findings without valid anchors. See [AI findings beside the diff](cmux.md#ai-findings-beside-the-diff) for scope checks, rollback, and private artifact storage.
 
-For a human-led review, open Hunk in the task worktree using the scope you intend to inspect:
+For native GitHub PR sessions, inspect the findings and use `:submit` when you want to publish. Asking Pi to review does not authorize publishing, including a remote draft. Select all commits for whole-PR reviews if tuicr has automatically selected only commits since your last review. Snapshots have no forge binding and cannot publish. GitHub CLI must already be authenticated; other forges and GitHub Enterprise are not yet supported by the skill's native binding.
+
+### Separate human-led Hunk workflow
+
+The existing shell shortcuts and Git pager still use Hunk during the tuicr skill trial. For a human-led review, open Hunk in the task worktree using the scope you intend to inspect:
 
 ```fish
 hunk diff
@@ -193,7 +197,10 @@ For dotfiles, only the primary checkout owns live HOME links. Integrate experime
 | Fish shell | `wt switch` | Open the worktree picker. |
 | Pi | Cmd+Enter or Ctrl+S | Submit a message. |
 | Pi | `/subagents-fleet` | Inspect delegated runs. |
-| Pi | Ask for a code review, then "show R1." | Open an annotated Hunk diff and navigate to a finding. |
+| Pi | Ask for a code review, then "show R1." | Open an annotated tuicr PR session or snapshot and discuss the finding. |
+| tuicr PR session | Use `:submit` after inspecting the findings. | Publish the selected review to GitHub. |
+| tuicr | `:summary`, select R1, then Enter. | Jump to the finding. |
+| Pi | Ask to read the review feedback. | Read saved human tuicr comments without clearing them. |
 | Hunk | `c`, then Ctrl+S | Save a human comment. |
 | Hunk | Ctrl+Shift+F | Send saved human comments to the bound idle Pi. |
 | Task shell | `wt merge main --no-commit --no-rebase --no-remove` | Integrate locally. |
