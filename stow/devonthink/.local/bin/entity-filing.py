@@ -133,16 +133,17 @@ import urllib.request
 from datetime import date, datetime
 from pathlib import Path
 
-sys.path.insert(0, str(Path.home() / ".local" / "bin"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 from pipeline_log import setup as setup_log
 
 import brief_events as be
 import entity_candidates as ec
+import entity_capture as capture
 import things_bridge
 
 log = setup_log("entity-filing")
 
-BRIDGE = os.path.expanduser("~/.local/bin/entity-dt-bridge.js")
+BRIDGE = str(Path(__file__).resolve().with_name("entity-dt-bridge.js"))
 CONFIG_FILE = os.path.expanduser("~/.config/dt-pipeline/entities.conf")
 STATE_DIR = os.path.expanduser("~/.local/state/devonthink")
 STATE_FILE = os.path.join(STATE_DIR, "entity-filing-state.json")
@@ -246,6 +247,7 @@ def load_config():
         "THINGS_SYNC": "off",
         "THINGS_PROJECT": "Entity Filing",
         "REVIEW_URL": "",
+        "CAPTURE_AUTO_AFTER": "",
     }
     if os.path.exists(CONFIG_FILE):
         with open(CONFIG_FILE) as f:
@@ -312,6 +314,8 @@ def rebuild_processed_from_dt(state):
     stamp = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
     added = 0
     for s in sources:
+        if s.get("capture_operation"):
+            continue
         if s.get("entityfiled") and s["uuid"] not in state["processed"]:
             state["processed"][s["uuid"]] = {"modified": stamp, "hash": None}
             added += 1
@@ -763,7 +767,8 @@ def strip_leading_h1(text):
     """Drop a fact capture's leading `# <title>` line (present so the global
     H1-sync smart rule no-ops) before extraction, so the model sees only the
     fact text."""
-    lines = text.splitlines()
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    lines = text.split("\n")
     i = 0
     while i < len(lines) and not lines[i].strip():
         i += 1
@@ -2451,10 +2456,12 @@ def scan(config, state, dry_run, force_uuid, user_invoked):
         return True
     min_roster = int(config["MIN_ROSTER"])
     if len(people) < min_roster and not force_uuid:
-        log.info("People holds %d record(s), MIN_ROSTER is %d — extraction "
-                 "paused until /20_ENTITIES/People is seeded",
-                 len(people), min_roster)
-        return False
+        candidates = [s for s in candidates if capture.eligible(
+            s, config.get("CAPTURE_AUTO_AFTER", "")) or s.get("capture_operation")]
+        if not candidates:
+            log.info("People holds %d record(s), MIN_ROSTER is %d; passive "
+                     "extraction is waiting for a seeded roster", len(people), min_roster)
+            return False
 
     limit = int(config["MAX_PER_RUN"])
     filing_mode = config["FILING_MODE"]
@@ -2504,7 +2511,10 @@ def scan(config, state, dry_run, force_uuid, user_invoked):
                 save_state(state)
             continue
 
-        transport = pick_transport(config)
+        capture_path = capture.eligible(source, config.get("CAPTURE_AUTO_AFTER", "")) \
+            or bool(source.get("capture_operation"))
+        frozen_capture = source.get("capture_operation", "")
+        transport = "frozen capture" if frozen_capture else pick_transport(config)
         if transport is None:
             no_transport += 1
             continue
@@ -2514,13 +2524,13 @@ def scan(config, state, dry_run, force_uuid, user_invoked):
                          defer_reason)
                 defer_logged = True
             continue
-        if llm_lock is None and not llm_lock_failed:
+        if not frozen_capture and llm_lock is None and not llm_lock_failed:
             llm_lock = acquire_llm_lock()
             if llm_lock is None:
                 llm_lock_failed = True
                 log.info("local-llm lock held (journal OCR?), deferring "
                          "local extraction to the next run")
-        if llm_lock is None:
+        if not frozen_capture and llm_lock is None:
             continue
 
         source_date = source_date_of(source)
@@ -2536,7 +2546,30 @@ def scan(config, state, dry_run, force_uuid, user_invoked):
                 save_state(state)
             progressed = True
             continue
+        if frozen_capture:
+            try:
+                manifest = capture.decode_manifest(frozen_capture, uuid)
+                if manifest["text"] != text:
+                    log.info("capture changed; correction is required before refiling",
+                             extra={"record_uuid": uuid})
+                    continue
+                result = file_capture(config, state, source, source_date, text, None,
+                                      dry_run, manifest=manifest, previous=frozen_capture)
+                progressed = progressed or result["status"] == "filed"
+                people = run_bridge([{"op": "dump_people", "include_bodies": False}])[0]
+                index = roster_index(people)
+            except BridgeUnavailable:
+                raise
+            except Exception as exc:
+                if not dry_run:
+                    record_attempt(state, uuid, f"{type(exc).__name__}: {exc}")
+                    save_state(state)
+                log.error("capture replay failed: %s: %s", type(exc).__name__, exc,
+                          extra={"record_name": source["name"], "record_uuid": uuid})
+            continue
         if len(text.split()) < min_words_for(source["kind"]):
+            if capture_path:
+                continue
             if not dry_run:
                 remember_processed(state, source, text)
                 save_state(state)
@@ -2554,7 +2587,9 @@ def scan(config, state, dry_run, force_uuid, user_invoked):
             source_name=source["name"],
             content=cap_words(text),
         )
-        if source["kind"] == "fact":
+        if capture_path:
+            prompt = capture.PROMPT.format(roster=roster_text(people), content=text)
+        elif source["kind"] == "fact":
             prompt = FACT_PREFACE + prompt
         extracted_count += 1
         log.info("extracting via %s", transport,
@@ -2579,6 +2614,13 @@ def scan(config, state, dry_run, force_uuid, user_invoked):
             continue
 
         try:
+            if capture_path:
+                result = file_capture(config, state, source, source_date, text,
+                                      extracted_people, dry_run)
+                progressed = progressed or result["status"] == "filed"
+                people = run_bridge([{"op": "dump_people", "include_bodies": False}])[0]
+                index = roster_index(people)
+                continue
             plans = build_person_plans(extracted_people, index, selves, people,
                                        source_date)
             plans += build_event_plans(extracted_events, index, selves,
@@ -2604,6 +2646,49 @@ def scan(config, state, dry_run, force_uuid, user_invoked):
         log.info("%d candidate source(s) waiting: no eligible transport "
                  "(TRANSPORT=%s)", no_transport, config["TRANSPORT"])
     return progressed
+
+
+def file_capture(config, state, source, source_date, text, extracted, dry_run,
+                 manifest=None, previous=""):
+    lock = ec.acquire_candidates_lock() if not dry_run else None
+    try:
+        people, listing, fresh = run_bridge([
+            {"op": "dump_people", "include_bodies": False},
+            {"op": "list_candidates"},
+            {"op": "get_text", "uuid": source["uuid"]},
+        ])
+        if normalize_source_text("fact", fresh["text"]) != text:
+            return capture.outcome("deferred", "source_changed")
+        ignored = ec.CandidateIndex(listing).ignored_names()
+        subjects = extracted if manifest is None else [
+            dict(s["evidence"], passage=s["passage"]) for s in manifest["subjects"]]
+        result = capture.resolve(text, subjects, people, ignored, self_names(config))
+        if result["status"] not in {"new", "existing"}:
+            log.info("capture retained: %s", result["reason"], extra={"record_uuid": source["uuid"]})
+            return result
+        if manifest is not None:
+            for frozen, current in zip(manifest["subjects"], result["subjects"]):
+                if frozen["uuid"] and frozen["uuid"] != current["uuid"]:
+                    return capture.outcome("unresolved", "identity_changed")
+        else:
+            manifest = capture.prepare(source, source_date, text, result, date.today().isoformat())
+        if dry_run:
+            print(json.dumps(manifest, indent=2))
+            return result
+        result = capture.replay(run_bridge, manifest, previous)
+        fresh, fresh_body = run_bridge([
+            {"op": "get_source", "uuid": source["uuid"]},
+            {"op": "get_text", "uuid": source["uuid"]},
+        ])
+        modified = source.get("modified", "")
+        if normalize_source_text("fact", fresh_body["text"]) == text:
+            modified = fresh.get("modified", "") or modified
+        remember_processed(state, source, text, modified=modified)
+        save_state(state)
+        return result
+    finally:
+        if lock:
+            lock.close()
 
 
 def review_group_has_name(name):

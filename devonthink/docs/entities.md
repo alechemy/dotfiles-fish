@@ -137,8 +137,8 @@ stay stdlib-only (tier-1 `/usr/bin/python3`, stable TCC identity):
 ### Morning brief (resurfacing + contact tracking)
 
 The briefed events are **the day you agreed to**, in start order: every timed
-event you accepted, on a calendar not in `SKIP_CALENDARS`, including the ones
-with nobody attached — each a timed `📅` bullet
+event you accepted with at most 10 invitees, on a calendar not in
+`SKIP_CALENDARS`, including the ones with nobody attached — each a timed `📅` bullet
 (`- 8:00am: 📅 [Title](…)`) in the daily note's flat timeline. A day reads as
 a day, so a solo dentist appointment lists as a bare bullet rather than
 vanishing.
@@ -156,6 +156,7 @@ anyone):
 
 | Event | Briefs? | Why |
 | --- | --- | --- |
+| More than 10 invitees | no | the whole event is excluded from entity processing, even if you accepted or organized it |
 | RSVP `accepted` | yes | — |
 | RSVP `tentative` | yes, titled `… (tentative)` | a maybe is still on your day, but says so |
 | RSVP `unknown` / `pending` / `declined` | no | you never said yes |
@@ -163,6 +164,15 @@ anyone):
 | Attendees, but you are not among them | no | a distribution-list invite: Exchange lists the list, never you, so it has no RSVP of yours and never will |
 | Organizer is you | yes | your own meeting, whatever your participant entry says |
 | `EKEventStatusCanceled` | no | Exchange keeps a cancelled meeting on the calendar, retitled `Canceled: …`, **with your acceptance intact** — so it has to be caught on status, not RSVP |
+
+The 10-invitee limit uses the complete EventKit attendee array, including
+self, rooms, resources, declined invitees, and suppressed people. Filtering
+those entries never makes a large meeting eligible. Large meetings produce
+no briefing, candidate sightings, identity-context observations, LastContact
+bumps, or recurring-series evidence. Historical contact backfills use the
+same cutoff. A distribution list counts as the one invitee EventKit exposes;
+its membership cannot be inferred locally. Existing candidate evidence and
+contact dates are retained.
 
 `calendar-events-json.js` passes a nil calendars predicate to EventKit, so
 **every** calendar is already queried — Exchange and iCloud alike. Nothing
@@ -785,6 +795,25 @@ The one-shot `entity-filing.py --migrate-candidates` converted the calendar
 pass's old never-repropose ledger (`identity-provenance.json`) into the
 store: still-pending calendar proposals became Pending candidates,
 previously rejected ones became Ignored candidates, and the ledger retired.
+
+#### Capture automation under development
+
+The task branch contains a separate source-grounded capture resolver and a
+recoverable write path. It is disabled unless `CAPTURE_AUTO_AFTER` is set to
+an explicit local timestamp in `yyyy-mm-ddTHH:MM:SS` format. This is an
+implementation boundary, not a deployment recommendation. Correction,
+exception questions, migration, and arrival-trigger work must finish before
+activation. See [the implementation receipt](entity-capture-implementation.md).
+
+The new path accepts uniquely identifying single names and an empty roster.
+It ignores model-expanded identity claims, preserves the submitted wording,
+and does not promote historical candidate evidence. It freezes source revision,
+targets, and contributions in the source's `CaptureOperation` metadata before
+writing. It verifies Person initialization and the destination text before
+writing a retryable daily-note receipt. It does not update structured fields
+or LastContact. Missing local state can recover the durable source operation;
+corrupt operations and edited contributions stop rather than overwrite data.
+The existing path below remains the default until this release is complete.
 
 #### Fact capture (Drafts → `_Facts`, kind `fact`)
 

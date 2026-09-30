@@ -127,7 +127,7 @@ import unicodedata
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
-sys.path.insert(0, str(Path.home() / ".local" / "bin"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 from pipeline_log import setup as setup_log
 
 import brief_events as be
@@ -135,7 +135,7 @@ import entity_candidates as ec
 
 log = setup_log("morning-brief")
 
-BRIDGE = os.path.expanduser("~/.local/bin/entity-dt-bridge.js")
+BRIDGE = str(Path(__file__).resolve().with_name("entity-dt-bridge.js"))
 CALENDAR = os.path.expanduser("~/.local/bin/calendar-events-json.js")
 CONTACTS = os.path.expanduser("~/.local/bin/contacts-json.js")
 MESSAGES_DB = os.path.expanduser("~/Library/Messages/chat.db")
@@ -636,8 +636,15 @@ def redact_person(p, ex_re, keys=()):
     return p
 
 
+def small_meeting(ev):
+    return len(ev.get("attendees") or []) <= 10
+
+
 def attending(ev):
-    """Whether you actually said yes to an event.
+    """Whether an event qualifies as personal attendance for entity processing.
+
+    More than ten raw invitees excludes the whole event, before filtering
+    yourself, rooms, suppressed people, or RSVP status.
 
     An invitation you never answered is indistinguishable from one you accepted
     on every other field, and Exchange deletes an event outright when you
@@ -655,7 +662,7 @@ def attending(ev):
     so it has to be excluded on its status: you are not attending a meeting
     that no longer exists.
     """
-    if ev.get("canceled"):
+    if not small_meeting(ev) or ev.get("canceled"):
         return False
     if not ev["attendees"] or ev.get("organizer_is_self"):
         return True
@@ -730,7 +737,7 @@ def repeat_series(history, today):
     first few is still not something you need re-introduced.
     """
     return {series_key(ev) for ev in history
-            if not ev["all_day"] and ev["date"] < today}
+            if small_meeting(ev) and not ev["all_day"] and ev["date"] < today}
 
 
 def real_attendees(ev, skip_re):
