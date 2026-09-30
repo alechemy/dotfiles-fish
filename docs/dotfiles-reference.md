@@ -463,6 +463,28 @@ Two invariants there:
 
 That `artist_name_variant` check groups artist *folders*, so it cannot see drift that exists only in tags. Nothing in the pipeline produces that state, but `tagger.py --album-artist` run by hand can.
 
+### Music imports: oversized album artwork
+
+`music-organize.py` handles artwork for both `riptag` modes and
+`import-album.py`. Covers at or below Navidrome's default 20,000,000-byte
+`MaxImageSize` stay byte-for-byte unchanged. Larger covers are re-encoded in the
+same format, at their original dimensions where possible. Dimensions are reduced
+only if compression cannot meet the limit. PNG transparency is preserved. Audio
+files and their embedded artwork are not changed by this check.
+
+Before filing, the organizer saves oversized originals in the importing host's
+`~/.local/state/music/artwork-originals/`, named by SHA-256 and extension. Backups
+are outside the library and private. Remote downloads keep their originals on the
+NAS; local downloads and standalone imports keep them on the Mac. Dry runs write
+nothing. Conversion or backup failures abort before the organizer changes source
+tags or existing library albums. A cover-write failure retains the source folder
+and reports a failed import, even if some audio has already moved.
+
+Pillow is declared in the organizer's script dependencies. The NAS worker invokes
+its configured Python directly, so that environment must also provide Pillow.
+Oversized images that are animated or exceed Navidrome's decoded pixel limit
+require manual conversion rather than a silent destructive conversion.
+
 ### Private music NAS topology
 
 The [private NAS configuration contract](music-nas.md) defines the version 1

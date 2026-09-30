@@ -3,6 +3,7 @@
 # requires-python = ">=3.11"
 # dependencies = [
 #   "mutagen",
+#   "pillow",
 # ]
 # ///
 """Organize audio files into an Artist/Album library tree.
@@ -26,10 +27,13 @@ SOURCE is an album folder (walked recursively) or a single audio file.
 """
 
 import argparse
+import hashlib
+import io
 import os
 import re
 import shutil
 import sys
+import tempfile
 from datetime import datetime
 
 from mutagen.flac import FLAC
@@ -42,6 +46,7 @@ COVER_STEMS = ("cover", "folder", "front", "album")  # preference order
 ILLEGAL = set('/\\:*?"<>|')  # replaced with "_"
 DIR_MODE = 0o775
 FILE_MODE = 0o664
+NAVIDROME_MAX_IMAGE_BYTES = 20_000_000
 
 
 # ----------------------------------------------------------------- tag reading
@@ -286,6 +291,89 @@ def find_cover(folder):
     return best[1] if best else None
 
 
+def prepare_cover(path):
+    """Return a compressed oversized cover, or None to copy its bytes unchanged.
+
+    Preserve the image format and try full-resolution encoding first. Reduce
+    dimensions only when compression alone cannot fit Navidrome's 20 MB cap.
+    """
+    if os.path.getsize(path) <= NAVIDROME_MAX_IMAGE_BYTES:
+        return None
+
+    from PIL import Image
+
+    fmt = {".jpg": "JPEG", ".jpeg": "JPEG", ".png": "PNG", ".webp": "WEBP"}[
+        os.path.splitext(path)[1].lower()
+    ]
+    with Image.open(path) as original:
+        if getattr(original, "is_animated", False):
+            raise ValueError("oversized animated artwork requires manual conversion")
+        if original.width * original.height > 64 << 20:
+            raise ValueError("cover exceeds Navidrome's decoded pixel limit")
+        image = original.convert("RGB") if fmt == "JPEG" else original.copy()
+        icc_profile = original.info.get("icc_profile") if image.mode == original.mode else None
+
+    while True:
+        for quality in ((95, 90, 85) if fmt != "PNG" else (None,)):
+            output = io.BytesIO()
+            options = {"optimize": True} if fmt in ("JPEG", "PNG") else {}
+            if icc_profile:
+                options["icc_profile"] = icc_profile
+            if quality is not None:
+                options["quality"] = quality
+            if fmt == "JPEG":
+                options["subsampling"] = 0
+            image.save(output, format=fmt, **options)
+            data = output.getvalue()
+            if len(data) <= NAVIDROME_MAX_IMAGE_BYTES:
+                return data
+        if image.size == (1, 1):
+            raise ValueError("cover cannot fit Navidrome's image size cap")
+        image = image.resize((max(1, image.width * 3 // 4),
+                              max(1, image.height * 3 // 4)), Image.Resampling.LANCZOS)
+
+
+def archive_original_cover(path):
+    """Keep an oversized source cover in a private, content-addressed host archive."""
+    with open(path, "rb") as f:
+        data = f.read()
+    root = os.path.expanduser("~/.local/state/music/artwork-originals")
+    os.makedirs(root, mode=0o700, exist_ok=True)
+    dest = os.path.join(root, hashlib.sha256(data).hexdigest() + os.path.splitext(path)[1].lower())
+    try:
+        fd = os.open(dest, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError:
+        if os.path.islink(dest):
+            raise ValueError("original artwork archive entry is a symlink")
+        with open(dest, "rb") as f:
+            if f.read() != data:
+                raise ValueError("original artwork archive entry does not match")
+    else:
+        try:
+            with os.fdopen(fd, "wb") as f:
+                f.write(data)
+        except Exception:
+            os.unlink(dest)
+            raise
+    return dest
+
+
+def copy_cover(source, dest, data):
+    """Install an original or prepared cover atomically with library permissions."""
+    fd, temporary = tempfile.mkstemp(prefix=".cover-", dir=os.path.dirname(dest))
+    try:
+        with os.fdopen(fd, "wb") as f:
+            if data is not None:
+                f.write(data)
+        if data is None:
+            shutil.copy2(source, temporary)
+        os.chmod(temporary, FILE_MODE)
+        os.replace(temporary, dest)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+
+
 def unique_path(path):
     """Append ' 1', ' 2', ... before the extension until the path is free."""
     if not os.path.exists(path):
@@ -485,6 +573,23 @@ def organize_source(source, library_root, policy, dry_run, manifest, stats,
             stats["failed"].append(source)
             return
 
+    cover = find_cover(source) if is_dir else None
+    cover_data = None
+    if cover:
+        try:
+            cover_data = prepare_cover(cover)
+            if cover_data is not None:
+                prefix = "[dry-run] " if dry_run else ""
+                print(f"  -> {prefix}compress cover: {os.path.getsize(cover):,} -> "
+                      f"{len(cover_data):,} bytes")
+                if not dry_run:
+                    backup = archive_original_cover(cover)
+                    print(f"  -> original cover archived: {backup}")
+        except Exception as e:
+            print(f"  -> ERROR preparing cover art: {e}", file=sys.stderr)
+            stats["failed"].append(source)
+            return
+
     if recase:
         spellings = sorted(set(recase.values()))
         print(f"  -> artist case aligned with the library: {', '.join(repr(s) for s in spellings)}")
@@ -610,7 +715,6 @@ def organize_source(source, library_root, policy, dry_run, manifest, stats,
         moved += 1
 
     # artwork + permissions + manifest
-    cover = find_cover(source) if is_dir else None
     for d in album_dirs:
         if d in skipped:
             continue
@@ -632,12 +736,12 @@ def organize_source(source, library_root, policy, dry_run, manifest, stats,
                     d, "cover" + os.path.splitext(cover)[1].lower()
                 )
                 try:
-                    shutil.copy2(cover, cover_dest)
-                    chmod_quiet(cover_dest, FILE_MODE)
+                    copy_cover(cover, cover_dest, cover_data)
                     print(f"  -> {cover_dest}")
                 except Exception as e:
+                    failures.append(cover)
                     print(
-                        f"  -> WARNING: could not copy cover art: {e}", file=sys.stderr
+                        f"  -> ERROR: could not copy cover art: {e}", file=sys.stderr
                     )
 
     stats["moved"] += moved
