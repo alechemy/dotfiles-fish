@@ -16,6 +16,34 @@ scripts/setup-cmux.sh --install-pi-hook
 
 The flag additionally runs cmux's official `hooks setup pi --yes`. The official hook owns cmux lifecycle state, notifications, and application restart restoration. `worktrunk.ts` separately owns Worktrunk markers and authenticated Hunk feedback delivery.
 
+## Native Computer Use in Pi
+
+The stowed `~/.pi/agent/extensions/cmux-cua/` extension connects Pi to cmux's bundled native MCP proxy. Loading Pi, discovering the extension, and starting or restoring a session do not start a proxy, request permissions, or perform GUI work.
+
+Use `/cmux-cua on` with an image-capable model to enable desktop tools for the current Pi session, `/cmux-cua status` to inspect activation, and `/cmux-cua off` to revoke them and close that session's proxy. Activation performs only MCP discovery. A direct user request must still identify the app and task before the agent operates it. UI text and screenshots can reach the selected model provider and ordinary Pi session history; this is not a local-only privacy guarantee.
+
+The adapter verifies the live originating terminal and workspace, cmux process ancestry, bundled executable, private native socket, current configuration, and forced `DisableComputerUse` policy in the app and release domains. It reads the token through an owner-only, single-link, no-follow file descriptor and passes it only in the proxy's environment. It preserves forced-proxy mode, external permission flow, cursor branding, exact surface identity, and Pi process ownership. cmux retains helper startup, recovery, onboarding, daemon admission, generation tracking, and disconnect cleanup.
+
+Fourteen desktop tools use the `mcp__cmux_cua__` prefix and retain native schemas. Calls are serialized, authority is rechecked before dispatch, and image results and structured element tokens remain available to Pi. Session, permission, recording, and configuration tools are excluded. Runtime checks also reject explicit session/private fields, screenshot file outputs, debugging ports, and additional launch arguments, including inside action groups. Use inline screenshots and current element tokens. A native error, lost connection, changed authority, cancellation after dispatch, or timeout requires explicit reactivation; an uncertain action must be inspected before retrying. Reload and session replacement revoke activation. There is no automatic reconnect or helper fallback.
+
+The inspected installation is cmux 0.64.25, build 106, with `cmux-cua` 0.7.1 and MCP protocol `2025-06-18`. Permission-free discovery returned 39 native tools; the adapter exposes 14. The installed Pi 0.87.1 SDK also completed discovery through the extension. After the user completed onboarding, the approved live test passed through the active Pi extension. It launched Calculator, read an inline screenshot and structured element tokens, clicked the grounded controls for `100 + 105`, and verified `205` in a fresh screenshot and accessibility tree. The nine clicks ran as one ordered action group without navigation or layout changes. Calculator remained open. This verifies app launch, state capture, token-based actions, action groups, and screenshot delivery to the selected model; the other desktop tools and live cancellation remain unverified.
+
+Run the synthetic checks and the permission-free SDK check with the installed reviewed Pi package:
+
+```sh
+PI_PACKAGE_ROOT=/opt/homebrew/Cellar/pi-coding-agent/0.87.1/libexec/lib/node_modules/@earendil-works/pi-coding-agent node --test scripts/tests/test_pi_cmux_cua.mjs
+PYTHONDONTWRITEBYTECODE=1 /usr/bin/python3 -m unittest discover -s scripts/tests -p test_pi_cmux_cua_policy.py
+PI_PACKAGE_ROOT=/opt/homebrew/Cellar/pi-coding-agent/0.87.1/libexec/lib/node_modules/@earendil-works/pi-coding-agent node scripts/tests/pi_cmux_cua_smoke.mjs --discovery-only
+```
+
+The separately approved live check uses the same smoke script with `--allow-ui`. It inspects Calculator, clicks 100 + 105, verifies 205 from a fresh state with inline screenshots, and closes only its proxy. It leaves Calculator open. Missing permissions, ambiguous targets, or failed operations stop the test. The script uses an isolated in-memory Pi SDK session, blocks model/network requests, and saves no screenshots or desktop content. It retains the current provider/model identity without reading live credentials or changing provider configuration.
+
+After adding the extension files, restow only `pi` from the primary checkout, then reload Pi. This does not merge settings or change cmux hooks, Worktrunk records, or Hunk ownership.
+
+```sh
+stow --restow --no-folding --ignore='__pycache__' --dir=stow --target="$HOME" pi
+```
+
 ## AeroSpace gaps
 
 On the `DELL U4025QW`, each tiled cmux window counts as its number of side-by-side pane columns when deciding whether to remove outer gaps. A two-column cmux window plus one other tiled window reaches three and sets the focused AeroSpace workspace's left and right outer gaps to zero, as does a single three-column cmux window. Stacked panes and tabs within a pane do not add columns. Expansion is immediate; reducing cached column counts waits for two seconds without another matching cmux event. Workspace switches restart that delay, and returning to a wider layout cancels the pending shrink. Ordinary window-count presets and manual gap overrides stay unchanged.

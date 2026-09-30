@@ -1,0 +1,890 @@
+{
+  "source": {
+    "repository": "https://github.com/manaflow-ai/cmux-cua",
+    "reviewedRevision": "7a57a7c79522ece017a3ae4ef7884a24d7eec270",
+    "license": "cmux-cua-native-tools.LICENSE",
+    "cmuxVersion": "0.64.25",
+    "cmuxBuild": 106,
+    "serverName": "cmux-cua",
+    "serverVersion": "0.7.1",
+    "profile": "native",
+    "discovery": "permission-free bootstrap tools/list"
+  },
+  "tools": [
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "capabilities": [
+        "app.list"
+      ],
+      "description": "List macOS apps — both currently running and installed-but-not-running — with per-app state flags:\n\n- running: is a process for this app live? (pid is 0 when false)\n- active: is it the system-frontmost app? (implies running)\n- launch_path: filesystem path to the `.app` bundle, when known. Pass this to `launch_app` to start the app cold.\n- kind: `\"desktop\"` for `.app` bundles on macOS.\n- last_used: RFC3339 timestamp from the bundle's filesystem mtime, when readable; otherwise null.\n\nOnly apps with NSApplicationActivationPolicyRegular are included — background helpers and system UI agents are filtered out. Installed apps come from scanning /Applications, /Applications/Utilities, ~/Applications, /System/Applications, and /System/Applications/Utilities.\n\nUse this for \"is X installed?\" as well as \"is X running?\". For per-window state — on-screen, on-current-Space, minimized, window titles — call list_windows instead. For just opening an app — running or not — call launch_app({bundle_id: ...}) directly; list_apps is not a prerequisite.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {},
+        "type": "object"
+      },
+      "name": "list_apps"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "capabilities": [
+        "window.list"
+      ],
+      "description": "List all layer-0 top-level windows currently known to WindowServer. Includes off-screen windows (minimized, on another Space, hidden-launched). Use this to find a window_id before calling get_window_state.\n\nPer-record fields: window_id, pid, app_name, title, bounds (x/y/width/height, top-left origin), z_index (higher = frontmost), is_on_screen, on_current_space.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "on_screen_only": {
+            "description": "When true, drop windows not on the current Space. Default false.",
+            "type": "boolean"
+          },
+          "pid": {
+            "description": "Optional pid filter. When set, only this pid's windows are returned.",
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "name": "list_windows"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "capabilities": [
+        "accessibility.window_state",
+        "accessibility.tree",
+        "accessibility.tree.structured",
+        "accessibility.tree.bounded",
+        "accessibility.element_tokens",
+        "screen.capture",
+        "screen.capture.window"
+      ],
+      "description": "Walk a running app's AX tree and return BOTH a structured `elements` array (preferred) AND a Markdown rendering of the same tree (back-compat). Every actionable element is tagged with [element_index N] in the markdown and as `element_index` in the structured array — pass those indices to click, type_text, press_key, etc.\n\nINVARIANT: call get_window_state once per turn per (pid, window_id) before any element-indexed action. The index map is replaced by the next snapshot.\n\nPREFERRED CONSUMERS read `structuredContent.elements` (actionable rows carry `element_index` + `element_token`; value-bearing read-only AXStaticText/AXTextField/AXTextArea rows are also included without addressability fields). Each entry carries `role`, title-first `label`, optional `description` when distinct from the label, `value` (stringified AXValue, capped at 512 characters), `frame: {x,y,w,h}`, `parent_index`, and `depth`. Mirrored actionable AX copies with the same role + label + frame are deduplicated so label lookup is unambiguous. The markdown `tree_markdown` stays available and unchanged in shape for existing text-parsing callers — but new fields will only be added to the structured side.\n\nAlways returns BOTH the element tree AND a screenshot — ground on both and cross-check (the tree lies on some surfaces: Electron echo-confirms, Catalyst null values, virtualized off-viewport rows with `h:1` frames). You choose the modality at ACTION time, not here: an element ax action (pass `element_index`/`element_token` → the accessibility rung) or an element px action (pass `x`,`y` → the pixel rung, read straight off this screenshot). `capture_mode` is deprecated and ignored. Pass `include_screenshot:false` to skip the grab and get the tree only — the cheap path when you're just re-indexing before an element ax action.\n\nOptional `query` filters the tree_markdown to matching lines plus their ancestor chain (case-insensitive substring). The element_index values are unchanged — filtering only trims the rendered Markdown.\n\nOptional `max_elements` / `max_depth` bound the AX walk to mitigate context-window blow-up on Electron / Obsidian / large web apps that produce 10k+ element trees. When applied, BOTH the markdown and the structured elements are truncated identically. Omit both for current default behaviour (≤2 000 elements, depth ≤25).",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "capture_mode": {
+            "description": "DEPRECATED and ignored. get_window_state always returns BOTH the element tree and a screenshot — ground on both. The modality is chosen at action time by how you address the target: an element ax action (element_index/element_token) or an element px action (x,y). Any value (including the old \"som\"/\"screenshot\" aliases) is accepted but has no effect.",
+            "enum": [
+              "ax",
+              "vision"
+            ],
+            "type": "string"
+          },
+          "include_screenshot": {
+            "description": "Default true — returns a grounding screenshot alongside the tree. Set false to skip the grab and return the tree only (the cheap path when you're just re-indexing before an element ax action; saves the image tokens + screen-grab latency). screenshot_out_file still forces a capture to disk.",
+            "type": "boolean"
+          },
+          "max_depth": {
+            "description": "Cap on the AX-tree walk depth. Nodes whose rendered indent would exceed this are omitted. Omit for the default (25). Lower this for deep menu/Electron trees.",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "max_elements": {
+            "description": "Cap on the total number of AX nodes walked. Truncates depth-first; markdown and structured elements truncate together. Omit for the default (2 000). Lower this for Electron / Obsidian / large web apps that produce 10k+ element trees and blow context windows.",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "pid": {
+            "description": "Target process ID.",
+            "type": "integer"
+          },
+          "query": {
+            "description": "Case-insensitive filter for tree_markdown.",
+            "type": "string"
+          },
+          "screenshot_out_file": {
+            "description": "When set, write the PNG to this file path (~ expanded) instead of embedding base64 in the response. The structured output will contain screenshot_file_path instead.",
+            "type": "string"
+          },
+          "session": {
+            "description": "Optional explicit session id for the agent cursor and per-session state. Embedded MCP calls may omit it to use CMUX_CUA_DEFAULT_SESSION (or embedded-<pid>); anonymous non-embedded calls remain cursor-less.",
+            "type": "string"
+          },
+          "window_id": {
+            "description": "Target window ID from list_windows.",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "pid",
+          "window_id"
+        ],
+        "type": "object"
+      },
+      "name": "get_window_state"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "capabilities": [
+        "app.launch"
+      ],
+      "description": "Launch a macOS app in the background — the target does NOT come to the foreground.\n\nProvide either `bundle_id` (preferred — unambiguous, e.g. `com.apple.calculator`) or `name` (e.g. \"Calculator\"). If both are given, bundle_id wins.\n\nOptional `urls` are handed to the app as open targets — for Finder, pass a folder path to open a backgrounded Finder window there.\n\nOptional `cdp_debugging_port`: opens a Chrome DevTools Protocol (CDP) server on the specified port (appends --remote-debugging-port=N to the app's argv). Use this to automate Electron/VS Code/Cursor, or Chrome/Brave/Edge, via CDP.\n\nOptional `webkit_inspector_port`: opens a WebKit inspector server on the specified port (sets WEBKIT_INSPECTOR_SERVER=127.0.0.1:N + TAURI_WEBVIEW_AUTOMATION=1). Use this for Tauri/WebKit-based apps.\n\nOptional `creates_new_application_instance`: when true, forces a new app instance even if one is already running (passes -n to open). Reach for this when another agent or session may drive the SAME app concurrently — it returns a fresh pid + window so each session acts on its own isolated window instead of clobbering one shared instance. Without it, single-instance apps (Calculator, many utilities) hand every caller the same window, so two sessions fight over it.\n\nOptional `additional_arguments`: extra argv strings appended after --args.\n\nReturns the launched app's pid, bundle_id, name, and a `windows` array (same shape as `list_windows`) so callers can skip an extra round-trip before `get_window_state(pid, window_id)`. When the focus-steal belt-and-braces demotion check ran (target pid ≠ prior frontmost), the response also includes `self_activation_suppressed: bool` — true if focus stayed with the prior frontmost, false if the launched app held focus despite the re-demote attempt.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "additional_arguments": {
+            "description": "Extra arguments appended after --args when launching.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "bundle_id": {
+            "description": "App bundle identifier, e.g. com.apple.calculator. Preferred over name.",
+            "type": "string"
+          },
+          "cdp_debugging_port": {
+            "description": "Open a Chrome DevTools Protocol server on this port (appends --remote-debugging-port=N).",
+            "type": "integer"
+          },
+          "creates_new_application_instance": {
+            "description": "When true, force a new app instance even if already running (open -n). Use for concurrent multi-agent/multi-session work so each session gets an isolated instance + window instead of sharing one — on single-instance apps (e.g. Calculator) every caller otherwise gets the same window and the sessions clobber each other.",
+            "type": "boolean"
+          },
+          "name": {
+            "description": "App display name. Used only when bundle_id is absent.",
+            "type": "string"
+          },
+          "urls": {
+            "description": "Optional file paths or URLs to open with the app (e.g. a folder path for Finder).",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "webkit_inspector_port": {
+            "description": "Open a WebKit inspector server on this port (sets WEBKIT_INSPECTOR_SERVER env var).",
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "name": "launch_app"
+    },
+    {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "capabilities": [
+        "input.pointer.click",
+        "input.pointer.click.left",
+        "accessibility.element_tokens"
+      ],
+      "description": "Click against a target pid. **Prefer `element_index` over pixel coordinates** — element_index works on backgrounded / minimized / hidden / off-Space windows, surfaces a stable handle that survives rebuilds, and tells you what you're clicking via the cached element's role + label. Reach for `x, y` only when the target is a canvas / video / WebGL / custom-drawn surface that doesn't appear in the AX tree.\n\nTwo addressing modes:\n\n- element_index + window_id (from last get_window_state): AX action path. Works on backgrounded/hidden windows. No cursor move, no focus steal. element_index cache is scoped per (pid, window_id) and is replaced by the next snapshot of the same window — re-snapshot every turn before clicking.\n\n- x, y (window-local screenshot pixels, top-left origin of the PNG returned by get_window_state): CGEvent path. Synthesizes mouse events and posts to pid. Before a background post with pid+window_id, the driver checks the front-to-back WindowServer stack and returns error=`obstructed`, code=`background_occluded` without posting if another app/window owns that point. Use modifier for cmd/shift/option/ctrl. Needs a visible on-screen window to anchor the conversion.\n\nbutton: \"left\" (default), \"right\", or \"middle\". Defaults to left so the field is fully back-compat — omit it and you get the legacy left-click behaviour. Pixel path: routes through the CGEvent left/right/middle mouse-button primitives. AX path: \"right\" maps to AXShowMenu (same surface as the dedicated `right_click` tool); \"middle\" has no AX equivalent and falls back to a pixel middle-click at the element's center.\naction: press (default), show_menu, pick, confirm, cancel, open.\nfrom_zoom: set true after a zoom call to auto-translate zoom-image pixel coordinates to full-window space.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "description": "AX action: press, show_menu, pick, confirm, cancel, open.",
+            "type": "string"
+          },
+          "button": {
+            "description": "Mouse button. Default: \"left\" — omit for legacy left-click behaviour. Pixel path uses the matching CGEvent primitive; AX path maps \"right\" to AXShowMenu and falls back to a pixel middle-click at the element's center for \"middle\".",
+            "enum": [
+              "left",
+              "right",
+              "middle"
+            ],
+            "type": "string"
+          },
+          "count": {
+            "description": "Click count (pixel path only). Default 1.",
+            "type": "integer"
+          },
+          "debug_image_out": {
+            "description": "Optional file path. When set on a pixel-addressed click, captures a fresh screenshot, draws a red crosshair at (x, y), and writes the PNG. Use to verify coordinate spaces. Requires window_id; incompatible with from_zoom.",
+            "type": "string"
+          },
+          "delivery_mode": {
+            "description": "Best-effort-background ladder rung (default \"background\"). \"background\": perform the AX action or post the CGEvent without fronting; pixel dispatch with pid+window_id fails with structured error=\"obstructed\", code=\"background_occluded\" when a different visible window owns the screen point. \"foreground\": briefly front the window, act, let transient UI settle, then restore the prior frontmost app; foreground skips the obstruction check because fronting resolves Z order. Requires window_id. A click that is dispatched remains verified:false — confirm its effect via get_window_state.",
+            "enum": [
+              "background",
+              "foreground"
+            ],
+            "type": "string"
+          },
+          "element_index": {
+            "description": "Element index from last get_window_state. REQUIRES `pid` and `window_id` to be passed alongside it — element_index alone (no pid) fails fast with \"Missing required integer field: pid\"; it is not a silent no-op.",
+            "type": "integer"
+          },
+          "element_token": {
+            "description": "Opaque per-snapshot element handle from `structuredContent.elements[].element_token` of the last get_window_state. Takes precedence over element_index when both supplied. Returns an explicit \"stale\" error if the snapshot has been superseded — re-snapshot in that case.",
+            "type": "string"
+          },
+          "from_zoom": {
+            "description": "When true, x and y are in the last zoom image for this pid; driver translates back to full-window coordinates.",
+            "type": "boolean"
+          },
+          "modifier": {
+            "description": "Modifier keys: cmd, shift, option/alt, ctrl.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "pid": {
+            "description": "Target process ID.",
+            "type": "integer"
+          },
+          "scope": {
+            "description": "Coordinate frame for a windowless screen-absolute click (default \"window\"). Pass \"desktop\" when sending x,y with NO pid/window_id — the coordinates are then true screen pixels (read from get_desktop_state with scope=\"desktop\"). Per-call; not a setting.",
+            "enum": [
+              "window",
+              "desktop"
+            ],
+            "type": "string"
+          },
+          "session": {
+            "description": "Optional explicit session id for the agent cursor and per-session state. Embedded MCP calls may omit it to use CMUX_CUA_DEFAULT_SESSION (or embedded-<pid>); anonymous non-embedded calls remain cursor-less.",
+            "type": "string"
+          },
+          "window_id": {
+            "description": "Target window ID. Required for element_index. Optional when element_token is supplied (the token carries it).",
+            "type": "integer"
+          },
+          "x": {
+            "description": "X in screenshot pixels, read straight off the image you were handed — no scaling math needed. With pid+window_id (capture_scope=window): window-local pixels from the get_window_state PNG (top-left origin). Windowless (no pid/window_id, capture_scope=desktop): pixels from the get_desktop_state PNG (the native full-display image). Either way, the pixel you read IS the pixel that gets clicked; the driver undoes the Retina backing scale + any downscale internally.",
+            "type": "number"
+          },
+          "y": {
+            "description": "Y in screenshot pixels (see x). Window-local from get_window_state, or full-display from get_desktop_state under capture_scope=desktop.",
+            "type": "number"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "name": "click"
+    },
+    {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "capabilities": [
+        "input.pointer.click",
+        "input.pointer.click.left",
+        "input.pointer.click.double",
+        "accessibility.element_tokens"
+      ],
+      "description": "Double-click at (x, y) or on an AX element identified by element_index + window_id.\n\nAX path (element_index provided): performs `AXOpen` when the element advertises it (Finder items, openable list rows/cells); otherwise resolves the element's on-screen center and falls back to a pixel double-click there.\n\nPixel path (x, y provided): two down/up pairs ~80 ms apart at the given coordinates.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "delivery_mode": {
+            "description": "Best-effort-background ladder rung (default \"background\"). \"background\": inject without fronting or raising the target — no focus steal. \"foreground\": briefly front the target, act, then restore the prior frontmost — the explicit last resort when a background attempt didn't land. Re-call with \"foreground\" only for the action that needs it.",
+            "enum": [
+              "background",
+              "foreground"
+            ],
+            "type": "string"
+          },
+          "element_index": {
+            "description": "Element index from last get_window_state. Uses AX path. REQUIRES `pid` and `window_id` to be passed alongside it — element_index alone (no pid) fails fast with \"Missing required integer field: pid\"; it is not a silent no-op.",
+            "type": "integer"
+          },
+          "element_token": {
+            "description": "Opaque per-snapshot element handle from `structuredContent.elements[].element_token`. Takes precedence over element_index when both supplied. Returns an explicit \"stale\" error if the snapshot has been superseded.",
+            "type": "string"
+          },
+          "pid": {
+            "type": "integer"
+          },
+          "session": {
+            "description": "Optional explicit session id for the agent cursor and per-session state. Embedded MCP calls may omit it to use CMUX_CUA_DEFAULT_SESSION (or embedded-<pid>); anonymous non-embedded calls remain cursor-less.",
+            "type": "string"
+          },
+          "window_id": {
+            "description": "CGWindowID. Required when element_index is used. Optional when element_token is supplied (the token carries it).",
+            "type": "integer"
+          },
+          "x": {
+            "description": "Screen X coordinate (pixel path).",
+            "type": "number"
+          },
+          "y": {
+            "description": "Screen Y coordinate (pixel path).",
+            "type": "number"
+          }
+        },
+        "required": [
+          "pid"
+        ],
+        "type": "object"
+      },
+      "name": "double_click"
+    },
+    {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "capabilities": [
+        "input.pointer.click",
+        "input.pointer.click.right",
+        "accessibility.element_tokens"
+      ],
+      "description": "Right-click against a target pid. Two addressing modes:\n\n- `element_index` + `window_id` (from the last `get_window_state` snapshot) — performs `AXShowMenu` on the cached element. Pure AX RPC, works on backgrounded / hidden windows, no cursor move or focus steal. Requires a prior `get_window_state(pid, window_id)` in this turn.\n\n- `x`, `y` — synthesizes `rightMouseDown` / `rightMouseUp` CGEvent pair posted to the pid. Driver converts image-pixel → screen-point internally. `modifier` forces the CGEvent path (AX actions don't propagate modifier keys).\n\nExactly one of `element_index` or (`x` AND `y`) must be provided. `pid` always required. `window_id` required when `element_index` is used.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "delivery_mode": {
+            "description": "Best-effort-background ladder rung (default \"background\"). \"background\": inject without fronting or raising the target — no focus steal. \"foreground\": briefly front the target, act, then restore the prior frontmost — the explicit last resort when a background attempt didn't land. Re-call with \"foreground\" only for the action that needs it.",
+            "enum": [
+              "background",
+              "foreground"
+            ],
+            "type": "string"
+          },
+          "element_index": {
+            "description": "Element index from last get_window_state. Routes through AXShowMenu. REQUIRES `pid` and `window_id` to be passed alongside it — element_index alone (no pid) fails fast with \"Missing required integer field: pid\"; it is not a silent no-op.",
+            "type": "integer"
+          },
+          "element_token": {
+            "description": "Opaque per-snapshot element handle from `structuredContent.elements[].element_token`. Takes precedence over element_index when both supplied. Returns an explicit \"stale\" error if the snapshot has been superseded.",
+            "type": "string"
+          },
+          "modifier": {
+            "description": "Modifier keys held during the right-click: cmd/shift/option/ctrl. Pixel path only.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "pid": {
+            "description": "Target process ID.",
+            "type": "integer"
+          },
+          "session": {
+            "description": "Optional explicit session id for the agent cursor and per-session state. Embedded MCP calls may omit it to use CMUX_CUA_DEFAULT_SESSION (or embedded-<pid>); anonymous non-embedded calls remain cursor-less.",
+            "type": "string"
+          },
+          "window_id": {
+            "description": "CGWindowID. Required when element_index is used. Optional when element_token is supplied (the token carries it).",
+            "type": "integer"
+          },
+          "x": {
+            "description": "X in window-local screenshot pixels. Must be provided together with y.",
+            "type": "number"
+          },
+          "y": {
+            "description": "Y in window-local screenshot pixels. Must be provided together with x.",
+            "type": "number"
+          }
+        },
+        "required": [
+          "pid"
+        ],
+        "type": "object"
+      },
+      "name": "right_click"
+    },
+    {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "capabilities": [
+        "input.pointer.drag"
+      ],
+      "description": "Press-drag-release gesture from (from_x, from_y) to (to_x, to_y) in window-local screenshot pixels — the same space get_window_state returns. Top-left origin of the target's window.\n\nUse for: marquee/lasso selection, drag-and-drop, resizing via a handle, scrubbing a slider, repositioning a panel.\n\n`duration_ms` (default 500) is the wall-clock budget for the path between mouse-down and mouse-up; `steps` (default 20) is the number of intermediate mouseDragged events linearly interpolated along the path. Increase both for slower, more human drags; decrease for snap gestures.\n\n`modifier` keys (cmd/shift/option/ctrl) are held across the entire gesture.\n\nBackground drag is unavailable on macOS because pid-posted drag streams drop background CGEvents. Pass delivery_mode=`foreground` and the `window_id` whose screenshot supplied the coordinates.\n\nWhen `from_zoom` is true, coordinates are in the last zoom image for this pid; the driver maps them back to window coordinates before dispatching.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "button": {
+            "description": "Mouse button used for the drag. Default: left.",
+            "enum": [
+              "left",
+              "right",
+              "middle"
+            ],
+            "type": "string"
+          },
+          "delivery_mode": {
+            "description": "Background drag is unavailable on macOS and returns code=\"background_unavailable\" without posting. Pass \"foreground\" to front the window, perform the gesture, then restore the prior app.",
+            "enum": [
+              "background",
+              "foreground"
+            ],
+            "type": "string"
+          },
+          "duration_ms": {
+            "description": "Wall-clock duration of the drag path between mouseDown and mouseUp. Default: 500.",
+            "maximum": 10000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "from_x": {
+            "description": "Drag-start X in window-local screenshot pixels. Top-left origin.",
+            "type": "number"
+          },
+          "from_y": {
+            "description": "Drag-start Y in window-local screenshot pixels. Top-left origin.",
+            "type": "number"
+          },
+          "from_zoom": {
+            "description": "When true, coordinates are in the last zoom image for this pid; driver maps back to window coordinates.",
+            "type": "boolean"
+          },
+          "modifier": {
+            "description": "Modifier keys held across the entire gesture: cmd/shift/option/ctrl.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "pid": {
+            "description": "Target process ID.",
+            "type": "integer"
+          },
+          "session": {
+            "description": "Optional explicit session id for the agent cursor and per-session state. Embedded MCP calls may omit it to use CMUX_CUA_DEFAULT_SESSION (or embedded-<pid>); anonymous non-embedded calls remain cursor-less.",
+            "type": "string"
+          },
+          "steps": {
+            "description": "Number of intermediate mouseDragged events linearly interpolated along the path. Default: 20.",
+            "maximum": 200,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "to_x": {
+            "description": "Drag-end X in window-local screenshot pixels.",
+            "type": "number"
+          },
+          "to_y": {
+            "description": "Drag-end Y in window-local screenshot pixels.",
+            "type": "number"
+          },
+          "window_id": {
+            "description": "Required CGWindowID for the window whose screenshot supplied the pixel coordinates. Foreground drag uses it to front the exact target window before dispatch.",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "pid",
+          "window_id",
+          "from_x",
+          "from_y",
+          "to_x",
+          "to_y"
+        ],
+        "type": "object"
+      },
+      "name": "drag"
+    },
+    {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "capabilities": [
+        "input.keyboard.type",
+        "input.keyboard.type.terminal_safe",
+        "accessibility.element_tokens"
+      ],
+      "description": "Insert text into the target pid via `AXSetAttribute(kAXSelectedText)`. Works for standard Cocoa text fields and text views. No keystrokes are synthesized — special keys (Return / Escape / arrows) go through `press_key` / `hotkey`. For Chromium / Electron inputs that don't implement `kAXSelectedText`, the tool falls back to CGEvent character synthesis automatically.\n\nOptional `element_index` + `window_id` (from the last `get_window_state` snapshot) directs the write to a specific field. Without `element_index`, the write goes to the pid's currently focused element.\n\nWEB CONTENT (Chromium/WebKit/Electron — browser tabs, Slack, VS Code, X's compose box): the AX layer accepts a write and echoes it back through AXValue while the renderer/DOM never observes it. The driver detects this at the element level (an AXWebArea ancestor) and refuses to trust that echo — an AX-path insert into web content returns effect:\"unverifiable\" + escalation, never a false \"confirmed\" (a browser's own native address bar/toolbar stays trusted). For a browser TAB the reliable path is the `page` tool (drives the DOM via CDP); for an embedded web view use this tool's px form: pass x,y (no element_index) to pixel-click the field then type, in one call. NOTE: a px focus-click won't reliably open+focus a CLOSED control; AX-press to open/activate it first (works in the background), then px-type. Always confirm via the screenshot; if px-background still drops, escalate to delivery_mode:\"foreground\".",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "delay_ms": {
+            "description": "Milliseconds between characters in the CGEvent fallback path. Default 30. Ignored when the AX path succeeds.",
+            "maximum": 200,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "delivery_mode": {
+            "description": "Best-effort-background ladder rung (default \"background\"). \"background\": AX insert, then CGEvent keystrokes if needed — no focus steal; the driver verifies via an AXValue read-back and reports `verified`. \"foreground\": briefly front the window, type, restore the prior frontmost — the explicit last resort for focus-sensitive surfaces (e.g. WhatsApp/Catalyst) where background keystrokes don't land. Re-call with \"foreground\" when a background attempt returns `verified:false` and a screenshot shows the text didn't appear.",
+            "enum": [
+              "background",
+              "foreground"
+            ],
+            "type": "string"
+          },
+          "element_index": {
+            "description": "Element index from last get_window_state. Directs the write to a specific field. REQUIRES `pid` and `window_id` to be passed alongside it — element_index alone (no pid) fails fast with \"Missing required integer field: pid\"; it is not a silent no-op.",
+            "type": "integer"
+          },
+          "element_token": {
+            "description": "Opaque per-snapshot element handle from `structuredContent.elements[].element_token`. Takes precedence over element_index when both supplied. Returns an explicit \"stale\" error if the snapshot has been superseded.",
+            "type": "string"
+          },
+          "pid": {
+            "description": "Target process ID.",
+            "type": "integer"
+          },
+          "session": {
+            "description": "Optional explicit session id for the agent cursor and per-session state. Embedded MCP calls may omit it to use CMUX_CUA_DEFAULT_SESSION (or embedded-<pid>); anonymous non-embedded calls remain cursor-less.",
+            "type": "string"
+          },
+          "text": {
+            "description": "Text to insert at the target's cursor.",
+            "type": "string"
+          },
+          "window_id": {
+            "description": "CGWindowID. Required when element_index is used. Optional when element_token is supplied (the token carries it).",
+            "type": "integer"
+          },
+          "x": {
+            "description": "Screenshot-pixel X of the field to type into — the element px action form. Pass x,y (no element_index) and the tool pixel-clicks there to establish real renderer focus, then types. Use for Chromium/Electron inputs the AX path can't reach. Read straight off the get_window_state PNG, same convention as click.",
+            "type": "number"
+          },
+          "y": {
+            "description": "Screenshot-pixel Y of the field (see x).",
+            "type": "number"
+          }
+        },
+        "required": [
+          "pid",
+          "text"
+        ],
+        "type": "object"
+      },
+      "name": "type_text"
+    },
+    {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "capabilities": [
+        "input.keyboard.press",
+        "accessibility.element_tokens"
+      ],
+      "description": "Press and release a single key, delivered to the target pid via CGEventPostToPid. Follows the same `delivery_mode` ladder as click/type_text — it does NOT raise the window by default:\n• `background` (default): post to the pid WITHOUT fronting/raising — the auth-message path (Chromium-safe). With element_index it focuses that AX element first. `window_id` only targets; it does not raise.\n• `foreground`: briefly front the window (NSMenu path, < 1 ms) so native menu key-equivalents dispatch, then restore prior frontmost — the explicit escalation for menu shortcuts an app drops in the background. Requires window_id (and no element_index).\n\nA key press is never driver-verifiable → effect:\"unverifiable\"; confirm via screenshot. Key names: return, tab, escape, up/down/left/right, space, delete, home, end, pageup, pagedown, f1-f12, plus any letter or digit. Modifiers array: cmd, shift, option/alt, ctrl, fn.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "delivery_mode": {
+            "description": "Best-effort-background ladder rung (default \"background\"). \"background\": inject without fronting or raising the target — no focus steal. \"foreground\": briefly front the target, act, then restore the prior frontmost — the explicit last resort when a background attempt didn't land. Re-call with \"foreground\" only for the action that needs it.",
+            "enum": [
+              "background",
+              "foreground"
+            ],
+            "type": "string"
+          },
+          "element_index": {
+            "type": "integer"
+          },
+          "element_token": {
+            "description": "Opaque per-snapshot element handle from `structuredContent.elements[].element_token`. Takes precedence over element_index when both supplied. Returns an explicit \"stale\" error if the snapshot has been superseded.",
+            "type": "string"
+          },
+          "key": {
+            "description": "Key name: return, tab, escape, up, down, etc.",
+            "type": "string"
+          },
+          "modifiers": {
+            "description": "Modifier keys: cmd, shift, option/alt, ctrl, fn.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "pid": {
+            "type": "integer"
+          },
+          "session": {
+            "description": "Optional explicit session id for the agent cursor and per-session state. Embedded MCP calls may omit it to use CMUX_CUA_DEFAULT_SESSION (or embedded-<pid>); anonymous non-embedded calls remain cursor-less.",
+            "type": "string"
+          },
+          "window_id": {
+            "description": "Target window. Required for delivery_mode:\"foreground\". Does NOT itself raise the window — raising is gated on delivery_mode.",
+            "type": "integer"
+          },
+          "x": {
+            "description": "Screenshot-pixel X — the element px action form: pixel-click there to focus, then send the key. Use when the key must go to a Chromium/Electron surface the AX path can't focus. Pass with y, no element_index.",
+            "type": "number"
+          },
+          "y": {
+            "description": "Screenshot-pixel Y (see x).",
+            "type": "number"
+          }
+        },
+        "required": [
+          "pid",
+          "key"
+        ],
+        "type": "object"
+      },
+      "name": "press_key"
+    },
+    {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "capabilities": [
+        "input.keyboard.hotkey"
+      ],
+      "description": "Press a key combination — e.g. `[\"cmd\", \"c\"]` for Copy, `[\"cmd\", \"shift\", \"4\"]` for screenshot selection. Follows the same `delivery_mode` ladder as click/type_text — it does NOT raise the window by default:\n• `background` (default): post the combo to the target pid WITHOUT fronting or raising it — uses the macOS 14+ auth-message envelope so Chromium/Electron accept it as trusted live input. No focus steal. `window_id` here only targets the combo; it does not raise.\n• `foreground`: briefly front the window (NSMenu path, < 1 ms via SLPSSetFrontProcessWithOptions) so native menu key-equivalents (Cmd+Z, Cmd+W) dispatch, then restore the prior frontmost — the explicit escalation for menu-bar shortcuts on non-Chromium apps that ignore a background combo. Requires window_id.\n\nA combo is never driver-verifiable (no read-back) → effect:\"unverifiable\"; confirm via screenshot. NOTE: a keyboard combo does NOT focus a text field — to type into a backgrounded Electron input, establish real renderer focus with a PIXEL click first, then `type_text` (do not reach for a clipboard + Cmd+V dance).\n\nRecognized modifiers: cmd/command, shift, option/alt, ctrl/control, fn. Non-modifier keys use the same vocabulary as `press_key`. Order: modifiers first, one non-modifier last.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "delivery_mode": {
+            "description": "Best-effort-background ladder rung (default \"background\"). \"background\": inject without fronting or raising the target — no focus steal. \"foreground\": briefly front the target, act, then restore the prior frontmost — the explicit last resort when a background attempt didn't land. Re-call with \"foreground\" only for the action that needs it.",
+            "enum": [
+              "background",
+              "foreground"
+            ],
+            "type": "string"
+          },
+          "keys": {
+            "description": "Modifier(s) and one non-modifier key, e.g. [\"cmd\", \"c\"].",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 2,
+            "type": "array"
+          },
+          "pid": {
+            "description": "Target process ID.",
+            "type": "integer"
+          },
+          "session": {
+            "description": "Optional explicit session id for the agent cursor and per-session state. Embedded MCP calls may omit it to use CMUX_CUA_DEFAULT_SESSION (or embedded-<pid>); anonymous non-embedded calls remain cursor-less.",
+            "type": "string"
+          },
+          "window_id": {
+            "description": "Target window. Required for delivery_mode:\"foreground\" (the NSMenu activation needs a window). Does NOT itself raise the window — raising is gated on delivery_mode.",
+            "type": "integer"
+          },
+          "x": {
+            "description": "Screenshot-pixel X — the element px action form: pixel-click there to focus, then send the combo (so e.g. Cmd+V pastes into that field). Pass with y. Use for Chromium/Electron surfaces the background combo can't reach.",
+            "type": "number"
+          },
+          "y": {
+            "description": "Screenshot-pixel Y (see x).",
+            "type": "number"
+          }
+        },
+        "required": [
+          "pid",
+          "keys"
+        ],
+        "type": "object"
+      },
+      "name": "hotkey"
+    },
+    {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "capabilities": [
+        "input.keyboard.type",
+        "accessibility.element_tokens"
+      ],
+      "description": "Set a value on a UI element. Two modes depending on element role:\n\n- **AXPopUpButton / select dropdown**: finds the child option whose title or value matches `value` (case-insensitive) and AXPresses it directly — the native macOS popup menu is never opened, so focus is never stolen. Use this for HTML <select> elements in Safari or any native NSPopUpButton.\n\n- **All other elements**: writes AXValue directly (sliders, steppers, date pickers, native text fields that expose settable AXValue).\n\nFor free-form text entry into web inputs, prefer `type_text_chars` which synthesises key events — AXValue writes are ignored by WebKit.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "element_index": {
+            "description": "Element index from last get_window_state. Must be supplied unless element_token is provided. REQUIRES `pid` and `window_id` to be passed alongside it — element_index alone (no pid) fails fast with \"Missing required integer field: pid\"; it is not a silent no-op.",
+            "type": "integer"
+          },
+          "element_token": {
+            "description": "Opaque per-snapshot element handle from `structuredContent.elements[].element_token`. Takes precedence over element_index when both supplied. Returns an explicit \"stale\" error if the snapshot has been superseded.",
+            "type": "string"
+          },
+          "pid": {
+            "type": "integer"
+          },
+          "session": {
+            "description": "Optional explicit session id for the agent cursor and per-session state. Embedded MCP calls may omit it to use CMUX_CUA_DEFAULT_SESSION (or embedded-<pid>); anonymous non-embedded calls remain cursor-less.",
+            "type": "string"
+          },
+          "value": {
+            "description": "New value. AX will coerce to the element's native type.",
+            "type": "string"
+          },
+          "window_id": {
+            "description": "CGWindowID for the window whose get_window_state produced the element_index. Required when element_index is used; optional when element_token is supplied (the token carries it).",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "pid",
+          "value"
+        ],
+        "type": "object"
+      },
+      "name": "set_value"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "capabilities": [
+        "input.pointer.scroll",
+        "accessibility.element_tokens"
+      ],
+      "description": "Scroll the target pid. Two paths, picked by how you address the scroll:\n\n• **Targeted wheel path** — when you pass a target, either `element_index`/`element_token` (preferred) or window-local `x, y` pixels: the driver synthesizes a real mouse-wheel event (CGEventCreateScrollWheelEvent) at that screen point. The renderer hit-tests the wheel at the cursor, so the scroll lands on whatever element is under the point — exactly like physically rolling the wheel over it. This is the ONLY way to scroll a nested `overflow:auto` region (e.g. a scrollable <div> with no tabindex): such regions never take keyboard focus, so the keystroke path below no-ops on them. Use this for inner/nested scrollers in web views. Background wheel dispatch with pid+window_id is refused with error=`obstructed`, code=`background_occluded` when another window owns the point. After dispatch the driver reads AXValue, visible range, or the first scroll-area ancestor and returns `verified` plus `observed_delta` whenever the app exposes a cheap scroll metric.\n\n• **Keystroke path (focused region)** — when you pass NO target (just pid + direction): synthesizes PageDown/PageUp (by='page') or Down/Up arrows (by='line'); horizontal uses Left/Right arrows. Drives the focused / page scroller only.\n\nMapping: by='page' → larger step; by='line' → smaller step; amount = number of wheel notches (targeted path) or keystroke repetitions (keystroke path).",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "amount": {
+            "description": "Pixel-wheel path: number of wheel notches. Keystroke path: number of keystroke repetitions. Default: 3.",
+            "maximum": 50,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "by": {
+            "description": "Scroll granularity. Default: line.",
+            "enum": [
+              "line",
+              "page"
+            ],
+            "type": "string"
+          },
+          "delivery_mode": {
+            "description": "Default background. Background targeted-wheel dispatch with pid+window_id checks WindowServer Z order and returns structured error=\"obstructed\", code=\"background_occluded\" without posting when another window owns the target point. Foreground fronts the target, skips that check, scrolls, then restores the prior app. Successful scrolls report verified plus observed_delta when AX exposes a readable scroll metric.",
+            "enum": [
+              "background",
+              "foreground"
+            ],
+            "type": "string"
+          },
+          "direction": {
+            "description": "Scroll direction.",
+            "enum": [
+              "up",
+              "down",
+              "left",
+              "right"
+            ],
+            "type": "string"
+          },
+          "element_index": {
+            "description": "Element from last get_window_state. Routes through the pixel-wheel path AT this element's center — use it to scroll a nested overflow region you located in the AX tree.",
+            "type": "integer"
+          },
+          "element_token": {
+            "description": "Opaque per-snapshot element handle from `structuredContent.elements[].element_token`. Takes precedence over element_index when both supplied. Returns an explicit \"stale\" error if the snapshot has been superseded. Routes through the pixel-wheel path at the element's center.",
+            "type": "string"
+          },
+          "pid": {
+            "type": "integer"
+          },
+          "session": {
+            "description": "Optional explicit session id for the agent cursor and per-session state. Embedded MCP calls may omit it to use CMUX_CUA_DEFAULT_SESSION (or embedded-<pid>); anonymous non-embedded calls remain cursor-less.",
+            "type": "string"
+          },
+          "window_id": {
+            "type": "integer"
+          },
+          "x": {
+            "description": "Window-local screenshot X (top-left origin of the PNG from get_window_state). With `y`, routes through the pixel-wheel path at this point — use for a scrollable surface that isn't in the AX tree. Requires window_id to anchor the window→screen conversion.",
+            "type": "number"
+          },
+          "y": {
+            "description": "Window-local screenshot Y. See `x`.",
+            "type": "number"
+          }
+        },
+        "required": [
+          "direction"
+        ],
+        "type": "object"
+      },
+      "name": "scroll"
+    },
+    {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "capabilities": [
+        "input.action_group"
+      ],
+      "description": "Execute up to 20 already-grounded UI actions in order inside one persistent Computer Use proxy call. Use this after one get_window_state when the referenced controls remain stable (for example, a Calculator button sequence), then verify the completed group with one fresh snapshot. Each step reuses the existing element-token cache and the same visible agent cursor, avoiding a new model/MCP round trip and accessibility-tree scan per click. Do not group navigation, modal-opening, or layout-changing actions whose later controls require a fresh snapshot.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "actions": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "arguments": {
+                  "type": "object"
+                },
+                "tool": {
+                  "enum": [
+                    "click",
+                    "double_click",
+                    "right_click",
+                    "type_text",
+                    "press_key",
+                    "hotkey",
+                    "scroll",
+                    "drag",
+                    "set_value",
+                    "move_cursor"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "tool",
+                "arguments"
+              ],
+              "type": "object"
+            },
+            "maxItems": 20,
+            "minItems": 1,
+            "type": "array"
+          },
+          "stop_on_error": {
+            "description": "Stop before later actions after the first failed step. Default true.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "actions"
+        ],
+        "type": "object"
+      },
+      "name": "perform_actions"
+    }
+  ]
+}

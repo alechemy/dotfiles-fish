@@ -436,6 +436,8 @@ Multiple Pi sessions can run against this repo at once, so HEAD may not be the c
 
 cmux owns local task workspaces and terminal surfaces. Its Stow package owns the `~/.config/ghostty/config` file that cmux reads for libghostty terminal settings; the standalone Ghostty app is not installed. [The cmux runbook](cmux.md) documents startup, exact task identity, Pi restoration, Hunk feedback, cleanup, and recovery.
 
+Pi's stowed `extensions/cmux-cua/` adds opt-in native Computer Use through cmux's authenticated proxy. Activation, privacy, lifecycle ownership, validation, and the Calculator live-test result are documented in [Native Computer Use in Pi](cmux.md#native-computer-use-in-pi).
+
 Homebrew owns cmux and Hunk. `scripts/setup-cmux.sh` removes known transitional app-specific command overrides, installs the reviewed native Hunk feedback extension, and installs only cmux's official Pi hook when requested. Normal setup and the cmux restow handler pass that flag. The official hook owns cmux lifecycle state, notifications, and application-level conversation restoration. The repository's Worktrunk Pi extension separately owns task markers and verified feedback delivery. Runtime sessions, review state, task records, local backups, and cmux's app-owned preferences remain outside Stow and Git.
 
 ### tmux: test config on an isolated socket
