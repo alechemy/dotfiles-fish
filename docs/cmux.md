@@ -16,6 +16,18 @@ scripts/setup-cmux.sh --install-pi-hook
 
 The flag additionally runs cmux's official `hooks setup pi --yes`. The official hook owns cmux lifecycle state, notifications, and application restart restoration. `worktrunk.ts` separately owns Worktrunk markers and authenticated Hunk feedback delivery.
 
+## Pi convenience commands
+
+Pi's settings fragment pins `npm:pi-cmux@0.1.24`. The package adds session-launch commands, terminal splits and tabs, and browser panes with user-written annotations. It does not connect Pi to cmux Computer Use.
+
+The stowed `~/.pi/agent/extensions/pi-cmux.ts` disables package notifications, sidebar updates, and automatic model-generated titles before invoking the installed package's entry point. The package declaration uses `extensions: []` to prevent a second direct load. Applying preferences inside Pi also covers package-launched sessions, whose shell command forwards only `PATH`. cmux's official hook retains lifecycle display, notifications, and restoration. Worktrunk retains activity records and Hunk feedback delivery. Run `/reload` or restart Pi after installation.
+
+Use `/cmo <command>` or `/cmt <command>` for requested tool views and `/cmb <url>` for a requested cmux browser pane. Browser annotations poll only panes opened by that Pi session, and each submitted note requires confirmation in Pi. Page scripts can forge notes; approve only notes you recognize. Native cmux Design Mode must be off. Hunk remains the review viewer and feedback owner; `agent-browser` remains the default browser automation workflow.
+
+Session commands need separate ownership decisions. `/cmn`, `/cmv`, and `/cmh` create independent Pi sessions in the current checkout, not isolated worktrees. `/cmcv` and `/cmch` fork the conversation while retaining the source session; their `-c` option creates a Git worktree outside the tracked Worktrunk launcher. `cmux_start_pi` exposes the same choices to the agent. These commands do not transfer a `wt pi` task binding or apply Subagents' provider and execution guards. Do not use them for managed delegation or tracked task handoffs, and never create a second writer in one checkout. Keep `wt pi new/open/remove` for human tracked tasks and Subagents for managed delegation. A partial launch may leave a workspace behind; inspect it before retrying.
+
+The published archive has no dependency lifecycle scripts or runtime dependencies beyond Pi peers. Selected registration, lifecycle, launch, configuration, and browser-annotation paths were source-reviewed. `scripts/tests/test_pi_cmux.mjs` checks the filtered pin, then optionally loads the stowed entry point and reviewed package through Pi's loader in a disposable HOME to verify enforced preferences, registration, and quiet lifecycle behavior. This does not verify live session launches or browser annotation delivery.
+
 ## Native Computer Use in Pi
 
 The stowed `~/.pi/agent/extensions/cmux-cua/` extension connects Pi to cmux's bundled native MCP proxy. Loading Pi, discovering the extension, and starting or restoring a session do not start a proxy, request permissions, or perform GUI work.

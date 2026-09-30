@@ -181,7 +181,7 @@ exec /bin/mv "$@"
             "tuiMode": "fullscreen", "fullscreenExitOutput": "transcript",
             "packages": ["npm:@upstash/context7-pi@0.1.2", "./local/copilot-delegation/node_modules/pi-subagents",
                          "npm:pi-web-access@0.27.0", "npm:@gotgenes/pi-anthropic-auth@3.3.1",
-                         "npm:@sting8k/pi-vcc@0.8.0"],
+                         "npm:@sting8k/pi-vcc@0.8.0", {"source": "npm:pi-cmux@0.1.24", "extensions": []}],
             "enabledModels": ["openai-codex/gpt-5.6-sol", "github-copilot/claude-opus-5",
                               "omlx/Qwen3.8-27B-oQ8e-mtp", "omlx/Qwen3.8-27B-oQ4e-mtp",
                               "openai-codex/gpt-6-astra",
