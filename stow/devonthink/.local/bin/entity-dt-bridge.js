@@ -467,13 +467,14 @@ function timelineMerge(body, blocks) {
 }
 
 // Pure core of the append_pinned op: one untimed machine line at the end of
-// the timeline (before trailing blanks), idempotent by item-link UUID — or
-// the whole trimmed line — anywhere in the body. A pre-flatten note routes to
+// the timeline (before trailing blanks), idempotent by capture receipt marker,
+// otherwise by item-link UUID or the whole trimmed line anywhere in the body. A pre-flatten note routes to
 // its `## Today's Notes` section instead, so a backfilled journal still lands
 // where that note's readers expect it.
 function appendPinned(body, line) {
   const m = /x-devonthink-item:\/\/([A-Za-z0-9-]+)/.exec(line)
-  const marker = m ? m[1] : String(line).trim()
+  const receipt = /<!-- capture-receipt:[a-f0-9]{64} -->/.exec(line)
+  const marker = receipt ? receipt[0] : m ? m[1] : String(line).trim()
   if (body.join('\n').indexOf(marker) !== -1) return body
   if (body.some(l => l.trim() === NOTES_SECTION)) {
     return insertUnderSectionOnce(body, NOTES_SECTION, line)
@@ -779,6 +780,44 @@ function appendLogLines(rec, lines, section) {
   return { appended: fresh.length, skipped: skipped }
 }
 
+function captureSourceText(text) {
+  const lines = String(text || '').split(/\r\n|\r|\n/)
+  let i = 0
+  while (i < lines.length && !lines[i].trim()) i++
+  if (i < lines.length && lines[i].trimStart().startsWith('# ')) {
+    i++
+    while (i < lines.length && !lines[i].trim()) i++
+    return lines.slice(i).join('\n')
+  }
+  return lines.join('\n')
+}
+
+function captureTargets(evidence, people) {
+  const key = normName(evidence.mention)
+  const names = people.filter(p => [p.name].concat(String(p.aliases || '').split(','))
+    .some(n => normName(n) === key || (key.split(' ').length === 1 &&
+      normName(n).split(' ')[0] === key)))
+  const email = normalizeEmail(evidence.email || '')
+  const emails = email ? people.filter(p => normalizeEmail(p.email || '') === email) : []
+  const ids = rows => rows.map(p => p.uuid)
+  const common = ids(names).filter(id => ids(emails).indexOf(id) !== -1)
+  if (names.length && emails.length && !common.length) throw new Error('conflicting identifiers')
+  return names.length && emails.length ? common : Array.from(new Set(ids(names.concat(emails))))
+}
+
+function captureBlockMutation(text, id, block, expectedPresent) {
+  const body = String(text || '').replace(/\r\n|\r/g, '\n')
+  const begin = '<!-- capture:' + id + ':begin -->'
+  const end = '<!-- capture:' + id + ':end -->'
+  if (body.indexOf(begin) !== -1 || body.indexOf(end) !== -1) {
+    if (body.split(begin).length !== 2 || body.split(end).length !== 2 ||
+        body.indexOf(block) === -1) throw new Error('capture contribution was edited; retained for correction')
+    return body
+  }
+  if (expectedPresent) throw new Error('capture contribution was removed; retained for correction')
+  return body + '\n\n' + block + '\n'
+}
+
 function run(argv) {
   const opsRaw = readFile(argv[0])
   if (opsRaw === null) {
@@ -944,6 +983,8 @@ function run(argv) {
           kind: kind,
           eventdate: mdField(md, 'eventdate'),
           added: added ? isoStamp(added).slice(0, 10) : '',
+          added_at: added ? isoStamp(added) : '',
+          capture_operation: mdField(md, 'captureoperation'),
           modified: isoStamp(modified),
           entityfiled: flagSet(mdField(md, 'entityfiled')),
           // NeedsProcessing=1 means the smart-rule pipeline (OCR, comment
@@ -1022,6 +1063,7 @@ function run(argv) {
           addResolved(uuids[i], names[i], locations[i], mds[i], addeds[i], modifieds[i])
         }
       }
+      dt.search('mdcaptureoperation:*', { in: db.root() }).forEach(addFromRecord)
       return out
     },
 
@@ -1041,6 +1083,8 @@ function run(argv) {
         kind: kind,
         eventdate: mdValue(r, 'eventdate'),
         added: added ? isoStamp(added).slice(0, 10) : '',
+        added_at: added ? isoStamp(added) : '',
+        capture_operation: mdValue(r, 'captureoperation'),
         modified: isoStamp(r.modificationDate()),
         entityfiled: flagSet(mdValue(r, 'entityfiled')),
         ready: kind === 'daily'
@@ -1237,6 +1281,73 @@ function run(argv) {
       const r = byUuid(op.uuid)
       r.plainText = op.text
       return { uuid: op.uuid }
+    },
+
+    capture_store(op) {
+      const rec = byUuid(op.uuid)
+      if (captureSourceText(rec.plainText()) !== op.text) throw new Error('capture source changed')
+      if (mdValue(rec, 'captureoperation') !== op.expected) throw new Error('capture operation changed')
+      dt.addCustomMetaData(op.value, { for: 'captureoperation', to: rec })
+      if (mdValue(rec, 'captureoperation') !== op.value) throw new Error('capture plan was not stored')
+      return { uuid: op.uuid }
+    },
+
+    capture_person(op) {
+      const source = byUuid(op.source_uuid)
+      if (captureSourceText(source.plainText()) !== op.text) throw new Error('capture source changed')
+      const recs = groupAt(PEOPLE_PATH).children().filter(r => String(r.type()) === 'markdown')
+      const people = recs.map(r => ({uuid: r.uuid(), name: r.name(), aliases: r.aliases(),
+                                    email: mdValue(r, 'email')}))
+      const targets = captureTargets(op.evidence, people)
+      const anchor = '<!-- capture-created:' + op.creation_id + ' -->'
+      const temporaryName = '[Capture ' + op.creation_id + ']'
+      const temporary = recs.filter(r => r.name() === temporaryName)
+      if (temporary.length > 1) throw new Error('duplicate capture initialization records')
+      let rec = null
+      if (targets.length > 1) throw new Error('capture identity became ambiguous')
+      if (op.uuid) {
+        if (targets.length !== 1 || targets[0] !== op.uuid) throw new Error('capture identity changed')
+        rec = byUuid(op.uuid)
+      } else if (targets.length) {
+        rec = byUuid(targets[0])
+        if (String(rec.plainText()).indexOf(anchor) === -1) throw new Error('capture identity changed before creation')
+      } else {
+        if (recs.some(r => r.name() !== temporaryName && String(r.plainText()).indexOf(anchor) !== -1)) {
+          throw new Error('capture-created person no longer matches the source')
+        }
+        rec = temporary[0] || dt.createRecordWith({name: temporaryName, type: 'markdown'},
+                                                  {in: groupAt(PEOPLE_PATH)})
+        const body = String(rec.plainText() || '')
+        if (!body) rec.plainText = personSkeleton(op.name) + '\n\n' + anchor + '\n'
+        else if (body.indexOf(anchor) === -1) throw new Error('capture initialization body was edited')
+        entityIndex = null
+        peopleIndex = null
+      }
+      if (flagSet(mdValue(rec, 'filingsuppressed'))) throw new Error('person is filing-suppressed')
+      const owned = String(rec.plainText()).indexOf(anchor) !== -1
+      if (owned) {
+        const entityType = mdValue(rec, 'entitytype')
+        if (entityType && entityType !== 'Person') throw new Error('person initialization conflict')
+        if (!entityType) dt.addCustomMetaData('Person', {for: 'entitytype', to: rec})
+        if (!mdValue(rec, 'entitystatus')) dt.addCustomMetaData('active', {for: 'entitystatus', to: rec})
+      }
+      if (mdValue(rec, 'entitytype') !== 'Person') throw new Error('person initialization is incomplete')
+      if (rec.name() === temporaryName) rec.name = op.name
+      return {uuid: rec.uuid(), initialized: true}
+    },
+
+    capture_append(op) {
+      if (captureSourceText(byUuid(op.source_uuid).plainText()) !== op.text) throw new Error('capture source changed')
+      const rec = byUuid(op.uuid)
+      const people = groupAt(PEOPLE_PATH).children().filter(r => String(r.type()) === 'markdown')
+        .map(r => ({uuid: r.uuid(), name: r.name(), aliases: r.aliases(), email: mdValue(r, 'email')}))
+      const targets = captureTargets(op.evidence, people)
+      if (targets.length !== 1 || targets[0] !== op.uuid) throw new Error('capture identity changed')
+      if (flagSet(mdValue(rec, 'filingsuppressed'))) throw new Error('person is filing-suppressed')
+      const current = String(rec.plainText() || '')
+      const next = captureBlockMutation(current, op.id, op.block, op.expected_present)
+      if (current !== next) rec.plainText = next
+      return {uuid: op.uuid}
     },
 
     ensure_person(op) {

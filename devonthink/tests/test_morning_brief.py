@@ -2089,25 +2089,55 @@ class CalendarPersonCandidateCap(unittest.TestCase):
             events, [], [], ROOM_RE, self.contexts, set(), mb.SKIP_CALENDARS,
             None)
 
-    def test_a_large_meeting_is_capped_per_event(self):
+    def test_a_large_meeting_is_ignored(self):
         attendees = [attendee(f"Guest Number{i}", f"g{i}@x.com")
                     for i in range(40)]
         ev = event("All Hands", attendees, calendar="Work", event_id="event-1")
         got = self.candidates([ev])
-        self.assertEqual(len(got), mb.CANDIDATE_CAP_PER_EVENT)
+        self.assertEqual(got, [])
 
-    def test_the_drop_is_logged_with_a_count_and_the_event_not_every_name(self):
+    def test_large_meeting_title_cannot_create_a_candidate(self):
+        ev = event("Meeting with Jordan Pike", [attendee(f"Guest Number{i}") for i in range(11)],
+                   calendar="Work")
+        got = mb.calendar_person_candidates([ev], [], [contact("Jordan Pike")], ROOM_RE,
+                                           self.contexts)
+        self.assertEqual(got, [])
+
+    def test_large_meeting_is_ignored_by_every_calendar_entity_path(self):
+        p = person("Jordan Pike", "P1", email="jp@x.com")
+        guests = [attendee("Jordan Pike", "jp@x.com")]
+        guests += [attendee(f"Room {i}", is_person=False) for i in range(10)]
+        ev = event("Jordan Pike webinar", guests, calendar="Work")
+        self.assertFalse(mb.attending(ev))
+        self.assertEqual(mb.brief_blocks([ev], [p], ROOM_RE), [])
+        self.assertEqual(mb.contact_bumps([ev], [p], "2026-07-07", ROOM_RE), [])
+        self.assertEqual(mb.calendar_observations([ev], [p], ROOM_RE, self.contexts), [])
+        self.assertEqual(mb.repeat_series([ev], "2026-07-08"), set())
+        self.assertEqual(self.candidates([ev]), [])
+
+    def test_exactly_ten_invitees_remain_eligible(self):
+        guests = [attendee("Jordan Pike", "jp@x.com")]
+        guests += [attendee(f"Room {i}", is_person=False) for i in range(8)]
+        guests += [attendee("Self", is_self=True)]
+        ev = event("Meeting", guests, calendar="Work")
+        self.assertTrue(mb.attending(ev))
+        self.assertEqual(len(self.candidates([ev])), 1)
+        self.assertEqual(len(mb.contact_bumps([ev], [person("Jordan Pike", "P1", email="jp@x.com")],
+                                              "2026-07-07", ROOM_RE)), 1)
+
+    def test_organizing_a_large_meeting_does_not_bypass_the_limit(self):
+        ev = event("Webinar", [attendee(f"Guest Number{i}") for i in range(11)],
+                   calendar="Work", organizer_is_self=True)
+        self.assertFalse(mb.attending(ev))
+
+    def test_large_meeting_is_ignored_without_per_person_logging(self):
         attendees = [attendee(f"Guest Number{i}", f"g{i}@x.com")
                     for i in range(40)]
         ev = event("All Hands", attendees, calendar="Work", event_id="event-1")
         with capture_logs(mb) as cap:
             self.candidates([ev])
         messages = cap.messages(level=logging.INFO)
-        self.assertEqual(len(messages), 1)
-        self.assertIn("35", messages[0])
-        self.assertIn("All Hands", messages[0])
-        for i in range(40):
-            self.assertNotIn(f"Guest Number{i}", messages[0])
+        self.assertEqual(messages, [])
 
     def test_two_small_meetings_are_not_capped_against_each_other(self):
         ev1 = event("Sync A", [attendee("Aaron Brooks", "ab@x.com")],
