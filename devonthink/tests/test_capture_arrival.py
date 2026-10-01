@@ -26,6 +26,16 @@ class Arrival(unittest.TestCase):
             request.unlink()
             self.assertTrue(arrival.notify(tmp, gate=0))
 
+    def test_existing_request_refreshes_the_watched_directory(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertTrue(arrival.notify(tmp, gate=0))
+            directory = Path(tmp) / ".local/state/devonthink/entity-capture-arrivals"
+            before = 1_000_000_000
+            os.utime(directory, ns=(before, before))
+            self.assertTrue(arrival.notify(tmp, gate=0))
+            self.assertGreater(directory.stat().st_mtime_ns, before)
+            self.assertEqual(list(directory.iterdir()), [directory / "pending"])
+
     def test_follower_does_not_wake_processing(self):
         with tempfile.TemporaryDirectory() as tmp:
             self.assertFalse(arrival.notify(tmp, gate=1))
