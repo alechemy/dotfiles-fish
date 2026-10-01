@@ -11,7 +11,7 @@ only ever sees human-authored content. The LLM only performs
 the messy-text -> structured-JSON extraction; everything that writes to
 DEVONthink is deterministic (entity-dt-bridge.js ops built here).
 
-Safety model:
+Safety model for passive discovery:
   - suggest mode (default): every extraction about *known* people becomes a
     proposal record in /20_ENTITIES/_Review containing a human summary plus
     the exact ops as a fenced JSON block. Moving a proposal into
@@ -42,6 +42,15 @@ Safety model:
     different flag on the same record, BriefingSuppressed, which redacts
     rendered output and is read only by dt-morning-brief.py. Neither flag
     reads the other; setting one does nothing for the other.
+
+Deliberate captures use entity_capture.py independently of passive discovery.
+After CAPTURE_AUTO_AFTER, a source-grounded, unambiguous subject may create a
+single-name Person and save the entire note. Questions stay on the source.
+Frozen operations recover without inference; filed operations are committed
+history and never replay over subsequent manual edits. Earlier captures require
+an explicit entity-capture-migrate preview and application. THINGS_SYNC mirrors
+unresolved capture questions only. Task completion, cancellation, and deletion
+never approve filings, track people, or suppress identities.
 
 Lifecycle: a source is only discovered once its upstream pipeline is
 complete (NeedsProcessing cleared — a Boox record mid-OCR has no text
@@ -85,24 +94,19 @@ Config (~/.config/dt-pipeline/entities.conf, KEY=VALUE):
                                      macOS reports elevated memory pressure,
                                      so inference never lands on an
                                      already-tight machine.
-  THINGS_SYNC=on|off                 default off. Mirror each pending
-                                     proposal as a to-do in Things 3: the
-                                     note carries an editable line-format
-                                     rendering of the proposal, completing
-                                     the to-do approves it (edits included),
-                                     canceling or deleting it rejects it.
-                                     Pending candidates mirror too, as one
-                                     to-do each with a compact summary and
-                                     DT link (never the evidence): complete
-                                     = track, cancel/delete = ignore, and a
-                                     decision made in DEVONthink first wins
-                                     — the task just closes to match.
-                                     Person names and facts sync through
-                                     Things Cloud — an explicit exception
-                                     to the entity layer's local-only rule.
-  THINGS_PROJECT=<title>             Things project holding the proposal
-                                     to-dos, created on demand; default
-                                     "Entity Filing"
+  CAPTURE_AUTO_AFTER=<local ISO>     persisted activation boundary. Earlier
+                                     captures require explicit migration.
+  REVIEW_URL=<base URL>              review app URL for receipts and optional
+                                     question reminders; defaults to the
+                                     Mac's http://localhost:8080/entities/.
+  THINGS_SYNC=on|off                 default off. Mirror unanswered capture
+                                     questions with links only. Terminal
+                                     task states dismiss the reminder and
+                                     leave the note and identity decisions
+                                     unchanged. No names or facts are sent.
+                                     Legacy task protocols are disabled.
+  THINGS_PROJECT=<title>             question reminder project, created on
+                                     demand; default "Entity Filing"
 
 Usage:
     entity-filing.py                 # launchd-driven scan + apply
@@ -139,6 +143,7 @@ from pipeline_log import setup as setup_log
 import brief_events as be
 import entity_candidates as ec
 import entity_capture as capture
+import entity_capture_reminders as capture_reminders
 import things_bridge
 
 log = setup_log("entity-filing")
@@ -767,17 +772,7 @@ def strip_leading_h1(text):
     """Drop a fact capture's leading `# <title>` line (present so the global
     H1-sync smart rule no-ops) before extraction, so the model sees only the
     fact text."""
-    text = text.replace("\r\n", "\n").replace("\r", "\n")
-    lines = text.split("\n")
-    i = 0
-    while i < len(lines) and not lines[i].strip():
-        i += 1
-    if i < len(lines) and lines[i].lstrip().startswith("# "):
-        i += 1
-        while i < len(lines) and not lines[i].strip():
-            i += 1
-        return "\n".join(lines[i:])
-    return text
+    return capture.source_text(text)
 
 
 def fact_match_is_strong(plan, text):
@@ -2445,6 +2440,7 @@ def scan(config, state, dry_run, force_uuid, user_invoked):
         candidates = [
             s for s in sources
             if source_needs_filing(s, state)
+            and (s["kind"] != "fact" or s.get("capture_operation") or capture.eligible(s, config.get("CAPTURE_AUTO_AFTER", "")))
             and not (skip_re and skip_re.search(s["name"]))
         ]
         # Newest first, but a fact capture leads its day: a deliberate
@@ -2514,6 +2510,8 @@ def scan(config, state, dry_run, force_uuid, user_invoked):
         capture_path = capture.eligible(source, config.get("CAPTURE_AUTO_AFTER", "")) \
             or bool(source.get("capture_operation"))
         frozen_capture = source.get("capture_operation", "")
+        if source["kind"] == "fact" and not capture_path:
+            continue
         transport = "frozen capture" if frozen_capture else pick_transport(config)
         if transport is None:
             no_transport += 1
@@ -2535,9 +2533,9 @@ def scan(config, state, dry_run, force_uuid, user_invoked):
 
         source_date = source_date_of(source)
         text = run_bridge([{"op": "get_text", "uuid": uuid}])[0]["text"]
-        text = normalize_source_text(source["kind"], text)
+        text = normalize_source_text("fact" if capture_path else source["kind"], text)
         entry = state["processed"].get(uuid)
-        if uuid != force_uuid and entry is not None and entry.get("hash") == \
+        if not frozen_capture and uuid != force_uuid and entry is not None and entry.get("hash") == \
                 hashlib.sha256(text.encode()).hexdigest():
             # Metadata-only touch (tags, EntityFiled, sync churn): the text
             # already filed is unchanged, so just re-baseline the mod stamp.
@@ -2549,15 +2547,51 @@ def scan(config, state, dry_run, force_uuid, user_invoked):
         if frozen_capture:
             try:
                 manifest = capture.decode_manifest(frozen_capture, uuid)
-                if manifest["text"] != text:
-                    log.info("capture changed; correction is required before refiling",
-                             extra={"record_uuid": uuid})
+                if manifest.get("replacement") or manifest["status"] == "correcting":
+                    if not dry_run:
+                        mutation_lock = ec.acquire_candidates_lock()
+                        try:
+                            if manifest.get("replacement"):
+                                capture.replace_pending(run_bridge, manifest, frozen_capture, selves=selves)
+                            elif not manifest.get("correction", {}).get("conflict_token"):
+                                capture.correct(run_bridge, manifest, frozen_capture, selves=selves)
+                        finally:
+                            mutation_lock.close()
                     continue
-                result = file_capture(config, state, source, source_date, text, None,
-                                      dry_run, manifest=manifest, previous=frozen_capture)
-                progressed = progressed or result["status"] == "filed"
-                people = run_bridge([{"op": "dump_people", "include_bodies": False}])[0]
-                index = roster_index(people)
+                if manifest["text"] != text:
+                    if manifest["subjects"]:
+                        manifest.update(status="revision_question", reason="source_changed", changed_text=text)
+                    else:
+                        history = list(manifest.get("history", [])) + [{k: v for k, v in manifest.items() if k != "history"}]
+                        manifest = capture.pending(source, source_date, text, [],
+                            capture.outcome("unresolved", "source_changed"), date.today().isoformat())
+                        manifest["history"] = history
+                    if not dry_run:
+                        store_capture(manifest, frozen_capture, text)
+                        remember_processed(state, source, text)
+                        save_state(state)
+                    continue
+                if manifest["status"] in {"question", "revision_question", "undone"}:
+                    if not dry_run:
+                        remember_processed(state, source, text)
+                        save_state(state)
+                    continue
+                if manifest["status"] == "deferred":
+                    frozen_capture = ""
+                    transport = pick_transport(config)
+                    if transport is None:
+                        continue
+                    if llm_lock is None:
+                        llm_lock = acquire_llm_lock()
+                    if llm_lock is None:
+                        continue
+                else:
+                    result = file_capture(config, state, source, source_date, text, None,
+                                          dry_run, manifest=manifest, previous=frozen_capture)
+                    progressed = progressed or result["status"] == "filed"
+                    people = run_bridge([{"op": "dump_people", "include_bodies": False}])[0]
+                    index = roster_index(people)
+                    continue
             except BridgeUnavailable:
                 raise
             except Exception as exc:
@@ -2566,7 +2600,7 @@ def scan(config, state, dry_run, force_uuid, user_invoked):
                     save_state(state)
                 log.error("capture replay failed: %s: %s", type(exc).__name__, exc,
                           extra={"record_name": source["name"], "record_uuid": uuid})
-            continue
+                continue
         if len(text.split()) < min_words_for(source["kind"]):
             if capture_path:
                 continue
@@ -2599,6 +2633,12 @@ def scan(config, state, dry_run, force_uuid, user_invoked):
             raw = extract_omlx(config, prompt)
             extracted_people, extracted_events = parse_extraction(raw)
         except LLMUnavailable as exc:
+            if capture_path and not dry_run:
+                held = capture.pending(source, source_date, text, [],
+                    capture.outcome("deferred", "model_unavailable"), date.today().isoformat())
+                if source.get("capture_operation"):
+                    held["history"] = capture.source_history(capture.decode_manifest(source["capture_operation"], uuid), text, source_date)
+                store_capture(held, source.get("capture_operation", ""), text)
             log.info("oMLX unavailable (%s), deferring remaining extraction "
                      "to the next run", exc)
             break
@@ -2606,6 +2646,12 @@ def scan(config, state, dry_run, force_uuid, user_invoked):
             raise
         except Exception as exc:
             if not dry_run:
+                if capture_path:
+                    held = capture.pending(source, source_date, text, [],
+                        capture.outcome("deferred", "extraction_failed"), date.today().isoformat())
+                    if source.get("capture_operation"):
+                        held["history"] = capture.source_history(capture.decode_manifest(source["capture_operation"], uuid), text, source_date)
+                    store_capture(held, source.get("capture_operation", ""), text)
                 record_attempt(state, uuid, f"{type(exc).__name__}: {exc}")
                 save_state(state)
             log.error("extraction failed: %s: %s", type(exc).__name__, exc,
@@ -2617,7 +2663,7 @@ def scan(config, state, dry_run, force_uuid, user_invoked):
             if capture_path:
                 result = file_capture(config, state, source, source_date, text,
                                       extracted_people, dry_run)
-                progressed = progressed or result["status"] == "filed"
+                progressed = progressed or result["status"] == "filed" or result.get("retained", False)
                 people = run_bridge([{"op": "dump_people", "include_bodies": False}])[0]
                 index = roster_index(people)
                 continue
@@ -2648,8 +2694,23 @@ def scan(config, state, dry_run, force_uuid, user_invoked):
     return progressed
 
 
+def store_capture(manifest, previous, text=None):
+    run_bridge([{"op": "capture_store", "uuid": manifest["source_uuid"], "expected": previous,
+                 "value": capture.encode_manifest(manifest),
+                 "text": manifest["text"] if text is None else text}])
+
+
 def file_capture(config, state, source, source_date, text, extracted, dry_run,
                  manifest=None, previous=""):
+    if manifest and manifest["status"] == "filed":
+        if not dry_run:
+            run_bridge([{"op": "capture_retire_source", "uuid": source["uuid"]}])
+            fresh, current = run_bridge([{"op": "get_source", "uuid": source["uuid"]},
+                                         {"op": "get_text", "uuid": source["uuid"]}])
+            modified = fresh.get("modified", "") if normalize_source_text("fact", current["text"]) == text else source.get("modified", "")
+            remember_processed(state, source, text, modified=modified)
+            save_state(state)
+        return capture.outcome("filed", subjects=manifest["subjects"])
     lock = ec.acquire_candidates_lock() if not dry_run else None
     try:
         people, listing, fresh = run_bridge([
@@ -2662,20 +2723,41 @@ def file_capture(config, state, source, source_date, text, extracted, dry_run,
         ignored = ec.CandidateIndex(listing).ignored_names()
         subjects = extracted if manifest is None else [
             dict(s["evidence"], passage=s["passage"]) for s in manifest["subjects"]]
-        result = capture.resolve(text, subjects, people, ignored, self_names(config))
+        decisions = None if manifest is None else {
+            i: dict(target=s["evidence"].get("selected_target", ""), new=s["evidence"].get("distinct", False))
+            for i, s in enumerate(manifest["subjects"]) if s["evidence"].get("selected_target") or s["evidence"].get("distinct")}
+        result = capture.resolve(text, subjects, people, ignored, self_names(config), decisions)
         if result["status"] not in {"new", "existing"}:
             log.info("capture retained: %s", result["reason"], extra={"record_uuid": source["uuid"]})
+            if manifest is None and not dry_run:
+                held = capture.pending(source, source_date, text, extracted, result, date.today().isoformat())
+                if source.get("capture_operation"):
+                    held["history"] = capture.source_history(capture.decode_manifest(source["capture_operation"], source["uuid"]), text, source_date)
+                if result["reason"] in {"no_subject", "ungrounded_subject", "invalid_subject"}:
+                    held["status"] = "question"
+                store_capture(held, source.get("capture_operation", ""), text)
+                fresh, current = run_bridge([{"op": "get_source", "uuid": source["uuid"]},
+                                             {"op": "get_text", "uuid": source["uuid"]}])
+                modified = fresh.get("modified", "") if normalize_source_text("fact", current["text"]) == text else source.get("modified", "")
+                remember_processed(state, source, text, modified=modified)
+                save_state(state)
+                result["retained"] = True
             return result
         if manifest is not None:
             for frozen, current in zip(manifest["subjects"], result["subjects"]):
-                if frozen["uuid"] and frozen["uuid"] != current["uuid"]:
+                if frozen["uuid"] and frozen["uuid"] != current["uuid"] and not frozen["evidence"].get("distinct"):
                     return capture.outcome("unresolved", "identity_changed")
         else:
             manifest = capture.prepare(source, source_date, text, result, date.today().isoformat())
+            manifest["review_url"] = config.get("REVIEW_URL") or "http://localhost:8080/entities/"
+            previous = source.get("capture_operation", "") or previous
+            if previous:
+                prior = capture.decode_manifest(previous, source["uuid"])
+                manifest["history"] = capture.source_history(prior, text, source_date)
         if dry_run:
             print(json.dumps(manifest, indent=2))
             return result
-        result = capture.replay(run_bridge, manifest, previous)
+        result = capture.replay(run_bridge, manifest, previous, selves=self_names(config))
         fresh, fresh_body = run_bridge([
             {"op": "get_source", "uuid": source["uuid"]},
             {"op": "get_text", "uuid": source["uuid"]},
@@ -3414,6 +3496,13 @@ def main():
                         or merge_args)
 
     if not dry_run:
+        if not apply_only:
+            arrivals = os.path.join(STATE_DIR, "entity-capture-arrivals")
+            os.makedirs(arrivals, exist_ok=True)
+            try:
+                os.unlink(os.path.join(arrivals, "pending"))
+            except FileNotFoundError:
+                pass
         subprocess.run(
             [os.path.expanduser("~/.local/bin/pipeline-record-run"),
              "entity-filing", "1800"],
@@ -3464,16 +3553,19 @@ def main():
             if rebuild_state:
                 return
         if not scan_only:
-            things_decisions(config, dry_run)
-            candidate_things_decisions(config, dry_run)
             promote_candidates(dry_run)
             apply_approved(dry_run)
         scan_healthy = apply_only
         if not apply_only:
             scan_healthy = scan(config, state, dry_run, force_uuid, user_invoked)
         if not scan_only:
-            things_reconcile(config, dry_run)
-            mirror_candidates(config, dry_run)
+            try:
+                capture_reminders.sync(run_bridge, things_bridge, config,
+                    os.path.join(STATE_DIR, "things-capture-questions-v2.json"), dry_run)
+            except BridgeUnavailable:
+                raise
+            except Exception as exc:
+                log.warning("question reminders deferred: %s", exc)
         if should_record_success(dry_run) and scan_healthy:
             record_success()
     except BridgeUnavailable as exc:

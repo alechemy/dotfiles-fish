@@ -62,6 +62,9 @@ class FakeBridge:
                     self.bodies["DAY-1"] += op["line"] + "\n"
                     self.mutate()
                 out.append({"uuid": "DAY-1"})
+            elif kind == "capture_retire_source":
+                self.mutate()
+                out.append({"uuid": op["uuid"]})
             elif kind == "mark_filed":
                 self.mutate()
                 out.append({"uuid": op["uuid"]})

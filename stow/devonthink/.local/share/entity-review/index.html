@@ -113,6 +113,13 @@ li.off .rowtext { opacity: .4; text-decoration: line-through; }
 }
 .captured { background: var(--chip); border-radius: 9px; padding: 10px 12px;
   font-size: 14px; white-space: pre-wrap; margin-top: 8px; max-height: 180px; overflow-y: auto; }
+.capture label { display: block; margin-top: 12px; font-size: 14.5px; }
+.capture input, .capture select, .capture textarea {
+  display: block; width: 100%; min-height: 44px; margin-top: 6px;
+  font: inherit; color: var(--ink); background: var(--chip);
+  border: 1px solid var(--line); border-radius: 8px; padding: 9px 10px;
+}
+.capture textarea { min-height: 80px; resize: vertical; }
 .state { text-align: center; color: var(--muted); padding: 48px 20px; }
 .state .big { font-size: 40px; margin-bottom: 10px; }
 .state .btn { margin-top: 14px; }
@@ -328,7 +335,7 @@ function cardKeyOf(el) {
 
 function pinnedKey() {
   const el = document.activeElement;
-  if (!el || !el.matches || !el.matches("input, textarea")) return null;
+  if (!el || !el.matches || !el.matches("input, textarea, select")) return null;
   if (!el.closest("#content")) return null;
   return cardKeyOf(el);
 }
@@ -337,6 +344,12 @@ async function refresh(manual) {
   try {
     queue = await api("api/queue");
     banner("");
+    const requested = location.hash.slice(1);
+    if (/^[A-Za-z0-9-]{8,}$/.test(requested) && queue.dt === "ok" &&
+        ![...(queue.captures || []),...(queue.candidates || []),...(queue.proposals || [])].some(c => c.uuid === requested)) {
+      try { (queue.captures || (queue.captures = [])).push(await api("api/capture/" + requested)); }
+      catch(e) { banner(e.message); }
+    }
     render();
   } catch (e) {
     if (manual || !queue) {
@@ -370,6 +383,14 @@ function viewItems() {
   const cands = queue.candidates || [];
   const props = queue.proposals || [];
   const items = [];
+  const captures = queue.captures || [];
+  if (captures.length) {
+    items.push(item("h:captures", '<h2 class="sec">Saved notes and questions</h2>'));
+    for (const cv of captures) {
+      const key = "c-" + cv.uuid;
+      items.push(item(key, captureCard(cv, overlayOf(local, key))));
+    }
+  }
   if (cands.length) {
     items.push(item("h:cands", '<h2 class="sec">People to review</h2>'));
     for (const cv of cands) {
@@ -489,6 +510,74 @@ function schedulePoll(ms) {
 function dtLink(uuid, label) {
   return '<a class="chip" href="x-devonthink-item://' + esc(uuid) + '">' +
     esc(label) + "</a>";
+}
+
+function captureCard(cv, o) {
+  const u = esc(cv.uuid);
+  const finished = cv.status === "filed" || cv.status === "undone";
+  const editing = (!!o.captureEdit || !finished) && cv.status !== "correcting";
+  const technical = ["waiting", "deferred", "broken", "correcting"].includes(cv.status);
+  let html = '<div class="card capture" id="c-' + u + '"><div class="cardtop"><span class="who">' +
+    esc(cv.status === "filed" ? "Saved" : cv.status === "undone" ? "Filing undone" : technical ? "Waiting for processing" : "A question about your note") +
+    '</span><span class="meta">' + esc(cv.date || "") + '</span></div>';
+  html += '<div class="chips">' + dtLink(cv.uuid, "Original note") + '</div>';
+  if (!finished) html += '<div class="notice">' + esc(cv.question) + '</div>';
+  if (!editing) html += '<div class="captured">' + esc(cv.text) + '</div>';
+  if (cv.status === "correcting" && cv.current_text !== undefined && cv.current_text !== cv.text) html += '<label>Current source<div class="captured">' + esc(cv.current_text) + '</div></label>';
+  if (editing && !["waiting", "broken"].includes(cv.status)) {
+    o = captureOverlay(cv.uuid);
+    if (o.captureRevision !== cv.revision) html += '<div class="notice">The source changed while you were editing. Your draft is retained.<button class="btn" data-act="capture-reload" data-uuid="' + u + '">Reload the changed note and discard these edits</button></div>';
+    const text = o.captureText;
+    html += '<label>Captured note<textarea class="captured" style="width:100%;max-height:none" data-capture-text="1">' + esc(text) + '</textarea></label>';
+    const rows = o.captureRows || (cv.subjects.length ? cv.subjects.map(s => ({mention:s.mention, passage:s.passage, target:s.uuid, email:s.email || ""})) :
+      [{mention:"", passage:cv.text, target:"", email:""}]);
+    rows.forEach((row, i) => {
+      html += '<div class="plan"><label>Name as written (optional when choosing an existing person)<input type="text" data-capture-row="' + i + '" data-field="mention" value="' + esc(row.mention) + '"></label>' +
+        '<label>Person<select data-capture-row="' + i + '" data-field="target"><option value="">Resolve from this name</option><option value="new"' + (row.target === "new" ? " selected" : "") + '>Someone new</option>';
+      for (const p of queue.roster || []) html += '<option value="' + esc(p.uuid) + '"' + (row.target === p.uuid ? " selected" : "") + '>' + esc([p.name,p.city,p.employer].filter(Boolean).join(" · ")) + '</option>';
+      html += '</select></label><label>Email from this passage (optional)<input type="text" data-capture-row="' + i + '" data-field="email" value="' + esc(row.email || "") + '"></label><label>Exact passage<textarea class="captured" style="width:100%;max-height:none" data-capture-row="' + i + '" data-field="passage">' + esc(row.passage) + '</textarea></label><button class="btn quiet" data-act="capture-remove" data-uuid="' + u + '" data-row="' + i + '"' + (rows.length === 1 ? ' disabled' : '') + '>Remove subject</button></div>';
+    });
+    html += '<button class="btn quiet" data-act="capture-add" data-uuid="' + u + '">Add another subject and passage</button>';
+    if (cv.choices.length) html += '<div class="notice">Possible people: ' + esc(cv.choices.map(p => [p.name,p.city,p.employer].filter(Boolean).join(", ")).join("; ")) + '</div>';
+  }
+  html += '<div class="actions">';
+  if (editing && !["waiting", "broken"].includes(cv.status)) html += '<button class="btn primary" data-act="capture-save" data-uuid="' + u + '">Save to the selected people</button>';
+  if (cv.status === "filed") html += '<button class="btn" data-act="capture-edit" data-uuid="' + u + '">Wrong person</button><button class="btn danger" data-act="capture-undo" data-uuid="' + u + '">Undo this capture\'s filing</button>';
+  if (cv.conflict) html += '<button class="btn" data-act="capture-keep" data-uuid="' + u + '">Keep the edited text and finish</button>';
+  if (cv.status === "correcting") html += '<button class="btn" data-act="capture-retry" data-uuid="' + u + '">Resume correction</button>';
+  if (!finished && !["waiting", "broken", "correcting"].includes(cv.status)) html += '<button class="btn quiet" data-act="capture-defer" data-uuid="' + u + '">Decide later</button><button class="btn" data-act="capture-retry" data-uuid="' + u + '">Retry processing</button>';
+  return html + '</div></div>';
+}
+
+function captureOverlay(uuid) {
+  const key = "c-" + uuid;
+  const cv = (queue.captures || []).find(c => c.uuid === uuid);
+  const o = local[key] || (local[key] = emptyOverlay());
+  if (o.captureRevision === undefined) {
+    o.captureRevision = cv.revision;
+    o.captureText = cv.text;
+  }
+  if (!o.captureRows) o.captureRows = cv.subjects.length ? cv.subjects.map(s => ({mention:s.mention, passage:s.passage, target:s.uuid, email:s.email || ""})) :
+    [{mention:"", passage:cv.text, target:"", email:""}];
+  return o;
+}
+
+async function decideCapture(uuid, action) {
+  const cv = queue.captures.find(c => c.uuid === uuid);
+  const body = {action, revision:cv.revision};
+  if (action === "save") {
+    const o = captureOverlay(uuid);
+    body.revision = o.captureRevision;
+    body.text = o.captureText;
+    body.subjects = o.captureRows.map(r => ({mention:r.mention, passage:r.passage,
+      target:r.target === "new" ? "" : r.target, new:r.target === "new", email:r.email || ""}));
+  }
+  try {
+    const result = await api("api/capture/" + uuid, body);
+    toast(result.status === "filed" ? "Saved" : result.status === "undone" ? "Filing undone" : action === "defer" ? "Kept for later" : "Waiting for processing");
+    delete local["c-" + uuid];
+    await refresh(false);
+  } catch(e) { banner(e.message); }
 }
 
 /* ---------- candidates ---------- */
@@ -881,6 +970,20 @@ document.addEventListener("click", e => {
   }
   const d = el.dataset;
   switch (d.act) {
+    case "capture-save": decideCapture(d.uuid, "save"); break;
+    case "capture-undo": decideCapture(d.uuid, "undo"); break;
+    case "capture-defer": decideCapture(d.uuid, "defer"); break;
+    case "capture-retry": decideCapture(d.uuid, "retry"); break;
+    case "capture-keep": decideCapture(d.uuid, "keep-edited"); break;
+    case "capture-edit": captureOverlay(d.uuid).captureEdit = true; render(); break;
+    case "capture-reload": delete local["c-" + d.uuid]; captureOverlay(d.uuid).captureEdit = true; render(); break;
+    case "capture-add": captureOverlay(d.uuid).captureRows.push({mention:"", passage:"", target:"", email:""}); render(); break;
+    case "capture-remove": {
+      const rows = captureOverlay(d.uuid).captureRows;
+      if (rows.length > 1) rows.splice(Number(d.row), 1);
+      render();
+      break;
+    }
     case "refresh": refresh(true); break;
     case "apply": applyNow(); break;
     case "open-dt": openDT(); break;
@@ -905,6 +1008,15 @@ document.addEventListener("click", e => {
     case "prop": decideProposal(d.uuid, d.action, d.msg, !!d.noundo); break;
     case "approve": approveProposal(d.uuid); break;
   }
+});
+
+document.addEventListener("input", e => {
+  const t = e.target;
+  const key = cardKeyOf(t);
+  if (!key) return;
+  const uuid = key.slice(2);
+  if (t.dataset.captureText) captureOverlay(uuid).captureText = t.value;
+  if (t.dataset.captureRow !== undefined) captureOverlay(uuid).captureRows[Number(t.dataset.captureRow)][t.dataset.field] = t.value;
 });
 
 document.addEventListener("change", e => {

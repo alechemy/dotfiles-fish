@@ -922,5 +922,15 @@
 		<key>type</key>
 		<string>text</string>
 	</dict>
+	<dict>
+		<key>identifier</key>
+		<string>mdcapturestatus</string>
+		<key>index</key>
+		<integer>82</integer>
+		<key>title</key>
+		<string>CaptureStatus</string>
+		<key>type</key>
+		<string>string</string>
+	</dict>
 </array>
 </plist>

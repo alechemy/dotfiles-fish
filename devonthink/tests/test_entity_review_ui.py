@@ -17,6 +17,7 @@ import json
 import os
 import re
 import subprocess
+import tempfile
 import textwrap
 import unittest
 from pathlib import Path
@@ -278,6 +279,53 @@ class SpecCollection(PureCore):
         self.assertEqual(len(spec["people"][0]["facts"]), 2)
         self.assertEqual(spec["people"][1]["name"], "Ada L")
         self.assertEqual(len(spec["people"][1]["facts"]), 1)
+
+
+class CaptureEditor(unittest.TestCase):
+    def test_refresh_keeps_the_editor_revision_and_rejected_draft(self):
+        script = ASSET.read_text().split("<script>", 1)[1].split('document.addEventListener("click"', 1)[0]
+        probe = r'''
+        (async function () {
+          const results = [];
+          for (const status of ["filed", "question"]) {
+            local = {};
+            const capture = {uuid:"SOURCE-FAKE", status, text:"Wren moved to Denver.", revision:"A",
+              subjects:[{mention:"Wren", passage:"Wren moved to Denver.", uuid:"PERSON-FAKE", email:""}], choices:[]};
+            let server = {dt:"ok", captures:[capture], roster:[]};
+            queue = server;
+            let posted, message;
+            api = async function (path, body) {
+              if (body) { posted = body; throw new Error("The note changed."); }
+              return server;
+            };
+            banner = function (text) { message = text; };
+            render = function () {
+              for (const cv of queue.captures) captureCard(cv, overlayOf(local, "c-" + cv.uuid));
+            };
+            if (status === "filed") captureOverlay(capture.uuid).captureEdit = true;
+            render();
+            server = {dt:"ok", captures:[{...capture, text:"Wren moved to Oslo.", revision:"B"}], roster:[]};
+            await refresh(false);
+            const draft = captureOverlay(capture.uuid);
+            draft.captureText = "Wren moved to Prague.";
+            draft.captureRows[0].passage = draft.captureText;
+            await decideCapture(capture.uuid, "save");
+            results.push({posted, text:local["c-" + capture.uuid].captureText, message});
+          }
+          console.log(JSON.stringify(results));
+        })().catch(function (error) { console.error(error); process.exitCode = 1; });
+        '''
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "capture-editor.js"
+            path.write_text(script + probe)
+            result = subprocess.run(["node", str(path)], capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        for row in json.loads(result.stdout):
+            self.assertEqual(row["posted"]["revision"], "A")
+            self.assertEqual(row["posted"]["text"], "Wren moved to Prague.")
+            self.assertEqual(row["posted"]["subjects"][0]["passage"], "Wren moved to Prague.")
+            self.assertEqual(row["text"], "Wren moved to Prague.")
+            self.assertEqual(row["message"], "The note changed.")
 
 
 if __name__ == "__main__":

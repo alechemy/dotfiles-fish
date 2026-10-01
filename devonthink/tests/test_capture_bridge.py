@@ -30,6 +30,13 @@ function run(argv) {
         for (const line of c.lines) body = appendPinned(body, line)
         return {value:body.join('\n')}
       }
+      if (c.fn === 'registry') {
+        const rows = Array.from({length: 250}, (_, i) => ({uuid: () => 'R' + i, modificationDate: () => i}))
+        const queries = []
+        const dt = {search: q => {queries.push(q); return q.includes('==') ? [rows[0]] : q.includes('NOT') ? [rows[1]] : rows}}
+        const result = captureRegistry(dt, {root: () => ({})}, 200)
+        return {value: {count:result.length, ids:result.map(r => r.uuid()), queries:queries}}
+      }
       let count = 0
       let failure = c.failure || 0
       const records = []
@@ -80,6 +87,11 @@ function run(argv) {
                                evidence:op.evidence, source_uuid:'SRC', text:op.text})
       } catch(e) {failed = true}
       failure = 0
+      if (c.clear_status) {
+        records[0].customMetaData().mdentitystatus = ''
+        op.uuid = records[0].uuid()
+        op.initialize = false
+      }
       const p = person.capture_person(op)
       append.capture_append({uuid:p.uuid, id:'abc', block:c.block,
                              evidence:op.evidence, source_uuid:'SRC', text:op.text})
@@ -108,7 +120,7 @@ BLOCK = "<!-- capture:abc:begin -->\n> Wren moved.\n<!-- capture:abc:end -->"
 
 class CaptureBridge(unittest.TestCase):
     def test_initialization_retries_after_each_real_handler_mutation(self):
-        cases = [{"fn": "initialize", "failure": i, "block": BLOCK} for i in range(7)]
+        cases = [{"fn": "initialize", "failure": i, "block": BLOCK} for i in range(8)]
         results = run_cases(cases)
         for i, result in enumerate(results):
             with self.subTest(failure=i):
@@ -120,6 +132,19 @@ class CaptureBridge(unittest.TestCase):
                 self.assertEqual(value["md"], {"mdentitytype": "Person", "mdentitystatus": "active"})
                 self.assertEqual(value["body"].count(BLOCK), 1)
                 self.assertEqual(value["failed"], i > 0)
+
+    def test_committed_creation_does_not_restore_cleared_metadata(self):
+        result = run_cases([{"fn": "initialize", "block": BLOCK, "clear_status": True}])[0]
+        self.assertEqual(result["value"]["md"]["mdentitystatus"], "")
+        self.assertEqual(result["value"]["body"].count(BLOCK), 1)
+
+    def test_registry_keeps_unfinished_and_unindexed_operations_outside_history_limit(self):
+        result = run_cases([{"fn": "registry"}])[0]["value"]
+        self.assertEqual(result["count"], 202)
+        self.assertIn("R0", result["ids"])
+        self.assertIn("R1", result["ids"])
+        self.assertNotIn("R2", result["ids"])
+        self.assertIn("mdcapturestatus==correcting", result["queries"][0])
 
     def test_modified_owned_block_is_refused(self):
         results = run_cases([

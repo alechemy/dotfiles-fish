@@ -19,9 +19,16 @@ creates `20_ENTITIES/_Facts` and prints its group UUID. Paste that UUID into
 `FACTS_GROUP_UUID` at the top of `drafts-capture-fact.js` before pasting the
 script into the action. The same UUID works on Mac and iOS (DEVONthink sync
 keeps it stable); canary one capture from each device into `_Facts` before
-relying on it. Name the person as specifically as you can — the person's full
-name or a known alias in the capture is what lets the fact auto-file rather than
-wait as a review proposal. See `devonthink/docs/entities.md` → "Fact capture".
+relying on it. After the capture release is installed and activated, a uniquely
+matching name or alias files directly, including a single name and a new person.
+The whole note is retained. Identity conflicts ask a question in the review app;
+success writes a daily-note receipt rather than a task. See
+`devonthink/docs/entities-howto.md` and the deployment procedure in
+`devonthink/docs/entity-capture-implementation.md`.
+
+The iOS callback confirms record creation. macOS confirms dispatch only. Neither
+acknowledgement claims verified filing; the daily-note receipt provides that
+confirmation. The canonical Script step is unchanged by this release.
 
 An earlier "Append to Daily Note" action (AppleScript + Shortcuts bridge) was
 retired in April 2026, superseded by Quick Jot; its files were removed from
