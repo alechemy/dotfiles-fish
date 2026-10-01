@@ -1,6 +1,6 @@
 # Entity capture implementation and deployment
 
-The implementation includes deliberate filing, questions, correction, reminder-only Things behavior, explicit old-source migration, and arrival notification. Installation and the five-source migration completed on the driver Mac. Five synthetic attribution checks passed against the configured local model. Automatic capture remains disabled; Smart Rule configuration, activation, and Mac/iOS canaries remain pending.
+The implementation includes deliberate filing, questions, correction, reminder-only Things behavior, explicit old-source migration, and arrival notification. Installation and the five-source migration completed on the driver Mac. Five synthetic attribution checks passed against the configured local model. The arrival Smart Rule is configured, and permanent automatic filing is enabled on the driver Mac after explicit approval. Mac capture, ambiguity, and correction checks passed. The user waived the iOS check; it remains unverified.
 
 ## Data and recovery
 
@@ -82,6 +82,10 @@ Live installation verified both metadata fields, recursive capture inventory, th
 
 The migration CLI's direct terminal invocation lacked Things database access. Resuming the same reviewed plan through a one-shot LaunchAgent used the pipeline's existing stable-interpreter permission context and completed cleanup. The temporary job was removed. Database access failures remain distinct from confirmed task deletion.
 
-Things Cloud convergence and real Mac/iOS capture/correction behavior remain unverified. The Calendar and Contacts live canaries are excluded under this task's privacy boundary. The 10-invitee calendar limit counts raw entries; it cannot detect a hidden distribution list behind one address.
+The installed Mac Drafts action, arrival Smart Rule, and worker filed a complete fictional note and verified its receipt. A mononym matching two fictional People produced a question without filing. A correction through the installed review API verified the new destination, removal of the original contribution, retained source history, and the correction receipt.
 
-The release is integrated into the primary checkout, with pre-existing edits preserved separately from the implementation commits. Installation and migration were authorized after implementation delivery. Automation is still disabled, and publication remains local.
+These checks exposed a coalesced-notification wake-up bug. The arrival helper now refreshes the watched directory even when the single empty pending file already exists. A regression failed before the fix, and launchd consumed the existing request after the directory refresh. The fix is installed from the primary checkout.
+
+Things Cloud convergence and iOS capture remain unverified. The user waived the iOS check. Fictional test-fixture cleanup remains outstanding. The Calendar and Contacts live canaries are excluded under this task's privacy boundary. The 10-invitee calendar limit counts raw entries; it cannot detect a hidden distribution list behind one address.
+
+The release is integrated into the primary checkout, with pre-existing edits preserved separately from the implementation commits. Installation and migration were authorized after implementation delivery. Permanent automatic filing is enabled for captures added after the approved, persisted machine-local activation timestamp. Earlier unregistered captures remain outside automatic routing; existing operations retain their recovery behavior. The temporary expiry job was removed, and unrelated configuration was preserved. The private activation receipt is `~/.local/state/devonthink/entity-capture-activation.json`. Publication remains local.
