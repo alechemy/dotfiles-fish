@@ -19,8 +19,10 @@ def notify(home=None, gate=None):
     try:
         fd = os.open(str(request), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     except FileExistsError:
-        return True
-    os.close(fd)
+        pass
+    else:
+        os.close(fd)
+    os.utime(directory, None)
     return True
 
 
