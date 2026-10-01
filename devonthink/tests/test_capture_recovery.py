@@ -133,6 +133,47 @@ class CaptureRecovery(unittest.TestCase):
 
 
 class CaptureScan(unittest.TestCase):
+    def test_retained_legacy_filing_recovers_retirement_without_inference(self):
+        bridge = FakeBridge()
+        manifest = capture.pending(SOURCE, "2026-09-29", TEXT, [],
+            capture.outcome("unresolved", "legacy_filing"), "2026-09-30")
+        manifest.update(status="retained", legacy_filings=[{"uuid": "P1", "body_revision": capture.revision("Original filing")}])
+        bridge.manifest = capture.encode_manifest(manifest)
+        state = {"processed": {}, "attempts": {}, "parked": {}}
+        config = {"TRANSPORT": "off", "CAPTURE_AUTO_AFTER": "", "MIN_ROSTER": "1",
+                  "SKIP_SOURCE_TITLES": "", "MAX_PER_RUN": "3", "FILING_MODE": "suggest", "IDLE_MINUTES": "0"}
+        with mock.patch.object(ef, "run_bridge", bridge), mock.patch.object(ef, "save_state"), \
+                mock.patch.object(ef, "self_names", return_value=set()), \
+                mock.patch.object(ef, "extract_omlx") as extract:
+            ef.scan(config, state, False, None, True)
+        extract.assert_not_called()
+        self.assertIn("capture_retire_source", bridge.calls)
+        self.assertNotIn("capture_append", bridge.calls)
+        self.assertIn("SRC-1", state["processed"])
+        self.assertEqual(capture.decode_manifest(bridge.manifest, "SRC-1")["status"], "retained")
+
+    def test_editing_retained_source_reopens_a_question_without_changing_old_filings(self):
+        bridge = FakeBridge()
+        manifest = capture.pending(SOURCE, "2026-09-29", TEXT, [],
+            capture.outcome("unresolved", "legacy_filing"), "2026-09-30")
+        manifest.update(status="retained", legacy_filings=[{"uuid": "P1", "body_revision": capture.revision("Original filing")}])
+        bridge.manifest = capture.encode_manifest(manifest)
+        bridge.bodies["SRC-1"] = "# Capture\n\nWren moved to Prague."
+        state = {"processed": {}, "attempts": {}, "parked": {}}
+        config = {"TRANSPORT": "off", "CAPTURE_AUTO_AFTER": "", "MIN_ROSTER": "1",
+                  "SKIP_SOURCE_TITLES": "", "MAX_PER_RUN": "3", "FILING_MODE": "suggest", "IDLE_MINUTES": "0"}
+        with mock.patch.object(ef, "run_bridge", bridge), mock.patch.object(ef, "save_state"), \
+                mock.patch.object(ef, "self_names", return_value=set()), \
+                mock.patch.object(ef, "extract_omlx") as extract:
+            ef.scan(config, state, False, None, True)
+        extract.assert_not_called()
+        current = capture.decode_manifest(bridge.manifest, "SRC-1")
+        self.assertEqual(current["status"], "question")
+        self.assertEqual(current["reason"], "source_changed")
+        self.assertEqual(current["history"][0]["status"], "retained")
+        self.assertNotIn("capture_remove", bridge.calls)
+        self.assertNotIn("capture_append", bridge.calls)
+
     def test_empty_roster_capture_uses_own_policy_and_refreshes_roster(self):
         bridge = FakeBridge()
         state = {"processed": {}, "attempts": {}, "parked": {}}

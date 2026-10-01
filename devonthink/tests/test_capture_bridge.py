@@ -71,10 +71,19 @@ function run(argv) {
         const end = source.indexOf('\n    },', start)
         if (start < 0 || end < 0) throw new Error('handler missing')
         return Function('dt', 'groupAt', 'byUuid', 'mdValue', 'flagSet', 'captureSourceText',
-                        'captureTargets', 'captureBlockMutation', 'personSkeleton', 'isoStamp',
+                        'captureTargets', 'captureBlockMutation', 'personSkeleton', 'isoStamp', 'handlers',
           'const PEOPLE_PATH = "/People"; const FACTS_PATH = "/Facts"; let entityIndex = null; let peopleIndex = null; return ({' + source.slice(start, end + 7) + '})'
         )(dt, groupAt, byUuid, mdValue, flagSet, captureSourceText, captureTargets,
-          captureBlockMutation, name => '# ' + name, isoStamp)
+          captureBlockMutation, name => '# ' + name, isoStamp,
+          {capture_retire_record: op => ({uuid: op.uuid, group: op.group})})
+      }
+      if (c.fn === 'retained_source') {
+        src.location = () => '/Facts/'
+        const value = JSON.stringify({source_uuid:'SRC', status:'retained'})
+        handler('capture_store').capture_store({uuid:'SRC', expected:'', text:'Wren moved.', value:value})
+        const retired = handler('capture_retire_source').capture_retire_source({uuid:'SRC'})
+        return {value:{retired:retired, status:src.customMetaData().mdcapturestatus,
+                      operation:src.customMetaData().mdcaptureoperation}}
       }
       if (c.fn === 'fact_sources') {
         src.additionDate = () => new Date(2026, 8, 29, 23, 59, 59)
@@ -156,6 +165,13 @@ class CaptureBridge(unittest.TestCase):
         self.assertIn("R1", result["ids"])
         self.assertNotIn("R2", result["ids"])
         self.assertIn("mdcapturestatus==correcting", result["queries"][0])
+
+    def test_retained_legacy_source_updates_its_index_and_retires_without_new_filing(self):
+        result = run_cases([{"fn": "retained_source"}])[0]
+        self.assertNotIn("error", result)
+        self.assertEqual(result["value"]["status"], "retained")
+        self.assertEqual(result["value"]["retired"], {"uuid": "SRC", "group": "/Facts/Filed"})
+        self.assertEqual(json.loads(result["value"]["operation"])["status"], "retained")
 
     def test_migration_source_inventory_uses_local_dates_and_walks_filed_groups(self):
         result = run_cases([{"fn": "fact_sources"}])[0]

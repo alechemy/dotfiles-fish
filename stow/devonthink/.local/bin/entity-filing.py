@@ -2571,8 +2571,10 @@ def scan(config, state, dry_run, force_uuid, user_invoked):
                         remember_processed(state, source, text)
                         save_state(state)
                     continue
-                if manifest["status"] in {"question", "revision_question", "undone"}:
+                if manifest["status"] in {"question", "revision_question", "undone", "retained"}:
                     if not dry_run:
+                        if manifest["status"] == "retained":
+                            run_bridge([{"op": "capture_retire_source", "uuid": uuid}])
                         remember_processed(state, source, text)
                         save_state(state)
                     continue

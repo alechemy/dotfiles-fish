@@ -1147,7 +1147,7 @@ function run(argv) {
     capture_retire_source(op) {
       const rec = byUuid(op.uuid)
       const manifest = JSON.parse(mdValue(rec, 'captureoperation'))
-      if (manifest.source_uuid !== op.uuid || !['filed', 'undone'].includes(manifest.status)) {
+      if (manifest.source_uuid !== op.uuid || !['filed', 'undone', 'retained'].includes(manifest.status)) {
         throw new Error('capture completion is not verified')
       }
       if (mdValue(rec, 'capturestatus') !== manifest.status) dt.addCustomMetaData(manifest.status, {for: 'capturestatus', to: rec})
@@ -1411,7 +1411,7 @@ function run(argv) {
       if (captureSourceText(rec.plainText()) !== op.text) throw new Error('capture source changed')
       if (mdValue(rec, 'captureoperation') !== op.expected) throw new Error('capture operation changed')
       const status = JSON.parse(op.value).status
-      const complete = ['filed', 'undone'].includes(status)
+      const complete = ['filed', 'undone', 'retained'].includes(status)
       if (!complete && mdValue(rec, 'capturestatus') !== status) dt.addCustomMetaData(status, {for: 'capturestatus', to: rec})
       if (op.expected !== op.value) dt.addCustomMetaData(op.value, { for: 'captureoperation', to: rec })
       if (complete && mdValue(rec, 'capturestatus') !== status) dt.addCustomMetaData(status, {for: 'capturestatus', to: rec})

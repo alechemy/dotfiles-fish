@@ -583,6 +583,9 @@ def capture_views(rows, people):
                     view["current_text"] = row["text"]
                     if manifest["status"] != "correcting":
                         view["text"] = row["text"]
+                    if manifest["status"] == "retained" and manifest["text"] != row["text"]:
+                        view.update(status="waiting", can_retain_legacy=False,
+                                    question="The original note changed. Waiting for processing before answering its new question.")
                 views.append(view)
             elif ef.capture.eligible(dict(row, kind="fact"), config.get("CAPTURE_AUTO_AFTER", "")):
                 views.append({"uuid": row["uuid"], "status": "waiting", "text": row.get("text", ""),
@@ -596,8 +599,8 @@ def capture_views(rows, people):
 
 def handle_capture(uuid, payload):
     action = payload.get("action")
-    if action not in {"save", "undo", "defer", "retry", "keep-edited"}:
-        raise RequestError("Choose Save, Undo, Decide later, or Retry.")
+    if action not in {"save", "undo", "defer", "retry", "keep-edited", "retain"}:
+        raise RequestError("Choose Save, Undo, Keep existing filings, Decide later, or Retry.")
     driver = subprocess.run([os.path.expanduser("~/.local/bin/should-run-dt-driver")], capture_output=True, text=True)
     if driver.returncode:
         raise RequestError("This Mac is not the entity-processing driver.", 409)
@@ -618,6 +621,23 @@ def handle_capture(uuid, payload):
         text = ef.normalize_source_text("fact", body["text"])
         if payload.get("revision") != ef.capture.revision(text):
             raise RequestError("The note changed. Refresh before deciding.", 409)
+        if manifest["status"] == "retained" and action != "retain":
+            raise RequestError("Existing filings were kept. Edit those Person records directly.", 409)
+        if action == "retain":
+            if text != manifest["text"]:
+                raise RequestError("The note changed. Review its replacement before keeping existing filings.", 409)
+            if manifest["status"] != "retained":
+                if (manifest["status"] != "question" or manifest.get("reason") != "legacy_filing" or
+                        manifest["subjects"] or manifest.get("replacement")):
+                    raise RequestError("Only a previous-filing migration question can keep existing filings.", 409)
+                references = ef.capture.previous_filings(uuid, ef.run_bridge([
+                    {"op": "dump_people", "include_bodies": True}])[0])
+                if not references:
+                    raise RequestError("No existing Person filing references this note. Its question is retained.", 409)
+                manifest.update(status="retained", legacy_filings=references)
+                ef.store_capture(manifest, raw, text)
+            ef.run_bridge([{"op": "capture_retire_source", "uuid": uuid}])
+            return {"ok": True, "status": "retained"}
         if action == "keep-edited":
             correction = manifest.get("correction", {})
             token = correction.get("conflict_token")

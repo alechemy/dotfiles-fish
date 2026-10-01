@@ -282,6 +282,37 @@ class SpecCollection(PureCore):
 
 
 class CaptureEditor(unittest.TestCase):
+    def test_legacy_retention_action_and_finished_label(self):
+        script = ASSET.read_text().split("<script>", 1)[1].split('document.addEventListener("click"', 1)[0]
+        probe = r'''
+        (async function () {
+          local = {};
+          const capture = {uuid:"SOURCE-FAKE", status:"question", text:"Wren moved.", revision:"A",
+            subjects:[], choices:[], can_retain_legacy:true};
+          queue = {captures:[capture], roster:[]};
+          const question = captureCard(capture, {});
+          const finished = captureCard({...capture, status:"retained", can_retain_legacy:false}, {});
+          let posted, message;
+          api = async function (path, body) { posted = body; return {status:"retained"}; };
+          toast = function (text) { message = text; };
+          refresh = async function () {};
+          await decideCapture(capture.uuid, "retain");
+          console.log(JSON.stringify({question, finished, posted, message}));
+        })().catch(function (error) { console.error(error); process.exitCode = 1; });
+        '''
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "capture-retention.js"
+            path.write_text(script + probe)
+            result = subprocess.run(["node", str(path)], capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        row = json.loads(result.stdout)
+        self.assertIn('data-act="capture-retain"', row["question"])
+        self.assertIn("Existing filings kept", row["finished"])
+        self.assertNotIn("Save to the selected people", row["finished"])
+        self.assertNotIn("Filing undone", row["finished"])
+        self.assertEqual(row["posted"], {"action": "retain", "revision": "A"})
+        self.assertEqual(row["message"], "Existing filings kept")
+
     def test_refresh_keeps_the_editor_revision_and_rejected_draft(self):
         script = ASSET.read_text().split("<script>", 1)[1].split('document.addEventListener("click"', 1)[0]
         probe = r'''
