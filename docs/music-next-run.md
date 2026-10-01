@@ -3,36 +3,42 @@
 `music-next-run.py` prepares a private, static `Next Run` playlist on Navidrome for
 Arpeggi downloads. It uses `Running` as the eligibility source, preserving its
 runnability, genre, rating, and Rock Rotation rules. It never edits that playlist
-or removes library files.
+or removes library files. A macOS user LaunchAgent runs
+`music-next-run.py daily`, preparing a queue once per local calendar day.
 
 ## Before a run
 
-Connect the Mac and Arpeggi to Navidrome. Let Arpeggi upload its previous offline
-listening history, then prepare the first queue:
+The installed schedule prepares a new queue each day, so no daily terminal
+command is required. Each queue covers at least 90 minutes.
 
-```sh
-music-next-run.py prepare
-```
-
-The default queue covers at least 90 minutes. Include a margin for your run when
-choosing a different duration:
-
-```sh
-music-next-run.py prepare --minutes 120
-```
-
-In Arpeggi, open `Next Run`, pull to refresh, and download its current tracks.
+Connect Arpeggi to Navidrome, let it upload previous offline listening history,
+then open `Next Run`, pull to refresh, and download its current tracks.
 Wait for downloads to finish before leaving. Start with the first track and keep
 shuffle, repeat, and continuous playback off. Avoid starting playback from the
 whole downloads collection, which can include tracks from previous queues.
 
-Before each subsequent run, explicitly request a different queue:
+The agent uses the Mac's local timezone. If today's queue is already published,
+it exits without touching Keychain or the server. A pending queue for the same day is retried without
+choosing new tracks, and a previous day's pending queue is finished before
+today's is generated. Each daily queue replaces the contents of the same
+private `Next Run` playlist rather than building a per-date collection. Source
+`Running` and the 90-minute minimum remain the defaults.
+
+To prepare today's queue immediately, run:
 
 ```sh
-music-next-run.py prepare --new
+music-next-run.py daily
 ```
 
-Without `--new`, the command reuses the prepared queue, including its original
+To request an extra queue, optionally with a longer duration, run:
+
+```sh
+music-next-run.py prepare --new --minutes 120
+```
+
+The extra queue is refused while a publication is pending.
+
+Without `--new`, `prepare` reuses the prepared queue, including its original
 duration and order. This makes retries safe but does not make replaying that queue
 a different run. The phone must refresh and download after every new preparation.
 
@@ -90,8 +96,8 @@ music-next-run.py status
 ```
 
 If publication fails, reservations remain and the queue is pending. Rerun
-`prepare` without `--new` to reconcile or finish publication of the same queue.
-An expired pending queue renews its reservations before retrying. An expired
+`prepare` without `--new`, or `daily`, to reconcile or finish publication of
+the same queue. An expired pending queue renews its reservations before retrying. An expired
 published queue requires `--new`.
 
 If a pending queue cannot be published, for example because a selected file was
@@ -127,6 +133,21 @@ refused. Use HTTPS outside a trusted network.
 The implementation uses only Python's standard library and supports Apple's
 `/usr/bin/python3`. It lives at `stow/bin/.local/bin/music-next-run.py` and is
 installed through the existing `bin` Stow package.
+
+The daily schedule is that Stow package's user LaunchAgent,
+`com.user.music-next-run`. Its template,
+`stow/bin/Library/LaunchAgents/com.user.music-next-run.plist.template`, is
+rendered by the existing `build-launchd-plists.sh` during setup, and the
+generated plist activates through the same `bin` Stow workflow. It runs
+`/usr/bin/python3 ~/.local/bin/music-next-run.py daily` with `RunAtLoad`
+enabled and a `StartCalendarInterval` at minute 0 and minute 30 of every hour.
+It attempts each new day's queue at local midnight and retries every half-hour.
+It also runs at login, and missed calendar events trigger one attempt on wake.
+Daily generation is deadline-bound, so it runs on battery through
+`should-run-background-job --urgent`; completed-day checks do no network or
+Keychain work. The Mac must be logged in, awake, and able to reach Navidrome
+for a preparation to succeed. Output goes to
+`~/Library/Logs/music-next-run.log`.
 
 Private state lives under `~/.local/state/music-next-run/<scope>/queue.sqlite3`.
 The scope is a hash of server URL and account. The profile directory is mode 700;

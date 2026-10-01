@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Offline queue regressions using fictional metadata and an in-memory server."""
 
+import contextlib
 import copy
 import datetime as dt
 import importlib.util
@@ -8,6 +9,7 @@ import io
 import json
 import os
 from pathlib import Path
+import plistlib
 import random
 import sqlite3
 import tempfile
@@ -308,6 +310,181 @@ class QueueTests(unittest.TestCase):
         for invalid in (dict(played="invalid"), dict(played="2026-01-02T10:30:00"), dict(playCount=1)):
             with self.assertRaises(queue.QueueError):
                 queue.played_at(invalid)
+
+
+class DailyTests(unittest.TestCase):
+    def setUp(self):
+        self.db = sqlite3.connect(":memory:")
+        queue.initialize(self.db)
+        self.addCleanup(self.db.close)
+        self.server = Server()
+
+    def ids(self, run):
+        return json.loads(run["songs"])
+
+    def daily(self, **kwargs):
+        return queue.daily(self.db, self.server, minutes=2, now=kwargs.pop("now", NOW), **kwargs)[0]
+
+    def test_daily_same_day_is_silent_without_server_access(self):
+        first = self.daily()
+        reads, writes = self.server.reads, len(self.server.writes)
+        result = queue.daily(self.db, None, now=NOW + 60)
+        self.assertEqual(result, (None, None))
+        self.assertEqual(self.server.reads, reads)
+        self.assertEqual(len(self.server.writes), writes)
+        self.assertEqual(queue.latest(self.db)["id"], first["id"])
+
+    def test_daily_uses_calendar_boundary_not_elapsed_24_hours(self):
+        before = dt.datetime(2026, 1, 1, 23, 59).timestamp()
+        after = dt.datetime(2026, 1, 2, 0, 0).timestamp()
+        first = self.daily(now=before)
+        second = self.daily(now=after)
+        self.assertNotEqual(first["id"], second["id"])
+        self.assertTrue(set(self.ids(first)).isdisjoint(self.ids(second)))
+        self.assertEqual(queue.calendar_day(second["created"]), dt.date(2026, 1, 2))
+
+    def test_daily_catches_up_without_generating_missed_days(self):
+        first = self.daily()
+        second = self.daily(now=NOW + 3 * 86400)
+        self.assertNotEqual(first["id"], second["id"])
+        self.assertEqual(self.db.execute("SELECT count(*) FROM run").fetchone()[0], 2)
+
+    def test_daily_resumes_same_day_pending_queue_without_new_reservations(self):
+        self.server.fail = "after_create"
+        with self.assertRaises(queue.QueueError):
+            self.daily()
+        pending = queue.latest(self.db)
+        resumed = self.daily(now=NOW + 60)
+        self.assertEqual(resumed["id"], pending["id"])
+        self.assertEqual(self.db.execute("SELECT count(*) FROM run").fetchone()[0], 1)
+        self.assertTrue(queue.daily_ready(self.db, NOW + 60))
+
+    def test_daily_finishes_old_pending_queue_then_prepares_today(self):
+        self.server.fail = "after_update"
+        with self.assertRaises(queue.QueueError):
+            self.daily()
+        pending = queue.latest(self.db)
+        today = self.daily(now=NOW + 86400)
+        self.assertNotEqual(today["id"], pending["id"])
+        self.assertTrue(set(self.ids(today)).isdisjoint(self.ids(pending)))
+        self.assertEqual(self.db.execute("SELECT count(*) FROM run WHERE status = 'published'").fetchone()[0], 2)
+
+    def test_daily_retries_failed_new_day_publication_without_reshuffling(self):
+        self.daily()
+        self.server.fail = "before"
+        with self.assertRaises(queue.QueueError):
+            self.daily(now=NOW + 86400)
+        pending = queue.latest(self.db)
+        resumed = self.daily(now=NOW + 86400 + 1800)
+        self.assertEqual(resumed["id"], pending["id"])
+        self.assertEqual(self.db.execute("SELECT count(*) FROM run").fetchone()[0], 2)
+
+    def test_daily_expired_pending_retry_still_generates_a_new_day(self):
+        self.server.fail = "before"
+        with self.assertRaises(queue.QueueError):
+            self.daily()
+        pending = queue.latest(self.db)
+        today = self.daily(now=NOW + queue.COOLDOWN + 86400)
+        self.assertNotEqual(today["id"], pending["id"])
+        self.assertTrue(set(self.ids(today)).isdisjoint(self.ids(pending)))
+
+    def test_expired_pending_recovery_does_not_mark_old_queue_as_today(self):
+        self.server.fail = "before"
+        with self.assertRaises(queue.QueueError):
+            self.daily()
+        old = queue.latest(self.db)
+        now = NOW + queue.COOLDOWN + 86400
+        with patch.object(self.server, "library", side_effect=queue.QueueError("Library unavailable.")):
+            with self.assertRaises(queue.QueueError):
+                self.daily(now=now)
+        self.assertFalse(queue.daily_ready(self.db, now))
+        self.assertEqual(queue.latest(self.db)["created"], old["created"])
+        today = self.daily(now=now + 1800)
+        self.assertNotEqual(today["id"], old["id"])
+        self.assertTrue(set(self.ids(today)).isdisjoint(self.ids(old)))
+
+    def test_daily_dry_run_does_not_publish_or_reserve(self):
+        self.daily()
+        before = list(self.db.execute("SELECT * FROM recording"))
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "queue.sqlite3"
+            with contextlib.closing(sqlite3.connect(path)) as copy_db:
+                self.db.backup(copy_db)
+            self.server.writes.clear()
+            with queue.state(path, dry_run=True) as db:
+                preview, _ = queue.daily(db, self.server, minutes=2, now=NOW + 86400, dry_run=True)
+                self.assertEqual(queue.calendar_day(preview["created"]), queue.calendar_day(NOW + 86400))
+            with contextlib.closing(sqlite3.connect(path)) as existing:
+                self.assertEqual(existing.execute("SELECT count(*) FROM run").fetchone()[0], 1)
+        self.assertEqual(self.server.writes, [])
+        self.assertEqual([tuple(r) for r in before], [tuple(r) for r in self.db.execute("SELECT * FROM recording")])
+
+    def test_previous_day_pending_dry_run_keeps_real_pending_state(self):
+        self.server.fail = "after_create"
+        with self.assertRaises(queue.QueueError):
+            self.daily()
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "queue.sqlite3"
+            with contextlib.closing(sqlite3.connect(path)) as copy_db:
+                self.db.backup(copy_db)
+            before = path.read_bytes()
+            self.server.writes.clear()
+            with queue.state(path, dry_run=True) as db:
+                preview, _ = queue.daily(db, self.server, minutes=2, now=NOW + 86400, dry_run=True)
+                self.assertEqual(queue.calendar_day(preview["created"]), queue.calendar_day(NOW + 86400))
+            self.assertEqual(path.read_bytes(), before)
+        self.assertEqual(self.server.writes, [])
+        self.assertEqual(queue.latest(self.db)["status"], "pending")
+
+    def test_thirty_daily_queues_have_no_overlapping_recordings(self):
+        self.server = Server([song(str(n)) for n in range(90)])
+        heard = set()
+        for day in range(30):
+            run = self.daily(now=NOW + day * 86400)
+            ids = set(self.ids(run))
+            self.assertTrue(heard.isdisjoint(ids))
+            heard.update(ids)
+        self.assertEqual(len(heard), 60)
+
+    def test_main_daily_ready_skips_keychain_and_power_gate(self):
+        self.daily()
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "queue.sqlite3"
+            with contextlib.closing(sqlite3.connect(path)) as copy_db:
+                self.db.backup(copy_db)
+            before = path.read_bytes()
+            with patch.object(queue, "configuration", return_value=("https://example.invalid", "example")), \
+                    patch.object(queue, "state_path", return_value=path), \
+                    patch.object(queue.time, "time", return_value=NOW), \
+                    patch.object(queue.Navidrome, "from_keychain", side_effect=AssertionError("Keychain accessed")), \
+                    patch.object(queue.subprocess, "run", side_effect=AssertionError("Power gate invoked")), \
+                    contextlib.redirect_stdout(io.StringIO()) as output:
+                self.assertEqual(queue.main(["daily"]), 0)
+                self.assertEqual(output.getvalue(), "")
+            self.assertEqual(path.read_bytes(), before)
+
+    def test_main_daily_work_uses_deadline_gate(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "queue.sqlite3"
+            with patch.object(queue, "configuration", return_value=("https://example.invalid", "example")), \
+                    patch.object(queue, "state_path", return_value=path), \
+                    patch.object(queue.time, "time", return_value=NOW), \
+                    patch.object(queue.Navidrome, "from_keychain", return_value=self.server), \
+                    patch.object(queue.subprocess, "run", return_value=Mock(returncode=0)) as gate, \
+                    contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(queue.main(["daily", "--minutes", "2"]), 0)
+                self.assertEqual(gate.call_args.args[0][-1], "--urgent")
+
+    def test_agent_template_and_setup_use_daily_entrypoint(self):
+        template = ROOT / "stow/bin/Library/LaunchAgents/com.user.music-next-run.plist.template"
+        config = plistlib.loads(template.read_bytes())
+        self.assertEqual(config["Label"], "com.user.music-next-run")
+        self.assertEqual(config["ProgramArguments"], ["/usr/bin/python3", "__HOME__/.local/bin/music-next-run.py", "daily"])
+        self.assertEqual(config["StartCalendarInterval"], [{"Minute": 0}, {"Minute": 30}])
+        self.assertTrue(config["RunAtLoad"])
+        self.assertEqual(config["Umask"], 0o77)
+        self.assertTrue(SPEC.origin and Path(SPEC.origin).read_text().startswith("#!/usr/bin/python3\n"))
+        self.assertIn('load_launch_agent "$HOME/Library/LaunchAgents/com.user.music-next-run.plist"', (ROOT / "scripts/setup.sh").read_text())
 
 
 class StateTests(unittest.TestCase):

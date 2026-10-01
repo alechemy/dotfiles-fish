@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/python3
 """Prepare an offline Navidrome run queue with recording-level reservations."""
 
 import argparse
@@ -200,7 +200,8 @@ def initialize(db):
     version = db.execute("PRAGMA user_version").fetchone()[0]
     if version not in (0, 1):
         raise QueueError("Unsupported queue state version.")
-    db.executescript("""
+    if version == 0:
+        db.executescript("""
         CREATE TABLE IF NOT EXISTS recording (
             id TEXT PRIMARY KEY, position TEXT NOT NULL,
             consumed INTEGER NOT NULL DEFAULT 0, reserved_until REAL NOT NULL DEFAULT 0
@@ -215,7 +216,7 @@ def initialize(db):
             status TEXT NOT NULL CHECK (status IN ('pending', 'published', 'abandoned'))
         );
         PRAGMA user_version = 1;
-    """)
+        """)
     db.execute("PRAGMA foreign_keys = ON")
     db.row_factory = sqlite3.Row
 
@@ -228,17 +229,14 @@ def state_path(url, user):
 @contextlib.contextmanager
 def state(path, dry_run=False):
     if dry_run:
-        db = sqlite3.connect(":memory:")
-        if path.exists():
-            if path.is_symlink():
-                raise QueueError("Queue state must not be a symlink.")
-            with contextlib.closing(sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)) as existing:
-                existing.backup(db)
-        initialize(db)
-        try:
+        with contextlib.closing(sqlite3.connect(":memory:")) as db:
+            if path.exists():
+                if path.is_symlink():
+                    raise QueueError("Queue state must not be a symlink.")
+                with contextlib.closing(sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)) as existing:
+                    existing.backup(db)
+            initialize(db)
             yield db
-        finally:
-            db.close()
         return
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     os.chmod(path.parent, 0o700)
@@ -433,8 +431,6 @@ def prepare(db, api, minutes=90, source_name="Running", new=False, dry_run=False
                         raise QueueError("Pending recording identity is missing; abandon this queue before using --new.")
                     db.execute("UPDATE recording SET reserved_until = max(reserved_until, ?) WHERE id = ?",
                                (now + COOLDOWN, matches[0][0]))
-                db.execute("UPDATE run SET created = ? WHERE id = ?", (now, run["id"]))
-            run = latest(db)
         if source_name != run["source"]:
             raise QueueError("Use --new to change the source playlist.")
         counts = None
@@ -457,10 +453,36 @@ def prepare(db, api, minutes=90, source_name="Running", new=False, dry_run=False
     return run, counts
 
 
+def calendar_day(timestamp):
+    return dt.datetime.fromtimestamp(timestamp).date()
+
+
+def daily_ready(db, now):
+    run = latest(db)
+    return bool(run and run["status"] == "published" and calendar_day(run["created"]) == calendar_day(now))
+
+
+def daily(db, api, minutes=90, source_name="Running", dry_run=False, now=None):
+    now = time.time() if now is None else now
+    if daily_ready(db, now):
+        return None, None
+    run = latest(db)
+    if run and run["status"] == "pending":
+        previous_day = calendar_day(run["created"])
+        resumed, counts = prepare(db, api, minutes, run["source"], dry_run=dry_run, now=now)
+        if previous_day == calendar_day(now):
+            return resumed, counts
+        if dry_run:
+            db.execute("UPDATE run SET status = 'published' WHERE id = ?", (run["id"],))
+            db.commit()
+    return prepare(db, api, minutes, source_name, new=True, dry_run=dry_run, now=now)
+
+
 def describe(run, dry_run=False):
     count = len(json.loads(run["songs"]))
     prefix = "Would prepare" if dry_run else "Prepared"
-    return "%s Next Run with %d tracks covering %.1f minutes." % (prefix, count, run["duration"] / 60)
+    return "%s Next Run for %s with %d tracks covering %.1f minutes." % (
+        prefix, calendar_day(run["created"]), count, run["duration"] / 60)
 
 
 def main(argv=None):
@@ -468,13 +490,15 @@ def main(argv=None):
     sub = parser.add_subparsers(dest="command", required=True)
     prep = sub.add_parser("prepare", help="Publish or reuse the prepared run")
     prep.add_argument("--new", action="store_true", help="Reserve a different queue for the next run")
-    prep.add_argument("--minutes", type=int, default=90, help="Minimum queue duration, including your margin")
-    prep.add_argument("--source", default="Running", help="Owned source playlist name")
-    prep.add_argument("--dry-run", action="store_true", help="Preview without local or server writes")
+    scheduled = sub.add_parser("daily", help="Ensure one published queue for the local calendar day")
+    for command in (prep, scheduled):
+        command.add_argument("--minutes", type=int, default=90, help="Minimum queue duration, including your margin")
+        command.add_argument("--source", default="Running", help="Owned source playlist name")
+        command.add_argument("--dry-run", action="store_true", help="Preview without local or server writes")
     sub.add_parser("status", help="Show local queue status without contacting Navidrome")
     sub.add_parser("abandon", help="Abandon the active queue locally, keeping all reservations")
     args = parser.parse_args(argv)
-    if args.command == "prepare" and not 1 <= args.minutes <= 1440:
+    if args.command in ("prepare", "daily") and not 1 <= args.minutes <= 1440:
         parser.error("--minutes must be between 1 and 1440")
     try:
         url, user = configuration()
@@ -492,9 +516,19 @@ def main(argv=None):
                     db.commit()
             print("The queue was abandoned locally. Reservations remain; use prepare --new.")
             return 0
-        api = Navidrome.from_keychain(url, user)
         with state(path, args.dry_run) as db:
-            run, counts = prepare(db, api, args.minutes, args.source, args.new, args.dry_run)
+            now = time.time()
+            if args.command == "daily":
+                if daily_ready(db, now):
+                    return 0
+                gate = Path.home() / ".local/bin/should-run-background-job"
+                if subprocess.run([str(gate), "--urgent"], capture_output=True, timeout=10).returncode:
+                    raise QueueError("Daily queue preparation was blocked by the background-job gate.")
+            api = Navidrome.from_keychain(url, user)
+            if args.command == "daily":
+                run, counts = daily(db, api, args.minutes, args.source, args.dry_run, now)
+            else:
+                run, counts = prepare(db, api, args.minutes, args.source, args.new, args.dry_run, now)
         print(describe(run, args.dry_run))
         if counts:
             print("Considered %d recordings; %d passed shared history and reservation cooldowns." % counts)

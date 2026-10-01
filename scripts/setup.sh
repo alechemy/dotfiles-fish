@@ -529,6 +529,8 @@ EOF
     load_launch_agent "$HOME/Library/LaunchAgents/com.user.caddy.plist" "Caddy (oMLX CSP proxy)"
     /usr/bin/python3 "$DOTFILES/scripts/setup-software-updates.py"
     load_launch_agent "$HOME/Library/LaunchAgents/com.user.runnability-sync.plist" "runnability sync"
+    mkdir -p "$HOME/Library/Logs"
+    load_launch_agent "$HOME/Library/LaunchAgents/com.user.music-next-run.plist" "daily running queue"
     load_launch_agent "$HOME/Library/LaunchAgents/com.user.btd700-audio-watcher.plist" "BTD 700 audio watcher"
 
     # Chromium -> Safari bookmark bridge for Alfred. Gate on the Bookmarks file
