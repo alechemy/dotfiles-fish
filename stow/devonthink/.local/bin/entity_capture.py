@@ -196,11 +196,17 @@ def pending(source, source_date, text, extracted, result, processing_date):
             "reason": result["reason"], "extracted": extracted, "subjects": [], "receipt": False}
 
 
+def previous_filings(source_uuid, people):
+    link = "x-devonthink-item://" + source_uuid
+    return [{"uuid": person["uuid"], "body_revision": revision(person["body"])}
+            for person in people if link in person.get("body", "")]
+
+
 def decode_manifest(raw, source_uuid):
     manifest = json.loads(raw)
     if (not isinstance(manifest, dict) or manifest.get("version") != 1 or
             manifest.get("source_uuid") != source_uuid or
-            manifest.get("status") not in {"filing", "filed", "question", "deferred", "correcting", "undone", "revision_question"} or
+            manifest.get("status") not in {"filing", "filed", "question", "deferred", "correcting", "undone", "retained", "revision_question"} or
             not isinstance(manifest.get("text"), str) or
             revision(manifest["text"]) != manifest.get("revision") or
             not isinstance(manifest.get("subjects"), list) or
@@ -208,6 +214,15 @@ def decode_manifest(raw, source_uuid):
         raise ValueError("unreadable capture operation; filing is paused")
     for key in ("source_date", "processing_date"):
         datetime.strptime(manifest[key], "%Y-%m-%d")
+    if manifest["status"] == "retained":
+        references = manifest.get("legacy_filings")
+        if (manifest.get("reason") != "legacy_filing" or manifest["subjects"] or manifest["receipt"] or
+                not isinstance(references, list) or not references or
+                any(not isinstance(row, dict) or not isinstance(row.get("uuid"), str) or not row["uuid"] or
+                    not isinstance(row.get("body_revision"), str) or
+                    not re.fullmatch(r"[a-f0-9]{64}", row["body_revision"]) for row in references) or
+                len({row["uuid"] for row in references}) != len(references)):
+            raise ValueError("retained filing evidence is unreadable")
     for s in manifest["subjects"]:
         if (not isinstance(s, dict) or s.get("kind") not in {"new", "existing"} or
                 not isinstance(s.get("name"), str) or not s["name"] or
@@ -401,6 +416,7 @@ def view(manifest, people):
                     "employer": p.get("md", {}).get("mdemployer", "")} for p in result["choices"]]
     return {"uuid": manifest["source_uuid"], "revision": revision(text),
             "status": status, "text": text,
+            "can_retain_legacy": status == "question" and manifest.get("reason") == "legacy_filing" and not manifest.get("replacement"),
             "date": manifest["source_date"], "deferred": manifest.get("deferred", False),
             "question": QUESTIONS.get(manifest.get("reason"), "Review this retained note before saving."),
             "conflict": manifest.get("reason") in {"edited_contribution", "destination_edited"},

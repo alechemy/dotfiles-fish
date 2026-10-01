@@ -514,11 +514,11 @@ function dtLink(uuid, label) {
 
 function captureCard(cv, o) {
   const u = esc(cv.uuid);
-  const finished = cv.status === "filed" || cv.status === "undone";
+  const finished = ["filed", "undone", "retained"].includes(cv.status);
   const editing = (!!o.captureEdit || !finished) && cv.status !== "correcting";
   const technical = ["waiting", "deferred", "broken", "correcting"].includes(cv.status);
   let html = '<div class="card capture" id="c-' + u + '"><div class="cardtop"><span class="who">' +
-    esc(cv.status === "filed" ? "Saved" : cv.status === "undone" ? "Filing undone" : technical ? "Waiting for processing" : "A question about your note") +
+    esc(cv.status === "filed" ? "Saved" : cv.status === "undone" ? "Filing undone" : cv.status === "retained" ? "Existing filings kept" : technical ? "Waiting for processing" : "A question about your note") +
     '</span><span class="meta">' + esc(cv.date || "") + '</span></div>';
   html += '<div class="chips">' + dtLink(cv.uuid, "Original note") + '</div>';
   if (!finished) html += '<div class="notice">' + esc(cv.question) + '</div>';
@@ -543,6 +543,7 @@ function captureCard(cv, o) {
   html += '<div class="actions">';
   if (editing && !["waiting", "broken"].includes(cv.status)) html += '<button class="btn primary" data-act="capture-save" data-uuid="' + u + '">Save to the selected people</button>';
   if (cv.status === "filed") html += '<button class="btn" data-act="capture-edit" data-uuid="' + u + '">Wrong person</button><button class="btn danger" data-act="capture-undo" data-uuid="' + u + '">Undo this capture\'s filing</button>';
+  if (cv.can_retain_legacy) html += '<button class="btn" data-act="capture-retain" data-uuid="' + u + '">Keep existing filings</button>';
   if (cv.conflict) html += '<button class="btn" data-act="capture-keep" data-uuid="' + u + '">Keep the edited text and finish</button>';
   if (cv.status === "correcting") html += '<button class="btn" data-act="capture-retry" data-uuid="' + u + '">Resume correction</button>';
   if (!finished && !["waiting", "broken", "correcting"].includes(cv.status)) html += '<button class="btn quiet" data-act="capture-defer" data-uuid="' + u + '">Decide later</button><button class="btn" data-act="capture-retry" data-uuid="' + u + '">Retry processing</button>';
@@ -574,7 +575,7 @@ async function decideCapture(uuid, action) {
   }
   try {
     const result = await api("api/capture/" + uuid, body);
-    toast(result.status === "filed" ? "Saved" : result.status === "undone" ? "Filing undone" : action === "defer" ? "Kept for later" : "Waiting for processing");
+    toast(result.status === "filed" ? "Saved" : result.status === "undone" ? "Filing undone" : result.status === "retained" ? "Existing filings kept" : action === "defer" ? "Kept for later" : "Waiting for processing");
     delete local["c-" + uuid];
     await refresh(false);
   } catch(e) { banner(e.message); }
@@ -972,6 +973,7 @@ document.addEventListener("click", e => {
   switch (d.act) {
     case "capture-save": decideCapture(d.uuid, "save"); break;
     case "capture-undo": decideCapture(d.uuid, "undo"); break;
+    case "capture-retain": decideCapture(d.uuid, "retain"); break;
     case "capture-defer": decideCapture(d.uuid, "defer"); break;
     case "capture-retry": decideCapture(d.uuid, "retry"); break;
     case "capture-keep": decideCapture(d.uuid, "keep-edited"); break;

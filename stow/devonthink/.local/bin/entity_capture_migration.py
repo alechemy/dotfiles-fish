@@ -30,8 +30,7 @@ def preview(sources, candidates, reviews, people):
                     ignored_evidence = ignored_evidence or group == "ignored"
         if ignored_evidence and disposition == "process_source_only":
             disposition = "retain_ignored"
-        old_filing = [p["uuid"] for p in people if
-                      "x-devonthink-item://" + source["uuid"] in p.get("body", "")]
+        old_filing = [row["uuid"] for row in capture.previous_filings(source["uuid"], people)]
         if old_filing and disposition == "process_source_only":
             disposition = "review_previous_filing"
         items.append({"source_uuid": source["uuid"], "disposition": disposition,
@@ -158,7 +157,7 @@ def apply(bridge, extract, config, journal, path, selves=()):
                     continue
                 bridge([{"op": "capture_retire_review", "uuid": record["uuid"],
                          "expected_text": text_body}])
-        if manifest["status"] in {"filed", "undone"}:
+        if manifest["status"] in {"filed", "undone", "retained"}:
             bridge([{"op": "capture_retire_source", "uuid": source_uuid}])
         progress["status"] = "done"
         progress["disposition"] = manifest["status"]

@@ -99,6 +99,16 @@ class Reminders(unittest.TestCase):
         self.sync()
         self.assertEqual(self.things.rows["TASK-1"]["status"], 2)
 
+    def test_retained_existing_filing_closes_its_question_reminder(self):
+        self.bridge.manifest["reason"] = "legacy_filing"
+        self.sync()
+        self.bridge.manifest.update(status="retained", legacy_filings=[
+            {"uuid": "P1", "body_revision": capture.revision("Original filing")}])
+        self.sync()
+        self.assertEqual(self.things.rows["TASK-1"]["status"], 2)
+        self.assertEqual(json.loads(self.path.read_text())["tasks"], {})
+        self.assertEqual(self.bridge.manifest["status"], "retained")
+
     def test_unreadable_source_never_cancels_a_question(self):
         self.sync()
         self.bridge.listed = False

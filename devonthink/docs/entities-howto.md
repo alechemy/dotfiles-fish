@@ -26,6 +26,8 @@ If two people could be Wren, choose the intended person using their name, city, 
 
 If a note has no written name, choosing an existing person is enough to answer who it concerns. Creating a new person still requires their name in the note. **Decide later** keeps the note and its question intact. Technical delays appear separately and do not claim that the note was saved.
 
+For a migration question about an older note that already has Person filings, **Keep existing filings** closes the question without copying its text again or changing those Person records. The app labels the outcome **Existing filings kept**. Edit those older Person records directly if they need correction. Changing the original note reopens a question.
+
 Permanent ignore and filing suppression remain separate decisions. Restore an ignored identity or change `FilingSuppressed` in DEVONthink before asking the automation to file against it.
 
 ## Find or correct saved information
