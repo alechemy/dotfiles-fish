@@ -54,7 +54,9 @@ function run(argv) {
       const src = record('SRC', 'Capture', '# Capture\n\nWren moved.')
       const groupAt = () => ({children: () => records})
       const byUuid = uuid => uuid === 'SRC' ? src : records.find(r => r.uuid() === uuid)
+      let moved = null
       const dt = {
+        move: op => {moved = op.record.uuid()},
         createRecordWith: p => {
           const rec = record('P' + (records.length + 1), p.name, '')
           records.push(rec)
@@ -71,11 +73,19 @@ function run(argv) {
         const end = source.indexOf('\n    },', start)
         if (start < 0 || end < 0) throw new Error('handler missing')
         return Function('dt', 'groupAt', 'byUuid', 'mdValue', 'flagSet', 'captureSourceText',
-                        'captureTargets', 'captureBlockMutation', 'personSkeleton', 'isoStamp', 'handlers',
+                        'captureTargets', 'captureBlockMutation', 'personSkeleton', 'isoStamp', 'handlers', 'db',
           'const PEOPLE_PATH = "/People"; const FACTS_PATH = "/Facts"; let entityIndex = null; let peopleIndex = null; return ({' + source.slice(start, end + 7) + '})'
         )(dt, groupAt, byUuid, mdValue, flagSet, captureSourceText, captureTargets,
           captureBlockMutation, name => '# ' + name, isoStamp,
-          {capture_retire_record: op => ({uuid: op.uuid, group: op.group})})
+          {capture_retire_record: op => ({uuid: op.uuid, group: op.group})},
+          {trashGroup: () => 'TRASH'})
+      }
+      if (c.fn === 'guarded_write') {
+        const op = {uuid:'SRC', text:'Updated text.'}
+        if ('expected' in c) op.expected_text = c.expected === 'current' ? src.plainText() : c.expected
+        let failed = false
+        try {handler(c.operation)[c.operation](op)} catch(e) {failed = true}
+        return {value:{text:src.plainText(), moved:moved, failed:failed}}
       }
       if (c.fn === 'retained_source') {
         src.location = () => '/Facts/'
@@ -165,6 +175,23 @@ class CaptureBridge(unittest.TestCase):
         self.assertIn("R1", result["ids"])
         self.assertNotIn("R2", result["ids"])
         self.assertIn("mdcapturestatus==correcting", result["queries"][0])
+
+    def test_guarded_cleanup_rejects_stale_bodies_and_preserves_existing_callers(self):
+        for operation in ("set_text", "trash"):
+            cases = [{"fn": "guarded_write", "operation": operation, "expected": "stale"},
+                     {"fn": "guarded_write", "operation": operation, "expected": "current"},
+                     {"fn": "guarded_write", "operation": operation}]
+            stale, current, compatible = [row["value"] for row in run_cases(cases)]
+            with self.subTest(operation=operation):
+                self.assertTrue(stale["failed"])
+                self.assertEqual(stale["text"], "# Capture\n\nWren moved.")
+                self.assertIsNone(stale["moved"])
+                self.assertFalse(current["failed"])
+                self.assertEqual(current, compatible)
+                if operation == "set_text":
+                    self.assertEqual(current["text"], "Updated text.")
+                else:
+                    self.assertEqual(current["moved"], "SRC")
 
     def test_retained_legacy_source_updates_its_index_and_retires_without_new_filing(self):
         result = run_cases([{"fn": "retained_source"}])[0]
