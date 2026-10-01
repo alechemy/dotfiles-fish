@@ -107,13 +107,21 @@ def main():
                         raise
                     finding = {"id": "R1", "axis": "Correctness", "priority": "P2", "scope": "line",
                                "path": "sample.txt", "side": "new", "start_line": 1, "end_line": 2,
-                               "title": "Synthetic native integration check.", "body": "This is synthetic review feedback."}
+                               "title": "Synthetic native integration check.", "body": "This is synthetic review feedback.",
+                               "note": "A < B & C needs validation.", "correction": ["Validate before using <input>."]}
                     values = {"findings": [finding, {"id": "R2", "axis": "Spec", "priority": "optional", "scope": "review",
                                                      "title": "Synthetic general finding.", "body": "Keep this in the report."}]}
                     for _ in range(2):
                         imported = review.import_findings(directory, state, values)
                         assert imported["inline"] == ["R1"] and imported["report_only"] == ["R2"]
-                    assert len(review.hunk("comment", "list", opened["session"])["comments"]) == 1
+                        notes = review.hunk("comment", "list", opened["session"])["comments"]
+                        assert review.same_comment(notes[0], state["payloads"]["R1"])
+                    context = review.hunk("context", opened["session"])["context"]
+                    assert "stml" in context["experimentalFeatures"]
+                    notes = review.hunk("comment", "list", opened["session"])["comments"]
+                    assert len(notes) == 1 and "&lt;" in state["payloads"]["R1"]["markup"]
+                    assert not review.preview_markup(state["payloads"]["R1"], context["noteMarkupWidth"])
+                    assert not imported["warnings"]
                     review.show_finding(directory, state, "R1")
                     assert review.open_viewer(directory, state)["reused"]
                     assert review.hunk("comment", "list", opened["session"], "--type", "user")["comments"] == []
@@ -126,7 +134,9 @@ def main():
                         time.sleep(0.1)
                     restored = json.loads(review.run(["/usr/bin/python3", str(HELPER), "open", "--review", state["id"], "--reopen"]))
                     assert restored["restored"]["inline"] == ["R1"]
-                    assert len(review.hunk("comment", "list", restored["session"])["comments"]) == 1
+                    notes = review.hunk("comment", "list", restored["session"])["comments"]
+                    assert len(notes) == 1
+                    assert review.load_state(directory)["payloads"]["R1"] == state["payloads"]["R1"]
                     state = review.load_state(directory)
                     review.cmux("close-surface", "--workspace", workspace, "--surface", state["launch"]["surface"])
                 print(json.dumps({"mode": case, "result": "passed"}))

@@ -222,13 +222,17 @@ class ViewerTests(Fixture):
                         "inputKind": "vcs", "sourceLabel": str(self.repo),
                         "snapshot": {"state": {"reviewPublication": {"generation": "generation:fixture:1", "stateRevision": 0}}}}
         self.view = {"files": [{"path": "sample file.txt", "patch": (self.directory / "review.patch").read_text()}]}
+        self.context = {"experimentalFeatures": ["stml"], "noteMarkupWidth": 32}
         self.comments = []
         self.calls = []
         self.apply_error = False
+        self.markup_notes = []
+        self.markup_ack = True
         self.after_apply = None
         review.save(self.directory / "process.json", review.encoded({"pid": 4123, "started": "synthetic-start", "workspace": "workspace", "surface": "viewer"}))
         review.save_state(self.directory, self.state)
         for replacement in (patch.object(review, "hunk", side_effect=self.hunk),
+                            patch.object(review, "preview_markup", return_value=[]),
                             patch.object(review, "surface_exists", return_value=True),
                             patch.object(review, "process_started", return_value="synthetic-start"),
                             patch.dict(os.environ, {"CMUX_WORKSPACE_ID": "workspace", "CMUX_SURFACE_ID": "pi"})):
@@ -237,6 +241,8 @@ class ViewerTests(Fixture):
 
     def hunk(self, *args, data=None):
         self.calls.append((args, data))
+        if args[0] == "context":
+            return {"context": {"sessionId": "session", **self.context}}
         if args[0] == "get":
             return {"session": json.loads(json.dumps(self.session))}
         if args[0] == "list":
@@ -251,8 +257,15 @@ class ViewerTests(Fixture):
                 side = "old" if "oldLine" in payload else "new"
                 comment = {"commentId": "note-" + str(len(self.comments)), "side": side, "line": payload[side + "Line"],
                            **{key: payload[key] for key in ("filePath", "summary", "rationale", "author")}}
+                if "markup" in payload:
+                    comment["markup"] = payload["markup"]
                 self.comments.append(comment)
-                applied.append(comment)
+                receipt = comment.copy()
+                if "markup" in payload and self.markup_ack:
+                    receipt["markupWidth"] = self.context["noteMarkupWidth"]
+                    if self.markup_notes:
+                        receipt["markupNotes"] = self.markup_notes
+                applied.append(receipt)
             if self.after_apply:
                 self.after_apply()
             if self.apply_error:
@@ -281,6 +294,109 @@ class ViewerTests(Fixture):
         self.assertEqual(result["comment"], "note-0")
         self.assertIn((("navigate", "session", "--comment", "note-0"), None), self.calls)
         self.assertIn("Reviewed range: new lines 1-2", self.comments[0]["rationale"])
+
+    def test_compact_stml_escapes_text_and_keeps_full_evidence(self):
+        finding = self.finding(note="A < B & C </text> fails.", correction=["Use <safe> & retry."])
+        self.send(finding)
+        markup = self.comments[0]["markup"]
+        self.assertEqual(markup, "<text><b>[R1][P1][Correctness] Handle the fixture.</b></text>"
+                         "<text>A &lt; B &amp; C &lt;/text&gt; fails.</text>"
+                         "<list><item>Use &lt;safe&gt; &amp; retry.</item></list>")
+        self.assertNotIn(finding["body"], self.comments[0]["rationale"])
+        saved = review.load_state(self.directory)
+        self.assertEqual(saved["findings"]["R1"]["body"], finding["body"])
+        self.assertEqual(saved["payloads"]["R1"]["markup"], markup)
+        review.preview_markup.assert_called_once_with(saved["payloads"]["R1"], 32)
+
+    def test_absent_capability_or_width_uses_explicit_plain_fallback(self):
+        for context in ({"experimentalFeatures": []},
+                        {"experimentalFeatures": ["stml"], "noteMarkupWidth": 0}):
+            self.context = context
+            finding = self.finding(id="R" + str(len(self.comments) + 1))
+            result = self.send(finding)
+            self.assertTrue(result["warnings"])
+            self.assertNotIn("markup", self.comments[-1])
+        review.preview_markup.assert_not_called()
+
+    def test_preview_degradation_falls_back_and_does_not_upgrade_on_retry(self):
+        review.preview_markup.return_value = ["fixture degradation"]
+        result = self.send(self.finding())
+        self.assertIn("markup degraded", result["warnings"][0])
+        self.assertNotIn("markup", self.comments[0])
+        review.preview_markup.return_value = []
+        self.send(self.finding())
+        self.assertEqual(len(self.comments), 1)
+        self.assertNotIn("markup", self.state["payloads"]["R1"])
+
+    def test_export_without_markup_reconciles_without_rewriting(self):
+        self.send(self.finding())
+        self.comments[0].pop("markup")
+        self.send(self.finding())
+        review.show_finding(self.directory, self.state, "R1")
+        self.assertEqual(len(self.comments), 1)
+        self.assertEqual(sum(args[:2] == ("comment", "apply") for args, _ in self.calls), 1)
+
+    def test_legacy_plain_note_reconciles_without_markup_migration(self):
+        finding = self.finding()
+        self.state["findings"]["R1"] = finding
+        payload = review.comment_payload(self.state, finding, review.patch_files(self.view["files"][0]["patch"]))
+        self.hunk("comment", "apply", "session", data={"comments": [payload]})
+        self.state["imports"]["R1"] = "note-0"
+        self.send(finding)
+        self.assertNotIn("markup", self.state["payloads"]["R1"])
+        self.assertEqual(len(self.comments), 1)
+
+    def test_restoration_preserves_saved_markup_and_plain_payloads(self):
+        self.send(self.finding())
+        original = self.state["payloads"]["R1"].copy()
+        self.context["experimentalFeatures"] = []
+        self.send(self.finding(id="R2"))
+        self.context["experimentalFeatures"] = ["stml"]
+        self.state["imports"] = {}
+        self.comments.clear()
+        result = self.send(*self.state["findings"].values())
+        self.assertEqual(result["inline"], ["R1", "R2"])
+        self.assertEqual(self.state["payloads"]["R1"], original)
+        self.assertNotIn("markup", self.comments[1])
+        self.context["experimentalFeatures"] = []
+        with self.assertRaisesRegex(review.ReviewError, "Saved markup requires STML"):
+            self.send(self.finding())
+        self.assertEqual(len(self.comments), 2)
+
+    def test_post_write_degradation_saves_receipts_without_retrying(self):
+        self.markup_notes = ["fixture degradation"]
+        with self.assertRaisesRegex(review.ReviewError, "degradation after applying"):
+            self.send(self.finding())
+        self.assertEqual(review.load_state(self.directory)["imports"], {"R1": "note-0"})
+        self.send(self.finding())
+        self.assertEqual(len(self.comments), 1)
+
+    def test_missing_markup_acknowledgement_saves_receipts(self):
+        self.markup_ack = False
+        with self.assertRaisesRegex(review.ReviewError, "did not acknowledge"):
+            self.send(self.finding())
+        self.assertEqual(review.load_state(self.directory)["imports"], {"R1": "note-0"})
+
+    def test_changed_width_degradation_does_not_rewrite_saved_markup(self):
+        self.send(self.finding())
+        self.context["noteMarkupWidth"] = 10
+        review.preview_markup.return_value = ["degraded"]
+        with self.assertRaisesRegex(review.ReviewError, "Saved markup degraded"):
+            self.send(self.finding())
+        self.assertEqual(len(self.comments), 1)
+
+    def test_human_notes_are_preserved(self):
+        human = {"commentId": "human-note", "author": "Human", "summary": "Keep this thread."}
+        self.comments.append(human.copy())
+        self.send(self.finding())
+        self.send(self.finding())
+        self.assertEqual(self.comments[0], human)
+
+    def test_invalid_correction_fails_before_mutation(self):
+        for correction in ("step", [], [""], [1], ["step"] * 6):
+            with self.assertRaises(review.ReviewError):
+                self.send(self.finding(correction=correction))
+        self.assertEqual(self.comments, [])
 
     def test_old_side_is_not_silently_remapped_to_new(self):
         self.send(self.finding(side="old", end_line=1))
@@ -477,6 +593,26 @@ class ViewerTests(Fixture):
             self.send(self.finding())
         self.assertEqual(len(self.comments), 1)
         self.assertFalse(any("--repo" in args for args, _ in self.calls))
+
+
+class MarkupTests(unittest.TestCase):
+    def test_native_and_patch_process_launches_opt_in(self):
+        directory = Path("/private/review")
+        for mode in review.MODES:
+            state = {"hunk_binary": "/hunk", "comparison": {"mode": mode, "base": "base",
+                     "head": "head", "paths": ["--experimental"], "include_untracked": False}}
+            for patch_view in (False, True):
+                state["patch_view"] = patch_view
+                command = review.hunk_command(directory, state)
+                self.assertEqual(command[:2], ["/hunk", "--experimental"])
+                self.assertEqual(command[2:], review.viewer_command(directory, state))
+
+    def test_preview_uses_raw_stdin_and_width_and_returns_notes(self):
+        with patch.object(review, "run", return_value=b'{"notes":["degraded"]}') as client:
+            notes = review.preview_markup({"markup": "<text>note</text>"}, 27)
+        self.assertEqual(notes, ["degraded"])
+        self.assertEqual(client.call_args.args[0], ["hunk", "markup", "render", "-", "--width", "27", "--json"])
+        self.assertEqual(client.call_args.kwargs["data"], b"<text>note</text>")
 
 
 class PatchParsingTests(unittest.TestCase):

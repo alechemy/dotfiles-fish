@@ -7,6 +7,7 @@ import codecs
 from contextlib import contextmanager
 import fcntl
 import hashlib
+from html import escape
 import json
 import os
 from pathlib import Path, PurePosixPath
@@ -348,6 +349,10 @@ def viewer_command(directory, state):
     return command + ["--", *target["paths"]]
 
 
+def hunk_command(directory, state):
+    return [state["hunk_binary"], "--experimental", *viewer_command(directory, state)]
+
+
 def launch_command(directory):
     args = [sys.executable, str(Path(__file__).resolve()), "_run", "--review", directory.name]
     payload = base64.b64encode(encoded(args)).decode()
@@ -377,7 +382,7 @@ def run_viewer(directory):
         if key.startswith("GIT_"):
             del os.environ[key]
     os.environ.update(GIT_LITERAL_PATHSPECS="1", GIT_OPTIONAL_LOCKS="0", GIT_TERMINAL_PROMPT="0")
-    args = [state["hunk_binary"], *viewer_command(directory, state)]
+    args = hunk_command(directory, state)
     os.execv(args[0], args)
 
 
@@ -507,16 +512,21 @@ def validate_findings(values):
         if not isinstance(value, dict):
             raise ReviewError("Each finding must be an object.")
         required = {"id", "axis", "priority", "scope", "title", "body"}
-        allowed = required | {"path", "side", "start_line", "end_line", "reference"}
+        allowed = required | {"path", "side", "start_line", "end_line", "reference", "note", "correction"}
         if not required <= value.keys() or value.keys() - allowed:
             raise ReviewError("A finding has missing or unknown fields.")
         if not isinstance(value["id"], str) or not re.fullmatch(r"R[1-9][0-9]*", value["id"]) or value["id"] in result:
             raise ReviewError("Finding IDs must be distinct R1, R2, etc.")
         if value["axis"] not in ("Correctness", "Spec", "Standards") or value["priority"] not in ("P0", "P1", "P2", "optional"):
             raise ReviewError("Use the review skill's axes and P0/P1/P2 or optional priority.")
-        for field in ("title", "body", "reference"):
+        for field in ("title", "body", "reference", "note"):
             if field in value and (not isinstance(value[field], str) or not value[field].strip() or len(value[field]) > 16000):
                 raise ReviewError("Finding text must be nonempty and at most 16,000 characters per field.")
+        if "correction" in value and (
+                not isinstance(value["correction"], list) or not 1 <= len(value["correction"]) <= 5
+                or any(not isinstance(item, str) or not item.strip() or len(item) > 1000
+                       for item in value["correction"])):
+            raise ReviewError("Correction must contain one to five nonempty steps of at most 1,000 characters.")
         scope = value["scope"]
         if scope not in ("line", "file", "review"):
             raise ReviewError("Finding scope must be line, file, or review.")
@@ -536,7 +546,7 @@ def validate_findings(values):
     return result
 
 
-def comment_payload(state, finding, files):
+def comment_payload(state, finding, files, *, rich=False):
     if finding["scope"] != "line":
         return None
     path = finding["path"]
@@ -548,14 +558,45 @@ def comment_payload(state, finding, files):
     lines = file["lines"][finding["side"]]
     if any(line not in lines for line in range(finding["start_line"], finding["end_line"] + 1)):
         return None
-    rationale = finding["body"]
+    rationale = finding.get("note", finding["body"])
+    if finding.get("correction"):
+        rationale += "\n\n" + "\n".join("- " + item for item in finding["correction"])
     if finding["end_line"] != finding["start_line"]:
         rationale += f'\n\nReviewed range: {finding["side"]} lines {finding["start_line"]}-{finding["end_line"]}.'
     if finding.get("reference"):
         rationale += "\n\nReference: " + finding["reference"]
-    return {"filePath": path, finding["side"] + "Line": finding["start_line"],
-            "summary": f'[{finding["id"]}][{finding["priority"]}][{finding["axis"]}] {finding["title"]}',
-            "rationale": rationale, "author": "Pi review " + state["id"]}
+    payload = {"filePath": path, finding["side"] + "Line": finding["start_line"],
+               "summary": f'[{finding["id"]}][{finding["priority"]}][{finding["axis"]}] {finding["title"]}',
+               "rationale": rationale, "author": "Pi review " + state["id"]}
+    if rich:
+        paragraphs = finding.get("note", finding["body"]).split("\n\n")
+        payload["markup"] = "<text><b>" + escape(payload["summary"]) + "</b></text>"
+        payload["markup"] += "".join("<text>" + escape(text) + "</text>" for text in paragraphs)
+        if finding.get("correction"):
+            payload["markup"] += "<list>" + "".join(
+                "<item>" + escape(item) + "</item>" for item in finding["correction"]) + "</list>"
+    return payload
+
+
+def markup_context(session_id):
+    context = hunk("context", session_id)["context"]
+    if context.get("sessionId") != session_id:
+        raise ReviewError("Hunk returned markup context for another session; no notes were imported.")
+    if "stml" not in context.get("experimentalFeatures", []):
+        return None, "The bound session does not expose STML; imported notes use plain text."
+    width = context.get("noteMarkupWidth")
+    if type(width) is not int or width < 1:
+        return None, "The bound session has no valid note width; imported notes use plain text."
+    return width, None
+
+
+def preview_markup(payload, width):
+    result = json.loads(run(
+        ["hunk", "markup", "render", "-", "--width", str(width), "--json"],
+        data=payload["markup"].encode()))
+    if not isinstance(result, dict) or not isinstance(result.get("notes"), list):
+        raise ReviewError("Hunk returned an invalid markup preview; no notes were imported.")
+    return result["notes"]
 
 
 def same_comment(comment, payload):
@@ -573,12 +614,30 @@ def import_findings(directory, state, values):
     session, files = live_session(directory, state)
     session_id = session["sessionId"]
     comments = hunk("comment", "list", session_id)["comments"]
-    pending, report_only, reconciled = {}, [], {}
+    pending, report_only, reconciled, selected = {}, [], {}, {}
+    payloads = state.setdefault("payloads", {})
+    width, fallback = markup_context(session_id)
+    warnings = [fallback] if fallback else []
     for finding_id, value in findings.items():
-        payload = comment_payload(state, value, files)
+        anchor = comment_payload(state, value, files)
+        payload = payloads.get(finding_id, anchor)
+        if anchor is not None and finding_id not in payloads and finding_id not in state["findings"]:
+            payload = comment_payload(state, value, files, rich=width is not None)
+        if payload is not None and payload.get("markup"):
+            if width is None:
+                raise ReviewError("Saved markup requires STML in the bound session; retain the text report.")
+            notes = preview_markup(payload, width)
+            if notes:
+                if finding_id in payloads:
+                    raise ReviewError("Saved markup degraded at the live width; use a new finding ID to revise it.")
+                payload.pop("markup")
+                warnings.append(f"{finding_id}: markup degraded; imported as plain text. " + "; ".join(notes))
+        if anchor is None:
+            payload = None
         if payload is None:
             report_only.append(finding_id)
             continue
+        selected[finding_id] = payload
         matches = [comment for comment in comments if same_comment(comment, payload)]
         if len(matches) > 1:
             raise ReviewError("Duplicate imported notes exist; inspect them instead of importing again.")
@@ -590,6 +649,7 @@ def import_findings(directory, state, values):
             raise ReviewError("A previous import may still complete. Its notes are not visible yet; inspect the pane rather than retrying the write.")
         else:
             pending[finding_id] = payload
+    payloads.update(selected)
     state["findings"].update(findings)
     state["imports"].update(reconciled)
     state["pending"] = [key for key in state.get("pending", []) if key not in reconciled]
@@ -614,8 +674,14 @@ def import_findings(directory, state, values):
         state["pending"] = [key for key in state["pending"] if key not in pending]
         save_state(directory, state)
         live_session(directory, state)
+        if any(payload.get("markup") and (type(receipt.get("markupWidth")) is not int
+                                          or receipt["markupWidth"] < 1)
+               for payload, receipt in zip(pending.values(), applied)):
+            raise ReviewError("Hunk did not acknowledge markup rendering; receipts are saved. Inspect the pane before retrying.")
+        if response["result"].get("markupNotes") or any(item.get("markupNotes") for item in applied):
+            raise ReviewError("Hunk reported markup degradation after applying notes; receipts are saved. Inspect the pane before revising.")
     return {"review": state["id"], "inline": list(reconciled) + list(pending), "report_only": report_only,
-            "artifact": str(directory / "review.json")}
+            "warnings": warnings, "artifact": str(directory / "review.json")}
 
 
 def show_finding(directory, state, finding_id):
@@ -624,7 +690,9 @@ def show_finding(directory, state, finding_id):
     if not finding:
         raise ReviewError("That finding is not in this review.")
     comment_id = state["imports"].get(finding_id)
-    payload = comment_payload(state, finding, files)
+    payload = state.get("payloads", {}).get(finding_id, comment_payload(state, finding, files))
+    if comment_payload(state, finding, files) is None:
+        payload = None
     comments = hunk("comment", "list", session["sessionId"])["comments"]
     if not comment_id or not payload or not any(item.get("commentId") == comment_id and same_comment(item, payload) for item in comments):
         raise ReviewError("This finding has no unchanged inline note; discuss its local report entry.")

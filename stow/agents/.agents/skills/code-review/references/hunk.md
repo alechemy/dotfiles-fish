@@ -29,6 +29,8 @@ Pass `--repo /absolute/worktree` in every prepare call. Omit `--include-untracke
 
 `open` creates an unfocused split beside the invoking Pi terminal and returns once Hunk registers. Repeating it for the same review reuses the recorded session. It never adopts an arbitrary existing Hunk window, selects by title, or repoints another review. Do not retry `prepare` to recover a slow launch. Inspect the existing pane and retry `open` with the original ID. An incomplete cmux identity fails closed instead of creating another pane.
 
+The helper launches every native comparison and saved-patch view with `hunk --experimental`. A reload cannot enable STML. An unsupported launch flag or missing CLI contract leaves the review in the text report; do not relaunch without the flag to bypass verification.
+
 The helper selects native Hunk comparisons where possible. A bare `hunk diff` compares the index to the working tree, so the all-uncommitted mode explicitly passes the pinned HEAD. An unborn all-uncommitted review uses the saved patch because no HEAD exists. Repositories with configured Git textconv drivers also use saved patches, so Hunk cannot execute those drivers during the review. Snapshot-backed views contain the captured diff context; inspect exact Git blobs through Pi when more source context is needed. The helper verifies the displayed file/line content against its captured patch before imports and navigation. Hunk's patch export can omit trailing empty context lines; the helper accepts that exact omission but keeps omitted lines unavailable as comment anchors. Changed lines, nonempty context, paths, and line numbers must still match. A reload changes Hunk's generation and invalidates the saved binding, even if its title or repository is unchanged.
 
 If opening or verification fails, explain the specific limitation briefly and continue the original read-only review. Keep the full report available. Do not install tools, alter configuration, broaden scope, or relax identity checks to make the viewer work.
@@ -51,6 +53,8 @@ Assign stable IDs after validating and deduplicating the reviewers' output. Impo
       "end_line": 52,
       "title": "Clear the timer when the request aborts.",
       "body": "Include the reachable failure, consequence, evidence, and correction or verification suggestion.",
+      "note": "Aborted requests keep the timer running because cleanup only handles success.",
+      "correction": ["Clear the timer in the abort handler.", "Test an abort before the response arrives."],
       "reference": "Optional requirement or documented standard reference."
     },
     {
@@ -65,7 +69,7 @@ Assign stable IDs after validating and deduplicating the reviewers' output. Impo
 }
 ```
 
-`scope` is `line`, `file`, or `review`. A file finding has `path` but no side or line fields. A review finding has none of those location fields. `reference` is optional. All line findings require an explicit old/new side and inclusive start/end lines. Use the renamed destination path when available; the old path is also accepted when unambiguous.
+`scope` is `line`, `file`, or `review`. A file finding has `path` but no side or line fields. A review finding has none of those location fields. `reference` is optional. `body` retains the complete evidence. For a concise inline explanation, add `note` with the cause and consequence and `correction` with one to five short steps. These fields are optional for older callers; without `note`, the helper uses `body`. All line findings require an explicit old/new side and inclusive start/end lines. Use the renamed destination path when available; the old path is also accepted when unambiguous.
 
 ```bash
 /usr/bin/python3 "$helper" import --review "$review_id" --input /private/path/findings.json
@@ -75,7 +79,13 @@ Use `--input -` for JSON on stdin. Never put findings in shell arguments or pars
 
 Only ranges present on the specified diff side become inline notes. Hunk attaches the note to the first line; the rationale preserves a multi-line range. File-level, review-level, and out-of-diff findings remain in the artifact and appear in the result's `report_only` list. Include their complete text in the Pi report. Never invent a line anchor to make a finding visible.
 
-A repeated identical import reconciles the existing agent note instead of duplicating it. Removed or edited notes are not silently recreated. Changed finding text requires a new ID, retaining the earlier evidence. If an import's outcome is uncertain, the helper records that uncertainty. A later call can recognize matching notes, but cannot repeat an unacknowledged write merely because the notes are not visible yet. Human notes are never cleared by the importer.
+The helper checks `hunk session context <bound-session-id> --json` for `stml` and a valid `noteMarkupWidth` before submitting markup. It builds STML with an escaped title, short `<text>` paragraphs, and a `<list>` of correction steps. It previews each rich note at that live width with `hunk markup render - --width <width> --json` and inspects the render notes. Missing capability or width, or a degraded new preview, produces a plain-text note and an explicit `warnings` entry. Read those warnings. An unavailable context or render command fails the import instead of relaxing the binding.
+
+Keep the cause and consequence to one or two short sentences. Keep long paths, detailed proof, and the full finding in `body` in the local artifact. STML replaces Hunk's plain summary/rationale display, so the markup includes the title and IDs too. Do not add a decorated outer card. The helper escapes all interpolated text and does not accept raw markup. Hunk's `<code>` clips rather than wraps; GitHub fenced `suggestion` blocks are not supported by this workflow. Check the rendered note after import before presenting the review. For follow-up markup replies, use the same capability check and live-width preview from the vendor guide.
+
+The helper saves each exact submitted payload, including markup or its plain fallback, before applying it. Retries reconcile the exported author, summary, rationale, file, side, and line without rewriting notes or upgrading plain notes to STML. Legacy findings without a saved payload remain plain. Hunk 0.23.0 does not export markup in comment listings, so the helper cannot detect markup-only edits or independently read back the rendered body. It checks `markupWidth` and `markupNotes` in apply receipts, but those acknowledge rendering rather than return the markup. Post-write degradation or a missing markup acknowledgement reports failure with saved receipts, not permission to retry the write. A saved rich payload that degrades on a later preview or loses STML support fails closed; revise under a new ID after inspecting the pane.
+
+A repeated identical import reconciles the existing agent note instead of duplicating it. Removed or edited notes are not silently recreated. Changed finding text requires a new ID, retaining the earlier evidence. For a requested rewrite, import the replacement under a new ID and verify it first. Check the old note's replies first. If any human reply exists, leave the thread intact and identify the replacement instead. Otherwise remove only the superseded agent note and its agent-authored replies by exact comment ID in the verified session. Navigate to the replacement and tell the user its new ID. The old finding remains in the local artifact; `open --reopen` restores all saved findings with their saved payloads, including removed ones, so do not use it for a revised review without accounting for that behavior. If an import's outcome is uncertain, the helper records that uncertainty. A later call can recognize matching notes, but cannot repeat an unacknowledged write merely because the notes are not visible yet. Human notes are never cleared by the importer.
 
 ## Discuss findings beside the code
 
@@ -96,7 +106,7 @@ This checks freshness and selects the exact imported comment. For a follow-up th
 
 Worktrunk-managed tasks retain their existing Ctrl+Shift+F delivery shortcut. It requires the recorded idle task Pi session and a matching acknowledgement. Standalone Pi reviews use `comments` on request instead of adopting a Worktrunk task binding.
 
-A different comparison gets a new review ID. Preserve unresolved conclusions before switching the visible comparison. Do not reload a bound viewer behind the helper and then reuse its findings. After closing a review's old pane and Hunk process, `open --review "$review_id" --reopen` explicitly opens the same still-current comparison and restores the saved agent findings. This restoration can bring back findings previously removed from the viewer, so use it deliberately. It does not acknowledge, clear, or deliver human notes.
+A different comparison gets a new review ID. Preserve unresolved conclusions before switching the visible comparison. Do not reload a bound viewer behind the helper and then reuse its findings. After closing a review's old pane and Hunk process, `open --review "$review_id" --reopen` explicitly opens the same still-current comparison with `--experimental` and restores the saved agent findings. It keeps the original markup or plain fallback, checks rich payloads at the new width, and does not regenerate their text. This restoration can bring back findings previously removed from the viewer, so use it deliberately. It does not acknowledge, clear, or deliver human notes.
 
 ## Storage and limits
 
@@ -104,6 +114,6 @@ Records live under `~/.local/state/pi-code-review/<id>/`, with mode-0700 directo
 
 The helper makes no model calls, launches no new Pi session, and never stages, commits, checks out branches, or posts remote reviews. PR inspection and fetching remain the scope skill's responsibility. A pending GitHub review is still a remote write requiring current-turn permission.
 
-Version evidence is Hunk 0.22.0 and cmux 0.64.25. The helper requires the generation and JSON contracts present in those versions, not a dependency patch. The input and patch size limit is 32 MiB. Failed native comparisons remain text reports; do not silently drop files.
+Version evidence is Hunk 0.23.0 and cmux 0.64.25. The helper requires the generation and JSON contracts present in those versions, not a dependency patch. The input and patch size limit is 32 MiB. Failed native comparisons remain text reports; do not silently drop files.
 
 Source and generation checks surround imports, but Hunk's comment CLI has no caller-supplied generation precondition. A simultaneous human reload can race the write. The post-check reports failure and retains receipts instead of claiming a successful import or retrying blindly. These checks are not an atomic lock on Hunk or the checkout.
