@@ -9,7 +9,9 @@ or removes library files. A macOS user LaunchAgent runs
 ## Before a run
 
 The installed schedule prepares a new queue each day, so no daily terminal
-command is required. Each queue covers at least 90 minutes.
+command is required. Each queue covers at least 180 minutes. Three hours
+leaves about 90 minutes of listening even if half of the queued audio is
+skipped.
 
 Connect Arpeggi to Navidrome, let it upload previous offline listening history,
 then open `Next Run`, pull to refresh, and download its current tracks.
@@ -22,7 +24,7 @@ it exits without touching Keychain or the server. A pending queue for the same d
 choosing new tracks, and a previous day's pending queue is finished before
 today's is generated. Each daily queue replaces the contents of the same
 private `Next Run` playlist rather than building a per-date collection. Source
-`Running` and the 90-minute minimum remain the defaults.
+`Running` and the 180-minute minimum remain the defaults.
 
 To prepare today's queue immediately, run:
 
@@ -33,7 +35,7 @@ music-next-run.py daily
 To request an extra queue, optionally with a longer duration, run:
 
 ```sh
-music-next-run.py prepare --new --minutes 120
+music-next-run.py prepare --new --minutes 240
 ```
 
 The extra queue is refused while a publication is pending.
@@ -116,7 +118,7 @@ replace an unrelated existing playlist called `Next Run`.
 The source can be another owned playlist:
 
 ```sh
-music-next-run.py prepare --new --source "Running: Hard" --minutes 90
+music-next-run.py prepare --new --source "Running: Hard" --minutes 180
 ```
 
 All sources share the account's deck and reservations. The recording-level

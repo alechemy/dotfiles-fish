@@ -25,6 +25,7 @@ import uuid
 
 TARGET = "Next Run"
 COOLDOWN = 30 * 86400
+DEFAULT_MINUTES = 180
 MARKER = "music-next-run:"
 
 
@@ -413,7 +414,7 @@ def publish(db, api, run):
     db.commit()
 
 
-def prepare(db, api, minutes=90, source_name="Running", new=False, dry_run=False, now=None):
+def prepare(db, api, minutes=DEFAULT_MINUTES, source_name="Running", new=False, dry_run=False, now=None):
     now = time.time() if now is None else now
     run = latest(db)
     if run and new and run["status"] == "pending":
@@ -462,7 +463,7 @@ def daily_ready(db, now):
     return bool(run and run["status"] == "published" and calendar_day(run["created"]) == calendar_day(now))
 
 
-def daily(db, api, minutes=90, source_name="Running", dry_run=False, now=None):
+def daily(db, api, minutes=DEFAULT_MINUTES, source_name="Running", dry_run=False, now=None):
     now = time.time() if now is None else now
     if daily_ready(db, now):
         return None, None
@@ -492,7 +493,7 @@ def main(argv=None):
     prep.add_argument("--new", action="store_true", help="Reserve a different queue for the next run")
     scheduled = sub.add_parser("daily", help="Ensure one published queue for the local calendar day")
     for command in (prep, scheduled):
-        command.add_argument("--minutes", type=int, default=90, help="Minimum queue duration, including your margin")
+        command.add_argument("--minutes", type=int, default=DEFAULT_MINUTES, help="Minimum queue duration, including your margin")
         command.add_argument("--source", default="Running", help="Owned source playlist name")
         command.add_argument("--dry-run", action="store_true", help="Preview without local or server writes")
     sub.add_parser("status", help="Show local queue status without contacting Navidrome")

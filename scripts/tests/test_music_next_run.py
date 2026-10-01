@@ -95,6 +95,13 @@ class QueueTests(unittest.TestCase):
     def ids(self, run):
         return json.loads(run["songs"])
 
+    def test_default_queue_covers_three_hours(self):
+        self.server = Server([song(str(n)) for n in range(200)])
+        run, _ = queue.prepare(self.db, self.server, now=NOW)
+        self.assertEqual(queue.DEFAULT_MINUTES, 180)
+        self.assertEqual(run["duration"], 180 * 60)
+        self.assertEqual(len(self.ids(run)), 180)
+
     def test_shared_history_excludes_unplayed_compilation_copy(self):
         original = song("original", "Same Song", played=dt.datetime.fromtimestamp(NOW - 86400, dt.timezone.utc).isoformat())
         duplicate = song("compilation", "Same Song")
@@ -324,6 +331,31 @@ class DailyTests(unittest.TestCase):
 
     def daily(self, **kwargs):
         return queue.daily(self.db, self.server, minutes=2, now=kwargs.pop("now", NOW), **kwargs)[0]
+
+    def test_default_daily_queue_covers_three_hours(self):
+        self.server = Server([song(str(n)) for n in range(200)])
+        run, _ = queue.daily(self.db, self.server, now=NOW)
+        self.assertEqual(run["duration"], 180 * 60)
+        self.assertEqual(len(self.ids(run)), 180)
+
+    def test_cli_defaults_cover_three_hours_for_manual_and_scheduled_runs(self):
+        with tempfile.TemporaryDirectory() as temp:
+            for command in ("prepare", "daily"):
+                with self.subTest(command=command):
+                    path = Path(temp) / command / "queue.sqlite3"
+                    server = Server([song(str(n)) for n in range(200)])
+                    with patch.object(queue, "configuration", return_value=("https://example.invalid", "example")), \
+                            patch.object(queue, "state_path", return_value=path), \
+                            patch.object(queue.time, "time", return_value=NOW), \
+                            patch.object(queue.Navidrome, "from_keychain", return_value=server), \
+                            patch.object(queue.subprocess, "run", return_value=Mock(returncode=0)), \
+                            contextlib.redirect_stdout(io.StringIO()):
+                        self.assertEqual(queue.main([command]), 0)
+                    with contextlib.closing(sqlite3.connect(path)) as db:
+                        queue.initialize(db)
+                        run = queue.latest(db)
+                        self.assertEqual(run["duration"], 180 * 60)
+                        self.assertEqual(run["status"], "published")
 
     def test_daily_same_day_is_silent_without_server_access(self):
         first = self.daily()
