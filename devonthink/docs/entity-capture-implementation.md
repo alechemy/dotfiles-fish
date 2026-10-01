@@ -1,6 +1,6 @@
 # Entity capture implementation and deployment
 
-The local implementation includes deliberate filing, questions, correction, reminder-only Things behavior, explicit old-source migration, and arrival notification. Production installation, migration, activation, and Mac/iOS canaries have not run. Five synthetic attribution checks passed against the configured local model.
+The implementation includes deliberate filing, questions, correction, reminder-only Things behavior, explicit old-source migration, and arrival notification. Installation and the five-source migration completed on the driver Mac. Five synthetic attribution checks passed against the configured local model. Automatic capture remains disabled; Smart Rule configuration, activation, and Mac/iOS canaries remain pending.
 
 ## Data and recovery
 
@@ -78,6 +78,10 @@ Tests use fictional records, temporary state, mocked APIs, and stubbed logging. 
 
 The configured local model passed five synthetic checks using the production capture prompt and parser: a short single-name note, incidental-relative news, separate subjects, source spelling despite a fuller roster name, and explicit email evidence. The checks verified exact mentions, complete passages, source-grounded resolution, and email attribution under the existing driver, power, memory, and inference locks. They do not establish accuracy on the private backlog or all possible notes.
 
-Native metadata-search behavior, AppleEvents delivery, Things Cloud convergence, and real Mac/iOS action behavior remain unverified. The Calendar and Contacts live canaries are excluded under this task's privacy boundary. The 10-invitee calendar limit counts raw entries; it cannot detect a hidden distribution list behind one address.
+Live installation verified both metadata fields, recursive capture inventory, the review server, and launchd consumption of an arrival notification. All five historical captures already had Person contributions; migration retained them as questions rather than filing them again. Legacy reminder cleanup confirmed 81 terminal tasks and canceled 21 remaining old reminders. The five new question reminders were confirmed through the installed worker's Things state.
 
-No production migration, activation, HOME-link changes, or remote publication is part of this implementation delivery.
+The migration CLI's direct terminal invocation lacked Things database access. Resuming the same reviewed plan through a one-shot LaunchAgent used the pipeline's existing stable-interpreter permission context and completed cleanup. The temporary job was removed. Database access failures remain distinct from confirmed task deletion.
+
+Things Cloud convergence and real Mac/iOS capture/correction behavior remain unverified. The Calendar and Contacts live canaries are excluded under this task's privacy boundary. The 10-invitee calendar limit counts raw entries; it cannot detect a hidden distribution list behind one address.
+
+The release is integrated into the primary checkout, with pre-existing edits preserved separately from the implementation commits. Installation and migration were authorized after implementation delivery. Automation is still disabled, and publication remains local.

@@ -27,4 +27,4 @@ This directory documents and tests a DEVONthink 4 document-processing pipeline. 
 /usr/bin/python3 -m unittest discover -s devonthink/tests -t devonthink/tests
 ```
 
-The suite is stdlib-only. It stubs pipeline logging; Calendar and Contacts canaries skip when permissions or suitable data are unavailable.
+The suite is stdlib-only. It stubs pipeline logging; Calendar and Contacts canaries skip when permissions or suitable data are unavailable. Test new bridge handlers through the actual JXA harness as well as Python mocks, including recursive groups and missing date values for inventory handlers.
