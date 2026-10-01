@@ -70,6 +70,30 @@ Evidence relative to the installed `pi-subagents` root: `src/agents/agents.ts`, 
 
 Evidence relative to `pi-web-access`: `index.ts`, `credential-source.ts`, `gemini-search.ts`, `summary-review.ts`, `summary-model-scope.ts`, `utils.ts`, `chrome-cookies.ts`, `auth-fetch.ts`, `extract.ts:525-527,1129-1147,1233-1237`, `pdf-extract.ts:185-232,324-332`, `gemini-pdf-extract.ts`, `video-extract.ts`, `storage.ts`, `curator-page.ts` and `curator-server.ts`. The review also traced selected provider/GitHub helpers. It did not audit every dependency, CLI, browser component or remote service.
 
+## Pi host-provided dependency declarations
+
+Pi 0.99.1 warns when extension manifests declare host-provided packages in `dependencies`. Applied the published TypeBox peer-dependency fix from Subagents 0.74.0 and Web Access 0.35.0 to the installed guarded Subagents 0.65.0 and Web Access 0.27.0 manifests. Both now declare `peerDependencies.typebox: "*"` without a runtime dependency declaration. The release check covered all published versions and dist-tags; neither package had prereleases. This backport changes only the two manifests, preserves the local delegation guard, and does not adopt newer package code or resolve the authenticated-PDF restriction.
+
+The original local build receipt and archive still describe the pre-backport package. Each changed manifest has an adjacent `package.json.before-host-peers` backup. Existing dependency files remain unchanged, including TypeBox copies used by older standalone runners and the inactive npm Subagents installation. The description projection gates now match the reviewed, corrected manifests.
+
+After restoring or reinstalling either pinned package, reapply the exact-source correction from the primary dotfiles checkout:
+
+```bash
+python3 scripts/fix-pi-extension-peers.py
+python3 scripts/fix-pi-extension-peers.py --check
+```
+
+The helper validates both original or corrected manifest digests before writing, rejects unknown changes, preserves originals, and atomically replaces each changed manifest. It installs nothing and leaves settings untouched. A package-version change requires reviewing and updating this backport rather than applying it to new bytes.
+
+The credential-free regression reproduced both warnings before the correction and loaded both packages without errors or warnings afterward on Pi 0.99.1. It uses a disposable HOME and blocks network requests. Run it with `PI_PACKAGE_ROOT`, `PI_SUBAGENTS_ROOT`, and `PI_WEB_ACCESS_ROOT` set to the reviewed package directories:
+
+```bash
+node --test scripts/tests/test_pi_extension_peers.mjs
+python3 -m unittest discover -s scripts/tests -p test_fix_pi_extension_peers.py
+```
+
+New sessions read the corrected manifests. Restart existing sessions or use `/reload` to refresh their resource diagnostics. Loader registration and the local-role policy check do not establish detached-runner execution parity.
+
 ## Anthropic subscription compatibility
 
 The settings fragment pins `@gotgenes/pi-anthropic-auth@3.3.1`, reviewed and tested offline against Pi 0.87.1. The 3.x line requires Pi 0.86 or newer and handles its XML-sectioned prompts and mid-conversation system messages. Homebrew updates Pi independently, so recheck compatibility when either version changes. The release check covered every published version and dist-tag; 3.3.1 was the stable release with no published prerelease.
