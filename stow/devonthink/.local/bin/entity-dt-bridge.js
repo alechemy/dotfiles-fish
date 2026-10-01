@@ -1134,7 +1134,7 @@ function run(argv) {
       function walk(group) {
         for (const r of group.children()) {
           if (String(r.type()) === 'group') { walk(r); continue }
-          sources.push({uuid: r.uuid(), name: r.name(), kind: 'fact', added: isoDay(r.additionDate()), eventdate: mdValue(r, 'eventdate'),
+          sources.push({uuid: r.uuid(), name: r.name(), kind: 'fact', added: isoStamp(r.additionDate()).slice(0, 10), eventdate: mdValue(r, 'eventdate'),
                         added_at: isoStamp(r.additionDate()), modified: isoStamp(r.modificationDate()),
                         ready: !flagSet(mdValue(r, 'needsprocessing')),
                         capture_operation: mdValue(r, 'captureoperation')})

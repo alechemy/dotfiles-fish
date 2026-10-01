@@ -71,10 +71,21 @@ function run(argv) {
         const end = source.indexOf('\n    },', start)
         if (start < 0 || end < 0) throw new Error('handler missing')
         return Function('dt', 'groupAt', 'byUuid', 'mdValue', 'flagSet', 'captureSourceText',
-                        'captureTargets', 'captureBlockMutation', 'personSkeleton',
-          'const PEOPLE_PATH = "/People"; let entityIndex = null; let peopleIndex = null; return ({' + source.slice(start, end + 7) + '})'
+                        'captureTargets', 'captureBlockMutation', 'personSkeleton', 'isoStamp',
+          'const PEOPLE_PATH = "/People"; const FACTS_PATH = "/Facts"; let entityIndex = null; let peopleIndex = null; return ({' + source.slice(start, end + 7) + '})'
         )(dt, groupAt, byUuid, mdValue, flagSet, captureSourceText, captureTargets,
-          captureBlockMutation, name => '# ' + name)
+          captureBlockMutation, name => '# ' + name, isoStamp)
+      }
+      if (c.fn === 'fact_sources') {
+        src.additionDate = () => new Date(2026, 8, 29, 23, 59, 59)
+        src.modificationDate = () => new Date(2026, 8, 30, 0, 1, 2)
+        const filed = record('FILED-SRC', 'Older capture', 'Wren stayed.')
+        filed.additionDate = () => null
+        filed.modificationDate = () => null
+        filed.customMetaData().mdneedsprocessing = true
+        filed.customMetaData().mdcaptureoperation = 'frozen-operation'
+        records.push(src, {type: () => 'group', children: () => [filed]})
+        return {value: handler('list_fact_captures').list_fact_captures({})}
       }
       const person = handler('capture_person')
       const append = handler('capture_append')
@@ -145,6 +156,20 @@ class CaptureBridge(unittest.TestCase):
         self.assertIn("R1", result["ids"])
         self.assertNotIn("R2", result["ids"])
         self.assertIn("mdcapturestatus==correcting", result["queries"][0])
+
+    def test_migration_source_inventory_uses_local_dates_and_walks_filed_groups(self):
+        result = run_cases([{"fn": "fact_sources"}])[0]
+        self.assertNotIn("error", result)
+        source, filed = result["value"]
+        self.assertEqual(source["added"], "2026-09-29")
+        self.assertEqual(source["added_at"], "2026-09-29T23:59:59")
+        self.assertEqual(source["modified"], "2026-09-30T00:01:02")
+        self.assertTrue(source["ready"])
+        self.assertEqual(filed["uuid"], "FILED-SRC")
+        self.assertEqual(filed["added"], "")
+        self.assertEqual(filed["added_at"], "")
+        self.assertFalse(filed["ready"])
+        self.assertEqual(filed["capture_operation"], "frozen-operation")
 
     def test_modified_owned_block_is_refused(self):
         results = run_cases([
