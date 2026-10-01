@@ -25,7 +25,7 @@
 //   get_at_path        {path}                           -> {uuid,name} | null
 //   open_record        {uuid}                           -> {uuid}
 //   get_text           {uuid}                           -> {uuid,text}
-//   set_text           {uuid,text}                      -> {uuid}
+//   set_text           {uuid,text,expected_text?}       -> {uuid}
 //   ensure_group       {path,exclude_chat?}             -> {uuid,created,chat_excluded}
 //   get_fields         {uuid,fields}                    -> {uuid,fields:{k:v}}
 //   set_fields         {uuid,fields}                    -> {uuid}
@@ -55,7 +55,7 @@
 //   relink_entities    {}                               -> {records,changed}
 //   sort_logs          {dry_run?}                       -> {records,changed,
 //                                                           records_changed}
-//   trash              {uuid}                           -> {uuid}
+//   trash              {uuid,expected_text?}            -> {uuid}
 //   add_aliases        {uuid,aliases}                   -> {uuid,aliases}
 //   list_candidates    {}                               -> {pending:[{uuid,name,md,text}],
 //                                                           approved:[...],ignored:[...]}
@@ -1377,6 +1377,7 @@ function run(argv) {
 
     set_text(op) {
       const r = byUuid(op.uuid)
+      if (op.expected_text !== undefined && r.plainText() !== op.expected_text) throw new Error('The record changed. Refresh before editing.')
       r.plainText = op.text
       return { uuid: op.uuid }
     },
@@ -1824,7 +1825,9 @@ function run(argv) {
     },
 
     trash(op) {
-      dt.move({ record: byUuid(op.uuid), to: db.trashGroup() })
+      const rec = byUuid(op.uuid)
+      if (op.expected_text !== undefined && rec.plainText() !== op.expected_text) throw new Error('The record changed. Refresh before removing it.')
+      dt.move({ record: rec, to: db.trashGroup() })
       return { uuid: op.uuid }
     },
   }
