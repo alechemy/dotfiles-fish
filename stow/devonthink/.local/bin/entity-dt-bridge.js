@@ -802,6 +802,17 @@ function captureTargets(evidence, people) {
   const ids = rows => rows.map(p => p.uuid)
   const common = ids(names).filter(id => ids(emails).indexOf(id) !== -1)
   if (names.length && emails.length && !common.length) throw new Error('conflicting identifiers')
+  if (evidence.selected_target) {
+    if (!people.some(p => p.uuid === evidence.selected_target) ||
+        (emails.length && ids(emails).indexOf(evidence.selected_target) === -1)) {
+      throw new Error('selected person conflicts with source email')
+    }
+    return [evidence.selected_target]
+  }
+  if (evidence.distinct) {
+    if (emails.length) throw new Error('email belongs to an existing person')
+    return []
+  }
   return names.length && emails.length ? common : Array.from(new Set(ids(names.concat(emails))))
 }
 
@@ -816,6 +827,31 @@ function captureBlockMutation(text, id, block, expectedPresent) {
   }
   if (expectedPresent) throw new Error('capture contribution was removed; retained for correction')
   return body + '\n\n' + block + '\n'
+}
+
+function captureBlockRemove(text, id, block) {
+  const body = String(text || '').replace(/\r\n|\r/g, '\n')
+  const begin = '<!-- capture:' + id + ':begin -->'
+  const end = '<!-- capture:' + id + ':end -->'
+  if (body.indexOf(begin) === -1 && body.indexOf(end) === -1) return body
+  if (body.split(begin).length !== 2 || body.split(end).length !== 2 || body.indexOf(block) === -1) {
+    throw new Error('This capture was edited on the Person. Its content has been retained.')
+  }
+  return body.replace(block, '')
+}
+
+function captureRegistry(dt, db, limit) {
+  const pending = dt.search('mdcapturestatus==filing OR mdcapturestatus==question OR mdcapturestatus==deferred OR mdcapturestatus==correcting OR mdcapturestatus==revision_question', {in: db.root()})
+  const unindexed = dt.search('mdcaptureoperation:* AND NOT mdcapturestatus:*', {in: db.root()})
+  const recent = dt.search('mdcaptureoperation:*', {in: db.root()})
+    .sort((a, b) => b.modificationDate() - a.modificationDate()).slice(0, limit)
+  const seen = new Set()
+  return pending.concat(unindexed, recent).filter(r => {
+    const uuid = r.uuid()
+    if (seen.has(uuid)) return false
+    seen.add(uuid)
+    return true
+  })
 }
 
 function run(argv) {
@@ -1063,7 +1099,7 @@ function run(argv) {
           addResolved(uuids[i], names[i], locations[i], mds[i], addeds[i], modifieds[i])
         }
       }
-      dt.search('mdcaptureoperation:*', { in: db.root() }).forEach(addFromRecord)
+      captureRegistry(dt, db, 200).forEach(addFromRecord)
       return out
     },
 
@@ -1091,6 +1127,68 @@ function run(argv) {
           ? true
           : !flagSet(mdValue(r, 'needsprocessing')),
       }
+    },
+
+    list_fact_captures(op) {
+      const sources = []
+      function walk(group) {
+        for (const r of group.children()) {
+          if (String(r.type()) === 'group') { walk(r); continue }
+          sources.push({uuid: r.uuid(), name: r.name(), kind: 'fact', added: isoDay(r.additionDate()), eventdate: mdValue(r, 'eventdate'),
+                        added_at: isoStamp(r.additionDate()), modified: isoStamp(r.modificationDate()),
+                        ready: !flagSet(mdValue(r, 'needsprocessing')),
+                        capture_operation: mdValue(r, 'captureoperation')})
+        }
+      }
+      walk(groupAt(FACTS_PATH))
+      return sources
+    },
+
+    capture_retire_source(op) {
+      const rec = byUuid(op.uuid)
+      const manifest = JSON.parse(mdValue(rec, 'captureoperation'))
+      if (manifest.source_uuid !== op.uuid || !['filed', 'undone'].includes(manifest.status)) {
+        throw new Error('capture completion is not verified')
+      }
+      if (mdValue(rec, 'capturestatus') !== manifest.status) dt.addCustomMetaData(manifest.status, {for: 'capturestatus', to: rec})
+      if (String(rec.location()).indexOf(FACTS_PATH + '/') !== 0) return {uuid: op.uuid}
+      return handlers.capture_retire_record({uuid: op.uuid, group: FACTS_PATH + '/Filed'})
+    },
+
+    capture_retire_record(op) {
+      let g = dt.getRecordAt(op.group, {in: db}) || dt.createLocation(op.group, {in: db})
+      g.excludeFromChat = true
+      if (!flagSet(String(g.excludeFromChat()))) throw new Error('capture archive chat exclusion could not be verified')
+      dt.move({record: byUuid(op.uuid), to: g})
+      return {uuid: op.uuid}
+    },
+
+    capture_retire_candidate(op) {
+      const rec = byUuid(op.uuid)
+      if (String(rec.plainText()) !== op.expected_text) throw new Error('candidate evidence changed during migration')
+      if (op.empty) return handlers.capture_retire_record({uuid: op.uuid, group: CANDIDATES_PATH + '/_RetiredCaptures'})
+      rec.plainText = op.text
+      return {uuid: op.uuid}
+    },
+
+    capture_retire_review(op) {
+      const rec = byUuid(op.uuid)
+      if (String(rec.plainText()) !== op.expected_text) throw new Error('proposal evidence changed during migration')
+      return handlers.capture_retire_record({uuid: op.uuid, group: REVIEW_PATH + '/_RetiredCaptures'})
+    },
+
+    list_captures(op) {
+      const limit = Math.min(Math.max(Number(op.limit || 200), 1), 500)
+      const rows = captureRegistry(dt, db, limit)
+        .map(r => ({uuid: r.uuid(), name: r.name(), operation: mdValue(r, 'captureoperation'),
+                   text: captureSourceText(r.plainText())}))
+      const seen = new Set(rows.map(r => r.uuid))
+      for (const r of groupAt(FACTS_PATH).children()) {
+        if (String(r.type()) === 'group' || seen.has(r.uuid())) continue
+        rows.push({uuid: r.uuid(), name: r.name(), operation: mdValue(r, 'captureoperation'),
+                   added_at: isoStamp(r.additionDate()), text: captureSourceText(r.plainText())})
+      }
+      return rows
     },
 
     list_group(op) {
@@ -1283,11 +1381,40 @@ function run(argv) {
       return { uuid: op.uuid }
     },
 
+    capture_source_edit(op) {
+      const rec = byUuid(op.uuid)
+      if (captureSourceText(rec.plainText()) !== op.expected_text) throw new Error('The source changed. Refresh before editing.')
+      rec.plainText = '# ' + rec.name() + '\n\n' + op.text
+      return {uuid: op.uuid}
+    },
+
+    capture_remove(op) {
+      const source = byUuid(op.source_uuid)
+      if (captureSourceText(source.plainText()) !== op.text) throw new Error('capture source changed')
+      if (mdValue(source, 'captureoperation') !== op.expected_operation) {
+        throw new Error('The capture operation changed. Refresh before correcting it.')
+      }
+      const rec = byUuid(op.uuid)
+      const current = String(rec.plainText() || '')
+      if (current.replace(/\r\n|\r/g, '\n') !== op.expected_body) throw new Error('The Person changed. Its content is retained.')
+      for (const destination of op.destinations || []) {
+        const target = byUuid(destination.uuid)
+        if (String(target.plainText()).replace(/\r\n|\r/g, '\n') !== destination.body || mdValue(target, 'entitytype') !== 'Person') throw new Error('capture destination changed before removal')
+      }
+      const next = captureBlockRemove(current, op.id, op.block)
+      if (current !== next) rec.plainText = next
+      return {uuid: op.uuid}
+    },
+
     capture_store(op) {
       const rec = byUuid(op.uuid)
       if (captureSourceText(rec.plainText()) !== op.text) throw new Error('capture source changed')
       if (mdValue(rec, 'captureoperation') !== op.expected) throw new Error('capture operation changed')
-      dt.addCustomMetaData(op.value, { for: 'captureoperation', to: rec })
+      const status = JSON.parse(op.value).status
+      const complete = ['filed', 'undone'].includes(status)
+      if (!complete && mdValue(rec, 'capturestatus') !== status) dt.addCustomMetaData(status, {for: 'capturestatus', to: rec})
+      if (op.expected !== op.value) dt.addCustomMetaData(op.value, { for: 'captureoperation', to: rec })
+      if (complete && mdValue(rec, 'capturestatus') !== status) dt.addCustomMetaData(status, {for: 'capturestatus', to: rec})
       if (mdValue(rec, 'captureoperation') !== op.value) throw new Error('capture plan was not stored')
       return { uuid: op.uuid }
     },
@@ -1306,33 +1433,40 @@ function run(argv) {
       let rec = null
       if (targets.length > 1) throw new Error('capture identity became ambiguous')
       if (op.uuid) {
-        if (targets.length !== 1 || targets[0] !== op.uuid) throw new Error('capture identity changed')
+        if (!(op.evidence.distinct && String(byUuid(op.uuid).plainText()).indexOf(anchor) !== -1) &&
+            (targets.length !== 1 || targets[0] !== op.uuid)) throw new Error('capture identity changed')
         rec = byUuid(op.uuid)
       } else if (targets.length) {
         rec = byUuid(targets[0])
         if (String(rec.plainText()).indexOf(anchor) === -1) throw new Error('capture identity changed before creation')
       } else {
-        if (recs.some(r => r.name() !== temporaryName && String(r.plainText()).indexOf(anchor) !== -1)) {
+        const owned = recs.filter(r => r.name() !== temporaryName && String(r.plainText()).indexOf(anchor) !== -1)
+        if (owned.length > 1 || (owned.length && !op.evidence.distinct)) {
           throw new Error('capture-created person no longer matches the source')
         }
-        rec = temporary[0] || dt.createRecordWith({name: temporaryName, type: 'markdown'},
+        rec = owned[0] || temporary[0] || dt.createRecordWith({name: temporaryName, type: 'markdown'},
                                                   {in: groupAt(PEOPLE_PATH)})
         const body = String(rec.plainText() || '')
-        if (!body) rec.plainText = personSkeleton(op.name) + '\n\n' + anchor + '\n'
+        if (!body) rec.plainText = personSkeleton(temporaryName) + '\n\n' + anchor + '\n'
         else if (body.indexOf(anchor) === -1) throw new Error('capture initialization body was edited')
         entityIndex = null
         peopleIndex = null
       }
       if (flagSet(mdValue(rec, 'filingsuppressed'))) throw new Error('person is filing-suppressed')
       const owned = String(rec.plainText()).indexOf(anchor) !== -1
-      if (owned) {
+      if (owned && op.initialize !== false) {
         const entityType = mdValue(rec, 'entitytype')
         if (entityType && entityType !== 'Person') throw new Error('person initialization conflict')
         if (!entityType) dt.addCustomMetaData('Person', {for: 'entitytype', to: rec})
         if (!mdValue(rec, 'entitystatus')) dt.addCustomMetaData('active', {for: 'entitystatus', to: rec})
       }
       if (mdValue(rec, 'entitytype') !== 'Person') throw new Error('person initialization is incomplete')
-      if (rec.name() === temporaryName) rec.name = op.name
+      if (rec.name() === temporaryName) {
+        const body = String(rec.plainText())
+        const heading = '# ' + temporaryName
+        if (body.indexOf(heading) === 0) rec.plainText = '# ' + op.name + body.slice(heading.length)
+        if (rec.name() === temporaryName) rec.name = op.name
+      }
       return {uuid: rec.uuid(), initialized: true}
     },
 
@@ -1342,7 +1476,9 @@ function run(argv) {
       const people = groupAt(PEOPLE_PATH).children().filter(r => String(r.type()) === 'markdown')
         .map(r => ({uuid: r.uuid(), name: r.name(), aliases: r.aliases(), email: mdValue(r, 'email')}))
       const targets = captureTargets(op.evidence, people)
-      if (targets.length !== 1 || targets[0] !== op.uuid) throw new Error('capture identity changed')
+      const ownAnchor = '<!-- capture-created:' + op.id + ' -->'
+      if (!(op.evidence.distinct && String(rec.plainText()).indexOf(ownAnchor) !== -1) &&
+          (targets.length !== 1 || targets[0] !== op.uuid)) throw new Error('capture identity changed')
       if (flagSet(mdValue(rec, 'filingsuppressed'))) throw new Error('person is filing-suppressed')
       const current = String(rec.plainText() || '')
       const next = captureBlockMutation(current, op.id, op.block, op.expected_present)

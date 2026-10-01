@@ -19,5 +19,9 @@
 	<string>/tmp/entity-filing.log</string>
 	<key>StartInterval</key>
 	<integer>1800</integer>
+	<key>WatchPaths</key>
+	<array>
+		<string>__HOME__/.local/state/devonthink/entity-capture-arrivals</string>
+	</array>
 </dict>
 </plist>

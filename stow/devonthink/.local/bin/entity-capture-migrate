@@ -1,0 +1,86 @@
+#!/usr/bin/python3
+"""Preview legacy captures, then explicitly apply an approved preview."""
+
+import argparse
+import importlib.util
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+BIN = Path(os.path.realpath(__file__)).parent
+sys.path.insert(0, str(BIN))
+import entity_candidates as ec
+import entity_capture as capture
+import entity_capture_migration as migration
+from entity_capture_reminders import save
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--preview", action="store_true")
+    mode.add_argument("--apply", action="store_true")
+    parser.add_argument("--output", type=Path)
+    parser.add_argument("--plan", type=Path)
+    args = parser.parse_args(argv)
+    if args.apply and not args.plan:
+        parser.error("--apply requires --plan from a reviewed --preview --output")
+    spec = importlib.util.spec_from_file_location("entity_filing", BIN / "entity-filing.py")
+    ef = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(ef)
+    sources, candidates, reviews, people = ef.run_bridge([
+        {"op": "list_fact_captures"}, {"op": "list_candidates"}, {"op": "list_review"},
+        {"op": "dump_people", "include_bodies": True}])
+    report = migration.preview(sources, candidates, reviews, people)
+    if args.preview:
+        if args.output:
+            save(args.output, report)
+        print(json.dumps(report, indent=2))
+        return
+    with args.plan.open() as stream:
+        plan = json.load(stream)
+    requested = migration.journal_for_plan(plan)
+    for gate in ("should-run-dt-driver", "should-run-background-job"):
+        if subprocess.run([str(Path.home() / ".local/bin" / gate)], capture_output=True).returncode:
+            raise RuntimeError("Migration is deferred by the driver or power gate.")
+    config = ef.load_config()
+    if not ef.memory_pressure_normal():
+        raise RuntimeError("Migration is deferred by memory pressure.")
+    if ef.pick_transport(config) is None:
+        raise RuntimeError("Migration is deferred by the local-model resource gates.")
+    process_lock = ef.acquire_lock()
+    if process_lock is None:
+        raise RuntimeError("Entity processing is already running.")
+    inference_lock = ef.acquire_llm_lock()
+    if inference_lock is None:
+        process_lock.close()
+        raise RuntimeError("Local inference is already running.")
+    candidate_lock = ec.acquire_candidates_lock()
+    try:
+        journal_path = Path(ef.STATE_DIR) / ("entity-capture-migration-v2-" + requested["plan_id"] + ".json")
+        if journal_path.exists():
+            with journal_path.open() as stream:
+                journal = json.load(stream)
+            if journal.get("plan_id") != requested["plan_id"] or journal.get("expected_modified") != requested["expected_modified"] or set(journal.get("scope", [])) != set(requested["scope"]):
+                raise RuntimeError("The saved migration journal belongs to a different preview.")
+        else:
+            journal = requested
+        def extract(source, text, roster):
+            prompt = capture.PROMPT.format(roster=ef.roster_text(roster), content=text)
+            return ef.parse_extraction(ef.extract_omlx(config, prompt))[0]
+        migration.apply(ef.run_bridge, extract, config, journal, journal_path, selves=ef.self_names(config))
+        retired = migration.retire_legacy_tasks(ef.things_bridge, config.get("THINGS_PROJECT", "Entity Filing"), journal, journal_path)
+        print(json.dumps({"sources": {k: v["disposition"] for k, v in journal["items"].items() if "disposition" in v},
+                          "legacy_reminders_retired": retired}, indent=2))
+        if not retired:
+            raise RuntimeError("Legacy reminder cleanup needs the Things auth token; entity decisions remain fenced.")
+    finally:
+        candidate_lock.close()
+        inference_lock.close()
+        process_lock.close()
+
+
+if __name__ == "__main__":
+    main()

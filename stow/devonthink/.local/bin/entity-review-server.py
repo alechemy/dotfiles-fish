@@ -61,7 +61,7 @@ ALLOWED_HOSTS = {"127.0.0.1", "localhost"}
 APPLY_DEBOUNCE_SECONDS = 20
 APPLY_RETRY_SECONDS = 60
 APPLY_MAX_ATTEMPTS = 5
-MAX_BODY_BYTES = 256 * 1024
+MAX_BODY_BYTES = 2 * 1024 * 1024
 READ_TIMEOUT = 120
 CSP = ("default-src 'self' 'unsafe-inline'; img-src 'self' data:; "
        "connect-src 'self'; form-action 'self'; base-uri 'self'")
@@ -230,6 +230,8 @@ def build_queue(cand_listing, review_listing, people):
                  for e in review_listing.get("pending") or []]
     roster = sorted(
         ({"uuid": p["uuid"], "name": p["name"],
+          "city": p.get("md", {}).get("mdcity", ""),
+          "employer": p.get("md", {}).get("mdemployer", ""),
           "aliases": [a.strip() for a in (p.get("aliases") or "").split(",")
                       if a.strip()]}
          for p in people),
@@ -555,6 +557,7 @@ def handle_queue():
     try:
         cand, review, people = fetch_snapshot()
         queue = build_queue(cand, review, people)
+        queue["captures"] = capture_views(ef.run_bridge([{"op": "list_captures"}])[0], people)
         queue["dt"] = "ok"
     except ef.BridgeUnavailable:
         queue = _empty_queue("closed")
@@ -563,6 +566,148 @@ def handle_queue():
         queue = _empty_queue("error")
     queue["apply"] = scheduler.status()
     return queue
+
+
+def capture_views(rows, people):
+    views = []
+    config = ef.load_config()
+    for row in rows:
+        try:
+            if row.get("operation"):
+                manifest = ef.capture.decode_manifest(row["operation"], row["uuid"])
+                if row.get("text") is not None and manifest["subjects"] and manifest["status"] in {"filed", "filing"} and manifest["text"] != row["text"]:
+                    manifest.update(status="revision_question", reason="source_changed", changed_text=row["text"])
+                view = ef.capture.view(manifest, people)
+                if row.get("text") is not None:
+                    view["revision"] = ef.capture.revision(row["text"])
+                    view["current_text"] = row["text"]
+                    if manifest["status"] != "correcting":
+                        view["text"] = row["text"]
+                views.append(view)
+            elif ef.capture.eligible(dict(row, kind="fact"), config.get("CAPTURE_AUTO_AFTER", "")):
+                views.append({"uuid": row["uuid"], "status": "waiting", "text": row.get("text", ""),
+                              "revision": ef.capture.revision(row.get("text", "")), "subjects": [],
+                              "choices": [], "question": "Waiting for eligible local processing. Your note is retained."})
+        except (ValueError, TypeError, KeyError):
+            views.append({"uuid": row["uuid"], "status": "broken", "text": "",
+                          "subjects": [], "choices": [], "question": "The saved operation cannot be read. Its evidence is retained."})
+    return views
+
+
+def handle_capture(uuid, payload):
+    action = payload.get("action")
+    if action not in {"save", "undo", "defer", "retry", "keep-edited"}:
+        raise RequestError("Choose Save, Undo, Decide later, or Retry.")
+    driver = subprocess.run([os.path.expanduser("~/.local/bin/should-run-dt-driver")], capture_output=True, text=True)
+    if driver.returncode:
+        raise RequestError("This Mac is not the entity-processing driver.", 409)
+    run_lock = ef.acquire_lock()
+    if run_lock is None:
+        raise RequestError("Processing is still running. Try again shortly.", 409)
+    lock = ec.acquire_candidates_lock()
+    try:
+        source, body, people, listing = ef.run_bridge([
+            {"op": "get_source", "uuid": uuid}, {"op": "get_text", "uuid": uuid},
+            {"op": "dump_people", "include_bodies": False}, {"op": "list_candidates"}])
+        raw = source.get("capture_operation", "")
+        if not raw:
+            raise RequestError("This note is waiting for processing.", 409)
+        manifest = ef.capture.decode_manifest(raw, uuid)
+        config = ef.load_config()
+        selves = ef.self_names(config)
+        text = ef.normalize_source_text("fact", body["text"])
+        if payload.get("revision") != ef.capture.revision(text):
+            raise RequestError("The note changed. Refresh before deciding.", 409)
+        if action == "keep-edited":
+            correction = manifest.get("correction", {})
+            token = correction.get("conflict_token")
+            if manifest["status"] != "correcting" or not token:
+                raise RequestError("There is no edited contribution to preserve.", 409)
+            correction.setdefault("keep_edited", []).append(token)
+            correction.pop("conflict_token")
+            manifest.pop("reason", None)
+            ef.store_capture(manifest, raw, text)
+            raw = ef.capture.encode_manifest(manifest)
+            action = "retry"
+        if manifest.get("replacement"):
+            if action != "retry":
+                raise RequestError("A source correction already started. Resume it before changing the plan.", 409)
+            ef.capture.replace_pending(ef.run_bridge, manifest, raw, selves=selves)
+            return {"ok": True, "status": "filed"}
+        if manifest["status"] in {"correcting", "filing"} and action == "retry":
+            if manifest["status"] == "filing":
+                ef.capture.replay(ef.run_bridge, manifest, raw, selves=selves)
+                return {"ok": True, "status": "filed"}
+            final = ef.capture.correct(ef.run_bridge, manifest, raw, selves=selves)
+            return {"ok": True, "status": final["status"]}
+        if manifest["status"] == "correcting":
+            raise RequestError("A correction already started. Resume it before changing the plan.", 409)
+        if action in {"defer", "retry"}:
+            manifest["deferred"] = action == "defer"
+            if action == "retry" and not manifest["subjects"]:
+                manifest["status"] = "deferred"
+                state = ef.load_state()
+                state["processed"].pop(uuid, None)
+                state["attempts"].pop(uuid, None)
+                state["parked"].pop(uuid, None)
+                ef.save_state(state)
+            ef.store_capture(manifest, raw, text)
+            if action == "retry":
+                subprocess.run(["/usr/bin/python3", os.path.join(BIN, "entity-capture-arrival")], check=True)
+            return {"ok": True, "status": manifest["status"]}
+        if action == "undo":
+            ef.capture.start_correction(manifest, "undo", current_text=text)
+            final = ef.capture.correct(ef.run_bridge, manifest, raw, selves=selves)
+            return {"ok": True, "status": final["status"]}
+        subjects = payload.get("subjects")
+        if not isinstance(subjects, list) or not 1 <= len(subjects) <= 20:
+            raise RequestError("Select at least one subject and its passage.")
+        extracted, decisions = [], {}
+        for i, s in enumerate(subjects):
+            if not isinstance(s, dict) or not isinstance(s.get("mention"), str) or not isinstance(s.get("passage"), str):
+                raise RequestError("Each subject needs a name and a passage from the note.")
+            extracted.append({"mention": s["mention"], "passage": s["passage"], "email": s.get("email", "")})
+            if s.get("target") or s.get("new"):
+                decisions[i] = {"target": s.get("target", ""), "new": s.get("new", False)}
+        new_text = payload.get("text", text)
+        if not isinstance(new_text, str) or not new_text.strip():
+            raise RequestError("Keep the captured note's text.")
+        result = ef.capture.resolve(new_text, extracted, people, ec.CandidateIndex(listing).ignored_names(),
+                                    selves, decisions)
+        if result["status"] not in {"new", "existing"}:
+            raise RequestError(ef.capture.QUESTIONS.get(result["reason"], "Select exact names and complete, separate passages."), 409)
+        next_manifest = ef.capture.prepare(source, manifest["source_date"], new_text, result,
+                                            datetime.now().strftime("%Y-%m-%d"))
+        next_manifest["review_url"] = config.get("REVIEW_URL") or "http://localhost:8080/entities/"
+        if manifest["subjects"]:
+            ef.capture.start_correction(manifest, "revise" if new_text != manifest["text"] else "reassign",
+                                        next_manifest, new_text)
+            if new_text != text:
+                manifest["correction"]["source_edit"] = {"from": text, "to": new_text,
+                    "from_revision": ef.capture.revision(text), "to_revision": ef.capture.revision(new_text)}
+                ef.store_capture(manifest, raw, text)
+                raw = ef.capture.encode_manifest(manifest)
+            final = ef.capture.correct(ef.run_bridge, manifest, raw, selves=selves)
+        else:
+            history = list(manifest.get("history", []))
+            history.append({k: v for k, v in manifest.items() if k != "history"})
+            if text != manifest["text"] and text != new_text:
+                history.append(ef.capture.pending(source, manifest["source_date"], text, [],
+                    ef.capture.outcome("unresolved", "source_changed"), next_manifest["processing_date"]))
+            next_manifest["history"] = history
+            if new_text != text:
+                manifest["replacement"] = next_manifest
+                manifest["replacement_from"] = text
+                manifest["replacement_from_revision"] = ef.capture.revision(text)
+                ef.store_capture(manifest, raw, text)
+                raw = ef.capture.encode_manifest(manifest)
+                ef.capture.repair_source_edit(ef.run_bridge, uuid, {"from": text, "to": new_text})
+            ef.capture.replay(ef.run_bridge, next_manifest, raw, selves=selves)
+            final = next_manifest
+        return {"ok": True, "status": final["status"]}
+    finally:
+        lock.close()
+        run_lock.close()
 
 
 def handle_candidate(uuid, payload):
@@ -648,6 +793,17 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, body, "text/html; charset=utf-8")
         if path == "/api/queue":
             return self._json(200, handle_queue())
+        match = re.match(r"^/api/capture/([A-Za-z0-9-]{8,})$", path)
+        if match:
+            try:
+                rows = ef.run_bridge([{"op": "get_source", "uuid": match.group(1)},
+                                      {"op": "dump_people", "include_bodies": False}])
+                source, people = rows
+                text = ef.normalize_source_text("fact", ef.run_bridge([{"op": "get_text", "uuid": source["uuid"]}])[0]["text"])
+                view = capture_views([dict(source, operation=source["capture_operation"], text=text)], people)[0]
+                return self._json(200, view)
+            except (RuntimeError, ValueError, KeyError):
+                return self._json(409, {"error": "This capture is unavailable. Its source is retained."})
         return self._json(404, {"error": "not found"})
 
     def do_POST(self):
@@ -683,6 +839,9 @@ class Handler(BaseHTTPRequestHandler):
                 subprocess.run(["/usr/bin/open", "-g", "-j", "-b",
                                 "com.devon-technologies.think"], check=False)
                 return self._json(200, {"ok": True})
+            capture_match = re.match(r"^/api/capture/([A-Za-z0-9-]{8,})$", path)
+            if capture_match:
+                return self._json(200, handle_capture(capture_match.group(1), payload))
             m = re.match(r"^/api/(candidate|proposal)/([A-Za-z0-9-]{8,})$",
                          path)
             if not m:
@@ -694,8 +853,18 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(exc.code, {"error": str(exc)})
         except ef.BridgeUnavailable:
             return self._json(503, {"error": "devonthink-closed"})
+        except (ValueError, KeyError, TypeError):
+            return self._json(409, {"error": "The saved operation cannot be read. Its source is retained."})
         except RuntimeError as exc:
             log.warning("decision failed: %s", exc)
+            if path.startswith("/api/capture/"):
+                if "capture was edited on the Person" in str(exc):
+                    message = "The capture was edited on the Person. Its content is retained; restore that contribution before retrying the correction."
+                elif "suppressed" in str(exc):
+                    message = "Filing is paused for that person. Your note is retained."
+                else:
+                    message = "Processing did not finish. Your note is retained. Refresh and retry."
+                return self._json(409, {"error": message})
             return self._json(409, {"error": "that item was already handled "
                                     "— refresh the queue"})
 

@@ -796,14 +796,16 @@ pass's old never-repropose ledger (`identity-provenance.json`) into the
 store: still-pending calendar proposals became Pending candidates,
 previously rejected ones became Ignored candidates, and the ledger retired.
 
-#### Capture automation under development
+#### Deliberate capture
 
-The task branch contains a separate source-grounded capture resolver and a
-recoverable write path. It is disabled unless `CAPTURE_AUTO_AFTER` is set to
-an explicit local timestamp in `yyyy-mm-ddTHH:MM:SS` format. This is an
-implementation boundary, not a deployment recommendation. Correction,
-exception questions, migration, and arrival-trigger work must finish before
-activation. See [the implementation receipt](entity-capture-implementation.md).
+The capture release includes source-grounded filing, recoverable corrections,
+exception questions, optional reminders, explicit migration, and arrival
+notifications. New automatic captures require a persisted `CAPTURE_AUTO_AFTER`
+local timestamp in `yyyy-mm-ddTHH:MM:SS` format. An empty value disables that
+routing. Registered operations can recover independently of the boundary.
+Installation and activation remain separate operator steps. See
+[the deployment guide](entity-capture-implementation.md) and
+[the user guide](entities-howto.md).
 
 The new path accepts uniquely identifying single names and an empty roster.
 It ignores model-expanded identity claims, preserves the submitted wording,
@@ -813,9 +815,24 @@ writing. It verifies Person initialization and the destination text before
 writing a retryable daily-note receipt. It does not update structured fields
 or LastContact. Missing local state can recover the durable source operation;
 corrupt operations and edited contributions stop rather than overwrite data.
-The existing path below remains the default until this release is complete.
+`CaptureStatus` indexes all unfinished operations independently of the newest
+200 committed records. Unindexed older operations are included for compatibility.
+Sources stay addressable by UUID after moving to `_Facts/Filed`. Direct detail
+links also retrieve older completed captures. Correction verifies destinations
+before removing originals, compares source and Person bodies before writes, and
+preserves manually edited contributions through an explicit decision. Changed
+passages use distinct deterministic anchors; original anchor formats still decode.
+Correction receipt dates and destinations remain frozen across retries.
 
-#### Fact capture (Drafts → `_Facts`, kind `fact`)
+The question editor supports person selection, new people, editable source-grounded
+email evidence, and adding or removing passage rows. It hashes the live source for
+action tokens even while the operation retains an earlier source version.
+
+#### Historical fact capture before this release
+
+The following describes older representations for migration. It does not describe
+the activated capture path. Older captures require a reviewed migration preview;
+an empty old proposal is not proof that its text reached a Person.
 
 The **Capture Person Fact** Drafts action (`drafts/drafts-capture-fact.js`)
 drops a one-line fact — *"Dana Parker's daughter started at Reed College"* —
@@ -867,9 +884,27 @@ gates, so a capture files on the next eligible tick, not instantly.
 `entity-filing.py --scan-only` drains it now. Setup (bootstrap creates `_Facts` and prints its
 UUID; paste into the action) is in `entities-howto.md` and `drafts/README.md`.
 
-### Things review loop (optional, `THINGS_SYNC=on`)
+### Question reminders and retired Things protocol
 
-The review loop above requires being at the Mac inside DEVONthink. With
+`THINGS_SYNC=on` now offers unscheduled, generic reminders only for actionable
+capture questions. Notes contain the source UUID, question revision, and private
+review link, without the captured content or person's name. Each revision is
+owned separately. Dismissing a reminder never decides data and does not recreate
+it; replacing a question retires its earlier reminder. An absent registry row
+requires a direct source read before cancellation. Unreadable sources remain
+unresolved.
+
+Legacy proposal/candidate task interpretation and map reconstruction are disabled.
+The explicit migration retires their old tasks without applying their completion
+or cancellation as entity consent. Deleted tasks are distinguished from an
+unreadable Things database.
+
+#### Historical Things behavior
+
+The following describes the retired protocol for interpreting old artifacts.
+None of these task gestures drives entity decisions in this release.
+
+The review loop above required being at the Mac inside DEVONthink. With
 `THINGS_SYNC=on`, every pending proposal is mirrored as a to-do in a Things 3
 project (`THINGS_PROJECT`, default "Entity Filing") and scheduled for **Today**
 so it surfaces without opening the project, and the decision travels
@@ -958,7 +993,7 @@ gesture the tick already consumes (candidates: `set_fields` of
 TrackTarget/CreateDistinct + a group move, held under the candidates lock;
 proposals: `move_to Approved`, `trash`, or — for structured edits — the same
 `build_person_plans`/`ops_for_plan`/`stale_person_ops` regeneration path the
-Things note-edit flow uses, minus the text grammar). Each candidate card runs
+retired Things note-edit flow used, minus the text grammar). Each candidate card runs
 `promotion_target()` as a read-only preflight and renders the one primary
 action promotion would actually take ("File into X", "Add as new person", or
 a pick-person/new-person choice when bare approval would bounce); a
@@ -999,9 +1034,8 @@ can't be imported as a module.
 
 After a decision the server debounces a `--apply-only` run (~20 s,
 `PIPELINE_MANUAL=1`, retreating to the 30-minute tick if the run lock stays
-busy), so the queue clears in seconds. The Things mirror needs no new
-convergence logic: DT decided first, so the next tick closes the mirrored
-to-do to match.
+busy), so the queue clears in seconds. Capture decisions apply under the existing mutation locks. The next reminder
+sync retires answered questions; task state cannot change the data decision.
 
 Reachability and trust: the server binds 127.0.0.1:7819 only. On the Mac it
 is reached through Caddy at `http://localhost:8080/entities/`; from the
@@ -1041,8 +1075,9 @@ WORK_CALENDARS=       # work calendar titles, calendar IDs, or source IDs
 SKIP_SOURCE_TITLES=Round ?Table|Standup|…   # sources never extracted
 IDLE_MINUTES=0        # optional idle gate on top of the memory-pressure
                       # check; 0 (default) = off
-THINGS_SYNC=off       # on = mirror proposals to Things 3 (see review loop)
-THINGS_PROJECT=Entity Filing   # Things project holding the proposal to-dos
+CAPTURE_AUTO_AFTER=   # explicit persisted local activation timestamp
+THINGS_SYNC=off       # on = optional unscheduled capture-question reminders
+THINGS_PROJECT=Entity Filing   # project holding question reminders
 ```
 
 Resource behavior: a run with nothing to extract never loads the model (the

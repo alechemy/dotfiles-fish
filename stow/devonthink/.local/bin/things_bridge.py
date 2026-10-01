@@ -162,6 +162,11 @@ def _wait(pred, tries=24, delay=0.4):
     return None
 
 
+def find_projects(title):
+    """Read every project UUID with this exact title, including terminal projects."""
+    return [row[0] for row in _query("SELECT uuid FROM TMTask WHERE title=? AND type=1", (title,))]
+
+
 def ensure_project(title):
     """UUID of the active project with this title, creating it if absent.
     More than one active match raises — never guess between duplicates."""

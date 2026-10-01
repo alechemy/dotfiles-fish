@@ -683,6 +683,7 @@ EOF
             chmod +x "$DOTFILES/scripts/build-dtnote-handler.sh"
             "$DOTFILES/scripts/build-dtnote-handler.sh"
 
+            mkdir -p "$HOME/.local/state/devonthink/entity-capture-arrivals"
             info "Loading launchd agents..."
             # Bootstrap each plist, surfacing real failures while tolerating the
             # "already loaded" case (launchctl exits 37 / Bootstrap failed: 17).

@@ -1,0 +1,28 @@
+#!/usr/bin/python3
+"""Coalesce capture-arrival notifications without bypassing worker gates."""
+
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+
+def notify(home=None, gate=None):
+    home = Path(home or os.path.expanduser("~"))
+    if gate is None:
+        gate = subprocess.run([str(home / ".local/bin/should-run-dt-driver")], capture_output=True).returncode
+    if gate:
+        return False
+    directory = home / ".local/state/devonthink/entity-capture-arrivals"
+    directory.mkdir(parents=True, exist_ok=True)
+    request = directory / "pending"
+    try:
+        fd = os.open(str(request), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError:
+        return True
+    os.close(fd)
+    return True
+
+
+if __name__ == "__main__":
+    notify()

@@ -1,86 +1,81 @@
-# Entity capture implementation receipt
+# Entity capture implementation and deployment
 
-This branch is an implementation in progress. Capture automation is not ready
-for activation. The default capture and review workflow remains unchanged.
+The local implementation includes deliberate filing, questions, correction, reminder-only Things behavior, explicit old-source migration, and arrival notification. Production installation, migration, activation, model-quality checks, and Mac/iOS canaries have not run.
 
-## Implemented
+## Data and recovery
 
-- A separate deliberate-capture resolver supports new and existing single-name
-  People, aliases, accent/case normalization, and an empty roster. It resolves
-  identifiers from the original text, not model-expanded names. Competing short
-  names and contradictory email evidence remain unresolved.
-- Single-subject captures preserve all submitted wording. Several subjects need
-  non-overlapping, source-grounded passages covering the whole note. Optional
-  enrichment is not required. Captures do not use the passive omission prompt
-  or its input truncation. No structured fields or contact dates are changed.
-- An explicit `CAPTURE_AUTO_AFTER` timestamp separates new captures from the
-  backlog. An empty value disables the new path. It is never inferred from the
-  worker date or reset after state loss. Passive roster and filing-mode guards
-  remain in place.
-- The source's `CaptureOperation` metadata stores a versioned, frozen operation
-  before destination writes. Compare-before-write checks protect both source
-  revision and operation state. Retries repair interrupted Person initialization
-  using a deterministic temporary name and durable creation anchor.
-- Contributions have source/revision-specific anchors. Edited or removed
-  verified contributions stop replay. Successful contributions receive one
-  processing-day receipt with Person and source links. Contribution dates retain
-  the original capture date. Receipts use the existing generated-note classifier
-  in Python and JavaScript and cannot re-enter extraction.
-- Calendar events with more than 10 raw invitees are excluded from every
-  calendar entity-processing path, including historical contact backfill.
-  Exactly 10 remains eligible. The count includes self, rooms, and resources.
-  Existing candidates and contact dates are retained.
+`entity_capture.py` resolves source names and explicit emails against the current roster. Single names and an empty roster are supported. Contrary identifiers, competing short names, ignored identities, and filing suppression stop automatic writes. The model cannot supply independent surname or identity evidence. An explicit existing-person choice can identify an unnamed note.
 
-## Remaining implementation
+A single subject receives the whole source text, including lists and mundane information. Several subjects require non-overlapping passages covering the note. The local model identifies main subjects; optional enrichment is unnecessary. Deliberate capture does not modify structured biographical fields or `LastContact`. New Person initialization sets `EntityType=Person` and an initially empty `EntityStatus=active`, without restoring cleared fields on committed records.
 
-Milestones 1 and 2 have their capture foundation. Milestone 3 has frozen-operation
-replay and mutation fault tests. Milestone 4 has receipts only.
+The source's `CaptureOperation` stores its version, UUID, text hash, original text and date, targets, frozen contributions, progress, receipts, and earlier source versions. Local state is a cache, and generic `EntityFiled` is not completion proof. Retries validate current controls without repeating inference. Invalid operations stop without overwriting evidence.
 
-Before release, implement capture-scoped undo and reassignment, a bounded recent
-capture registry, explicit source-revision correction, durable exceptional
-questions and technical-delay views in the review app, reminder-only Things
-semantics, preview/resumable migration with legacy-task fences, and a gated
-arrival trigger. Unresolved captures currently retain their source and retry;
-they do not yet have the new question UI. Source changes after filing stop for
-correction rather than appending a second interpretation. Structured-field
-extraction is intentionally omitted from this initial capture path so correction
-can operate on unchanged source contributions without restoring metadata.
+`CaptureStatus` is a derived discovery index. Nonterminal operations and unindexed older operations are retrieved separately from the newest 200 completed records. Only verified filed or undone sources move to `_Facts/Filed`; sources manually moved outside `_Facts` keep their location. Source UUIDs remain stable for provenance and direct detail links.
 
-The existing default path still has its legacy review and Things semantics.
-Do not enable the new path as a substitute for completing those milestones.
+Contribution identities include a versioned source, revision, name, date, and passage hash. The original source/revision/name anchor format still decodes. Source edits and interrupted pending replacements preserve the original evidence and independently hashed edit baseline. Replacement recovery retains intervening source versions and refuses a second plan while the frozen replacement is unfinished. Editors retain the source hash from when editing began; refreshing cannot authorize overwriting a newer source. Reloading a changed note explicitly discards the draft and adopts the new baseline.
 
-## Verification and deployment boundary
+Correction writes and verifies destinations before removing unchanged original contributions. Removal compares the source text, operation, original Person body, and destination bodies. Interrupted removals retain their expected post-removal hashes. Manual contribution edits require an explicit keep-edited decision, including destinations written before an interrupted correction completed. Recovery records that conflict before replay and leaves explicitly preserved blocks unchanged. Other captures, manual paragraphs, metadata, and populated Person records are never rolled back or deleted. Receipt dates and destinations are frozen before appending, including correction receipts across midnight.
 
-Tests use fictional data, temporary state, stubbed logging, and mocked bridge
-records. The JavaScript tests execute the actual capture handlers under
-`osascript` with fake DEVONthink objects. They inject interruption after record
-creation, body initialization, each metadata initialization, rename, and
-contribution writing. Python replay tests interrupt every orchestrated mutation,
-including operation persistence and receipt writing.
+## Questions and reminders
 
-Local inference attribution quality, DEVONthink property/index behavior, and
-Mac/iOS action behavior require a bounded fictional-data check after the release
-is ready. The Calendar and Contacts live canaries are outside this task's privacy
-boundary. Distribution-list membership is unavailable through the event data,
-so the invitee limit cannot detect a hidden large audience behind one address.
+The review app shows waiting, technical delay, questions, and recent outcomes. It supports person selection, Someone new, Decide later, editable email evidence, passage-row addition/removal, wrong-person correction, and capture-scoped undo. Saved is returned only after verified application.
 
-Activation and migration have not run. The eventual activation must happen from
-the primary checkout after a separate local integration decision:
+`THINGS_SYNC=on` mirrors only actionable questions as unscheduled generic reminders. The `Entity question v2:` marker binds each reminder to source and question revision. Names and capture text are omitted. Completion, cancellation, trash, disappearance, and moved tasks never decide entity data. Old-revision references remain until cleanup succeeds. A source omitted from the bounded history is read directly before its reminder can close; unreadable sources do not imply resolution.
 
-1. Finish and review all remaining milestones, including the migration CLI.
-2. Merge `CaptureOperation` from the tracked metadata seed using
-   `scripts/seed-devonthink-config.sh` while DEVONthink is closed, then restart
-   DEVONthink. Use the seed reconciler's read-only preview first.
-3. Install the finished files through the primary checkout's normal setup/Stow
-   workflow. A task worktree must never own live HOME links.
-4. Persist `CAPTURE_AUTO_AFTER=<local activation timestamp>` in the machine-local
-   `~/.config/dt-pipeline/entities.conf`. Leave it empty until the full release
-   passes its safety checks. The timestamp comparison uses DEVONthink's precise
-   addition timestamp, not its date-only source date.
-5. Preview and explicitly apply the forthcoming capture migration. There is no
-   authorized production migration command yet. The existing
-   `--migrate-candidates` command converts the old calendar ledger only and is not
-   a capture-backlog migration.
-6. Agree on one fictional Mac capture, one iOS capture, one ambiguity, and one
-   correction to verify the activated release. Applying a changed canonical
-   Drafts action requires replacing its Script step in the app.
+Legacy proposal/candidate task interpretation and map reconstruction are disabled. The migration closes their old tasks as housekeeping, including already-completed, canceled, trashed, or confirmed missing tasks. Database failures remain distinct from confirmed deletion.
+
+## Migration
+
+`entity-capture-migrate` previews `_Facts` recursively, including filed sources. It reports dispositions, source UUIDs, previous filing references, candidate references, and modification stamps without printing captured text. Keep the preview private.
+
+After installation, create a reviewed preview in a private state directory:
+
+```sh
+mkdir -p "$HOME/.local/state/devonthink"
+/usr/bin/python3 "$HOME/.local/bin/entity-capture-migrate" --preview \
+  --output "$HOME/.local/state/devonthink/capture-preview.json"
+```
+
+Review its dispositions and scope. Applying requires that exact reviewed artifact:
+
+```sh
+/usr/bin/python3 "$HOME/.local/bin/entity-capture-migrate" --apply \
+  --plan "$HOME/.local/state/devonthink/capture-preview.json"
+```
+
+Each source/modification-stamp plan has its own `entity-capture-migration-v2-<plan-id>.json` journal. Reusing the same plan resumes it. A narrower or different plan cannot silently resume another plan's sources. Current ignored controls and People are refreshed before resolving each source. Changed sources require a new preview; frozen operations recover without inference. Previous legacy filings become questions rather than duplicate contributions. Ignored and upstream-pending evidence stays intact.
+
+Once a capture is filed or durably questioned, migration removes only its source-specific candidate sighting. Other sightings remain, and empty candidate/review representations move to private retired groups rather than being deleted. Event proposals remain untouched. Model-unavailable captures keep their legacy representations until later processing can retain an answerable question or complete filing.
+
+Apply honors driver, AC, normal-memory, local-model availability, and inference/process/candidate locks. It does not turn on capture automation. Legacy Things cleanup needs its configured auth token for open-task cancellation; failure does not become consent or erase entity evidence.
+
+## Installation and activation
+
+Run these steps only after separate approval and local integration into the primary checkout. Never run setup or Stow from the task worktree.
+
+1. Preserve unrelated primary-checkout work before integration. Leave `CAPTURE_AUTO_AFTER` empty while installing and checking the release.
+2. From the primary checkout, preview seed drift with `scripts/reconcile-devonthink-seed.sh`. Quit DEVONthink and run `scripts/seed-devonthink-config.sh` to merge missing `CaptureOperation` and `CaptureStatus` definitions without replacing existing definitions. Restart DEVONthink.
+3. Install the new files through the primary checkout's normal setup/Stow workflow. Build LaunchAgent definitions with `scripts/build-launchd-plists.sh`. Rebootstrapping the entity worker is necessary for its new watch path:
+
+   ```sh
+   mkdir -p "$HOME/.local/state/devonthink/entity-capture-arrivals"
+   launchctl bootout "gui/$(id -u)/com.user.entity-filing"
+   launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/com.user.entity-filing.plist"
+   ```
+
+4. Configure a DEVONthink Smart Rule for arriving or modified Markdown records under `20_ENTITIES/_Facts`, executing `~/Library/Application Scripts/com.devon-technologies.think/Smart Rules/entity-capture-arrival.applescript`. This rule configuration requires app setup; the release supplies its script, not a fabricated opaque rule blob. Keep the scheduled 30-minute worker for missed events and sync events that do not fire the rule.
+5. Agree on a bounded fictional-data check of one Mac capture, one iOS capture, one ambiguity, and one correction. Also verify local-model main-subject extraction on synthetic short, relative-containing, and split-subject prompts without changing shared model configuration.
+6. Preview and explicitly apply the old-capture migration. Retain the private preview and its journal for interrupted cleanup. Existing `--migrate-candidates` handles the old calendar ledger and is not this capture migration.
+7. Persist `CAPTURE_AUTO_AFTER=<approved local activation timestamp>` in machine-local `~/.config/dt-pipeline/entities.conf`. Use `yyyy-mm-ddTHH:MM:SS`; do not infer or reset it on restart. Newness uses DEVONthink's precise addition timestamp. A deliberately future boundary can limit canary routing to new fictional records before general activation.
+
+The Drafts Script step is unchanged. Its `_Facts` UUID must already be configured. iOS confirms record creation through the callback; Mac confirms dispatch only. Neither reports verified filing before the receipt.
+
+Arrival notifications create one private, content-free pending file. The LaunchAgent watches its directory and the worker consumes it. Notifications coalesce, preserve resource gates and locks, and do not set `PIPELINE_MANUAL`. Scheduled processing remains the recovery path. There is no additional polling service.
+
+## Verification boundary
+
+Tests use fictional records, temporary state, mocked APIs, and stubbed logging. Actual JXA handlers run under `osascript` with fake DEVONthink objects, including interruption during Person initialization. Python correction tests interrupt every orchestrated mutation and cover source changes, edited destinations, original-body preservation, independent source baselines, passage splitting, ignored retry controls, and receipt recovery across midnight. Reminder tests cover dismissal, omitted sources, revision replacement, missing auth, current-task retry retention during obsolete-task cleanup, and deleted legacy tasks. Migration tests cover distinct plans, source revision checks, repeated-person sources, and unreadable Things state. Arrival tests cover coalescing and follower refusal. A Node-driven frontend regression exercises the page's actual refresh and Save functions, retaining the editor's original revision and rejected draft. A synthetic Chromium fixture also verified stale-save rejection, explicit reload, and a 390-pixel layout with labelled full-width controls.
+
+Native metadata-search behavior, AppleEvents delivery, local-model attribution quality, Things Cloud convergence, and real Mac/iOS action behavior remain unverified. The Calendar and Contacts live canaries are excluded under this task's privacy boundary. The 10-invitee calendar limit counts raw entries; it cannot detect a hidden distribution list behind one address.
+
+No production migration, activation, HOME-link changes, or remote publication is part of this implementation delivery.
