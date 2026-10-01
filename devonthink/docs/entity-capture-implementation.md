@@ -1,6 +1,6 @@
 # Entity capture implementation and deployment
 
-The local implementation includes deliberate filing, questions, correction, reminder-only Things behavior, explicit old-source migration, and arrival notification. Production installation, migration, activation, model-quality checks, and Mac/iOS canaries have not run.
+The local implementation includes deliberate filing, questions, correction, reminder-only Things behavior, explicit old-source migration, and arrival notification. Production installation, migration, activation, and Mac/iOS canaries have not run. Five synthetic attribution checks passed against the configured local model.
 
 ## Data and recovery
 
@@ -76,6 +76,8 @@ Arrival notifications create one private, content-free pending file. The LaunchA
 
 Tests use fictional records, temporary state, mocked APIs, and stubbed logging. Actual JXA handlers run under `osascript` with fake DEVONthink objects, including interruption during Person initialization. Python correction tests interrupt every orchestrated mutation and cover source changes, edited destinations, original-body preservation, independent source baselines, passage splitting, ignored retry controls, and receipt recovery across midnight. Reminder tests cover dismissal, omitted sources, revision replacement, missing auth, current-task retry retention during obsolete-task cleanup, and deleted legacy tasks. Migration tests cover distinct plans, source revision checks, repeated-person sources, and unreadable Things state. Arrival tests cover coalescing and follower refusal. A Node-driven frontend regression exercises the page's actual refresh and Save functions, retaining the editor's original revision and rejected draft. A synthetic Chromium fixture also verified stale-save rejection, explicit reload, and a 390-pixel layout with labelled full-width controls.
 
-Native metadata-search behavior, AppleEvents delivery, local-model attribution quality, Things Cloud convergence, and real Mac/iOS action behavior remain unverified. The Calendar and Contacts live canaries are excluded under this task's privacy boundary. The 10-invitee calendar limit counts raw entries; it cannot detect a hidden distribution list behind one address.
+The configured local model passed five synthetic checks using the production capture prompt and parser: a short single-name note, incidental-relative news, separate subjects, source spelling despite a fuller roster name, and explicit email evidence. The checks verified exact mentions, complete passages, source-grounded resolution, and email attribution under the existing driver, power, memory, and inference locks. They do not establish accuracy on the private backlog or all possible notes.
+
+Native metadata-search behavior, AppleEvents delivery, Things Cloud convergence, and real Mac/iOS action behavior remain unverified. The Calendar and Contacts live canaries are excluded under this task's privacy boundary. The 10-invitee calendar limit counts raw entries; it cannot detect a hidden distribution list behind one address.
 
 No production migration, activation, HOME-link changes, or remote publication is part of this implementation delivery.
