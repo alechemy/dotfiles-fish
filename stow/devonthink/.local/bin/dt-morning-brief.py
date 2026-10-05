@@ -872,7 +872,7 @@ def log_bullets(p):
         if not LOG_BULLET_RE.match(ln) or ln.rstrip().endswith("— Created."):
             continue
         marker = FACT_MARKER_RE.search(ln)
-        text = FACT_MARKER_RE.sub("", ln).rstrip()
+        text = re.sub(r"\s*<!-- bio:v2:.*? -->", "", FACT_MARKER_RE.sub("", ln)).rstrip()
         out.append((ln[2:12], marker.group(0).strip() if marker else norm(text),
                     "  " + text))
     return out

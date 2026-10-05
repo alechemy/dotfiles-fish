@@ -1151,7 +1151,11 @@ Boundaries hard-coded regardless of config:
 
 ## Fact provenance and correction propagation
 
-Every machine-filed log bullet ends with an invisible provenance marker:
+The unified biographical update adds a versioned `bio:v2` marker to new Person assertions. It binds the assertion to its Person UUID and stores its content/date baseline and independent source references. Capture Undo removes only its own references. Passive exact matches add independent support, while protected historical or kept-edited content is never deleted by capture Undo. Grouped and flat logs remain readable by briefing and dedup consumers, which omit the hidden marker. Passive model-based equivalence is deferred.
+
+The explicit migration upgrades only unchanged v1 capture blocks and fingerprint-verified legacy machine facts. It leaves manual edits and unfinished corrections intact. Preview, semantic review, apply, recovery, and rollback use exact private artifacts and a durable mutation fence. See [the v2 deployment procedure](entity-capture-implementation.md#explicit-v2-migration). This update is not yet installed; frozen v1 retries retain their original representation.
+
+Legacy machine-filed log bullets use an invisible provenance marker:
 
 ```markdown
 - 2026-07-10 — Moved to Denver. ([source](x-devonthink-item://SRC)) <!-- fact:3f9a1c22 -->

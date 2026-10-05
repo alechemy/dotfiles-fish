@@ -45,6 +45,12 @@ class FakeBridge:
                     self.bodies["P1"] = "# Wren\n\n"
                     self.mutate()
                 out.append({"uuid": "P1", "initialized": True})
+            elif kind == "biographical_write":
+                if self.bodies[op["uuid"]] != op["expected_body"] or self.manifest != op["expected_operation"]:
+                    raise RuntimeError("assertion baseline changed")
+                self.bodies[op["uuid"]] = op["body"]
+                self.mutate()
+                out.append({"uuid": op["uuid"]})
             elif kind == "capture_append":
                 body = self.bodies[op["uuid"]]
                 if op["block"] not in body:
@@ -69,7 +75,7 @@ class FakeBridge:
                 self.mutate()
                 out.append({"uuid": op["uuid"]})
             elif kind == "dump_people":
-                out.append(copy.deepcopy(self.people))
+                out.append([dict(copy.deepcopy(p), **({"body": self.bodies[p["uuid"]]} if op.get("include_bodies") else {})) for p in self.people])
             elif kind == "list_candidates":
                 out.append({"pending": [], "approved": [], "ignored": []})
             elif kind == "get_source":

@@ -1,0 +1,99 @@
+#!/usr/bin/python3
+import argparse
+import contextlib
+import importlib.util
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+BIN = Path(os.path.realpath(__file__)).parent
+sys.path.insert(0, str(BIN))
+import entity_biographical_migration as migration
+import entity_candidates as ec
+import entity_biographical_review as review
+
+
+def execute(args):
+    locks = []
+    try:
+        spec = importlib.util.spec_from_file_location("entity_filing", BIN / "entity-filing.py")
+        ef = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(ef)
+        destination = (args.output if args.preview else args.plan).expanduser().resolve()
+        repo = BIN.parents[3]
+        if repo == destination or repo in destination.parents:
+            raise ValueError("Private migration artifacts must be outside the repository.")
+        for gate in ("should-run-dt-driver", "should-run-background-job"):
+            if subprocess.run([str(Path.home() / ".local/bin" / gate)], capture_output=True).returncode:
+                raise ValueError("Resource gate deferred.")
+        lock = ef.acquire_lock()
+        if lock is None:
+            raise ValueError("Processing is busy.")
+        locks.append(lock)
+        locks.append(ec.acquire_candidates_lock())
+        fence = Path(ef.STATE_DIR) / migration.FENCE_NAME
+        if args.preview:
+            suggest, selves = None, ()
+            if not fence.exists():
+                config = ef.load_config()
+                if not ef.memory_pressure_normal() or ef.pick_transport(config) is None:
+                    raise ValueError("Local comparison is unavailable.")
+                inference = ef.acquire_llm_lock()
+                if inference is None:
+                    raise ValueError("Inference is busy.")
+                locks.append(inference)
+                suggest, selves = ef.semantic_suggestions(config), ef.self_names(config)
+            plan = migration.preview(ef.run_bridge, suggest, selves=selves)
+            migration.private_save(destination, plan)
+            review.register(ef.STATE_DIR, plan)
+            return {"status": "previewed", "plan_id": plan["plan_id"], "mutations": len(plan["steps"]), **plan["counts"]}, 0
+        plan = review.read_private(destination)
+        migration.validate(plan)
+        current = review.load_current(ef.STATE_DIR, plan["plan_id"], writable=args.resolve, allow_terminal=True)
+        if current != plan:
+            raise ValueError("Registered preview changed.")
+        if args.resolve:
+            next_plan = migration.resolve(ef.run_bridge, plan, review.read_private(args.decisions))
+            output = args.output.expanduser().resolve()
+            if repo == output or repo in output.parents or output == destination:
+                raise ValueError("Keep the original private preview.")
+            migration.private_save(output, next_plan)
+            review.register(ef.STATE_DIR, next_plan, prior=plan["plan_id"])
+            return {"status": "reviewed", "plan_id": next_plan["plan_id"], **next_plan["counts"]}, 0
+        if plan["counts"]["pending_questions"]:
+            return {"status": "pending_review", "pending_questions": plan["counts"]["pending_questions"]}, 1
+        journal = Path(ef.STATE_DIR) / ("entity-biographical-" + plan["plan_id"] + ".json")
+        review.set_status(ef.STATE_DIR, plan["plan_id"], "applying")
+        report = migration.transact(ef.run_bridge, plan, journal, fence, args.rollback)
+        review.set_status(ef.STATE_DIR, plan["plan_id"], report["status"])
+        return report, 0
+    finally:
+        for lock in reversed(locks):
+            lock.close()
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description="Preview, review, recover, or roll back the frozen biographical migration.")
+    mode = parser.add_mutually_exclusive_group(required=True)
+    for name in ("preview", "apply", "recover", "rollback", "resolve"):
+        mode.add_argument("--" + name, action="store_true")
+    parser.add_argument("--output", type=Path)
+    parser.add_argument("--plan", type=Path)
+    parser.add_argument("--decisions", type=Path)
+    args = parser.parse_args(argv)
+    if (args.preview and not args.output or not args.preview and not args.plan or
+            args.resolve and (not args.decisions or not args.output)):
+        parser.error("Preview requires --output; resolve requires --plan, --decisions, --output; other modes require --plan.")
+    try:
+        with open(os.devnull, "w") as quiet, contextlib.redirect_stdout(quiet), contextlib.redirect_stderr(quiet):
+            report, code = execute(args)
+    except (Exception, KeyboardInterrupt):
+        report, code = {"status": "stopped"}, 1
+    print(json.dumps(report, sort_keys=True))
+    return code
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

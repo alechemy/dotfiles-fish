@@ -511,7 +511,7 @@ function sortLogSection(body, header) {
     const m = body[i].match(LOG_ENTRY_RE)
     if (!m) { slots.push(body[i]); continue }
     const block = [body[i]]
-    while (i + 1 < b.end && body[i + 1].trim() !== '' &&
+    while (i + 1 < b.end && (body[i + 1].trim() !== '' || body[i + 1].startsWith('    ')) &&
            !LOG_ENTRY_RE.test(body[i + 1])) {
       block.push(body[++i])
     }
@@ -532,9 +532,9 @@ function sortLogSection(body, header) {
 // The two shapes a machine-filed fact can be stored in: flat
 // (`- YYYY-MM-DD — fact ([source](…))`) or grouped under a bare date bullet
 // (`- YYYY-MM-DD` with one `  - fact ([source](…))` sub-bullet per fact).
-const FLAT_FACT_RE = /^- (\d{4}-\d{2}-\d{2}) — (.+)$/
+const FLAT_FACT_RE = /^- (\d{4}-\d{2}-\d{2}) — ([\s\S]+)$/
 const GROUP_DATE_RE = /^- (\d{4}-\d{2}-\d{2})\s*$/
-const SUB_FACT_RE = /^\s+- (.+)$/
+const SUB_FACT_RE = /^\s+- ([\s\S]+)$/
 const SOURCE_LINK_RE = /\(\[source\]\(x-devonthink-item:\/\/[0-9A-Fa-f-]+\)\)/
 
 // One date, one bullet: consecutive same-date machine entries merge into a
@@ -556,7 +556,7 @@ function groupLogSection(body, header) {
     const line = body[i]
     if (!LOG_ENTRY_RE.test(line)) { items.push({ lines: [line] }); continue }
     const block = [line]
-    while (i + 1 < b.end && body[i + 1].trim() !== '' &&
+    while (i + 1 < b.end && (body[i + 1].trim() !== '' || body[i + 1].startsWith('    ')) &&
            !LOG_ENTRY_RE.test(body[i + 1])) {
       block.push(body[++i])
     }
@@ -566,7 +566,7 @@ function groupLogSection(body, header) {
       item.date = flat[1]
       item.facts = [flat[2]]
     } else if (block.length > 1 && GROUP_DATE_RE.test(line) &&
-               block.slice(1).every(l => SUB_FACT_RE.test(l))) {
+               block.slice(1).every(l => l.startsWith('  - ') && SOURCE_LINK_RE.test(l))) {
       item.date = line.match(GROUP_DATE_RE)[1]
       item.facts = block.slice(1).map(l => l.match(SUB_FACT_RE)[1])
     }
@@ -684,6 +684,8 @@ function withinSpan(start, end, spans) {
 // links the target record to itself, skips entities the line already
 // links to.
 function linkEntities(line, excludeUuid) {
+  const marker = line.indexOf(' <!-- bio:v2:')
+  if (marker !== -1) return linkEntities(line.slice(0, marker), excludeUuid) + line.slice(marker)
   if (entityIndex === null) entityIndex = buildEntityIndex()
   let out = line
   for (const e of entityIndex) {
@@ -721,7 +723,8 @@ function linkEntities(line, excludeUuid) {
 function factSignature(line) {
   const src = (line.match(
     /\[source\]\(x-devonthink-item:\/\/([0-9A-Fa-f-]+)\)/) || [])[1] || ''
-  const text = line
+  const text = (line.replace(/\s*\(\[source\]\(x-devonthink-item:\/\/[0-9A-Fa-f-]+\)\)/g, '') + (src ? ' (source)' : ''))
+    .replace(/<!-- bio:v2:.*? -->/g, '')
     .replace(/<!--\s*fact:[0-9a-f]+\s*-->/g, '')
     .replace(/\[([^\]]*)\]\(x-devonthink-item:\/\/[0-9A-Fa-f-]+\)/g, '$1')
     .replace(/\s+/g, ' ').trim()
@@ -734,6 +737,16 @@ function factSignature(line) {
 // copy groupLogSection left behind.
 function bodyFactSignatures(body) {
   const sigs = []
+  if (body.some(line => line.includes('<!-- bio:v2:'))) {
+    for (const row of biographicalRows(body.join('\n'))) {
+      for (const ref of row.data.references) {
+        for (const text of [row.data.baseline.text, ref.evidence.trim()]) {
+          sigs.push(factSignature('- ' + row.data.baseline.log_date + ' — ' + encodeBiographicalLiteral(text) +
+            ' ([source](x-devonthink-item://' + ref.source_uuid + '))'))
+        }
+      }
+    }
+  }
   let groupDate = null
   for (const line of body) {
     const parent = line.match(GROUP_DATE_RE)
@@ -758,7 +771,9 @@ function bodyFactSignatures(body) {
 // newest-first and regroup same-date facts under one bullet. Sort and group
 // run even when nothing was appended, so a record the filer touches at all
 // leaves in order and grouped.
-function appendLogLines(rec, lines, section) {
+function appendLogLines(rec, lines, section, assertions) {
+  if (bridgeCtx && migrationBlocked(rec.uuid())) throw new Error('record paused for migration')
+  if (assertions && assertions.length) return appendBiographical(rec, assertions)
   const header = section || LOG_SECTION
   const body = bodyLines(rec)
   const uuid = rec.uuid()
@@ -852,6 +867,190 @@ function captureRegistry(dt, db, limit) {
     seen.add(uuid)
     return true
   })
+}
+
+let migrationFence = undefined
+function loadMigrationFence() {
+  if (migrationFence !== undefined) return migrationFence
+  const path = ObjC.unwrap($.NSHomeDirectory()) + '/.local/state/devonthink/entity-biographical-fence.json'
+  if (!$.NSFileManager.defaultManager.fileExistsAtPath(path)) return (migrationFence = null)
+  const raw = readFile(path)
+  if (raw === null) throw new Error('migration fence unreadable')
+  const value = JSON.parse(raw)
+  if (value.version !== 2 || !Array.isArray(value.scope) || !Array.isArray(value.names) ||
+      !/^[a-f0-9]{64}$/.test(value.plan_id)) throw new Error('migration fence unreadable')
+  return (migrationFence = value)
+}
+function migrationBlocked(uuid) {
+  const fence = loadMigrationFence()
+  return fence !== null && fence.scope.includes(uuid)
+}
+function checkMigrationFence(op) {
+  const reads = ['dump_people', 'list_sources', 'get_source', 'get_text', 'get_fields', 'list_registered_captures',
+    'list_fact_captures', 'list_captures', 'list_candidates', 'list_review', 'list_group', 'search',
+    'get_at_path', 'find_by_field', 'list_tags', 'open_record', 'sort_logs', 'relink_entities']
+  const fence = loadMigrationFence()
+  if (op.op === 'biographical_migration_write' && !fence) throw new Error('migration fence required')
+  if (!fence || reads.includes(op.op)) return
+  if (op.op === 'biographical_migration_write' && op.migration_plan === fence.plan_id && fence.scope.includes(op.uuid)) return
+  if ([op.uuid, op.source_uuid].some(id => fence.scope.includes(id)) ||
+      (op.name && fence.names.includes(normName(op.name))) ||
+      (op.destinations || []).some(d => fence.scope.includes(d.uuid)) ||
+      (op.assertions || []).some(a => fence.scope.includes(a.reference.source_uuid)) ||
+      (op.lines || op.log_lines || []).some(line => fence.scope.some(id => line.includes('x-devonthink-item://' + id)))) {
+    throw new Error('This record is paused for biographical migration recovery.')
+  }
+  if (op.op === 'biographical_migration_write') throw new Error('migration fence required')
+}
+
+function encodeBiographicalLiteral(text) {
+  return text.replace(/<(\u2060*)!-- (?=bio:v2:|fact:|capture(?:-receipt|-created)?:)/g,
+    (_, escapes) => '<' + '\u2060'.repeat(escapes.length + 1) + '!-- ')
+}
+function decodeBiographicalLiteral(text) {
+  const value = text.replace(/<(\u2060*)!-- (?=bio:v2:|fact:|capture(?:-receipt|-created)?:)/g, (_, escapes) => {
+    if (!escapes.length) throw new Error('unescaped ownership syntax in assertion')
+    return '<' + '\u2060'.repeat(escapes.length - 1) + '!-- '
+  })
+  if (encodeBiographicalLiteral(value) !== text) throw new Error('noncanonical assertion rendering')
+  return value
+}
+function biographicalAssertionText(text, baseline) {
+  const pattern = /\[([^\]]+)\]\(x-devonthink-item:\/\/[^)]+\)/g
+  const original = baseline.match(pattern) || []
+  return text.replace(pattern, (match, label) => original.includes(match) ? match : label)
+}
+function biographicalSources(data) {
+  return Array.from(new Set(data.references.map(r => r.source_uuid)))
+    .map(id => ' ([source](x-devonthink-item://' + id + '))').join('')
+}
+function biographicalDay(value) {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value) || value.startsWith('0000')) return false
+  const date = new Date(value + 'T00:00:00Z')
+  return !isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value
+}
+function biographicalKeys(value, keys) {
+  return value && typeof value === 'object' && !Array.isArray(value) && Object.keys(value).sort().join('|') === keys.sort().join('|')
+}
+function biographicalFingerprint(ref) {
+  ObjC.bindFunction('CC_SHA1', ['void *', ['void *', 'unsigned int', 'void *']])
+  const text = $.NSString.stringWithString(ref.source_uuid + '|' + ref.original_date + '|' + ref.evidence)
+    .dataUsingEncoding($.NSUTF8StringEncoding)
+  const result = $.NSMutableData.dataWithLength(20)
+  $.CC_SHA1(text.bytes, text.length, result.mutableBytes)
+  const base64 = ObjC.unwrap(result.base64EncodedStringWithOptions(0))
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
+  const n = base64.slice(0, 6).split('').map(c => alphabet.indexOf(c))
+  return [(n[0] << 2) | (n[1] >> 4), ((n[1] & 15) << 4) | (n[2] >> 2),
+          ((n[2] & 3) << 6) | n[3], (n[4] << 2) | (n[5] >> 4)]
+    .map(b => ('0' + b.toString(16)).slice(-2)).join('')
+}
+function biographicalRows(body, personUuid) {
+  const lines = body.split(/\r\n|\r|\n/)
+  const rows = [], ids = new Set(), refs = new Set()
+  let section = false, date = null
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]
+    if (line.startsWith('## ')) {section = line === LOG_SECTION; date = null}
+    const group = section && line.match(GROUP_DATE_RE)
+    if (group) date = group[1]
+    if (/^\s*>/.test(line)) continue
+    const marker = line.match(/<!-- bio:v2:(.*?) -->/)
+    if (!marker) {if (line.includes('<!-- bio:v2:')) throw new Error('malformed assertion'); continue}
+    const flat = section && line.match(FLAT_FACT_RE)
+    if (!section || (!flat && !(date && line.startsWith('  - '))) ||
+        (line.match(/<!-- bio:v2:/g) || []).length !== 1) throw new Error('malformed assertion layout')
+    const data = JSON.parse(marker[1])
+    if (!biographicalKeys(data, ['id','person_uuid','baseline','protected','references']) || typeof data.id !== 'string' || !/^[a-f0-9]{64}$/.test(data.id) || ids.has(data.id) ||
+        typeof data.person_uuid !== 'string' || !data.person_uuid || (personUuid && data.person_uuid !== personUuid) ||
+        typeof data.protected !== 'boolean' || !biographicalKeys(data.baseline, ['text','log_date','temporal_context','origin']) ||
+        typeof data.baseline.text !== 'string' || !data.baseline.text.trim() || !biographicalDay(data.baseline.log_date) ||
+        typeof data.baseline.temporal_context !== 'string' ||
+        !['capture', 'protected'].includes(data.baseline.origin) ||
+        !Array.isArray(data.references) || (!data.references.length && !data.protected)) throw new Error('malformed ownership')
+    ids.add(data.id)
+    for (const ref of data.references) {
+      const keys = ['id','kind','source_uuid','source_revision','original_date','start','end','evidence','evidence_kind']
+      if (ref && ref.fingerprint) keys.push('fingerprint')
+      if (!biographicalKeys(ref, keys) || typeof ref.id !== 'string' || !/^[a-f0-9]{64}$/.test(ref.id) || refs.has(ref.id) ||
+          !['capture', 'passive', 'legacy'].includes(ref.kind) || (ref.fingerprint && ref.kind !== 'legacy') || typeof ref.source_uuid !== 'string' || !ref.source_uuid ||
+          (!(typeof ref.source_revision === 'string' && /^[a-f0-9]{64}$/.test(ref.source_revision)) && !(ref.kind === 'legacy' && ref.source_revision === null &&
+            data.protected && data.baseline.origin === 'protected' && /^[a-f0-9]{8}$/.test(ref.fingerprint))) ||
+          !['source_span', 'extracted_assertion', 'legacy_assertion'].includes(ref.evidence_kind) ||
+          (ref.kind === 'capture' && ref.evidence_kind !== 'source_span') ||
+          (ref.kind === 'passive' && ref.evidence_kind !== 'extracted_assertion') || typeof ref.evidence !== 'string' ||
+          !Number.isInteger(ref.start) || !Number.isInteger(ref.end) || ref.start < 0 ||
+          ref.end <= ref.start || Array.from(ref.evidence).length !== ref.end - ref.start) throw new Error('malformed support')
+      if (!biographicalDay(ref.original_date) || (ref.source_revision === null && biographicalFingerprint(ref) !== ref.fingerprint)) throw new Error('historical support changed')
+      refs.add(ref.id)
+    }
+    const day = flat ? flat[1] : date
+    let display = (flat ? flat[2] : line.slice(4)).replace(/<!-- bio:v2:.*? -->/, '').trimEnd()
+    const links = biographicalSources(data)
+    if (links && display.endsWith(links)) display = display.slice(0, -links.length)
+    let end = i + 1
+    while (end < lines.length && (lines[end].startsWith('    ') || lines[end].trim()) &&
+           !lines[end].startsWith('## ') && !FLAT_FACT_RE.test(lines[end]) && !GROUP_DATE_RE.test(lines[end]) &&
+           !(!flat && lines[end].startsWith('  - '))) {
+      display += '\n' + (lines[end].startsWith('    ') ? lines[end].slice(4) : lines[end])
+      end++
+    }
+    display = decodeBiographicalLiteral(display)
+    const visible = biographicalAssertionText(display, data.baseline.text)
+    if (!data.protected && (day !== data.baseline.log_date || visible !== data.baseline.text)) throw new Error('assertion edited')
+    rows.push({start:i, end:end, data:data, visible:visible, display:display, date:day, grouped:!flat})
+  }
+  return rows
+}
+function biographicalLine(data, grouped, visible, logDate) {
+  const texts = encodeBiographicalLiteral(visible || data.baseline.text).split('\n')
+  const marker = JSON.stringify(data).replace(/</g, '\\u003c').replace(/>/g, '\\u003e')
+    .replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029')
+  return (grouped ? '  - ' : '- ' + (logDate || data.baseline.log_date) + ' — ') + texts[0] +
+    biographicalSources(data) + ' <!-- bio:v2:' + marker + ' -->' +
+    texts.slice(1).map(t => '\n    ' + t).join('')
+}
+function canonical(value) {
+  if (Array.isArray(value)) return value.map(canonical)
+  if (value && typeof value === 'object') {
+    const out = {}
+    Object.keys(value).sort().forEach(key => {out[key] = canonical(value[key])})
+    return out
+  }
+  return value
+}
+function appendBiographical(rec, assertions) {
+  let body = bodyLines(rec).join('\n')
+  let appended = 0, skipped = 0
+  for (const assertion of assertions) {
+    const rows = biographicalRows(body, rec.uuid())
+    const matches = rows.filter(r => r.data.baseline.text === assertion.baseline.text &&
+      r.visible === r.data.baseline.text && r.date === r.data.baseline.log_date &&
+      r.data.baseline.temporal_context === assertion.baseline.temporal_context)
+    if (matches.length > 1) throw new Error('ambiguous assertion ownership')
+    const row = matches[0]
+    if (row) {
+      const existing = row.data.references.filter(r => r.id === assertion.reference.id)
+      if (existing.length) {
+        if (JSON.stringify(canonical(existing[0])) !== JSON.stringify(canonical(assertion.reference))) throw new Error('support changed')
+        skipped++; continue
+      }
+      row.data.references.push(assertion.reference)
+      const lines = body.split('\n')
+      lines[row.start] = biographicalLine(row.data, row.grouped, row.display, row.date).split('\n')[0]
+      body = lines.join('\n')
+      skipped++
+    } else {
+      const data = {id:assertion.id, person_uuid:rec.uuid(), baseline:assertion.baseline, protected:true, references:[assertion.reference]}
+      const line = linkEntities(biographicalLine(data, false), rec.uuid())
+      body = insertUnderSection(body.split('\n'), LOG_SECTION, [line]).join('\n')
+      appended++
+    }
+  }
+  const next = groupLogSection(sortLogSection(body.split('\n'), LOG_SECTION), LOG_SECTION).join('\n')
+  biographicalRows(next)
+  if (next !== bodyLines(rec).join('\n')) rec.plainText = next
+  return {appended:appended, skipped:skipped}
 }
 
 function run(argv) {
@@ -1129,6 +1328,13 @@ function run(argv) {
       }
     },
 
+    list_registered_captures(op) {
+      return dt.search('mdcaptureoperation:*', {in: db.root()}).map(r => ({
+        uuid: r.uuid(), operation: mdValue(r, 'captureoperation'),
+        text: captureSourceText(r.plainText())
+      }))
+    },
+
     list_fact_captures(op) {
       const sources = []
       function walk(group) {
@@ -1382,6 +1588,34 @@ function run(argv) {
       return { uuid: op.uuid }
     },
 
+    biographical_write(op) {
+      const source = byUuid(op.source_uuid)
+      if (captureSourceText(source.plainText()) !== op.text ||
+          mdValue(source, 'captureoperation') !== op.expected_operation) throw new Error('capture baseline changed')
+      const rec = byUuid(op.uuid)
+      if (mdValue(rec, 'entitytype') !== 'Person' || flagSet(mdValue(rec, 'filingsuppressed')) ||
+          String(rec.plainText()) !== op.expected_body) throw new Error('Person baseline changed')
+      for (const target of op.destinations || []) {
+        if (String(byUuid(target.uuid).plainText()) !== target.body ||
+            mdValue(byUuid(target.uuid), 'entitytype') !== 'Person') throw new Error('destination baseline changed')
+      }
+      biographicalRows(op.body, op.uuid)
+      rec.plainText = op.body
+      return {uuid: op.uuid}
+    },
+
+    biographical_migration_write(op) {
+      const rec = byUuid(op.uuid)
+      if (String(rec.plainText()) !== op.before.body || mdValue(rec, 'captureoperation') !== op.before.operation ||
+          mdValue(rec, 'entitytype') !== op.controls.entitytype || mdValue(rec, 'filingsuppressed') !== op.controls.filingsuppressed) {
+        throw new Error('migration baseline changed')
+      }
+      if (mdValue(rec, 'entitytype') === 'Person' && op.after.body !== op.before.body) biographicalRows(op.after.body, op.uuid)
+      if (op.after.body !== op.before.body) rec.plainText = op.after.body
+      if (op.after.operation !== op.before.operation) dt.addCustomMetaData(op.after.operation, {for: 'captureoperation', to: rec})
+      return {uuid: op.uuid}
+    },
+
     capture_source_edit(op) {
       const rec = byUuid(op.uuid)
       if (captureSourceText(rec.plainText()) !== op.expected_text) throw new Error('The source changed. Refresh before editing.')
@@ -1453,6 +1687,7 @@ function run(argv) {
         entityIndex = null
         peopleIndex = null
       }
+      if (migrationBlocked(rec.uuid())) throw new Error('record paused for migration')
       if (flagSet(mdValue(rec, 'filingsuppressed'))) throw new Error('person is filing-suppressed')
       const owned = String(rec.plainText()).indexOf(anchor) !== -1
       if (owned && op.initialize !== false) {
@@ -1496,6 +1731,7 @@ function run(argv) {
       let created = false
       if (hits.length === 1) {
         rec = hits[0]
+        if (migrationBlocked(rec.uuid())) throw new Error('record paused for migration')
       } else {
         rec = dt.createRecordWith(
           { name: op.name, type: 'markdown' }, { in: groupAt(PEOPLE_PATH) })
@@ -1522,7 +1758,7 @@ function run(argv) {
         dt.addCustomMetaData(value, { for: field, to: rec })
       }
       if ((op.log_lines || []).length) {
-        appendLogLines(rec, op.log_lines)
+        appendLogLines(rec, op.log_lines, undefined, op.assertions)
       }
       const result = { uuid: rec.uuid(), created: created }
       if (lastcontact) {
@@ -1562,6 +1798,7 @@ function run(argv) {
       }
       if (rec !== null) {
         const uuid = rec.uuid()
+        if (migrationBlocked(uuid)) throw new Error('record paused for migration')
         const lines = bodyLines(rec)
         let changed = false
         for (let i = 0; i < lines.length; i++) {
@@ -1636,7 +1873,7 @@ function run(argv) {
 
     append_log(op) {
       const rec = byUuid(op.uuid)
-      const counts = appendLogLines(rec, op.lines)
+      const counts = appendLogLines(rec, op.lines, undefined, op.assertions)
       return { uuid: op.uuid, appended: counts.appended, skipped: counts.skipped }
     },
 
@@ -1747,6 +1984,7 @@ function run(argv) {
         try { group = groupAt(path) } catch (e) { continue }
         for (const rec of group.children()) {
           if (String(rec.type()) !== 'markdown') continue
+          if (migrationBlocked(rec.uuid())) continue
           records++
           const body = bodyLines(rec)
           let next = body
@@ -1777,6 +2015,7 @@ function run(argv) {
         try { group = groupAt(path) } catch (e) { continue }
         for (const rec of group.children()) {
           if (String(rec.type()) !== 'markdown') continue
+          if (migrationBlocked(rec.uuid())) continue
           records++
           const uuid = rec.uuid()
           const lines = bodyLines(rec)
@@ -1838,6 +2077,7 @@ function run(argv) {
     try {
       const handler = handlers[op.op]
       if (!handler) throw new Error('unknown op: ' + op.op)
+      checkMigrationFence(op)
       results.push(handler(op))
     } catch (e) {
       return JSON.stringify({

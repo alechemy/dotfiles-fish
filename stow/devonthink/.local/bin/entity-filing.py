@@ -897,7 +897,19 @@ def ops_for_plan(plan, source, source_date):
         if plan["summary"]:
             op["log_line"] = fact_line(plan["date"], plan["summary"], src)
         return [op]
-    lines = [fact_line(d, fact, src) for d, fact in plan["facts"]]
+    import entity_biographical as bio
+    facts = [(d, bio.relative(fact, [plan["name"]] + plan.get("aliases", "").split(","))) for d, fact in plan["facts"]]
+    lines = [fact_line(d, fact, src) for d, fact in facts]
+    assertions = []
+    for i, (d, fact) in enumerate(facts if source.get("text_revision") else []):
+        value = fact.rstrip(".") + "."
+        evidence = plan["facts"][i][1].rstrip(".") + "."
+        ref_id = bio.digest(bio.encoded(["passive", src, source["text_revision"], source_date, d, evidence]))
+        assertions.append({"id": bio.digest("passive-assertion|" + plan.get("uuid", plan["name"]) + "|" + ref_id),
+            "baseline": {"text": value, "log_date": d, "temporal_context": ("observed:" if d == source_date else "dated:") + d, "origin": "protected"},
+            "reference": {"id": ref_id, "kind": "passive", "source_uuid": src,
+                "source_revision": source["text_revision"], "original_date": source_date,
+                "start": 0, "end": len(evidence), "evidence": evidence, "evidence_kind": "extracted_assertion"}})
     ops = []
     if plan["kind"] == "existing":
         for field, value in plan["updates"].items():
@@ -916,7 +928,8 @@ def ops_for_plan(plan, source, source_date):
                     f"{field.capitalize()}: {previous} → {value}", src)
             ops.append(op)
         if lines:
-            ops.append({"op": "append_log", "uuid": plan["uuid"], "lines": lines})
+            ops.append({"op": "append_log", "uuid": plan["uuid"], "lines": lines,
+                        "assertions": assertions})
         # A typed fact is knowledge, not contact evidence — the calendar and
         # Messages passes own LastContact; a fact must not move that clock.
         if plan.get("interacted") and source.get("kind") != "fact":
@@ -927,7 +940,7 @@ def ops_for_plan(plan, source, source_date):
         if plan.get("interacted") and source.get("kind") != "fact":
             fields["lastcontact"] = source_date
         ops.append({"op": "ensure_person", "name": plan["name"],
-                    "fields": fields, "log_lines": lines})
+                    "fields": fields, "log_lines": lines, "assertions": assertions})
     return ops
 
 
@@ -2512,7 +2525,8 @@ def scan(config, state, dry_run, force_uuid, user_invoked):
         frozen_capture = source.get("capture_operation", "")
         if source["kind"] == "fact" and not capture_path:
             continue
-        transport = "frozen capture" if frozen_capture else pick_transport(config)
+        analysis_requested = capture.analysis_needed(frozen_capture)
+        transport = "frozen capture" if frozen_capture and not analysis_requested else pick_transport(config)
         if transport is None:
             no_transport += 1
             continue
@@ -2522,13 +2536,13 @@ def scan(config, state, dry_run, force_uuid, user_invoked):
                          defer_reason)
                 defer_logged = True
             continue
-        if not frozen_capture and llm_lock is None and not llm_lock_failed:
+        if (not frozen_capture or analysis_requested) and llm_lock is None and not llm_lock_failed:
             llm_lock = acquire_llm_lock()
             if llm_lock is None:
                 llm_lock_failed = True
                 log.info("local-llm lock held (journal OCR?), deferring "
                          "local extraction to the next run")
-        if not frozen_capture and llm_lock is None:
+        if (not frozen_capture or analysis_requested) and llm_lock is None:
             continue
 
         source_date = source_date_of(source)
@@ -2547,6 +2561,15 @@ def scan(config, state, dry_run, force_uuid, user_invoked):
         if frozen_capture:
             try:
                 manifest = capture.decode_manifest(frozen_capture, uuid)
+                if manifest.get("analysis_request"):
+                    if not manifest.get("analysis_plan") and not dry_run:
+                        extracted_count += 1
+                        mutation_lock = ec.acquire_candidates_lock()
+                        try:
+                            process_capture_analysis(config, source, manifest, frozen_capture, text, selves)
+                        finally:
+                            mutation_lock.close()
+                    continue
                 if manifest.get("replacement") or manifest["status"] == "correcting":
                     if not dry_run:
                         mutation_lock = ec.acquire_candidates_lock()
@@ -2559,7 +2582,7 @@ def scan(config, state, dry_run, force_uuid, user_invoked):
                             mutation_lock.close()
                     continue
                 if manifest["text"] != text:
-                    if manifest["subjects"]:
+                    if capture.filing_started(manifest):
                         manifest.update(status="revision_question", reason="source_changed", changed_text=text)
                     else:
                         history = list(manifest.get("history", [])) + [{k: v for k, v in manifest.items() if k != "history"}]
@@ -2716,7 +2739,7 @@ def file_capture(config, state, source, source_date, text, extracted, dry_run,
     lock = ec.acquire_candidates_lock() if not dry_run else None
     try:
         people, listing, fresh = run_bridge([
-            {"op": "dump_people", "include_bodies": False},
+            {"op": "dump_people", "include_bodies": manifest is None},
             {"op": "list_candidates"},
             {"op": "get_text", "uuid": source["uuid"]},
         ])
@@ -2750,7 +2773,8 @@ def file_capture(config, state, source, source_date, text, extracted, dry_run,
                 if frozen["uuid"] and frozen["uuid"] != current["uuid"] and not frozen["evidence"].get("distinct"):
                     return capture.outcome("unresolved", "identity_changed")
         else:
-            manifest = capture.prepare(source, source_date, text, result, date.today().isoformat())
+            manifest = capture.prepare_unified(source, source_date, text, result, date.today().isoformat(), people,
+                                               suggest=semantic_suggestions(config) if config.get("TRANSPORT") == "local" else None)
             manifest["review_url"] = config.get("REVIEW_URL") or "http://localhost:8080/entities/"
             previous = source.get("capture_operation", "") or previous
             if previous:
@@ -2759,6 +2783,11 @@ def file_capture(config, state, source, source_date, text, extracted, dry_run,
         if dry_run:
             print(json.dumps(manifest, indent=2))
             return result
+        if manifest["status"] == "question":
+            store_capture(manifest, previous, text)
+            remember_processed(state, source, text)
+            save_state(state)
+            return capture.outcome("unresolved", manifest["reason"], subjects=manifest["subjects"])
         result = capture.replay(run_bridge, manifest, previous, selves=self_names(config))
         fresh, fresh_body = run_bridge([
             {"op": "get_source", "uuid": source["uuid"]},
@@ -2773,6 +2802,78 @@ def file_capture(config, state, source, source_date, text, extracted, dry_run,
     finally:
         if lock:
             lock.close()
+
+
+def process_capture_analysis(config, source, manifest, previous, actual_text, selves):
+    request = manifest["analysis_request"]
+    if actual_text != request["from_text"]:
+        manifest["reason"] = "source_changed"
+        store_capture(manifest, previous, actual_text)
+        return
+    people, candidates = run_bridge([{"op": "dump_people", "include_bodies": True}, {"op": "list_candidates"}])
+    decisions = {i: {"target": s["evidence"].get("selected_target", s["uuid"]),
+                     "new": s["evidence"].get("distinct", False)} for i, s in enumerate(request["subjects"])}
+    for i, subject in enumerate(request["subjects"]):
+        if subject["evidence"].get("distinct"):
+            decisions[i]["target"] = ""
+    result = capture.resolve(request["text"], [dict(s["evidence"], passage=s["passage"]) for s in request["subjects"]],
+                             people, ec.CandidateIndex(candidates).ignored_names(), selves, decisions)
+    if result["status"] not in {"new", "existing"}:
+        manifest["reason"] = result["reason"]
+        store_capture(manifest, previous, actual_text)
+        return
+    next_manifest = capture.prepare_unified(source, manifest["source_date"], request["text"], result,
+                                            date.today().isoformat(), people, suggest=semantic_suggestions(config))
+    next_manifest["review_url"] = config.get("REVIEW_URL") or "http://localhost:8080/entities/"
+    if next_manifest["status"] == "question":
+        manifest["analysis_plan"] = next_manifest
+        manifest["reason"] = "assertion_equivalence"
+        store_capture(manifest, previous, actual_text)
+        return
+    finish_capture_analysis(manifest, next_manifest, request, previous, selves)
+
+
+def finish_capture_analysis(manifest, next_manifest, request, previous, selves):
+    manifest.pop("analysis_request", None)
+    manifest.pop("analysis_plan", None)
+    if capture.filing_started(manifest):
+        capture.start_correction(manifest, "revise" if next_manifest["text"] != manifest["text"] else "reassign",
+                                 next_manifest, request["from_text"])
+        manifest["correction"]["text"] = next_manifest["text"]
+        if request["from_text"] != next_manifest["text"]:
+            manifest["correction"]["source_edit"] = {"from": request["from_text"], "to": next_manifest["text"]}
+        store_capture(manifest, previous, request["from_text"])
+        return capture.correct(run_bridge, manifest, capture.encode_manifest(manifest), selves=selves)
+    else:
+        next_manifest["history"] = capture.source_history(manifest, next_manifest["text"], next_manifest["source_date"])
+        if request["from_text"] not in {manifest["text"], next_manifest["text"]}:
+            next_manifest["history"].append(capture.pending({"uuid": manifest["source_uuid"]}, manifest["source_date"],
+                request["from_text"], [], capture.outcome("unresolved", "source_changed"), next_manifest["processing_date"]))
+        manifest.update(replacement=next_manifest, replacement_from=request["from_text"],
+                        replacement_from_revision=capture.revision(request["from_text"]))
+        store_capture(manifest, previous, request["from_text"])
+        capture.replace_pending(run_bridge, manifest, capture.encode_manifest(manifest), selves=selves)
+        return next_manifest
+
+
+def semantic_suggestions(config):
+    def suggest(assertion, observed_date, candidates):
+        prompt = ("Compare the complete assertion, all qualifiers, negation, attribution, changing state and temporal context. "
+                  "Return JSON {\"candidates\":[\"id\"]} identifying possible equivalent assertions, including uncertain cases. "
+                  "Source observation dates are not event dates. Never treat repeated events as proven equivalent. "
+                  "This is a suggestion for explicit review, not authority to omit information.\n" +
+                  json.dumps({"assertion": assertion, "observed_date": observed_date, "existing": candidates}, ensure_ascii=False))
+        known = [candidate["id"] for candidate in candidates]
+        if len(candidates) > 80 or len(prompt) > 32000:
+            return known
+        try:
+            selected = json.loads(extract_omlx(config, prompt))["candidates"]
+            if not isinstance(selected, list) or any(value not in known for value in selected):
+                return known
+            return selected
+        except (LLMUnavailable, ValueError, KeyError, TypeError):
+            return known
+    return suggest
 
 
 def review_group_has_name(name):
@@ -2849,6 +2950,7 @@ def divert_new_plans(plans, source, source_date, text, index, ignored,
 
 def file_source(config, state, source, source_date, plans, filing_mode,
                 dry_run, text, candidate_handled=0):
+    source = dict(source, text_revision=capture.revision(text))
     is_fact = source.get("kind") == "fact"
     filed_ops = [{"op": "mark_filed", "uuid": source["uuid"]}]
     if is_fact:

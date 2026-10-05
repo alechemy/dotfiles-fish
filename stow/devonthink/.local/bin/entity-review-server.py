@@ -35,6 +35,7 @@ if BIN not in sys.path:
 
 from pipeline_log import setup as setup_log
 import entity_candidates as ec
+import entity_biographical_review as bioreview
 
 
 def _load(filename, module_name):
@@ -396,7 +397,8 @@ def approve_with_edits(uuid, payload, confirm, bridge=None):
     if not source_uuid:
         raise RequestError("the proposal has no source record — review it "
                            "in DEVONthink", 409)
-    source = run([{"op": "get_source", "uuid": source_uuid}])[0]
+    source, source_body = run([{"op": "get_source", "uuid": source_uuid}, {"op": "get_text", "uuid": source_uuid}])
+    source["text_revision"] = ef.capture.revision(ef.normalize_source_text(source["kind"], source_body["text"]))
     source_date = ef.source_date_of(source)
     people_ext, events_ext = spec_from_payload(payload)
     index = ef.roster_index(people)
@@ -553,11 +555,38 @@ def _empty_queue(dt):
             "queued": {"candidates": 0, "proposals": 0}, "dt": dt}
 
 
+def handle_biographical_plan(plan_id, payload):
+    if not isinstance(payload, dict) or set(payload) != {"source_uuid", "answers"}:
+        raise RequestError("Choose dispositions for this registered migration plan.")
+    driver = subprocess.run([os.path.expanduser("~/.local/bin/should-run-dt-driver")], capture_output=True, text=True)
+    if driver.returncode:
+        raise RequestError("This Mac is not the entity-processing driver.", 409)
+    run_lock = ef.acquire_lock()
+    if run_lock is None:
+        raise RequestError("Processing is running. Try again shortly.", 409)
+    lock = None
+    try:
+        lock = ec.acquire_candidates_lock()
+        return bioreview.decide(ef.run_bridge, ef.STATE_DIR, plan_id, payload["source_uuid"], payload["answers"])
+    except Exception:
+        raise RequestError("The migration preview is stale, fenced, or its choices could not be verified. Refresh or create a new preview.", 409) from None
+    finally:
+        if lock is not None:
+            lock.close()
+        run_lock.close()
+
+
 def handle_queue():
     try:
         cand, review, people = fetch_snapshot()
         queue = build_queue(cand, review, people)
         queue["captures"] = capture_views(ef.run_bridge([{"op": "list_captures"}])[0], people)
+        try:
+            queue["captures"].extend(bioreview.views(ef.STATE_DIR))
+            queue["migration_plans"] = [{"id": key, "status": row["status"]} for key, row in
+                list(bioreview.registry(ef.STATE_DIR)["plans"].items())[-20:] if row["status"] != "superseded"]
+        except (OSError, ValueError, KeyError, TypeError):
+            queue["migration_status"] = "unavailable"
         queue["dt"] = "ok"
     except ef.BridgeUnavailable:
         queue = _empty_queue("closed")
@@ -581,7 +610,10 @@ def capture_views(rows, people):
                 if row.get("text") is not None:
                     view["revision"] = ef.capture.revision(row["text"])
                     view["current_text"] = row["text"]
-                    if manifest["status"] != "correcting":
+                    if manifest.get("analysis_request") and manifest["analysis_request"]["from_text"] != row["text"]:
+                        view.update(status="question", text=row["text"], subjects=[], semantic_questions=[],
+                                    question="The source changed during comparison. Review and save its new version.")
+                    elif manifest["status"] != "correcting" and not manifest.get("analysis_request"):
                         view["text"] = row["text"]
                     if manifest["status"] == "retained" and manifest["text"] != row["text"]:
                         view.update(status="waiting", can_retain_legacy=False,
@@ -611,7 +643,7 @@ def handle_capture(uuid, payload):
     try:
         source, body, people, listing = ef.run_bridge([
             {"op": "get_source", "uuid": uuid}, {"op": "get_text", "uuid": uuid},
-            {"op": "dump_people", "include_bodies": False}, {"op": "list_candidates"}])
+            {"op": "dump_people", "include_bodies": True}, {"op": "list_candidates"}])
         raw = source.get("capture_operation", "")
         if not raw:
             raise RequestError("This note is waiting for processing.", 409)
@@ -663,6 +695,8 @@ def handle_capture(uuid, payload):
         if manifest["status"] == "correcting":
             raise RequestError("A correction already started. Resume it before changing the plan.", 409)
         if action in {"defer", "retry"}:
+            if action == "retry" and manifest.get("analysis_request"):
+                manifest.pop("analysis_plan", None)
             manifest["deferred"] = action == "defer"
             if action == "retry" and not manifest["subjects"]:
                 manifest["status"] = "deferred"
@@ -675,6 +709,8 @@ def handle_capture(uuid, payload):
             if action == "retry":
                 subprocess.run(["/usr/bin/python3", os.path.join(BIN, "entity-capture-arrival")], check=True)
             return {"ok": True, "status": manifest["status"]}
+        if action == "undo" and manifest.get("analysis_request"):
+            raise RequestError("A replacement is waiting for local comparison. Finish it before Undo.", 409)
         if action == "undo":
             ef.capture.start_correction(manifest, "undo", current_text=text)
             final = ef.capture.correct(ef.run_bridge, manifest, raw, selves=selves)
@@ -696,9 +732,66 @@ def handle_capture(uuid, payload):
                                     selves, decisions)
         if result["status"] not in {"new", "existing"}:
             raise RequestError(ef.capture.QUESTIONS.get(result["reason"], "Select exact names and complete, separate passages."), 409)
-        next_manifest = ef.capture.prepare(source, manifest["source_date"], new_text, result,
-                                            datetime.now().strftime("%Y-%m-%d"))
-        next_manifest["review_url"] = config.get("REVIEW_URL") or "http://localhost:8080/entities/"
+        semantic_plan = manifest.get("analysis_plan") or (manifest if manifest.get("semantic_questions") else None)
+        answers = payload.get("semantic_answers", {})
+        if semantic_plan and answers:
+            import entity_biographical as bio
+            if not isinstance(answers, dict) or set(answers) != {q["key"] for q in semantic_plan["semantic_questions"]}:
+                raise RequestError("Answer every assertion question before saving.", 409)
+            if new_text != semantic_plan["text"] or any(
+                    (a["uuid"], a["passage"], a["evidence"]["mention"]) != (b["uuid"], b["passage"], b["evidence"]["mention"])
+                    for a, b in zip(result["subjects"], semantic_plan["subjects"])) or len(result["subjects"]) != len(semantic_plan["subjects"]):
+                raise RequestError("The analysis plan changed. Save the new edit for local comparison first.", 409)
+            answers = {**semantic_plan.get("equivalence_answers", {}), **answers}
+            questions = list(semantic_plan["semantic_questions"])
+            for subject in semantic_plan["subjects"]:
+                for row in subject["contribution"]["assertions"]:
+                    if row.get("equivalence") == "confirmed" and row["reference"]["id"] not in {q["key"] for q in questions}:
+                        questions.append({"key": row["reference"]["id"], "candidates": [{"id": row["id"], **row["baseline"]}]})
+            for question in questions:
+                chosen = answers[question["key"]]
+                if chosen in {"separate", "source"}:
+                    continue
+                expected = next((c for c in question["candidates"] if c["id"] == chosen), None)
+                if expected is None:
+                    raise RequestError("Choose a displayed assertion or keep separate.", 409)
+                current = [row["data"] for p in people for row in bio.render(p.get("body", "")) +
+                           bio.legacy_rows(p.get("body", ""), p["uuid"], [p["name"]] + p.get("aliases", "").split(",")) if row["data"]["id"] == chosen]
+                if not current:
+                    current = [{"baseline": row["baseline"]} for subject in semantic_plan["subjects"]
+                               for row in subject["contribution"]["assertions"] if row["id"] == chosen and not row.get("existing")]
+                if len(current) != 1 or current[0]["baseline"] != {k: v for k, v in expected.items() if k != "id"}:
+                    raise RequestError("The compared assertion changed. Retry local comparison.", 409)
+            next_manifest = ef.capture.prepare_unified(source, manifest["source_date"], new_text, result,
+                datetime.now().strftime("%Y-%m-%d"), people, decisions=answers)
+            next_manifest["review_url"] = config.get("REVIEW_URL") or "http://localhost:8080/entities/"
+            if next_manifest["status"] == "question":
+                if manifest.get("analysis_request"):
+                    manifest.update(analysis_plan=next_manifest, reason="assertion_equivalence")
+                    ef.store_capture(manifest, raw, text)
+                else:
+                    next_manifest["history"] = ef.capture.source_history(manifest, new_text, manifest["source_date"])
+                    ef.store_capture(next_manifest, raw, text)
+                return {"ok": True, "status": "question"}
+            if manifest.get("analysis_request"):
+                final = ef.finish_capture_analysis(manifest, next_manifest, manifest["analysis_request"], raw, selves)
+                return {"ok": True, "status": final["status"]}
+            if manifest["status"] == "question" and not any(s["applied"] for s in manifest["subjects"]):
+                ef.capture.replay(ef.run_bridge, next_manifest, raw, selves=selves)
+                return {"ok": True, "status": next_manifest["status"]}
+        else:
+            if manifest.get("analysis_request"):
+                if manifest["analysis_request"]["from_text"] == text:
+                    raise RequestError("Local comparison is pending. Retry processing before changing the plan.", 409)
+                manifest.setdefault("history", []).append({k: v for k, v in manifest.items() if k != "history"})
+                manifest.pop("analysis_plan", None)
+            manifest["analysis_request"] = {"from_text": text, "from_revision": ef.capture.revision(text),
+                                             "text": new_text, "subjects": result["subjects"]}
+            manifest["status"] = "revision_question" if ef.capture.filing_started(manifest) else "deferred"
+            manifest["reason"] = "model_unavailable"
+            ef.store_capture(manifest, raw, text)
+            subprocess.run(["/usr/bin/python3", os.path.join(BIN, "entity-capture-arrival")], check=True)
+            return {"ok": True, "status": "waiting"}
         if manifest["subjects"]:
             ef.capture.start_correction(manifest, "revise" if new_text != manifest["text"] else "reassign",
                                         next_manifest, new_text)
@@ -846,7 +939,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._refuse(reason)
         path = urlsplit(self.path).path
         try:
-            payload = json.loads(raw or b"{}")
+            payload = json.loads(raw or b"{}", object_pairs_hook=bioreview.unique_object if path.startswith("/api/biographical-plan/") else dict)
             if not isinstance(payload, dict):
                 raise ValueError("payload must be an object")
         except ValueError:
@@ -859,6 +952,9 @@ class Handler(BaseHTTPRequestHandler):
                 subprocess.run(["/usr/bin/open", "-g", "-j", "-b",
                                 "com.devon-technologies.think"], check=False)
                 return self._json(200, {"ok": True})
+            migration_match = re.fullmatch(r"/api/biographical-plan/([a-f0-9]{64})", path)
+            if migration_match:
+                return self._json(200, handle_biographical_plan(migration_match.group(1), payload))
             capture_match = re.match(r"^/api/capture/([A-Za-z0-9-]{8,})$", path)
             if capture_match:
                 return self._json(200, handle_capture(capture_match.group(1), payload))

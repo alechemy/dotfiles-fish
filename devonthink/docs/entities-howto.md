@@ -12,6 +12,10 @@ Use **Capture Person Fact** in Drafts on Mac or iPhone. Write naturally, for exa
 
 Single names are valid. A uniquely matching existing person receives the note. A new person gets a record under the name you wrote, without a guessed surname. An empty roster does not block deliberate capture. Short notes, lists, and mundane information are retained in full. A daughter mentioned as news about Wren does not need her own record.
 
+After the unified biographical update is installed, captures appear in the Person's Biographical Log instead of separate Captured sections. The primary person's name is normally implicit in their bullets. Original notes remain available through source links.
+
+Exact compatible assertions share one bullet with independent source support. Possible paraphrases or cross-day matches ask whether they are the **Same complete assertion**. Choose **Keep separate** when details or timing differ or you are unsure. **Keep source wording** keeps the submitted wording. New edits or reassignments can report Waiting while the local worker compares them. Review never claims Saved before verified filing.
+
 After verified filing, the processing day's daily note contains a short receipt linking to the person, original note, and correction view. The saved contribution keeps the capture's original date. Capturing information does not update `LastContact` or automatically overwrite city, employer, email, or other structured fields.
 
 The action's acknowledgement confirms delivery rather than filing. iOS confirms record creation through its callback. macOS confirms dispatch only. The daily-note receipt confirms filing.
@@ -34,7 +38,7 @@ Permanent ignore and filing suppression remain separate decisions. Restore an ig
 
 Open the person from a receipt, search their name in DEVONthink, or follow the original-note link. Recent outcomes appear in the review app; an older receipt's detail link opens its capture directly.
 
-Use **Wrong person** to reassign the capture or revise its wording. The automation verifies the destination before removing its old contribution. Use **Undo this capture's filing** to remove only that capture's unchanged machine-owned text. Original sources, other captures, populated Person records, and unrelated metadata stay intact.
+Use **Wrong person** to reassign the capture or revise its wording. The automation verifies the destination before removing its old contribution. Use **Undo this capture's filing** to remove only that capture's support. A shared assertion stays while another source supports it. Historical or explicitly kept manual content stays even without active support. Original sources, other captures, populated Person records, and unrelated metadata stay intact.
 
 If you edited the contribution directly, the app asks whether to keep that edited text and finish. It also stops if the destination changed during an interrupted correction. Review the displayed conflict before choosing to preserve those changes. A source edit keeps the earlier captured version in the operation history.
 

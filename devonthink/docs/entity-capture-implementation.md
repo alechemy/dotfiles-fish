@@ -24,7 +24,53 @@ The review app shows waiting, technical delay, questions, and recent outcomes. I
 
 Legacy proposal/candidate task interpretation and map reconstruction are disabled. The migration closes their old tasks as housekeeping, including already-completed, canceled, trashed, or confirmed missing tasks. Database failures remain distinct from confirmed deletion.
 
-## Migration
+## Unified biographical filing update
+
+The v2 update is implemented but has not been installed or migrated. The deployment history below describes the earlier capture release.
+
+New captures file assertions under `## Biographical Log`, without separate Captured sections. A conservative splitter preserves every source span. It omits a leading primary name only for recognized subject-relative wording, leaving quotations, links, compound subjects, and other people's names intact. Unsupported structures retain source wording. Original sources and operation history remain unchanged.
+
+Each assertion's hidden `bio:v2` marker binds it to the containing Person UUID, an immutable content/date baseline, and independent capture, passive, or protected legacy references. Literal ownership examples use a reversible render-only escape; their evidence stays exact. Moving an owned assertion into a blockquote removes its active ownership. Copies in another Person do not authorize writes.
+
+Exact assertions with compatible temporal context share one visible bullet. Cross-day or suggested paraphrase matches require **Same complete assertion** confirmation. **Keep separate** retains both, and **Keep source wording** retains the submitted wording. Source observation dates do not prove event dates. The local model only suggests candidates. Novel edits and reassignments queue analysis under the worker's existing resource and inference locks; the review app reports Waiting until verified filing.
+
+Undo removes that capture's references. Another capture or passive source keeps the assertion alive. Historical and keep-edited assertions stay protected, including when they have no remaining references. Only unchanged capture-created assertions lose their visible bullet with their last support. Corrections verify destination references before removing superseded references. Frozen v1 operations continue using their original blocks on retries.
+
+Future passive Person facts use subject-relative wording and provenance-aware exact attachment. Passive paraphrase comparison is deferred. Passive review policy, field-transition history, Event logs, and LastContact behavior are unchanged.
+
+### Explicit v2 migration
+
+`entity-biographical-migrate` is separate from `entity-capture-migrate` and `--migrate-candidates`. It inventories all registered operations, including sources moved outside `_Facts`, and recognized machine Person log entries. Preview freezes ordered body and operation writes, source/control snapshots, candidate baselines, code digest, and scope. It never rewrites edited capture blocks, hand-authored lines, unverified legacy fingerprints, unknown ownership, or unfinished corrections. Those contribute to skipped/conflicted counts.
+
+Only the operator may run the following after code review and integration into the primary checkout. Keep detailed artifacts outside Git; the CLI prints counts, a plan digest, and status only. Do not paste private plans, decisions, source bodies, or review responses into agent context.
+
+1. Preserve unrelated primary-checkout edits and integrate the reviewed task diff without replacing those files wholesale. Run the synthetic tests. From the primary checkout only, restow the `devonthink` package with `stow --dir=stow --target="$HOME" --restow --no-folding devonthink` because this update adds helpers. Restart the existing entity review server to load its Python modules. No metadata or launchd schema change is required; keep the existing activation boundary.
+2. On the driver, with its existing resource gates satisfied, create the private preview:
+
+   ```sh
+   export PIPELINE_MANUAL=1
+   STATE="$HOME/.local/state/devonthink"
+   /usr/bin/python3 "$HOME/.local/bin/entity-biographical-migrate" --preview \
+     --output "$STATE/biographical-preview.json"
+   ```
+
+3. Inspect sanitized counts. Pending semantic questions appear in the existing private review app. Review freezes a newly digested plan, preserves the original, and reports Reviewed or Waiting, never Saved. Partial review is supported. After reviewing, use the reported current plan ID and its fixed registration at `$STATE/entity-biographical-plans/<plan-id>.json`. The CLI alternative accepts an operator-created mode-600 decision file with `plan_id` and `answers`, keyed by frozen source UUID and question key:
+
+   ```sh
+   /usr/bin/python3 "$HOME/.local/bin/entity-biographical-migrate" --resolve \
+     --plan "$STATE/biographical-preview.json" \
+     --decisions "$STATE/biographical-decisions.json" \
+     --output "$STATE/biographical-reviewed.json"
+   ```
+
+   Each choice is `separate`, `source`, or a candidate ID from that exact frozen question. Use the private UI rather than asking an agent to author decisions. Resolve performs no inference or entity writes. Superseded or changed plans are rejected.
+4. Apply the exact current, fully answered registered artifact with `--apply --plan "$PLAN"`. Unanswered plans refuse application. Private plans include exact before/after evidence; retain them and `$STATE/entity-biographical-<plan-id>.json`, the recoverable journal.
+5. After interruption, use `--recover --plan "$PLAN"` with the same code and exact artifact. Recovery performs no inference. The durable `entity-biographical-fence.json` pauses affected sources and People across crashes, while unrelated ingestion and read-only review remain available. Never delete the fence to force a retry.
+6. To reverse application, use `--rollback --plan "$PLAN"`. Repeat that command to recover an interrupted rollback. Rollback restores frozen bodies and operations only if every affected record still matches a valid checkpoint; later edits or new support stop it. Do not reinstall older code while the fence is active.
+
+A nonzero pending count is unfinished migration. Skipped/conflicted records stay intact and must be reported as residuals. `{"status":"stopped"}` is sanitized failure output, not permission to regenerate a plan over partial work. This procedure authorizes no publication or remote write.
+
+## Earlier capture migration
 
 `entity-capture-migrate` previews `_Facts` recursively, including filed sources. It reports dispositions, source UUIDs, previous filing references, candidate references, and modification stamps without printing captured text. Keep the preview private.
 

@@ -384,6 +384,12 @@ function viewItems() {
   const props = queue.proposals || [];
   const items = [];
   const captures = queue.captures || [];
+  for (const plan of queue.migration_plans || []) {
+    if (plan.status === "pending") continue;
+    items.push(item("m:" + plan.id, '<div class="notice">Migration plan ' + esc(plan.status) +
+      '. Registered plan ID: <code style="overflow-wrap:anywhere">' + esc(plan.id) + '</code>' +
+      (plan.status === "reviewed" ? '<p>Apply this exact registered artifact separately. Review has not migrated any records.</p>' : '') + '</div>'));
+  }
   if (captures.length) {
     items.push(item("h:captures", '<h2 class="sec">Saved notes and questions</h2>'));
     for (const cv of captures) {
@@ -514,13 +520,15 @@ function dtLink(uuid, label) {
 
 function captureCard(cv, o) {
   const u = esc(cv.uuid);
+  const migration = !!cv.migration_plan;
+  if (migration) o = captureOverlay(cv.uuid);
   const finished = ["filed", "undone", "retained"].includes(cv.status);
-  const editing = (!!o.captureEdit || !finished) && cv.status !== "correcting";
+  const editing = !migration && (!!o.captureEdit || !finished) && cv.status !== "correcting";
   const technical = ["waiting", "deferred", "broken", "correcting"].includes(cv.status);
   let html = '<div class="card capture" id="c-' + u + '"><div class="cardtop"><span class="who">' +
-    esc(cv.status === "filed" ? "Saved" : cv.status === "undone" ? "Filing undone" : cv.status === "retained" ? "Existing filings kept" : technical ? "Waiting for processing" : "A question about your note") +
+    esc(migration ? "Migration review" : cv.status === "filed" ? "Saved" : cv.status === "undone" ? "Filing undone" : cv.status === "retained" ? "Existing filings kept" : technical ? "Waiting for processing" : "A question about your note") +
     '</span><span class="meta">' + esc(cv.date || "") + '</span></div>';
-  html += '<div class="chips">' + dtLink(cv.uuid, "Original note") + '</div>';
+  html += '<div class="chips">' + dtLink(cv.source_uuid || cv.uuid, "Original note") + '</div>';
   if (!finished) html += '<div class="notice">' + esc(cv.question) + '</div>';
   if (!editing) html += '<div class="captured">' + esc(cv.text) + '</div>';
   if (cv.status === "correcting" && cv.current_text !== undefined && cv.current_text !== cv.text) html += '<label>Current source<div class="captured">' + esc(cv.current_text) + '</div></label>';
@@ -540,13 +548,25 @@ function captureCard(cv, o) {
     html += '<button class="btn quiet" data-act="capture-add" data-uuid="' + u + '">Add another subject and passage</button>';
     if (cv.choices.length) html += '<div class="notice">Possible people: ' + esc(cv.choices.map(p => [p.name,p.city,p.employer].filter(Boolean).join(", ")).join("; ")) + '</div>';
   }
+  for (const q of cv.semantic_questions || []) {
+    const answer = (o.captureAnswers || {})[q.key] || "";
+    html += '<div class="plan"><label>Complete source evidence<div class="captured">' + esc(q.evidence) +
+      '</div></label><p>Proposed assertion: ' + esc(q.assertion) + '</p><p>Observed on ' + esc(q.observed_date) +
+      '. Confirm only when the full assertion, qualifiers, and time are the same.</p><label>Disposition<select data-semantic-key="' + esc(q.key) +
+      '"><option value="">Choose a disposition</option>';
+    const options = [{id:"separate", text:"Keep separate"}, {id:"source", text:"Keep source wording"}].concat(
+      q.candidates.map(c => ({id:c.id, text:"Same complete assertion: " + c.text + " [" + c.temporal_context + "]"})));
+    for (const choice of options) html += '<option value="' + esc(choice.id) + '"' + (answer === choice.id ? ' selected' : '') + '>' + esc(choice.text) + '</option>';
+    html += '</select></label></div>';
+  }
   html += '<div class="actions">';
+  if (migration) html += '<button class="btn primary" data-act="migration-answer" data-uuid="' + u + '">Record these migration choices</button>';
   if (editing && !["waiting", "broken"].includes(cv.status)) html += '<button class="btn primary" data-act="capture-save" data-uuid="' + u + '">Save to the selected people</button>';
   if (cv.status === "filed") html += '<button class="btn" data-act="capture-edit" data-uuid="' + u + '">Wrong person</button><button class="btn danger" data-act="capture-undo" data-uuid="' + u + '">Undo this capture\'s filing</button>';
   if (cv.can_retain_legacy) html += '<button class="btn" data-act="capture-retain" data-uuid="' + u + '">Keep existing filings</button>';
   if (cv.conflict) html += '<button class="btn" data-act="capture-keep" data-uuid="' + u + '">Keep the edited text and finish</button>';
   if (cv.status === "correcting") html += '<button class="btn" data-act="capture-retry" data-uuid="' + u + '">Resume correction</button>';
-  if (!finished && !["waiting", "broken", "correcting"].includes(cv.status)) html += '<button class="btn quiet" data-act="capture-defer" data-uuid="' + u + '">Decide later</button><button class="btn" data-act="capture-retry" data-uuid="' + u + '">Retry processing</button>';
+  if (!migration && !finished && !["waiting", "broken", "correcting"].includes(cv.status)) html += '<button class="btn quiet" data-act="capture-defer" data-uuid="' + u + '">Decide later</button><button class="btn" data-act="capture-retry" data-uuid="' + u + '">Retry processing</button>';
   return html + '</div></div>';
 }
 
@@ -565,11 +585,22 @@ function captureOverlay(uuid) {
 
 async function decideCapture(uuid, action) {
   const cv = queue.captures.find(c => c.uuid === uuid);
+  if (cv.migration_plan) {
+    try {
+      const result = await api("api/biographical-plan/" + cv.migration_plan,
+        {source_uuid:cv.source_uuid, answers:captureOverlay(uuid).captureAnswers || {}});
+      toast(result.status === "migration_reviewed" ? "Migration plan reviewed. Apply it separately." : "Choices recorded. More migration questions remain.");
+      delete local["c-" + uuid];
+      await refresh(false);
+    } catch(e) { banner(e.message); }
+    return;
+  }
   const body = {action, revision:cv.revision};
   if (action === "save") {
     const o = captureOverlay(uuid);
     body.revision = o.captureRevision;
     body.text = o.captureText;
+    body.semantic_answers = o.captureAnswers || {};
     body.subjects = o.captureRows.map(r => ({mention:r.mention, passage:r.passage,
       target:r.target === "new" ? "" : r.target, new:r.target === "new", email:r.email || ""}));
   }
@@ -971,6 +1002,7 @@ document.addEventListener("click", e => {
   }
   const d = el.dataset;
   switch (d.act) {
+    case "migration-answer": decideCapture(d.uuid, "migration"); break;
     case "capture-save": decideCapture(d.uuid, "save"); break;
     case "capture-undo": decideCapture(d.uuid, "undo"); break;
     case "capture-retain": decideCapture(d.uuid, "retain"); break;
@@ -1019,6 +1051,10 @@ document.addEventListener("input", e => {
   const uuid = key.slice(2);
   if (t.dataset.captureText) captureOverlay(uuid).captureText = t.value;
   if (t.dataset.captureRow !== undefined) captureOverlay(uuid).captureRows[Number(t.dataset.captureRow)][t.dataset.field] = t.value;
+  if (t.dataset.semanticKey !== undefined) {
+    const o = captureOverlay(uuid);
+    (o.captureAnswers || (o.captureAnswers = {}))[t.dataset.semanticKey] = t.value;
+  }
 });
 
 document.addEventListener("change", e => {

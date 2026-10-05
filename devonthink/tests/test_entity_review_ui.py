@@ -358,6 +358,44 @@ class CaptureEditor(unittest.TestCase):
             self.assertEqual(row["text"], "Wren moved to Prague.")
             self.assertEqual(row["message"], "The note changed.")
 
+    def test_migration_uses_same_semantic_renderer_and_never_reports_saved(self):
+        script = ASSET.read_text().split("<script>", 1)[1].split('document.addEventListener("click"', 1)[0]
+        probe = r'''
+        (async function () {
+          const planId = "a".repeat(64);
+          const cv = {uuid:"migration:" + planId + ":AAA-111", source_uuid:"AAA-111", migration_plan:planId,
+            status:"question", date:"2026-09-01", revision:"frozen", text:"Wren has two siblings.", subjects:[], choices:[],
+            semantic_questions:[{key:"q", evidence:"Wren has two siblings.", assertion:"Has two siblings.",
+              observed_date:"2026-09-01", candidates:[{id:"b".repeat(64), text:"Has two siblings.", temporal_context:"observed:2026-08-01"}]}]};
+          queue = {dt:"ok", captures:[cv], roster:[], candidates:[], proposals:[], queued:{candidates:0,proposals:0}};
+          local = {};
+          const html = captureCard(cv, emptyOverlay());
+          captureOverlay(cv.uuid).captureAnswers = {q:"b".repeat(64)};
+          let posted, endpoint, message;
+          api = async function(path, body) {endpoint=path;posted=body;return {status:"migration_reviewed",plan_id:"c".repeat(64)}};
+          toast = text => {message = text};
+          refresh = async function() {};
+          await decideCapture(cv.uuid, "migration");
+          console.log(JSON.stringify({html, posted, endpoint, message}));
+        })().catch(function(error) {console.error(error);process.exitCode=1});
+        '''
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "migration-review.js"
+            path.write_text(script + probe)
+            result = subprocess.run(["node", str(path)], capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        row = json.loads(result.stdout)
+        self.assertIn("Same complete assertion", row["html"])
+        self.assertIn("Keep separate", row["html"])
+        self.assertIn("Keep source wording", row["html"])
+        self.assertIn('<label>Disposition<select data-semantic-key="q">', row["html"])
+        self.assertIn('</select></label>', row["html"])
+        self.assertNotIn('data-act="capture-save"', row["html"])
+        self.assertNotIn("Captured note<textarea", row["html"])
+        self.assertEqual(row["endpoint"], "api/biographical-plan/" + "a" * 64)
+        self.assertEqual(row["posted"], {"source_uuid": "AAA-111", "answers": {"q": "b" * 64}})
+        self.assertEqual(row["message"], "Migration plan reviewed. Apply it separately.")
+
 
 if __name__ == "__main__":
     unittest.main()

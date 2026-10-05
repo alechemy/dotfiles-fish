@@ -202,7 +202,23 @@ def previous_filings(source_uuid, people):
             for person in people if link in person.get("body", "")]
 
 
+def prepare_unified(source, source_date, text, result, processing_date, people=(), decisions=None, suggest=None, require_review=()):
+    import entity_biographical
+    return entity_biographical.prepare(source, source_date, text, result, processing_date,
+                                      people, decisions, suggest, require_review)
+
+
 def decode_manifest(raw, source_uuid):
+    value = json.loads(raw)
+    if not isinstance(value, dict):
+        raise ValueError("unreadable capture operation; filing is paused")
+    if value.get("version") == 2:
+        import entity_biographical
+        return entity_biographical.decode(raw, source_uuid)
+    return _decode_v1(raw, source_uuid)
+
+
+def _decode_v1(raw, source_uuid):
     manifest = json.loads(raw)
     if (not isinstance(manifest, dict) or manifest.get("version") != 1 or
             manifest.get("source_uuid") != source_uuid or
@@ -274,6 +290,17 @@ def decode_manifest(raw, source_uuid):
                 replacement.get("status") not in {"filing", "filed"}):
             raise ValueError("capture replacement is unreadable")
         decode_manifest(encode_manifest(replacement), source_uuid)
+    if manifest.get("analysis_request"):
+        request = manifest["analysis_request"]
+        if (not isinstance(request, dict) or not isinstance(request.get("text"), str) or
+                not isinstance(request.get("from_text"), str) or
+                request.get("from_revision") != revision(request["from_text"]) or
+                not isinstance(request.get("subjects"), list) or not request["subjects"]):
+            raise ValueError("capture analysis request is unreadable")
+        if manifest.get("analysis_plan"):
+            plan = decode_manifest(encode_manifest(manifest["analysis_plan"]), source_uuid)
+            if plan["status"] != "question" or plan["text"] != request["text"]:
+                raise ValueError("capture analysis plan is unreadable")
     if not isinstance(manifest.get("history", []), list):
         raise ValueError("capture history is unreadable")
     for old in manifest.get("history", []):
@@ -328,6 +355,10 @@ def validate_frozen(bridge, manifest, selves=()):
 
 def replay(bridge, manifest, previous="", persist_manifest=None, selves=(), preserve_contributions=()):
     """Replay frozen source contributions. Call under filing and candidate mutation locks."""
+    if manifest["version"] == 2:
+        import entity_biographical
+        return entity_biographical.replay(bridge, manifest, previous, persist_manifest,
+                                          selves, preserve_contributions)
     def persist():
         nonlocal previous
         if persist_manifest:
@@ -388,6 +419,7 @@ def replay(bridge, manifest, previous="", persist_manifest=None, selves=(), pres
 
 
 QUESTIONS = {
+    "assertion_equivalence": "Does the existing assertion cover all this information, including its qualifiers and time? Keep separate when unsure.",
     "ambiguous_name": "Which person is this note about?",
     "conflicting_identifiers": "The name and email point to different people. Correct the note or separate its passages.",
     "passage_selection_needed": "Which passage belongs to each person?",
@@ -405,7 +437,27 @@ QUESTIONS = {
 }
 
 
+def analysis_needed(raw):
+    try:
+        value = json.loads(raw)
+        return bool(value.get("analysis_request") and not value.get("analysis_plan"))
+    except (ValueError, TypeError, AttributeError):
+        return False
+
+
 def view(manifest, people):
+    if manifest.get("analysis_plan"):
+        planned = dict(manifest["analysis_plan"])
+        result = view(planned, people)
+        result["revision"] = revision(manifest["analysis_request"]["from_text"])
+        return result
+    if manifest.get("analysis_request"):
+        request = manifest["analysis_request"]
+        return {"uuid": manifest["source_uuid"], "revision": revision(request["from_text"]),
+                "status": "waiting", "text": request["text"], "date": manifest["source_date"],
+                "deferred": False, "question": QUESTIONS.get(manifest.get("reason"), "Waiting for local comparison."),
+                "conflict": False, "choices": [], "subjects": [], "can_retain_legacy": False,
+                "semantic_questions": []}
     status = manifest["status"]
     text = manifest.get("correction", {}).get("text", manifest.get("changed_text", manifest["text"]))
     choices = []
@@ -418,6 +470,7 @@ def view(manifest, people):
             "status": status, "text": text,
             "can_retain_legacy": status == "question" and manifest.get("reason") == "legacy_filing" and not manifest.get("replacement"),
             "date": manifest["source_date"], "deferred": manifest.get("deferred", False),
+            "semantic_questions": manifest.get("semantic_questions", []),
             "question": QUESTIONS.get(manifest.get("reason"), "Review this retained note before saving."),
             "conflict": manifest.get("reason") in {"edited_contribution", "destination_edited"},
             "choices": choices, "subjects": [{"uuid": s["uuid"], "name": s["name"],
@@ -428,6 +481,11 @@ def view(manifest, people):
                 for s in manifest.get("extracted", []) if isinstance(s, dict) and
                 isinstance(s.get("mention"), str) and in_text(s["mention"], manifest["text"]) and
                 isinstance(s.get("email", ""), str) and (not s.get("email") or in_text(s["email"], manifest["text"]))]}
+
+
+def filing_started(manifest):
+    return bool(manifest["subjects"]) and (manifest["status"] not in {"question", "deferred"} or
+        manifest["receipt"] or any(s["applied"] for s in manifest["subjects"]) or bool(manifest.get("applied_references")))
 
 
 def start_correction(manifest, action, next_manifest=None, current_text=None):
@@ -448,6 +506,9 @@ def start_correction(manifest, action, next_manifest=None, current_text=None):
 
 
 def correct(bridge, manifest, previous, selves=()):
+    if manifest["version"] == 2 or (manifest.get("correction", {}).get("next") or {}).get("version") == 2:
+        import entity_biographical_correction
+        return entity_biographical_correction.correct(bridge, manifest, previous, selves)
     correction = manifest["correction"]
     if correction.get("source_edit"):
         repair_source_edit(bridge, manifest["source_uuid"], correction["source_edit"])
