@@ -385,16 +385,68 @@ class CaptureEditor(unittest.TestCase):
             result = subprocess.run(["node", str(path)], capture_output=True, text=True, timeout=30)
         self.assertEqual(result.returncode, 0, result.stderr)
         row = json.loads(result.stdout)
-        self.assertIn("Same complete assertion", row["html"])
-        self.assertIn("Keep separate", row["html"])
-        self.assertIn("Keep source wording", row["html"])
-        self.assertIn('<label>Disposition<select data-semantic-key="q">', row["html"])
-        self.assertIn('</select></label>', row["html"])
+        self.assertIn("Already recorded; keep this entry", row["html"])
+        self.assertIn("Add as new information", row["html"])
+        self.assertIn("Add a separate entry using my original wording", row["html"])
+        self.assertIn('type="radio"', row["html"])
+        self.assertNotIn('<select data-semantic-key="q">', row["html"])
         self.assertNotIn('data-act="capture-save"', row["html"])
         self.assertNotIn("Captured note<textarea", row["html"])
         self.assertEqual(row["endpoint"], "api/biographical-plan/" + "a" * 64)
         self.assertEqual(row["posted"], {"source_uuid": "AAA-111", "answers": {"q": "b" * 64}})
-        self.assertEqual(row["message"], "Migration plan reviewed. Apply it separately.")
+        self.assertEqual(row["message"], "Choices confirmed. Your notes stay unchanged until migration is applied.")
+
+
+class ComparisonCards(unittest.TestCase):
+    def render(self, status="question", answers=None, candidates=None):
+        cv = {"uuid":"migration:fiction:SRC-1", "source_uuid":"SRC-1", "migration_plan":"fiction",
+              "revision":"r1", "status":status, "date":"2026-09-02", "text":"Wren has two siblings.",
+              "question":"Waiting for local comparison.", "subjects":[], "choices":[], "semantic_questions":[]}
+        if status == "question":
+            cv["semantic_questions"] = [{"key":"fact1", "person_name":"Wren", "evidence":cv["text"],
+                "assertion":"Has two siblings.", "observed_date":"2026-09-02", "candidates":candidates or [
+                    {"id":"existing1", "text":"Has a brother and a sister.", "log_date":"2026-09-01",
+                     "temporal_context":"observed:2026-09-01"}]}]
+        src = ASSET.read_text().split('<script>', 1)[1].split('document.addEventListener("click"', 1)[0]
+        call = "const cv=" + json.dumps(cv) + ";queue={captures:[cv],roster:[]};local={};" + \
+            "captureOverlay(cv.uuid).captureAnswers=" + json.dumps(answers or {}) + ";console.log(captureCard(cv,emptyOverlay()));"
+        result = subprocess.run(["node", "-e", src + call], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return result.stdout
+
+    def test_comparison_shows_both_texts_without_dropdown_or_internal_terms(self):
+        html = self.render()
+        for label in ("From your note", "Already saved", "Has two siblings.", "Has a brother and a sister.",
+                      "Add as new information", "Already recorded; keep this entry", "About Wren", "Noted on Sep 1, 2026"):
+            self.assertIn(label, html)
+        for label in ("<select", "Disposition", "Proposed assertion", "observed:"):
+            self.assertNotIn(label, html)
+        self.assertIn('value="separate"', html)
+        self.assertIn('value="existing1"', html)
+        self.assertIn('value="source"', html)
+        self.assertIn('<details><summary>Read the full note</summary>', html)
+        self.assertIn('<details><summary>Original wording and other options</summary>', html)
+        self.assertIn('disabled>Confirm choices', html)
+        selected = self.render(answers={"fact1":"existing1"})
+        self.assertNotIn('disabled>Confirm choices', selected)
+        self.assertIn('value="existing1" checked', selected)
+
+    def test_waiting_migration_has_no_choices_or_save_action(self):
+        html = self.render(status="waiting")
+        self.assertIn("Waiting to compare", html)
+        self.assertNotIn('data-act="migration-answer"', html)
+        self.assertNotIn('data-act="capture-save"', html)
+        self.assertNotIn('type="radio"', html)
+
+    def test_all_candidates_remain_visible_escaped_and_date_context_is_preserved(self):
+        html = self.render(candidates=[
+            {"id":"existing1", "text":"Has two siblings.", "log_date":"2026-09-01", "temporal_context":"dated:2026-08-01"},
+            {"id":"existing2", "text":"<script>fiction()</script>", "log_date":"2026-09-02", "temporal_context":"observed:2026-09-02"}])
+        self.assertIn("Dated Aug 1, 2026. Recorded on Sep 1, 2026", html)
+        self.assertIn("&lt;script&gt;fiction()&lt;/script&gt;", html)
+        self.assertNotIn("<script>fiction()", html)
+        self.assertIn('value="existing1"', html)
+        self.assertIn('value="existing2"', html)
 
 
 if __name__ == "__main__":

@@ -2783,11 +2783,12 @@ def file_capture(config, state, source, source_date, text, extracted, dry_run,
         if dry_run:
             print(json.dumps(manifest, indent=2))
             return result
-        if manifest["status"] == "question":
+        if manifest["status"] in {"question", "deferred"}:
             store_capture(manifest, previous, text)
             remember_processed(state, source, text)
             save_state(state)
-            return capture.outcome("unresolved", manifest["reason"], subjects=manifest["subjects"])
+            return capture.outcome("deferred" if manifest["status"] == "deferred" else "unresolved",
+                                   manifest["reason"], subjects=manifest["subjects"])
         result = capture.replay(run_bridge, manifest, previous, selves=self_names(config))
         fresh, fresh_body = run_bridge([
             {"op": "get_source", "uuid": source["uuid"]},
@@ -2825,6 +2826,10 @@ def process_capture_analysis(config, source, manifest, previous, actual_text, se
     next_manifest = capture.prepare_unified(source, manifest["source_date"], request["text"], result,
                                             date.today().isoformat(), people, suggest=semantic_suggestions(config))
     next_manifest["review_url"] = config.get("REVIEW_URL") or "http://localhost:8080/entities/"
+    if next_manifest["status"] == "deferred":
+        manifest["reason"] = next_manifest["reason"]
+        store_capture(manifest, previous, actual_text)
+        return
     if next_manifest["status"] == "question":
         manifest["analysis_plan"] = next_manifest
         manifest["reason"] = "assertion_equivalence"
@@ -2857,6 +2862,7 @@ def finish_capture_analysis(manifest, next_manifest, request, previous, selves):
 
 
 def semantic_suggestions(config):
+    import entity_biographical as bio
     def suggest(assertion, observed_date, candidates):
         prompt = ("Compare the complete assertion, all qualifiers, negation, attribution, changing state and temporal context. "
                   "Return JSON {\"candidates\":[\"id\"]} identifying possible equivalent assertions, including uncertain cases. "
@@ -2865,14 +2871,14 @@ def semantic_suggestions(config):
                   json.dumps({"assertion": assertion, "observed_date": observed_date, "existing": candidates}, ensure_ascii=False))
         known = [candidate["id"] for candidate in candidates]
         if len(candidates) > 80 or len(prompt) > 32000:
-            return known
+            raise bio.ComparisonUnavailable("Local comparison is too large.")
         try:
             selected = json.loads(extract_omlx(config, prompt))["candidates"]
             if not isinstance(selected, list) or any(value not in known for value in selected):
-                return known
+                raise bio.ComparisonUnavailable("Local comparison returned an invalid result.")
             return selected
-        except (LLMUnavailable, ValueError, KeyError, TypeError):
-            return known
+        except (LLMUnavailable, OSError, ValueError, KeyError, TypeError):
+            raise bio.ComparisonUnavailable("Local comparison is unavailable.") from None
     return suggest
 
 

@@ -74,13 +74,20 @@ def save_registry(state_dir, before, after):
     migration.private_save(directory(state_dir) / "registry.json", after)
 
 
+def validate_replacement(state_dir, plan_id):
+    plan_path(state_dir, plan_id)
+    current = registry(state_dir)
+    if (current["plans"].get(plan_id, {}).get("status") not in {"pending", "reviewed"} or
+            (Path(state_dir) / migration.FENCE_NAME).exists()):
+        raise ValueError("Migration preview is stale, superseded, or paused for recovery.")
+    return current
+
+
 def register(state_dir, plan, prior=None):
     migration.validate(plan)
-    current = registry(state_dir)
+    current = registry(state_dir) if prior is None else validate_replacement(state_dir, prior)
     updated = json.loads(json.dumps(current))
     if prior is not None:
-        if current["plans"].get(prior, {}).get("status") not in {"pending", "reviewed"}:
-            raise ValueError("Migration preview is stale or superseded.")
         updated["plans"][prior] = {"status": "superseded", "superseded_by": plan["plan_id"]}
     path = plan_path(state_dir, plan["plan_id"])
     if path.is_symlink() or current["plans"].get(plan["plan_id"], {}).get("status") in {"superseded", "applying", "applied", "rolled_back"}:
@@ -90,7 +97,7 @@ def register(state_dir, plan, prior=None):
             raise ValueError("Registered migration evidence changed.")
     else:
         migration.private_save(path, plan)
-    status = "pending" if plan["counts"]["pending_questions"] else "reviewed"
+    status = "pending" if plan["counts"]["pending_questions"] or plan["counts"].get("waiting_comparisons") else "reviewed"
     updated["plans"][plan["plan_id"]] = {"status": status}
     save_registry(state_dir, current, updated)
     return path
@@ -131,6 +138,9 @@ def views(state_dir):
             view = capture.view(row["manifest"], [])
             view.update(uuid="migration:" + plan_id + ":" + row["source_uuid"], source_uuid=row["source_uuid"],
                         migration_plan=plan_id, can_retain_legacy=False, conflict=False)
+            if plan["counts"].get("waiting_comparisons"):
+                view.update(status="waiting", semantic_questions=[],
+                            question="This migration is waiting for local comparison. Nothing has changed. A fresh preview is needed when comparison is available.")
             out.append(view)
     return out
 

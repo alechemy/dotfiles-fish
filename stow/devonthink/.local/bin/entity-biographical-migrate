@@ -10,9 +10,14 @@ from pathlib import Path
 
 BIN = Path(os.path.realpath(__file__)).parent
 sys.path.insert(0, str(BIN))
+import entity_biographical as bio
 import entity_biographical_migration as migration
 import entity_candidates as ec
 import entity_biographical_review as review
+
+
+def unavailable_comparison(*args):
+    raise bio.ComparisonUnavailable("Local comparison is unavailable.")
 
 
 def execute(args):
@@ -25,6 +30,8 @@ def execute(args):
         repo = BIN.parents[3]
         if repo == destination or repo in destination.parents:
             raise ValueError("Private migration artifacts must be outside the repository.")
+        if args.preview and destination.exists():
+            raise ValueError("Keep existing migration artifacts. Choose a new output path.")
         for gate in ("should-run-dt-driver", "should-run-background-job"):
             if subprocess.run([str(Path.home() / ".local/bin" / gate)], capture_output=True).returncode:
                 raise ValueError("Resource gate deferred.")
@@ -35,20 +42,22 @@ def execute(args):
         locks.append(ec.acquire_candidates_lock())
         fence = Path(ef.STATE_DIR) / migration.FENCE_NAME
         if args.preview:
+            if args.replace_plan is not None:
+                review.validate_replacement(ef.STATE_DIR, args.replace_plan)
             suggest, selves = None, ()
             if not fence.exists():
                 config = ef.load_config()
-                if not ef.memory_pressure_normal() or ef.pick_transport(config) is None:
-                    raise ValueError("Local comparison is unavailable.")
-                inference = ef.acquire_llm_lock()
-                if inference is None:
-                    raise ValueError("Inference is busy.")
-                locks.append(inference)
-                suggest, selves = ef.semantic_suggestions(config), ef.self_names(config)
+                suggest, selves = unavailable_comparison, ef.self_names(config)
+                if ef.memory_pressure_normal() and ef.pick_transport(config) is not None:
+                    inference = ef.acquire_llm_lock()
+                    if inference is not None:
+                        locks.append(inference)
+                        suggest = ef.semantic_suggestions(config)
             plan = migration.preview(ef.run_bridge, suggest, selves=selves)
-            migration.private_save(destination, plan)
-            review.register(ef.STATE_DIR, plan)
-            return {"status": "previewed", "plan_id": plan["plan_id"], "mutations": len(plan["steps"]), **plan["counts"]}, 0
+            migration.private_save(destination, plan, replace=False)
+            review.register(ef.STATE_DIR, plan, prior=args.replace_plan)
+            return {"status": "waiting_comparison" if plan["counts"].get("waiting_comparisons") else "previewed",
+                    "plan_id": plan["plan_id"], "mutations": len(plan["steps"]), **plan["counts"]}, 0
         plan = review.read_private(destination)
         migration.validate(plan)
         current = review.load_current(ef.STATE_DIR, plan["plan_id"], writable=args.resolve, allow_terminal=True)
@@ -59,9 +68,11 @@ def execute(args):
             output = args.output.expanduser().resolve()
             if repo == output or repo in output.parents or output == destination:
                 raise ValueError("Keep the original private preview.")
-            migration.private_save(output, next_plan)
+            migration.private_save(output, next_plan, replace=False)
             review.register(ef.STATE_DIR, next_plan, prior=plan["plan_id"])
             return {"status": "reviewed", "plan_id": next_plan["plan_id"], **next_plan["counts"]}, 0
+        if plan["counts"].get("waiting_comparisons"):
+            return {"status": "waiting_comparison", "waiting_comparisons": plan["counts"]["waiting_comparisons"]}, 1
         if plan["counts"]["pending_questions"]:
             return {"status": "pending_review", "pending_questions": plan["counts"]["pending_questions"]}, 1
         journal = Path(ef.STATE_DIR) / ("entity-biographical-" + plan["plan_id"] + ".json")
@@ -82,7 +93,10 @@ def main(argv=None):
     parser.add_argument("--output", type=Path)
     parser.add_argument("--plan", type=Path)
     parser.add_argument("--decisions", type=Path)
+    parser.add_argument("--replace-plan", help="Supersede an unapplied registration with a fresh preview.")
     args = parser.parse_args(argv)
+    if args.replace_plan and not args.preview:
+        parser.error("--replace-plan requires --preview.")
     if (args.preview and not args.output or not args.preview and not args.plan or
             args.resolve and (not args.decisions or not args.output)):
         parser.error("Preview requires --output; resolve requires --plan, --decisions, --output; other modes require --plan.")

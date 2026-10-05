@@ -14,6 +14,10 @@ LINK = re.compile(r"\[([^]]+)\]\(x-devonthink-item://[^)]+\)")
 LITERAL = re.compile("<(\u2060*)!-- (?=bio:v2:|fact:|capture(?:-receipt|-created)?:)")
 
 
+class ComparisonUnavailable(RuntimeError):
+    pass
+
+
 def encode_literal(text):
     return LITERAL.sub(lambda match: "<" + "\u2060" * (len(match[1]) + 1) + "!-- ", text)
 
@@ -323,6 +327,7 @@ def prepare(source, source_date, text, result, processing_date, people, decision
     manifest = capture.prepare(source, source_date, text, result, processing_date)
     manifest["version"] = 2
     questions = []
+    comparison_failed = False
     decisions = decisions or {}
     for subject in manifest["subjects"]:
         person = next((p for p in people if p["uuid"] == subject["uuid"]), {})
@@ -330,6 +335,7 @@ def prepare(source, source_date, text, result, processing_date, people, decision
         candidates = [row for row in render(body, subject["uuid"]) if row["visible"] == row["data"]["baseline"]["text"] and
                       row["date"] == row["data"]["baseline"]["log_date"]] + legacy_rows(
             body, subject["uuid"], [person.get("name", subject["evidence"]["mention"])] + person.get("aliases", "").split(","))
+        saved_candidates = list(candidates)
         assertions = []
         offset = text.index(subject["passage"])
         scope = subject["uuid"] or subject["contribution"]["id"]
@@ -346,11 +352,14 @@ def prepare(source, source_date, text, result, processing_date, people, decision
             compatible = [c for c in exact if c["data"]["baseline"]["temporal_context"] == baseline["temporal_context"]]
             selected = decisions.get(ref_id)
             proposed = exact
-            if suggest and not compatible and candidates:
-                ids = suggest(value, source_date, [{"id": c["data"]["id"], **c["data"]["baseline"]} for c in candidates])
-                if not isinstance(ids, list) or any(not isinstance(i, str) or i not in [c["data"]["id"] for c in candidates] for i in ids):
-                    raise ValueError("Semantic suggestions are unreadable.")
-                proposed += [c for c in candidates if c["data"]["id"] in ids and c not in proposed]
+            if suggest and not exact and saved_candidates and selected is None and not comparison_failed:
+                try:
+                    ids = suggest(value, source_date, [{"id": c["data"]["id"], **c["data"]["baseline"]} for c in saved_candidates])
+                    if not isinstance(ids, list) or any(not isinstance(i, str) or i not in [c["data"]["id"] for c in saved_candidates] for i in ids):
+                        raise ComparisonUnavailable("Local comparison returned an invalid result.")
+                    proposed += [c for c in saved_candidates if c["data"]["id"] in ids and c not in proposed]
+                except ComparisonUnavailable:
+                    comparison_failed = True
             if selected not in {None, "separate", "source"}:
                 match = next((c for c in candidates if c["data"]["id"] == selected), None)
                 if match is None:
@@ -368,7 +377,7 @@ def prepare(source, source_date, text, result, processing_date, people, decision
                     assertion["legacy"] = {"line": match["legacy_line"], "data": match["data"]}
             elif proposed and selected is None:
                 questions.append({"key": ref_id, "evidence": evidence, "assertion": value,
-                    "observed_date": source_date, "candidates": [{"id": c["data"]["id"], **c["data"]["baseline"]} for c in proposed]})
+                    "person_name": subject["name"], "observed_date": source_date, "candidates": [{"id": c["data"]["id"], **c["data"]["baseline"]} for c in proposed]})
             if selected is not None:
                 manifest.setdefault("equivalence_answers", {})[ref_id] = selected
             assertions.append(assertion)
@@ -377,7 +386,10 @@ def prepare(source, source_date, text, result, processing_date, people, decision
                                            "protected": False, "references": [assertion["reference"]]},
                                    "visible": assertion["baseline"]["text"]})
         subject["contribution"] = {"id": subject["contribution"]["id"], "scope": scope, "assertions": assertions}
-    if questions:
+    if comparison_failed:
+        manifest.update(status="deferred", reason="comparison_unavailable",
+                        extracted=[dict(s["evidence"], passage=s["passage"]) for s in manifest["subjects"]])
+    elif questions:
         manifest.update(status="question", reason="assertion_equivalence", semantic_questions=questions,
                         extracted=[dict(s["evidence"], passage=s["passage"]) for s in manifest["subjects"]])
     return manifest
@@ -466,9 +478,9 @@ def replay(bridge, manifest, previous="", persist_manifest=None, selves=(), pres
             bridge([{"op": "capture_store", "uuid": manifest["source_uuid"], "expected": previous,
                      "value": value, "text": manifest["text"]}])
             previous = value
-    if manifest["status"] == "question":
+    if manifest["status"] in {"question", "deferred"}:
         persist()
-        return capture.outcome("unresolved", manifest["reason"])
+        return capture.outcome("deferred" if manifest["status"] == "deferred" else "unresolved", manifest["reason"])
     if manifest["status"] != "filed":
         capture.validate_frozen(bridge, manifest, selves)
     if previous != capture.encode_manifest(manifest):

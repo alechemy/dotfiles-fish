@@ -8,7 +8,7 @@ The implementation includes deliberate filing, questions, correction, reminder-o
 
 A single subject receives the whole source text, including lists and mundane information. Several subjects require non-overlapping passages covering the note. The local model identifies main subjects; optional enrichment is unnecessary. Deliberate capture does not modify structured biographical fields or `LastContact`. New Person initialization sets `EntityType=Person` and an initially empty `EntityStatus=active`, without restoring cleared fields on committed records.
 
-The source's `CaptureOperation` stores its version, UUID, text hash, original text and date, targets, frozen contributions, progress, receipts, and earlier source versions. Local state is a cache, and generic `EntityFiled` is not completion proof. Retries validate current controls without repeating inference. Invalid operations stop without overwriting evidence.
+The source's `CaptureOperation` stores its version, UUID, text hash, original text and date, targets, frozen contributions, progress, receipts, and earlier source versions. Local state is a cache, and generic `EntityFiled` is not completion proof. Retries of frozen filings validate current controls without repeating inference. Notes waiting for analysis can retry local comparison. Invalid operations stop without overwriting evidence.
 
 `CaptureStatus` is a derived discovery index. Nonterminal operations and unindexed older operations are retrieved separately from the newest 200 completed records. Verified filed, undone, or explicitly retained legacy sources move to `_Facts/Filed`; sources manually moved outside `_Facts` keep their location. Source UUIDs remain stable for provenance and direct detail links.
 
@@ -26,15 +26,15 @@ Legacy proposal/candidate task interpretation and map reconstruction are disable
 
 ## Unified biographical filing update
 
-The v2 update is integrated and installed on the driver. Its private preview plans eight Person normalizations, with two unanswered semantic questions and six skipped records. Migration has not applied record writes. Answer those questions in the review app before applying the resulting frozen plan. The deployment history below describes the earlier capture release.
+The v2 filing update is installed on the driver. The initial private preview planned eight Person normalizations and excluded six records. It did not apply record writes. The comparison fix invalidates that preview and its two questions; create a fresh preview before reviewing or applying it. The deployment history below describes the earlier capture release.
 
-The configured local model rejected synthetic comparison requests with HTTP 507. Model-assisted comparison remains unverified. Failed comparisons retain possible candidates for explicit review rather than authorizing equivalence.
+The last synthetic model-assisted comparison check returned HTTP 507, so model comparison remains unverified. Failed, malformed, or oversized comparisons now retain complete source evidence in a waiting state without inventing possible matches. Existing Person support stays intact during a queued correction. Waiting comparisons block migration review and application.
 
 New captures file assertions under `## Biographical Log`, without separate Captured sections. A conservative splitter preserves every source span. It omits a leading primary name only for recognized subject-relative wording, leaving quotations, links, compound subjects, and other people's names intact. Unsupported structures retain source wording. Original sources and operation history remain unchanged.
 
 Each assertion's hidden `bio:v2` marker binds it to the containing Person UUID, an immutable content/date baseline, and independent capture, passive, or protected legacy references. Literal ownership examples use a reversible render-only escape; their evidence stays exact. Moving an owned assertion into a blockquote removes its active ownership. Copies in another Person do not authorize writes.
 
-Exact assertions with compatible temporal context share one visible bullet. Cross-day or suggested paraphrase matches require **Same complete assertion** confirmation. **Keep separate** retains both, and **Keep source wording** retains the submitted wording. Source observation dates do not prove event dates. The local model only suggests candidates. Novel edits and reassignments queue analysis under the worker's existing resource and inference locks; the review app reports Waiting until verified filing.
+Exact assertions with compatible temporal context share one visible bullet. Exact repetitions within a draft also coalesce without inference. Semantic candidates come only from saved Person entries; differently worded passages within the current draft stay separate. Cross-day or suggested paraphrase matches show the incoming and existing text with dates. **Already recorded; keep this entry** confirms complete equivalence. **Add as new information** retains a separate entry, and the expandable original-wording option retains the submitted wording. Source observation dates do not prove event dates. The local model only suggests candidates. Novel edits and reassignments queue analysis under the worker's existing resource and inference locks; the review app reports Waiting until verified filing.
 
 Undo removes that capture's references. Another capture or passive source keeps the assertion alive. Historical and keep-edited assertions stay protected, including when they have no remaining references. Only unchanged capture-created assertions lose their visible bullet with their last support. Corrections verify destination references before removing superseded references. Frozen v1 operations continue using their original blocks on retries.
 
@@ -56,7 +56,16 @@ Only the operator may run the following after code review and integration into t
      --output "$STATE/biographical-preview.json"
    ```
 
-3. Inspect sanitized counts. Pending semantic questions appear in the existing private review app. Review freezes a newly digested plan, preserves the original, and reports Reviewed or Waiting, never Saved. Partial review is supported. After reviewing, use the reported current plan ID and its fixed registration at `$STATE/entity-biographical-plans/<plan-id>.json`. The CLI alternative accepts an operator-created mode-600 decision file with `plan_id` and `answers`, keyed by frozen source UUID and question key:
+3. Inspect sanitized counts. `waiting_comparisons` means local comparison could not finish; those cards have no decision controls. A waiting plan cannot be reviewed or applied. Once comparison is available, create a fresh preview at a new output path and explicitly replace the unapplied registration:
+
+   ```sh
+   /usr/bin/python3 "$HOME/.local/bin/entity-biographical-migrate" --preview \
+     --replace-plan "$OLD_PLAN_ID" --output "$STATE/biographical-refreshed.json"
+   ```
+
+   Replacement accepts only an unapplied pending or reviewed registration and stops during a migration fence. Preview and resolve never overwrite existing output files, including registered artifacts. The original preview remains available.
+
+   Pending semantic questions appear in the existing private review app. Review freezes a newly digested plan, preserves the original, and reports Reviewed or Waiting, never Saved. Partial review is supported. After reviewing, use the reported current plan ID and its fixed registration at `$STATE/entity-biographical-plans/<plan-id>.json`. The CLI alternative accepts an operator-created mode-600 decision file with `plan_id` and `answers`, keyed by frozen source UUID and question key:
 
    ```sh
    /usr/bin/python3 "$HOME/.local/bin/entity-biographical-migrate" --resolve \
@@ -70,7 +79,7 @@ Only the operator may run the following after code review and integration into t
 5. After interruption, use `--recover --plan "$PLAN"` with the same code and exact artifact. Recovery performs no inference. The durable `entity-biographical-fence.json` pauses affected sources and People across crashes, while unrelated ingestion and read-only review remain available. Never delete the fence to force a retry.
 6. To reverse application, use `--rollback --plan "$PLAN"`. Repeat that command to recover an interrupted rollback. Rollback restores frozen bodies and operations only if every affected record still matches a valid checkpoint; later edits or new support stop it. Do not reinstall older code while the fence is active.
 
-A nonzero pending count is unfinished migration. Skipped/conflicted records stay intact and must be reported as residuals. `{"status":"stopped"}` is sanitized failure output, not permission to regenerate a plan over partial work. This procedure authorizes no publication or remote write.
+A nonzero `pending_questions` or `waiting_comparisons` count is unfinished migration. Skipped/conflicted records stay intact and must be reported as residuals. `{"status":"stopped"}` is sanitized failure output, not permission to regenerate a plan over partial work. This procedure authorizes no publication or remote write.
 
 ## Earlier capture migration
 

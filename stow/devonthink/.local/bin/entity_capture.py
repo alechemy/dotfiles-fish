@@ -419,7 +419,8 @@ def replay(bridge, manifest, previous="", persist_manifest=None, selves=(), pres
 
 
 QUESTIONS = {
-    "assertion_equivalence": "Does the existing assertion cover all this information, including its qualifiers and time? Keep separate when unsure.",
+    "assertion_equivalence": "Is this new information, or is it already saved? Keep it as new information if any details differ.",
+    "comparison_unavailable": "Waiting to compare this note with existing information. Your note is safe; nothing will change until comparison succeeds.",
     "ambiguous_name": "Which person is this note about?",
     "conflicting_identifiers": "The name and email point to different people. Correct the note or separate its passages.",
     "passage_selection_needed": "Which passage belongs to each person?",
@@ -458,7 +459,7 @@ def view(manifest, people):
                 "deferred": False, "question": QUESTIONS.get(manifest.get("reason"), "Waiting for local comparison."),
                 "conflict": False, "choices": [], "subjects": [], "can_retain_legacy": False,
                 "semantic_questions": []}
-    status = manifest["status"]
+    status = "waiting" if manifest.get("reason") == "comparison_unavailable" and manifest["status"] == "deferred" else manifest["status"]
     text = manifest.get("correction", {}).get("text", manifest.get("changed_text", manifest["text"]))
     choices = []
     if status in {"question", "deferred"}:

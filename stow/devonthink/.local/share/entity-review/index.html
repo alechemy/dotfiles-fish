@@ -120,6 +120,20 @@ li.off .rowtext { opacity: .4; text-decoration: line-through; }
   border: 1px solid var(--line); border-radius: 8px; padding: 9px 10px;
 }
 .capture textarea { min-height: 80px; resize: vertical; }
+.capture details { margin-top: 12px; font-size: 14px; }
+.capture summary { cursor: pointer; color: var(--muted); }
+.comparison { min-width: 0; border: 1px solid var(--line); border-radius: 10px; padding: 12px; margin: 18px 0 0; }
+.comparison legend { font-weight: 650; padding: 0 5px; }
+.comparison-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
+@media (min-width: 600px) { .comparison-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } }
+.comparison h3 { font-size: 14px; margin: 0 0 8px; color: var(--muted); }
+.comparison-text { white-space: pre-wrap; overflow-wrap: anywhere; margin: 6px 0; }
+.comparison-date { display: block; color: var(--muted); font-size: 12.5px; margin-top: 6px; }
+.capture .comparison-choice { display: flex; align-items: flex-start; gap: 8px; padding: 10px; margin-top: 8px; border: 1px solid var(--line); border-radius: 9px; cursor: pointer; }
+.comparison-choice:has(input:checked) { border-color: var(--accent); }
+.capture .comparison-choice input[type=radio] { display: inline-block; width: 18px; height: 18px; min-height: 0; flex: none; margin: 2px 0 0; padding: 0; accent-color: var(--accent); }
+.comparison-choice strong { display: block; font-size: 14px; }
+.review-explanation { color: var(--muted); font-size: 13.5px; margin: 10px 0 0; }
 .state { text-align: center; color: var(--muted); padding: 48px 20px; }
 .state .big { font-size: 40px; margin-bottom: 10px; }
 .state .btn { margin-top: 14px; }
@@ -384,11 +398,15 @@ function viewItems() {
   const props = queue.proposals || [];
   const items = [];
   const captures = queue.captures || [];
+  if (queue.migration_status === "unavailable") items.push(item("m:unavailable",
+    '<div class="notice">The older-note review is unavailable. Your saved notes remain in DEVONthink.</div>'));
   for (const plan of queue.migration_plans || []) {
     if (plan.status === "pending") continue;
-    items.push(item("m:" + plan.id, '<div class="notice">Migration plan ' + esc(plan.status) +
-      '. Registered plan ID: <code style="overflow-wrap:anywhere">' + esc(plan.id) + '</code>' +
-      (plan.status === "reviewed" ? '<p>Apply this exact registered artifact separately. Review has not migrated any records.</p>' : '') + '</div>'));
+    const message = {reviewed:"Your review is complete. Your notes stay unchanged until the migration is applied.",
+      applying:"Your older notes are being updated.", applied:"Your older notes have been updated.",
+      rolled_back:"The migration was undone."}[plan.status] || "Check the migration status before continuing.";
+    items.push(item("m:" + plan.id, '<div class="notice">' + esc(message) +
+      '<details><summary>Migration details</summary>Plan ID: <code style="overflow-wrap:anywhere">' + esc(plan.id) + '</code></details></div>'));
   }
   if (captures.length) {
     items.push(item("h:captures", '<h2 class="sec">Saved notes and questions</h2>'));
@@ -518,6 +536,33 @@ function dtLink(uuid, label) {
     esc(label) + "</a>";
 }
 
+function comparisonDate(value, context) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value || "")) return "";
+  const format = date => new Intl.DateTimeFormat("en", {month:"short", day:"numeric", year:"numeric", timeZone:"UTC"}).format(new Date(date + "T12:00:00Z"));
+  const timing = /^(observed|dated):(\d{4}-\d{2}-\d{2})$/.exec(context || "");
+  if (context && !timing) return "Recorded on " + format(value) + "; timing: " + context;
+  return (timing && timing[1] === "dated" ? "Dated " : "Noted on ") + format(timing ? timing[2] : value) +
+    (timing && timing[2] !== value ? ". Recorded on " + format(value) : "");
+}
+
+function comparisonCard(q, cv, o, index, total) {
+  const answer = (o.captureAnswers || {})[q.key] || "";
+  const name = "comparison-" + cv.uuid + "-" + q.key;
+  const input = value => '<input type="radio" name="' + esc(name) + '" data-semantic-key="' + esc(q.key) + '" value="' + esc(value) + '"' + (answer === value ? ' checked' : '') + '>';
+  let html = '<fieldset class="comparison"><legend>Review fact ' + (index + 1) + ' of ' + total + '</legend>';
+  if (q.person_name) html += '<p class="review-explanation">About ' + esc(q.person_name) + '</p>';
+  html += '<div class="comparison-grid"><div><h3>From your note</h3><p class="comparison-text">' + esc(q.assertion) +
+    '</p><span class="comparison-date">' + esc(comparisonDate(q.observed_date)) + '</span></div><div><h3>Already saved</h3>';
+  for (const candidate of q.candidates) html += '<label class="comparison-choice">' + input(candidate.id) +
+    '<span><strong>Already recorded; keep this entry</strong><span class="comparison-text">' + esc(candidate.text) +
+    '</span><span class="comparison-date">' + esc(comparisonDate(candidate.log_date, candidate.temporal_context)) + '</span></span></label>';
+  html += '</div></div><label class="comparison-choice">' + input("separate") + '<span><strong>Add as new information</strong>' +
+    '<span>Keep a separate entry if any details differ or you are unsure.</span></span></label>';
+  html += '<details><summary>Original wording and other options</summary><div class="captured">' + esc(q.evidence) +
+    '</div><label class="comparison-choice">' + input("source") + '<span>Add a separate entry using my original wording</span></label></details></fieldset>';
+  return html;
+}
+
 function captureCard(cv, o) {
   const u = esc(cv.uuid);
   const migration = !!cv.migration_plan;
@@ -525,17 +570,19 @@ function captureCard(cv, o) {
   const finished = ["filed", "undone", "retained"].includes(cv.status);
   const editing = !migration && (!!o.captureEdit || !finished) && cv.status !== "correcting";
   const technical = ["waiting", "deferred", "broken", "correcting"].includes(cv.status);
+  const questions = cv.semantic_questions || [];
   let html = '<div class="card capture" id="c-' + u + '"><div class="cardtop"><span class="who">' +
-    esc(migration ? "Migration review" : cv.status === "filed" ? "Saved" : cv.status === "undone" ? "Filing undone" : cv.status === "retained" ? "Existing filings kept" : technical ? "Waiting for processing" : "A question about your note") +
-    '</span><span class="meta">' + esc(cv.date || "") + '</span></div>';
-  html += '<div class="chips">' + dtLink(cv.source_uuid || cv.uuid, "Original note") + '</div>';
-  if (!finished) html += '<div class="notice">' + esc(cv.question) + '</div>';
-  if (!editing) html += '<div class="captured">' + esc(cv.text) + '</div>';
+    esc(migration ? technical ? "Waiting to compare" : "Review an older note" : cv.status === "filed" ? "Saved" : cv.status === "undone" ? "Filing undone" : cv.status === "retained" ? "Existing filings kept" : technical ? "Waiting for processing" : "A question about your note") +
+    '</span><span class="meta">' + esc(comparisonDate(cv.date)) + '</span></div>';
+  html += '<div class="chips">' + dtLink(cv.source_uuid || cv.uuid, "Open in DEVONthink") + '</div>';
+  if (!finished) html += '<div class="notice">' + esc(questions.length ? "Compare the new information with what is already saved. Reuse an entry only if it includes every detail and any relevant dates." : cv.question) + '</div>';
+  if (!editing) html += '<details><summary>Read the full note</summary><div class="captured">' + esc(cv.text) + '</div></details>';
   if (cv.status === "correcting" && cv.current_text !== undefined && cv.current_text !== cv.text) html += '<label>Current source<div class="captured">' + esc(cv.current_text) + '</div></label>';
   if (editing && !["waiting", "broken"].includes(cv.status)) {
     o = captureOverlay(cv.uuid);
     if (o.captureRevision !== cv.revision) html += '<div class="notice">The source changed while you were editing. Your draft is retained.<button class="btn" data-act="capture-reload" data-uuid="' + u + '">Reload the changed note and discard these edits</button></div>';
     const text = o.captureText;
+    if (questions.length) html += '<details><summary>Edit this note or change the person</summary>';
     html += '<label>Captured note<textarea class="captured" style="width:100%;max-height:none" data-capture-text="1">' + esc(text) + '</textarea></label>';
     const rows = o.captureRows || (cv.subjects.length ? cv.subjects.map(s => ({mention:s.mention, passage:s.passage, target:s.uuid, email:s.email || ""})) :
       [{mention:"", passage:cv.text, target:"", email:""}]);
@@ -547,27 +594,19 @@ function captureCard(cv, o) {
     });
     html += '<button class="btn quiet" data-act="capture-add" data-uuid="' + u + '">Add another subject and passage</button>';
     if (cv.choices.length) html += '<div class="notice">Possible people: ' + esc(cv.choices.map(p => [p.name,p.city,p.employer].filter(Boolean).join(", ")).join("; ")) + '</div>';
+    if (questions.length) html += '</details>';
   }
-  for (const q of cv.semantic_questions || []) {
-    const answer = (o.captureAnswers || {})[q.key] || "";
-    html += '<div class="plan"><label>Complete source evidence<div class="captured">' + esc(q.evidence) +
-      '</div></label><p>Proposed assertion: ' + esc(q.assertion) + '</p><p>Observed on ' + esc(q.observed_date) +
-      '. Confirm only when the full assertion, qualifiers, and time are the same.</p><label>Disposition<select data-semantic-key="' + esc(q.key) +
-      '"><option value="">Choose a disposition</option>';
-    const options = [{id:"separate", text:"Keep separate"}, {id:"source", text:"Keep source wording"}].concat(
-      q.candidates.map(c => ({id:c.id, text:"Same complete assertion: " + c.text + " [" + c.temporal_context + "]"})));
-    for (const choice of options) html += '<option value="' + esc(choice.id) + '"' + (answer === choice.id ? ' selected' : '') + '>' + esc(choice.text) + '</option>';
-    html += '</select></label></div>';
-  }
+  questions.forEach((q, index) => {html += comparisonCard(q, cv, o, index, questions.length);});
   html += '<div class="actions">';
-  if (migration) html += '<button class="btn primary" data-act="migration-answer" data-uuid="' + u + '">Record these migration choices</button>';
+  if (migration && questions.length && !technical) html += '<button class="btn primary" data-act="migration-answer" data-uuid="' + u + '"' +
+    (questions.some(q => !(o.captureAnswers || {})[q.key]) ? ' disabled' : '') + '>Confirm choices</button>';
   if (editing && !["waiting", "broken"].includes(cv.status)) html += '<button class="btn primary" data-act="capture-save" data-uuid="' + u + '">Save to the selected people</button>';
   if (cv.status === "filed") html += '<button class="btn" data-act="capture-edit" data-uuid="' + u + '">Wrong person</button><button class="btn danger" data-act="capture-undo" data-uuid="' + u + '">Undo this capture\'s filing</button>';
   if (cv.can_retain_legacy) html += '<button class="btn" data-act="capture-retain" data-uuid="' + u + '">Keep existing filings</button>';
   if (cv.conflict) html += '<button class="btn" data-act="capture-keep" data-uuid="' + u + '">Keep the edited text and finish</button>';
   if (cv.status === "correcting") html += '<button class="btn" data-act="capture-retry" data-uuid="' + u + '">Resume correction</button>';
   if (!migration && !finished && !["waiting", "broken", "correcting"].includes(cv.status)) html += '<button class="btn quiet" data-act="capture-defer" data-uuid="' + u + '">Decide later</button><button class="btn" data-act="capture-retry" data-uuid="' + u + '">Retry processing</button>';
-  return html + '</div></div>';
+  return html + '</div>' + (migration && questions.length && !technical ? '<p class="review-explanation">Your notes stay unchanged until the migration is applied.</p>' : '') + '</div>';
 }
 
 function captureOverlay(uuid) {
@@ -589,7 +628,7 @@ async function decideCapture(uuid, action) {
     try {
       const result = await api("api/biographical-plan/" + cv.migration_plan,
         {source_uuid:cv.source_uuid, answers:captureOverlay(uuid).captureAnswers || {}});
-      toast(result.status === "migration_reviewed" ? "Migration plan reviewed. Apply it separately." : "Choices recorded. More migration questions remain.");
+      toast(result.status === "migration_reviewed" ? "Choices confirmed. Your notes stay unchanged until migration is applied." : "Choices recorded. More information needs review.");
       delete local["c-" + uuid];
       await refresh(false);
     } catch(e) { banner(e.message); }
@@ -606,7 +645,7 @@ async function decideCapture(uuid, action) {
   }
   try {
     const result = await api("api/capture/" + uuid, body);
-    toast(result.status === "filed" ? "Saved" : result.status === "undone" ? "Filing undone" : result.status === "retained" ? "Existing filings kept" : action === "defer" ? "Kept for later" : "Waiting for processing");
+    toast(result.status === "filed" ? "Saved" : result.status === "undone" ? "Filing undone" : result.status === "retained" ? "Existing filings kept" : result.status === "question" ? "More information needs your review." : action === "defer" ? "Kept for later" : "Waiting for processing");
     delete local["c-" + uuid];
     await refresh(false);
   } catch(e) { banner(e.message); }
@@ -1052,8 +1091,12 @@ document.addEventListener("input", e => {
   if (t.dataset.captureText) captureOverlay(uuid).captureText = t.value;
   if (t.dataset.captureRow !== undefined) captureOverlay(uuid).captureRows[Number(t.dataset.captureRow)][t.dataset.field] = t.value;
   if (t.dataset.semanticKey !== undefined) {
+    if (t.type === "radio" && !t.checked) return;
     const o = captureOverlay(uuid);
     (o.captureAnswers || (o.captureAnswers = {}))[t.dataset.semanticKey] = t.value;
+    const button = t.closest(".capture").querySelector('[data-act="migration-answer"]');
+    const cv = queue.captures.find(c => c.uuid === uuid);
+    if (button) button.disabled = cv.semantic_questions.some(q => !o.captureAnswers[q.key]);
   }
 });
 

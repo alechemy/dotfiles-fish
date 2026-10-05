@@ -14,7 +14,9 @@ Single names are valid. A uniquely matching existing person receives the note. A
 
 New captures appear in the Person's Biographical Log instead of separate Captured sections. Earlier Captured sections remain until the explicit migration is applied. The primary person's name is normally implicit in their bullets. Original notes remain available through source links.
 
-Exact compatible assertions share one bullet with independent source support. Possible paraphrases or cross-day matches ask whether they are the **Same complete assertion**. Choose **Keep separate** when details or timing differ or you are unsure. **Keep source wording** keeps the submitted wording. New edits or reassignments can report Waiting while the local worker compares them. Review never claims Saved before verified filing.
+Exact matches with compatible dates share one bullet while retaining both sources. For a possible match, the app shows **From your note** beside **Already saved**. Choose **Already recorded; keep this entry** only if the existing entry covers every detail, including who it concerns and any dates. Otherwise, choose **Add as new information**. Expand **Original wording and other options** to keep your submitted wording as a separate entry.
+
+If local comparison fails or is unavailable, the note waits without asking you to resolve unverified matches. New edits or reassignments can also report Waiting while the local worker compares them. Review never claims Saved before verified filing.
 
 After verified filing, the processing day's daily note contains a short receipt linking to the person, original note, and correction view. The saved contribution keeps the capture's original date. Capturing information does not update `LastContact` or automatically overwrite city, employer, email, or other structured fields.
 

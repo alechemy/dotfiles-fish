@@ -7,7 +7,7 @@ from pathlib import Path
 import entity_biographical as bio
 import entity_capture as capture
 
-VERSION = "biographical-v2-2"
+VERSION = "biographical-v2-3"
 FENCE_NAME = "entity-biographical-fence.json"
 
 
@@ -18,7 +18,7 @@ def code_digest():
     return bio.digest("".join((root / name).read_text() for name in names))
 
 
-def private_save(path, value):
+def private_save(path, value, replace=True):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, temp = tempfile.mkstemp(dir=str(path.parent), prefix=".biographical-")
@@ -28,7 +28,10 @@ def private_save(path, value):
             stream.flush()
             os.fsync(stream.fileno())
         os.chmod(temp, 0o600)
-        os.replace(temp, path)
+        if replace:
+            os.replace(temp, path)
+        else:
+            os.link(temp, path)
         directory = os.open(str(path.parent), os.O_RDONLY)
         try:
             os.fsync(directory)
@@ -75,7 +78,7 @@ def preview(bridge, suggest=None, decisions=None, frozen_questions=None, selves=
         sources = {uuid: row for uuid, row in sources.items() if uuid in allowed_scope}
     records, states, steps, questions, question_scope = {}, {}, [], [], set()
     decisions = decisions or {}
-    counts = {"normalized_people": 0, "upgraded_captures": 0, "skipped": 0, "conflicted": 0, "pending_questions": 0}
+    counts = {"normalized_people": 0, "upgraded_captures": 0, "skipped": 0, "conflicted": 0, "pending_questions": 0, "waiting_comparisons": 0}
     for person in people:
         records[person["uuid"]] = {"body": person.get("body", ""), "operation": "", "controls": controls(person),
                                    "name": person["name"], "aliases": person.get("aliases", ""), "md": person.get("md", {})}
@@ -143,10 +146,11 @@ def preview(bridge, suggest=None, decisions=None, frozen_questions=None, selves=
                         if q["assertion"] == value for c in q["candidates"] if c["id"] in ids)) if frozen else []
             upgraded = capture.prepare_unified({"uuid": uuid}, original["source_date"], original["text"], resolved,
                                                original["processing_date"], current_people, decisions=decisions.get(uuid), suggest=comparisons, require_review=required)
-            if upgraded["status"] == "question":
+            if upgraded["status"] in {"question", "deferred"}:
                 questions.append({"source_uuid": uuid, "manifest": upgraded})
                 question_scope.update([uuid] + [s["uuid"] for s in original["subjects"]])
-                counts["pending_questions"] += len(upgraded["semantic_questions"])
+                counts["pending_questions"] += len(upgraded.get("semantic_questions", []))
+                counts["waiting_comparisons"] += upgraded["status"] == "deferred"
                 steps[checkpoint:] = []
                 states = frozen_states
                 continue
@@ -192,13 +196,15 @@ def validate(plan):
         raise ValueError("Migration plan is unreadable.")
     if not isinstance(plan.get("questions"), list) or not isinstance(plan.get("decisions"), dict):
         raise ValueError("Migration questions are unreadable.")
-    question_count = 0
+    question_count, waiting_count = 0, 0
     for question in plan["questions"]:
         manifest = capture.decode_manifest(capture.encode_manifest(question["manifest"]), question["source_uuid"])
-        if manifest["status"] != "question" or question["source_uuid"] not in plan["scope"]:
+        if (manifest["status"] not in {"question", "deferred"} or question["source_uuid"] not in plan["scope"] or
+                manifest["status"] == "deferred" and (manifest.get("reason") != "comparison_unavailable" or manifest.get("semantic_questions"))):
             raise ValueError("Migration question scope is unreadable.")
-        question_count += len(manifest["semantic_questions"])
-    if question_count != plan["counts"].get("pending_questions", 0):
+        question_count += len(manifest.get("semantic_questions", []))
+        waiting_count += manifest["status"] == "deferred"
+    if question_count != plan["counts"].get("pending_questions", 0) or waiting_count != plan["counts"].get("waiting_comparisons", 0):
         raise ValueError("Migration question counts changed.")
     states = {uuid: {"body": record["body"], "operation": record["operation"]} for uuid, record in plan["records"].items()}
     for step in plan["steps"]:
@@ -210,6 +216,8 @@ def validate(plan):
 
 def resolve(bridge, plan, answer_document):
     validate(plan)
+    if plan["counts"].get("waiting_comparisons"):
+        raise ValueError("Migration is waiting for local comparison. Create a fresh preview when it is available.")
     if (not isinstance(answer_document, dict) or set(answer_document) != {"plan_id", "answers"} or
             answer_document["plan_id"] != plan["plan_id"] or not isinstance(answer_document["answers"], dict) or
             not answer_document["answers"]):
@@ -267,6 +275,8 @@ def expected_at(plan, position):
 
 def transact(bridge, plan, journal_path, fence_path, rollback=False):
     validate(plan)
+    if plan["counts"].get("waiting_comparisons"):
+        raise ValueError("Migration is waiting for local comparison.")
     if plan["counts"].get("pending_questions", 0):
         raise ValueError("Migration has unanswered questions.")
     journal_path, fence_path = Path(journal_path), Path(fence_path)

@@ -166,6 +166,88 @@ class PrivateReview(unittest.TestCase):
             self.assertEqual(json.loads(console.getvalue()), {"status": "stopped"})
             self.assertNotIn("Wren", console.getvalue())
 
+    def test_unavailable_cli_preview_replaces_questions_but_preserves_original_and_blocks_apply(self):
+        cli = load("entity-biographical-migrate", "bio_waiting_cli")
+        ef = load("entity-filing.py", "bio_waiting_legacy_format")
+        self.bridge.bodies["BBB-222"] = self.bridge.bodies["BBB-222"].replace(
+            ef.fact_line("2026-08-01", "Wren has two siblings.", "EEE-555"),
+            ef.fact_line("2026-08-01", "Wren likes hiking.", "EEE-555"))
+        original = copy.deepcopy(self.bridge.bodies)
+        for cause in ("pressure", "transport", "lock", "comparison"):
+            with self.subTest(cause=cause):
+                state = self.state / cause
+                review.register(state, self.plan)
+                prior = review.plan_path(state, self.plan["plan_id"])
+                prior_bytes = prior.read_bytes()
+                fake = types.SimpleNamespace(STATE_DIR=str(state), run_bridge=self.bridge,
+                    acquire_lock=lambda: mock.Mock(), load_config=lambda: {},
+                    memory_pressure_normal=lambda: cause != "pressure",
+                    pick_transport=lambda config: None if cause == "transport" else "local",
+                    acquire_llm_lock=lambda: None if cause == "lock" else mock.Mock(),
+                    self_names=lambda config: set(),
+                    semantic_suggestions=mock.Mock(return_value=cli.unavailable_comparison))
+                spec = types.SimpleNamespace(loader=types.SimpleNamespace(exec_module=lambda module: None))
+                output = state / "refreshed.json"
+                console = io.StringIO()
+                with mock.patch.object(cli.importlib.util, "spec_from_file_location", return_value=spec), \
+                        mock.patch.object(cli.importlib.util, "module_from_spec", return_value=fake), \
+                        mock.patch("sys.stdout", console):
+                    self.assertEqual(cli.main(["--preview", "--output", str(output),
+                                               "--replace-plan", self.plan["plan_id"]]), 0)
+                report = json.loads(console.getvalue())
+                self.assertEqual(report["status"], "waiting_comparison")
+                self.assertEqual(report["pending_questions"], 0)
+                self.assertEqual(report["waiting_comparisons"], 2)
+                self.assertEqual(fake.semantic_suggestions.call_count, int(cause == "comparison"))
+                self.assertEqual(prior.read_bytes(), prior_bytes)
+                self.assertEqual(review.registry(state)["plans"][self.plan["plan_id"]]["status"], "superseded")
+                self.assertTrue(all(view["status"] == "waiting" for view in review.views(state)))
+                with mock.patch.object(cli.importlib.util, "spec_from_file_location", return_value=spec), \
+                        mock.patch.object(cli.importlib.util, "module_from_spec", return_value=fake), \
+                        mock.patch("sys.stdout", io.StringIO()):
+                    self.assertEqual(cli.main(["--apply", "--plan", str(output)]), 1)
+                self.assertEqual(review.registry(state)["plans"][report["plan_id"]]["status"], "pending")
+                self.assertFalse((state / migration.FENCE_NAME).exists())
+        self.assertEqual(self.bridge.bodies, original)
+        self.assertEqual(self.bridge.mutations, 0)
+
+    def test_cli_never_overwrites_registered_or_external_preview_or_writes_invalid_replacement(self):
+        cli = load("entity-biographical-migrate", "bio_preserve_cli")
+        fake = types.SimpleNamespace(STATE_DIR=str(self.state), run_bridge=self.bridge,
+            acquire_lock=lambda: mock.Mock(), load_config=lambda: {}, memory_pressure_normal=lambda: True,
+            pick_transport=lambda config: "local", acquire_llm_lock=lambda: mock.Mock(), self_names=lambda config: set(),
+            semantic_suggestions=mock.Mock(return_value=lambda *args: []))
+        spec = types.SimpleNamespace(loader=types.SimpleNamespace(exec_module=lambda module: None))
+        external = self.state / "original-preview.json"
+        migration.private_save(external, self.plan)
+        registered = review.plan_path(self.state, self.plan["plan_id"])
+        original_bytes = {path: path.read_bytes() for path in (external, registered)}
+        original_registry = review.registry(self.state)
+        decisions = self.state / "decisions.json"
+        payload = answer(self.plan)
+        migration.private_save(decisions, {"plan_id": self.plan["plan_id"],
+            "answers": {payload["source_uuid"]: payload["answers"]}})
+        with mock.patch.object(cli.importlib.util, "spec_from_file_location", return_value=spec), \
+                mock.patch.object(cli.importlib.util, "module_from_spec", return_value=fake), \
+                mock.patch("sys.stdout", io.StringIO()):
+            for path in original_bytes:
+                self.assertEqual(cli.main(["--preview", "--output", str(path),
+                                           "--replace-plan", self.plan["plan_id"]]), 1)
+                self.assertEqual(cli.main(["--resolve", "--plan", str(external), "--decisions", str(decisions),
+                                           "--output", str(path)]), 1)
+            fresh = self.state / "invalid-replacement.json"
+            self.assertEqual(cli.main(["--preview", "--output", str(fresh), "--replace-plan", "f" * 64]), 1)
+            self.assertFalse(fresh.exists())
+            migration.private_save(self.state / migration.FENCE_NAME, {"version": 2})
+            self.assertEqual(cli.main(["--preview", "--output", str(fresh),
+                                       "--replace-plan", self.plan["plan_id"]]), 1)
+            self.assertFalse(fresh.exists())
+        for path, original in original_bytes.items():
+            self.assertEqual(path.read_bytes(), original)
+        self.assertEqual(review.registry(self.state), original_registry)
+        fake.semantic_suggestions.assert_not_called()
+        self.assertEqual(self.bridge.mutations, 0)
+
     def test_endpoint_has_exact_plan_id_origin_gate_and_duplicate_key_rejection(self):
         path = "/api/biographical-plan/" + self.plan["plan_id"]
         raw = json.dumps(answer(self.plan)).encode()
