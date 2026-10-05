@@ -236,6 +236,7 @@ if brew trust --help >/dev/null 2>&1; then
     if brew trust --command domt4/autoupdate/autoupdate \
         && brew trust --formula \
             atlassian/acli/acli \
+            mobile-dev-inc/tap/maestro \
             felixkratz/formulae/borders \
             felixkratz/formulae/sketchybar \
             yqrashawn/goku/goku \
