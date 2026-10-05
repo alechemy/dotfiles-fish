@@ -26,7 +26,9 @@ Legacy proposal/candidate task interpretation and map reconstruction are disable
 
 ## Unified biographical filing update
 
-The v2 update is implemented but has not been installed or migrated. The deployment history below describes the earlier capture release.
+The v2 update is integrated and installed on the driver. Its private preview plans eight Person normalizations, with two unanswered semantic questions and six skipped records. Migration has not applied record writes. Answer those questions in the review app before applying the resulting frozen plan. The deployment history below describes the earlier capture release.
+
+The configured local model rejected synthetic comparison requests with HTTP 507. Model-assisted comparison remains unverified. Failed comparisons retain possible candidates for explicit review rather than authorizing equivalence.
 
 New captures file assertions under `## Biographical Log`, without separate Captured sections. A conservative splitter preserves every source span. It omits a leading primary name only for recognized subject-relative wording, leaving quotations, links, compound subjects, and other people's names intact. Unsupported structures retain source wording. Original sources and operation history remain unchanged.
 
@@ -44,7 +46,7 @@ Future passive Person facts use subject-relative wording and provenance-aware ex
 
 Only the operator may run the following after code review and integration into the primary checkout. Keep detailed artifacts outside Git; the CLI prints counts, a plan digest, and status only. Do not paste private plans, decisions, source bodies, or review responses into agent context.
 
-1. Preserve unrelated primary-checkout edits and integrate the reviewed task diff without replacing those files wholesale. Run the synthetic tests. From the primary checkout only, restow the `devonthink` package with `stow --dir=stow --target="$HOME" --restow --no-folding devonthink` because this update adds helpers. Restart the existing entity review server to load its Python modules. No metadata or launchd schema change is required; keep the existing activation boundary.
+1. Preserve unrelated primary-checkout edits and integrate the reviewed task diff without replacing those files wholesale. Run the synthetic tests. From the primary checkout only, restow the `devonthink` package with `stow --dir=stow --target="$HOME" --restow --no-folding --ignore='.DS_Store' --ignore='__pycache__' devonthink` because this update adds helpers. Restart the existing entity review server to load its Python modules. No metadata or launchd schema change is required; keep the existing activation boundary.
 2. On the driver, with its existing resource gates satisfied, create the private preview:
 
    ```sh

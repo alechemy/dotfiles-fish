@@ -12,7 +12,7 @@ Use **Capture Person Fact** in Drafts on Mac or iPhone. Write naturally, for exa
 
 Single names are valid. A uniquely matching existing person receives the note. A new person gets a record under the name you wrote, without a guessed surname. An empty roster does not block deliberate capture. Short notes, lists, and mundane information are retained in full. A daughter mentioned as news about Wren does not need her own record.
 
-After the unified biographical update is installed, captures appear in the Person's Biographical Log instead of separate Captured sections. The primary person's name is normally implicit in their bullets. Original notes remain available through source links.
+New captures appear in the Person's Biographical Log instead of separate Captured sections. Earlier Captured sections remain until the explicit migration is applied. The primary person's name is normally implicit in their bullets. Original notes remain available through source links.
 
 Exact compatible assertions share one bullet with independent source support. Possible paraphrases or cross-day matches ask whether they are the **Same complete assertion**. Choose **Keep separate** when details or timing differ or you are unsure. **Keep source wording** keeps the submitted wording. New edits or reassignments can report Waiting while the local worker compares them. Review never claims Saved before verified filing.
 
