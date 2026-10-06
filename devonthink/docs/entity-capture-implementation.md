@@ -44,6 +44,8 @@ Future passive Person facts use subject-relative wording and provenance-aware ex
 
 `entity-biographical-migrate` is separate from `entity-capture-migrate` and `--migrate-candidates`. It inventories all registered operations, including sources moved outside `_Facts`, and recognized machine Person log entries. Preview freezes ordered body and operation writes, source/control snapshots, candidate baselines, code digest, and scope. It never rewrites edited capture blocks, hand-authored lines, unverified legacy fingerprints, unknown ownership, or unfinished corrections. Those contribute to skipped/conflicted counts.
 
+The Person metadata snapshot excludes `LastContact`, which the morning brief updates independently. Migration never writes or rolls back that date. Other metadata and source/Person bodies must still match the preview.
+
 Only the operator may run the following after code review and integration into the primary checkout. Keep detailed artifacts outside Git; the CLI prints counts, a plan digest, and status only. Do not paste private plans, decisions, source bodies, or review responses into agent context.
 
 1. Preserve unrelated primary-checkout edits and integrate the reviewed task diff without replacing those files wholesale. Run the synthetic tests. From the primary checkout only, restow the `devonthink` package with `stow --dir=stow --target="$HOME" --restow --no-folding --ignore='.DS_Store' --ignore='__pycache__' devonthink` because this update adds helpers. Restart the existing entity review server to load its Python modules. No metadata or launchd schema change is required; keep the existing activation boundary.

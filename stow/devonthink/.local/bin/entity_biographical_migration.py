@@ -48,6 +48,10 @@ def controls(record):
             "filingsuppressed": str(md.get("mdfilingsuppressed", "") or "")}
 
 
+def filing_metadata(md):
+    return {key: value for key, value in md.items() if key != "mdlastcontact"}
+
+
 def coalesce(body, person_uuid):
     by_key = {}
     for row in reversed(bio.render(body, person_uuid)):
@@ -81,7 +85,7 @@ def preview(bridge, suggest=None, decisions=None, frozen_questions=None, selves=
     counts = {"normalized_people": 0, "upgraded_captures": 0, "skipped": 0, "conflicted": 0, "pending_questions": 0, "waiting_comparisons": 0}
     for person in people:
         records[person["uuid"]] = {"body": person.get("body", ""), "operation": "", "controls": controls(person),
-                                   "name": person["name"], "aliases": person.get("aliases", ""), "md": person.get("md", {})}
+                                   "name": person["name"], "aliases": person.get("aliases", ""), "md": filing_metadata(person.get("md", {}))}
     for uuid, source in sorted(sources.items()):
         body, fields = bridge([{"op": "get_text", "uuid": uuid},
                                {"op": "get_fields", "uuid": uuid, "fields": ["entitytype", "filingsuppressed"]}])
@@ -261,7 +265,8 @@ def snapshot(bridge, plan):
         if "name" not in record:
             continue
         current = next((p for p in people if p["uuid"] == uuid), None)
-        if not current or any(current.get(key, "") != record[key] for key in ("name", "aliases", "md")):
+        if (not current or any(current.get(key, "") != record[key] for key in ("name", "aliases")) or
+                filing_metadata(current.get("md", {})) != record["md"]):
             raise ValueError("Migration Person identity changed.")
     return out
 

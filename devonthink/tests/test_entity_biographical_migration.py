@@ -80,6 +80,44 @@ class Migration(unittest.TestCase):
             self.assertIn("Manual paragraph", bridge.bodies["BBB-222"])
             self.assertEqual(migration.preview(bridge)["steps"], [])
 
+    def test_contact_updates_do_not_block_apply_or_rollback_or_get_overwritten(self):
+        bridge = Bridge()
+        bridge.people[0]["md"]["mdlastcontact"] = "2026-09-01"
+        original_bodies = copy.deepcopy(bridge.bodies)
+        original_operations = copy.deepcopy(bridge.operations)
+        plan = migration.preview(bridge, lambda *args: [])
+        bridge.people[0]["md"]["mdlastcontact"] = "2026-09-03"
+        with tempfile.TemporaryDirectory() as directory:
+            journal, fence = Path(directory) / "journal", Path(directory) / "fence"
+            migration.transact(bridge, plan, journal, fence)
+            self.assertEqual(bridge.people[0]["md"]["mdlastcontact"], "2026-09-03")
+            bridge.people[0]["md"]["mdlastcontact"] = "2026-09-04"
+            migration.transact(bridge, plan, journal, fence, rollback=True)
+        self.assertEqual(bridge.people[0]["md"]["mdlastcontact"], "2026-09-04")
+        self.assertEqual(bridge.bodies, original_bodies)
+        self.assertEqual(bridge.operations, original_operations)
+
+    def test_contact_updates_before_and_during_review_keep_frozen_questions_valid(self):
+        ef = load("entity-filing.py", "bio_contact_drift_format")
+        bridge = Bridge()
+        bridge.people[0]["md"]["mdlastcontact"] = "2026-09-01"
+        bridge.bodies["BBB-222"] += "\n\n## Biographical Log\n\n" + ef.fact_line(
+            "2026-08-01", "Wren has two siblings.", "EEE-555")
+        plan = migration.preview(bridge, lambda *args: [])
+        bridge.people[0]["md"]["mdlastcontact"] = "2026-09-03"
+        question = plan["questions"][0]
+        answers = {"plan_id": plan["plan_id"], "answers": {question["source_uuid"]: {
+            q["key"]: q["candidates"][0]["id"] for q in question["manifest"]["semantic_questions"]}}}
+        def contact_update(ops):
+            if ops[0]["op"] == "dump_people" and ops[0].get("include_bodies"):
+                bridge.people[0]["md"]["mdlastcontact"] = "2026-09-04"
+            return bridge(ops)
+        result = migration.resolve(contact_update, plan, answers)
+        self.assertEqual(result["counts"]["pending_questions"], 1)
+        self.assertEqual(bridge.people[0]["md"]["mdlastcontact"], "2026-09-04")
+        self.assertEqual(bridge.mutations, 0)
+        migration.validate(result)
+
     def test_recovery_and_rollback_after_every_mutation_are_frozen(self):
         baseline = Bridge()
         plan = migration.preview(baseline, lambda *args: [])

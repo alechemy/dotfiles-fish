@@ -63,6 +63,28 @@ class PrivateReview(unittest.TestCase):
         self.assertEqual(review.read_private(review.plan_path(self.state, self.plan["plan_id"])), self.plan)
         self.assertEqual(self.bridge.mutations, 0)
 
+    def test_confirmation_accepts_contact_updates_without_changing_records(self):
+        original = copy.deepcopy(self.bridge.bodies)
+        self.bridge.people[0]["md"]["mdlastcontact"] = "2026-09-03"
+        response = srv.handle_biographical_plan(self.plan["plan_id"], answer(self.plan))
+        self.assertEqual(response["status"], "migration_waiting")
+        self.assertEqual(response["pending_questions"], 1)
+        self.assertEqual(self.bridge.bodies, original)
+        self.assertEqual(self.bridge.people[0]["md"]["mdlastcontact"], "2026-09-03")
+        self.assertEqual(review.read_private(review.plan_path(self.state, self.plan["plan_id"])), self.plan)
+        self.assertEqual(self.bridge.mutations, 0)
+
+    def test_confirmation_still_rejects_other_person_metadata_changes(self):
+        baseline = copy.deepcopy(self.bridge.people[0]["md"])
+        for field in ("mdemail", "mdaliases", "mdentitytype", "mdfilingsuppressed",
+                      "mdbriefingsuppressed", "mdentitystatus", "mdcity"):
+            with self.subTest(field=field):
+                self.bridge.people[0]["md"] = {**baseline, field: "changed"}
+                with self.assertRaises(srv.RequestError):
+                    srv.handle_biographical_plan(self.plan["plan_id"], answer(self.plan))
+                self.assertEqual(review.registry(self.state)["plans"][self.plan["plan_id"]]["status"], "pending")
+                self.assertEqual(self.bridge.mutations, 0)
+
     def test_stale_source_person_controls_or_decision_are_rejected(self):
         for choice in ({"source_uuid": "unknown", "answers": {}},
                        {"source_uuid": answer(self.plan)["source_uuid"], "answers": {"unknown": "separate"}},
