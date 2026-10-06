@@ -27,4 +27,6 @@ This directory documents and tests a DEVONthink 4 document-processing pipeline. 
 /usr/bin/python3 -m unittest discover -s devonthink/tests -t devonthink/tests
 ```
 
-The suite is stdlib-only. It stubs pipeline logging; Calendar and Contacts canaries skip when permissions or suitable data are unavailable. Test new bridge handlers through the actual JXA harness as well as Python mocks, including recursive groups and missing date values for inventory handlers.
+For agent validation, use `PIPELINE_MANUAL=1 /usr/bin/python3 devonthink/tests/run_synthetic.py`. It isolates HOME and credential/provider environment before importing tests and excludes live Calendar/Contacts canaries. Focused tests need the same disposable HOME and fictional config/transport stubs. HOME does not isolate macOS account APIs.
+
+The suite is stdlib-only. It stubs pipeline logging. Test new bridge handlers through the actual JXA harness as well as Python mocks, including recursive groups and missing date values for inventory handlers. Passive-envelope integration tests must exercise the production dispatcher and complete retry, promotion and application sequence; extracted handlers and retry-only tests do not cover those contracts.

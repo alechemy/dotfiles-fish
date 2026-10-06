@@ -73,12 +73,12 @@ function run(argv) {
         const end = source.indexOf('\n    },', start)
         if (start < 0 || end < 0) throw new Error('handler missing')
         return Function('dt', 'groupAt', 'byUuid', 'mdValue', 'flagSet', 'captureSourceText',
-                        'captureTargets', 'captureBlockMutation', 'personSkeleton', 'isoStamp', 'handlers', 'db', 'migrationBlocked',
+                        'captureTargets', 'captureBlockMutation', 'personSkeleton', 'isoStamp', 'handlers', 'db', 'migrationBlocked', 'passiveGuard',
           'const PEOPLE_PATH = "/People"; const FACTS_PATH = "/Facts"; let entityIndex = null; let peopleIndex = null; return ({' + source.slice(start, end + 7) + '})'
         )(dt, groupAt, byUuid, mdValue, flagSet, captureSourceText, captureTargets,
           captureBlockMutation, name => '# ' + name, isoStamp,
           {capture_retire_record: op => ({uuid: op.uuid, group: op.group})},
-          {trashGroup: () => 'TRASH'}, () => false)
+          {trashGroup: () => 'TRASH'}, () => false, null)
       }
       if (c.fn === 'guarded_write') {
         const op = {uuid:'SRC', text:'Updated text.'}

@@ -791,6 +791,10 @@ function appendLogLines(rec, lines, section, assertions) {
     fresh.length ? insertUnderSection(body, header, fresh) : body, header),
     header)
   const text = next.join('\n')
+  if (passiveGuard) {
+    passiveGuard()
+    if (bodyLines(rec).join('\n') !== body.join('\n')) throw new Error('passive destination raced')
+  }
   if (text !== body.join('\n')) rec.plainText = text
   return { appended: fresh.length, skipped: skipped }
 }
@@ -896,6 +900,8 @@ function checkMigrationFence(op) {
   if ([op.uuid, op.source_uuid].some(id => fence.scope.includes(id)) ||
       (op.name && fence.names.includes(normName(op.name))) ||
       (op.destinations || []).some(d => fence.scope.includes(d.uuid)) ||
+      (op.sources || []).some(s => fence.scope.includes(s.uuid)) ||
+      (op.targets || []).some(t => fence.scope.includes(t.uuid) || fence.names.includes(normName(t.name))) ||
       (op.assertions || []).some(a => fence.scope.includes(a.reference.source_uuid)) ||
       (op.lines || op.log_lines || []).some(line => fence.scope.some(id => line.includes('x-devonthink-item://' + id)))) {
     throw new Error('This record is paused for biographical migration recovery.')
@@ -1019,16 +1025,163 @@ function canonical(value) {
   }
   return value
 }
+let passiveGuard = null
+function passiveHash(value) {
+  ObjC.import('Foundation')
+  ObjC.bindFunction('CC_SHA256', ['void *', ['void *', 'unsigned int', 'void *']])
+  const text = $(value).dataUsingEncoding($.NSUTF8StringEncoding)
+  const result = $.NSMutableData.dataWithLength(32)
+  $.CC_SHA256(text.bytes, text.length, result.mutableBytes)
+  const base64 = ObjC.unwrap(result.base64EncodedStringWithOptions(0))
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
+  let bits = 0, count = 0, hex = ''
+  for (const character of base64.replace(/=+$/, '')) {
+    bits = (bits << 6) | alphabet.indexOf(character)
+    count += 6
+    if (count >= 8) {
+      count -= 8
+      hex += ((bits >> count) & 255).toString(16).padStart(2, '0')
+    }
+  }
+  return hex
+}
+function passiveEncoded(value) {
+  return JSON.stringify(canonical(value)).replace(/[\u007f-\uffff<>]/g, c => '\\u' + c.charCodeAt(0).toString(16).padStart(4, '0'))
+}
+function passiveCreation(plan, name) {
+  return passiveHash(passiveEncoded([plan.id, 'new:' + name]))
+}
+function validatePassivePlan(plan, ops, services) {
+  if (plan.version !== 1 || plan.status !== 'ready' || !Array.isArray(plan.inputs) || !Array.isArray(plan.sources) ||
+      !Array.isArray(plan.targets) || !Array.isArray(plan.questions) || !plan.answers ||
+      passiveHash(passiveEncoded([plan.inputs, plan.sources, plan.origin])) !== plan.id ||
+      JSON.stringify(canonical(ops)) !== JSON.stringify(canonical(plan.ops)) ||
+      JSON.stringify(Object.keys(plan.answers).sort()) !== JSON.stringify(plan.questions.map(q => q.key).sort())) {
+    throw new Error('passive comparison unresolved or changed')
+  }
+  if (plan.proposal && String(services.record(plan.proposal.uuid).plainText()) !== plan.proposal.text) throw new Error('proposal changed')
+  for (const frozen of plan.sources) {
+    const current = services.source(frozen.uuid)
+    if (!current.ready || current.raw_field !== frozen.raw_field || passiveHash(current.raw_text) !== frozen.raw_revision ||
+        ['name','kind','eventdate','added'].some(key => current[key] !== frozen[key]) ||
+        !biographicalKeys(frozen.input_parameters, ['head_words','tail_words']) ||
+        frozen.input_parameters.head_words !== 6000 || frozen.input_parameters.tail_words !== 1000 ||
+        passiveHash(frozen.input) !== frozen.input_revision ||
+        (frozen.raw_text !== undefined && passiveHash(frozen.raw_text) !== frozen.raw_revision) ||
+        (frozen.text !== undefined && passiveHash(frozen.text) !== frozen.revision)) throw new Error('passive source changed')
+  }
+  const people = services.people()
+  const checkOwners = (owners, allowed) => {
+    for (const key of Object.keys(owners)) {
+      const hits = people.filter(p => [p.name].concat(String(p.aliases || '').split(','), [String(p.email || '').replace(/^mailto:/i, '')]).map(normName).includes(key)).map(p => p.uuid)
+      if (JSON.stringify(hits.filter(id => id !== allowed).sort()) !== JSON.stringify(owners[key].filter(id => id !== allowed).sort())) throw new Error('passive resolution changed')
+    }
+  }
+  for (const target of plan.targets) {
+    let allowed = target.uuid
+    if (target.new) {
+      if (target.creation !== passiveCreation(plan, target.name)) throw new Error('passive creation identity changed')
+      const owned = people.filter(p => p.body.includes('<!-- passive-created:' + target.creation + ':' + p.uuid + ' -->'))
+      if (owned.length > 1) throw new Error('passive creation duplicated')
+      allowed = owned.length ? owned[0].uuid : null
+    }
+    checkOwners(target.owners, allowed)
+    if (target.new) {
+      const keys = [target.name].concat(String(target.aliases || '').split(',')).map(normName).filter(Boolean)
+      const hits = people.filter(p => [p.name].concat(String(p.aliases || '').split(',')).map(normName).some(k => keys.includes(k)) ||
+        target.email && normName(p.email) === normName(target.email))
+      const allowedEmails = ['', target.email, normalizeEmail(target.email)].concat(plan.ops.filter(op => op.target_name === target.name && op.op === 'set_field' && op.field === 'email').map(op => normalizeEmail(op.value)))
+      if (hits.length && (hits.length !== 1 || hits[0].name !== target.name || !hits[0].body.includes('<!-- passive-created:' + target.creation + ':' + hits[0].uuid + ' -->') ||
+          !['', target.aliases].includes(hits[0].aliases) || !allowedEmails.includes(hits[0].email) ||
+          hits[0].entitytype !== 'Person' || flagSet(hits[0].filingsuppressed))) throw new Error('new passive identity changed')
+      if (services.ignored(keys)) throw new Error('passive identity is ignored')
+    } else {
+      const p = people.find(p => p.uuid === target.uuid)
+      if (!p || p.name !== target.name || !target.allowed_aliases.includes(p.aliases) || !target.allowed_email.includes(p.email) ||
+          p.entitytype !== 'Person' || flagSet(p.filingsuppressed)) throw new Error('passive identity changed')
+    }
+  }
+  if (plan.origin) {
+    const target = plan.targets.find(t => 'new:' + t.name === plan.origin.target)
+    const owned = target && people.find(p => p.body.includes('<!-- passive-created:' + target.creation + ':' + p.uuid + ' -->'))
+    checkOwners(plan.origin.owners, plan.origin.target.startsWith('new:') ? (owned && owned.uuid) : plan.origin.target)
+    const rec = services.record(plan.origin.uuid)
+    if (String(rec.plainText()) !== plan.origin.text ||
+        mdValue(rec, 'tracktarget') !== plan.origin.tracktarget ||
+        flagSet(mdValue(rec, 'createdistinct')) !== plan.origin.createdistinct) throw new Error('candidate changed')
+  }
+  if (plan.ops.length !== plan.inputs.length) throw new Error('passive operation count changed')
+  const drafts = new Map()
+  for (let i = 0; i < plan.ops.length; i++) {
+    const op = plan.ops[i], input = plan.inputs[i]
+    if (op.op === 'ensure_person' && op.passive_creation !== passiveCreation(plan, op.name)) throw new Error('passive creation identity changed')
+    const withoutAssertions = value => {
+      const result = Object.assign({}, value)
+      delete result.assertions
+      delete result.passive_creation
+      return result
+    }
+    if (JSON.stringify(canonical(withoutAssertions(op))) !== JSON.stringify(canonical(withoutAssertions(input))) ||
+        (op.assertions || []).length !== (input.assertions || []).length) throw new Error('passive operation changed')
+    const person = people.find(p => p.uuid === op.uuid)
+    for (const assertion of op.assertions || []) {
+      if (assertion.passive_explicit !== true) throw new Error('passive assertion mode changed')
+      const scope = op.uuid || 'new:' + op.name
+      biographicalRows('## Biographical Log\n' + biographicalLine({id:assertion.id, person_uuid:scope, baseline:assertion.baseline,
+        protected:true, references:[assertion.reference]}, false), scope)
+      if (assertion.draft && (!drafts.has(assertion.id) || JSON.stringify(canonical(drafts.get(assertion.id))) !== JSON.stringify(canonical(assertion.baseline)))) throw new Error('passive draft identity changed')
+      if (!assertion.existing) drafts.set(assertion.id, assertion.baseline)
+      const frozen = plan.inputs.flatMap(op => op.assertions || []).find(a => a.reference.id === assertion.reference.id)
+      if (!frozen || JSON.stringify(canonical(frozen.reference)) !== JSON.stringify(canonical(assertion.reference))) throw new Error('passive support changed')
+      const source = plan.sources.find(s => s.uuid === assertion.reference.source_uuid)
+      if (!source || source.revision !== assertion.reference.source_revision || source.date !== assertion.reference.original_date) throw new Error('passive support not source-bound')
+      const chosen = plan.answers[assertion.reference.id]
+      if (assertion.existing) {
+        if (chosen !== undefined) {
+          const question = plan.questions.find(q => q.key === assertion.reference.id)
+          const candidate = question && question.candidates.find(c => c.id === chosen)
+          if (!candidate || chosen !== assertion.id || Object.keys(assertion.baseline).some(k => candidate[k] !== assertion.baseline[k])) throw new Error('passive choice changed')
+        } else if (assertion.baseline.text !== frozen.baseline.text || assertion.baseline.temporal_context !== frozen.baseline.temporal_context) throw new Error('passive equivalence not confirmed')
+      } else if (assertion.id !== frozen.id || Object.keys(assertion.baseline).some(k => assertion.baseline[k] !== (k === 'text' && chosen === 'source' ? frozen.reference.evidence : frozen.baseline[k]))) throw new Error('passive new assertion changed')
+
+      if (assertion.existing && !assertion.draft) {
+        if (!person) throw new Error('selected passive Person missing')
+        let rows = biographicalRows(person.body, person.uuid)
+        if (assertion.legacy && !rows.some(r => r.data.id === assertion.id)) {
+          const lines = person.body.split(/\r\n|\r|\n/)
+          if (lines.filter(line => line === assertion.legacy.line).length !== 1 ||
+              assertion.legacy.data.person_uuid !== person.uuid ||
+              assertion.legacy.data.references.some(ref => biographicalFingerprint(ref) !== ref.fingerprint)) throw new Error('legacy assertion changed')
+          rows = [{data:assertion.legacy.data, visible:assertion.selected.visible, date:assertion.selected.date}]
+        }
+        const hits = rows.filter(r => r.data.id === assertion.id)
+        if (hits.length !== 1 || JSON.stringify(canonical(hits[0].data.baseline)) !== JSON.stringify(canonical(assertion.baseline)) ||
+            hits[0].visible !== assertion.selected.visible || hits[0].date !== assertion.selected.date) throw new Error('selected assertion changed')
+      }
+    }
+  }
+}
 function appendBiographical(rec, assertions) {
-  let body = bodyLines(rec).join('\n')
+  const before = bodyLines(rec).join('\n')
+  let body = before
   let appended = 0, skipped = 0
   for (const assertion of assertions) {
+    if (assertion.passive_explicit && assertion.legacy && !biographicalRows(body, rec.uuid()).some(r => r.data.id === assertion.id)) {
+      const lines = body.split('\n')
+      const positions = lines.map((line, i) => line === assertion.legacy.line ? i : -1).filter(i => i >= 0)
+      if (positions.length !== 1 || assertion.legacy.data.person_uuid !== rec.uuid() || assertion.legacy.data.references.some(ref => biographicalFingerprint(ref) !== ref.fingerprint)) throw new Error('legacy assertion changed')
+      lines[positions[0]] = biographicalLine(assertion.legacy.data, assertion.legacy.line.startsWith('  - '))
+      body = lines.join('\n')
+    }
     const rows = biographicalRows(body, rec.uuid())
-    const matches = rows.filter(r => r.data.baseline.text === assertion.baseline.text &&
+    const matches = assertion.passive_explicit ? rows.filter(r => r.data.id === assertion.id) : rows.filter(r => r.data.baseline.text === assertion.baseline.text &&
       r.visible === r.data.baseline.text && r.date === r.data.baseline.log_date &&
       r.data.baseline.temporal_context === assertion.baseline.temporal_context)
     if (matches.length > 1) throw new Error('ambiguous assertion ownership')
     const row = matches[0]
+    if (assertion.passive_explicit && assertion.existing && !row) throw new Error('selected assertion missing')
+    if (row && assertion.passive_explicit && (JSON.stringify(canonical(row.data.baseline)) !== JSON.stringify(canonical(assertion.baseline)) ||
+        row.visible !== assertion.baseline.text || row.date !== assertion.baseline.log_date)) throw new Error('selected assertion changed')
     if (row) {
       const existing = row.data.references.filter(r => r.id === assertion.reference.id)
       if (existing.length) {
@@ -1049,7 +1202,9 @@ function appendBiographical(rec, assertions) {
   }
   const next = groupLogSection(sortLogSection(body.split('\n'), LOG_SECTION), LOG_SECTION).join('\n')
   biographicalRows(next)
-  if (next !== bodyLines(rec).join('\n')) rec.plainText = next
+  if (passiveGuard) passiveGuard()
+  if (bodyLines(rec).join('\n') !== before) throw new Error('passive destination raced')
+  if (next !== before) rec.plainText = next
   return {appended:appended, skipped:skipped}
 }
 
@@ -1403,6 +1558,7 @@ function run(argv) {
 
     add_aliases(op) {
       const rec = byUuid(op.uuid)
+      if (passiveGuard) passiveGuard()
       rec.aliases = unionAliases(rec.aliases(), op.aliases)
       entityIndex = null
       peopleIndex = null
@@ -1471,9 +1627,9 @@ function run(argv) {
       // a legacy OCR layer that goes stale on re-export.
       if (flagSet(mdValue(r, 'handwritten'))) {
         const c = r.comment()
-        if (c) return { uuid: op.uuid, text: c }
+        if (c) return { uuid: op.uuid, text: c, field: 'comment' }
       }
-      return { uuid: op.uuid, text: r.plainText() }
+      return { uuid: op.uuid, text: r.plainText(), field: 'plainText' }
     },
 
     ensure_group(op) {
@@ -1729,19 +1885,55 @@ function run(argv) {
       }
       let rec
       let created = false
-      if (hits.length === 1) {
+      if (op.passive_creation) {
+        const temporaryName = '[Passive ' + op.passive_creation + ']'
+        const temporary = findPerson(temporaryName)
+        if (temporary.length > 1) throw new Error('duplicate passive initialization')
+      if (passiveGuard) passiveGuard()
+        rec = hits[0] || temporary[0] || dt.createRecordWith({name:temporaryName, type:'markdown'}, {in:groupAt(PEOPLE_PATH)})
+        const marker = '<!-- passive-created:' + op.passive_creation + ':' + rec.uuid() + ' -->'
+        let body = String(rec.plainText() || '')
+        if (rec.name() === temporaryName && !body) {
+      if (passiveGuard) passiveGuard()
+          rec.plainText = personSkeleton(temporaryName) + '\n' + marker + '\n'
+          body = String(rec.plainText())
+          created = true
+        }
+        if (!body.includes(marker)) throw new Error('passive initialization changed')
+        if (flagSet(mdValue(rec, 'filingsuppressed')) || migrationBlocked(rec.uuid())) throw new Error('passive Person unavailable')
+        const entityType = mdValue(rec, 'entitytype')
+        if (entityType && entityType !== 'Person') throw new Error('passive initialization type changed')
+      if (passiveGuard) passiveGuard()
+        if (!entityType) dt.addCustomMetaData('Person', {for:'entitytype', to:rec})
+      if (passiveGuard) passiveGuard()
+        if (rec.name() === temporaryName && !mdValue(rec, 'entitystatus')) dt.addCustomMetaData('active', {for:'entitystatus', to:rec})
+        if (rec.name() === temporaryName) {
+          const heading = '# ' + temporaryName
+      if (passiveGuard) passiveGuard()
+          if (body.startsWith(heading)) rec.plainText = '# ' + op.name + body.slice(heading.length)
+      if (passiveGuard) passiveGuard()
+          rec.name = op.name
+        }
+        entityIndex = null
+        peopleIndex = null
+      } else if (hits.length === 1) {
         rec = hits[0]
         if (migrationBlocked(rec.uuid())) throw new Error('record paused for migration')
       } else {
+      if (passiveGuard) passiveGuard()
         rec = dt.createRecordWith(
           { name: op.name, type: 'markdown' }, { in: groupAt(PEOPLE_PATH) })
+      if (passiveGuard) passiveGuard()
         rec.plainText = personSkeleton(op.name)
         created = true
         entityIndex = null
         peopleIndex = null
+      if (passiveGuard) passiveGuard()
         dt.addCustomMetaData('Person', { for: 'entitytype', to: rec })
+      if (passiveGuard) passiveGuard()
         dt.addCustomMetaData('active', { for: 'entitystatus', to: rec })
       }
+      if (passiveGuard) passiveGuard()
       if (op.aliases) rec.aliases = unionAliases(rec.aliases(), op.aliases)
       let lastcontact
       for (const [field, value] of Object.entries(op.fields || {})) {
@@ -1751,10 +1943,12 @@ function run(argv) {
         // overwritten backwards.
         if (field === 'lastcontact') {
           const g = lastContactGuard(mdValue(rec, 'lastcontact'), value)
+      if (passiveGuard) passiveGuard()
           if (g.changed) dt.addCustomMetaData(value, { for: field, to: rec })
           lastcontact = g
           continue
         }
+      if (passiveGuard) passiveGuard()
         dt.addCustomMetaData(value, { for: field, to: rec })
       }
       if ((op.log_lines || []).length) {
@@ -1898,6 +2092,7 @@ function run(argv) {
       const stampAsOf = () => {
         if (op.effective_date && op.effective_date > asof) {
           dates[op.field] = op.effective_date
+      if (passiveGuard) passiveGuard()
           dt.addCustomMetaData(JSON.stringify(dates), { for: 'fieldasof', to: rec })
         }
       }
@@ -1915,6 +2110,7 @@ function run(argv) {
                  String(op.expected_previous) !== previous) {
         return { uuid: op.uuid, changed: false, stale: true, previous: previous }
       }
+      if (passiveGuard) passiveGuard()
       dt.addCustomMetaData(incomingValue, { for: op.field, to: rec })
       stampAsOf()
       if (op.transition_line) appendLogLines(rec, [op.transition_line])
@@ -1925,11 +2121,13 @@ function run(argv) {
       const rec = byUuid(op.uuid)
       const g = lastContactGuard(mdValue(rec, 'lastcontact'), op.date)
       if (g.invalid) return { uuid: op.uuid, changed: false, invalid: true }
+      if (passiveGuard) passiveGuard()
       if (g.changed) dt.addCustomMetaData(op.date, { for: 'lastcontact', to: rec })
       return { uuid: op.uuid, changed: g.changed }
     },
 
     mark_filed(op) {
+      if (passiveGuard) passiveGuard()
       dt.addCustomMetaData(true, { for: 'entityfiled', to: byUuid(op.uuid) })
       return { uuid: op.uuid }
     },
@@ -2066,15 +2264,56 @@ function run(argv) {
     trash(op) {
       const rec = byUuid(op.uuid)
       if (op.expected_text !== undefined && rec.plainText() !== op.expected_text) throw new Error('The record changed. Refresh before removing it.')
+      if (passiveGuard) passiveGuard()
       dt.move({ record: rec, to: db.trashGroup() })
       return { uuid: op.uuid }
     },
   }
 
+  const passivePlans = ops.filter(op => op.op === 'passive_plan')
+  let activePassive = null
+  const passiveServices = {
+    record:byUuid,
+    source:uuid => {
+      const raw = handlers.get_text({uuid:uuid})
+      return Object.assign(handlers.get_source({uuid:uuid}), {raw_text:String(raw.text || ''), raw_field:raw.field})
+    },
+    people:() => handlers.dump_people({include_bodies:true}).map(p => ({uuid:p.uuid, name:p.name,
+      aliases:String(p.aliases || ''), body:String(p.body || ''), email:mdField(p.md, 'email'),
+      entitytype:mdField(p.md, 'entitytype'), filingsuppressed:mdField(p.md, 'filingsuppressed')})),
+    ignored:keys => listMarkdownAt(CANDIDATES_IGNORED_PATH).some(rec => {
+      const fences = String(rec.text).replace(/\r\n|\r/g, '\n').match(/```json\s*\n([\s\S]*?)\n```/)
+      if (!fences) throw new Error('ignored candidate unreadable')
+      const data = JSON.parse(fences[1])
+      return [data.name].concat(data.name_variants || []).map(normName).some(key => keys.includes(key))
+    })
+  }
+  if (passivePlans.length) {
+    try {
+      if (passivePlans.length !== 1 || ops[0] !== passivePlans[0]) throw new Error('passive plan layout changed')
+      activePassive = ops[0]
+      const tail = ops.slice(1, activePassive.ops.length + 1)
+      if (ops.length > activePassive.ops.length + 2 || ops.length === activePassive.ops.length + 2 &&
+          (!activePassive.proposal || ops[ops.length - 1].op !== 'trash' || ops[ops.length - 1].uuid !== activePassive.proposal.uuid)) throw new Error('passive batch changed')
+      validatePassivePlan(activePassive, tail, passiveServices)
+      ops.forEach(checkMigrationFence)
+      passiveGuard = () => validatePassivePlan(activePassive, tail, passiveServices)
+    } catch(e) {return JSON.stringify({ok:false, error:String(e.message || e), results:[]})}
+  }
+  handlers.passive_plan = () => ({status:'ready'})
   const results = []
   for (let i = 0; i < ops.length; i++) {
-    const op = ops[i]
+    let op = ops[i]
     try {
+      if (activePassive && op.op !== 'passive_plan') {
+        passiveGuard()
+        if (op.target_name) {
+          const targets = activePassive.targets.filter(target => target.new && target.name === op.target_name)
+          const hits = findPerson(op.target_name)
+          if (targets.length !== 1 || hits.length !== 1 || !String(hits[0].plainText()).includes('<!-- passive-created:' + targets[0].creation + ':' + hits[0].uuid() + ' -->')) throw new Error('passive target changed')
+          op = Object.assign({}, op, {uuid:hits[0].uuid()})
+        }
+      }
       const handler = handlers[op.op]
       if (!handler) throw new Error('unknown op: ' + op.op)
       checkMigrationFence(op)

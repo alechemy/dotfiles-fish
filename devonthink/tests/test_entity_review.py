@@ -3,6 +3,7 @@ structured-edit approval path."""
 
 import json
 import unittest
+from unittest.mock import patch
 
 from helpers import load, person
 
@@ -402,6 +403,11 @@ class ScriptedBridge:
 
 
 class ApproveWithEdits(unittest.TestCase):
+    def setUp(self):
+        self.config = patch.object(ef, "load_config", return_value={"SELF_NAME": ""})
+        self.config.start()
+        self.addCleanup(self.config.stop)
+
     def test_dropping_a_fact_regenerates_the_fence(self):
         bridge = ScriptedBridge(prop_text(ops_for_existing()), PEOPLE, SRC)
         payload = {"people": [{
@@ -410,16 +416,16 @@ class ApproveWithEdits(unittest.TestCase):
             "updates": {"city": "Oslo"}}], "events": []}
         res = srv.approve_with_edits("PROP-0001-UUID", payload,
                                      confirm=False, bridge=bridge)
-        self.assertEqual(res, {"ok": True})
+        self.assertEqual(res, {"ok": True, "status": "waiting"})
         final = bridge.batches[-1]
-        self.assertEqual([op["op"] for op in final], ["set_text", "move_to"])
-        self.assertEqual(final[1]["group"], ef.APPROVED_PATH)
-        new_ops = ef.proposal_ops(final[0]["text"])
+        self.assertEqual([op["op"] for op in final], ["set_field", "set_text", "move_to"])
+        self.assertEqual(final[2]["group"], ef.REVIEW_PATH)
+        new_ops = ef.proposal_ops(final[1]["text"])[0]["inputs"]
         logs = [op for op in new_ops if op["op"] == "append_log"]
         self.assertEqual(len(logs), 1)
         self.assertEqual(len(logs[0]["lines"]), 1)
         self.assertIn("Fact number 0.", logs[0]["lines"][0])
-        self.assertNotIn("Fact number 1", final[0]["text"])
+        self.assertNotIn("Fact number 1", json.dumps(new_ops))
 
     def test_new_person_resembling_roster_needs_confirm_then_applies(self):
         ops = [{"op": "ensure_person", "name": "Karsten Doyle", "fields": {},
@@ -439,8 +445,8 @@ class ApproveWithEdits(unittest.TestCase):
         bridge2 = ScriptedBridge(prop_text(ops), PEOPLE, SRC)
         res2 = srv.approve_with_edits("PROP-0001-UUID", payload,
                                       confirm=True, bridge=bridge2)
-        self.assertEqual(res2, {"ok": True})
-        new_ops = ef.proposal_ops(bridge2.batches[-1][0]["text"])
+        self.assertEqual(res2, {"ok": True, "status": "waiting"})
+        new_ops = ef.proposal_ops(bridge2.batches[-1][1]["text"])[0]["inputs"]
         ensure = next(op for op in new_ops if op["op"] == "ensure_person")
         self.assertTrue(ensure["confirm_new"])
 
@@ -519,6 +525,8 @@ class HandlerPlumbing(unittest.TestCase):
                                   "name": "Juniper Wask"})
 
     def test_proposal_reject_trashes(self):
+        original = ef.run_bridge
+        ef.run_bridge = lambda ops: [{"text": "legacy"}, {"md": {}}] if ops[0]["op"] == "get_text" else original(ops)
         srv.handle_proposal("PROP-0001-UUID", {"action": "reject"})
         self.assertEqual(self.calls[0][0]["op"], "trash")
         self.assertEqual(len(self.kicks), 1)

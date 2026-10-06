@@ -187,6 +187,21 @@ def proposal_view(entry, people):
         ops = None
     if ops is None:
         return {"uuid": entry["uuid"], "title": entry["name"], "broken": True}
+    import entity_passive as passive
+    try:
+        envelope = passive.read(ops)
+    except ValueError:
+        return {"uuid": entry["uuid"], "title": entry["name"], "broken": True}
+    if envelope is None and ("Passive v1" in str(entry.get("md", {}).get("mddocumenttype", "")) or "\nPassive comparison: " in text):
+        return {"uuid": entry["uuid"], "title": entry["name"], "broken": True}
+    if envelope:
+        plans, editable, source_uuid = ef.plans_from_ops(envelope["inputs"], people)
+        source = envelope["sources"][0] if envelope["sources"] else {"uuid": (envelope.get("origin") or {}).get("uuid", ""), "name": entry["name"], "date": ""}
+        return {"uuid": entry["uuid"], "title": entry["name"], "broken": False,
+                "source": {k: source[k] for k in ("uuid", "name", "date")},
+                "plans": [_plan_view(p) for p in plans], "editable": bool(editable) and not envelope.get("origin") and envelope.get("variant") != "oversized_evidence",
+                "empty": False, "passive": True, "status": envelope["status"], "reason": envelope["reason"],
+                "revision": passive.bio.digest(text), "semantic_questions": envelope["questions"]}
     plans, editable, source_uuid = ef.plans_from_ops(ops, people)
     m = SOURCE_LINE_RE.search(text)
     if m:
@@ -388,11 +403,19 @@ def approve_with_edits(uuid, payload, confirm, bridge=None):
         raise RequestError("this proposal can't be edited — approve or "
                            "reject it as-is", 409)
     people = run([{"op": "dump_people", "include_bodies": False}])[0]
-    plans0, editable, _ = ef.plans_from_ops(ops, people)
+    import entity_passive as passive
+    envelope = passive.read(ops)
+    if envelope and envelope.get("variant") == "oversized_evidence":
+        raise RequestError("Complete oversized evidence needs operator reconciliation before editing.", 409)
+    if envelope and payload.get("revision") != passive.bio.digest(text):
+        raise RequestError("The proposal changed. Refresh before editing.", 409)
+    if envelope:
+        ef.validate_passive_sources(envelope, bridge=run)
+    plans0, editable, _ = ef.plans_from_ops(envelope["inputs"] if envelope else ops, people)
     if not editable:
         raise RequestError("this proposal can't be edited — approve or "
                            "reject it as-is", 409)
-    source_uuid = next((op.get("uuid") for op in ops
+    source_uuid = next((op.get("uuid") for op in (envelope["inputs"] if envelope else ops)
                         if op.get("op") == "mark_filed"), None)
     if not source_uuid:
         raise RequestError("the proposal has no source record — review it "
@@ -427,10 +450,14 @@ def approve_with_edits(uuid, payload, confirm, bridge=None):
             if op.get("op") == "ensure_person" \
                     and ec.norm(op.get("name", "")) in confirmed:
                 op["confirm_new"] = True
-    body = ef.proposal_body(source, source_date, plans, new_ops)
-    run([{"op": "set_text", "uuid": uuid, "text": body},
-         {"op": "move_to", "uuid": uuid, "group": ef.APPROVED_PATH}])
-    return {"ok": True}
+    bodies = run([{"op": "dump_people", "include_bodies": True}])[0]
+    normalized = ef.normalize_source_text(source["kind"], source_body["text"])
+    frozen = passive.snapshot(source, source_body["text"], normalized, source_date, ef.cap_words(normalized), source_body.get("field", "plainText"))
+    queued = passive.prepare(new_ops, [frozen], bodies, auto=True, analyze_now=False)
+    run([{"op": "set_field", "uuid": uuid, "field": "documenttype", "value": "Entity Filing Proposal Passive v1"},
+         {"op": "set_text", "uuid": uuid, "expected_text": text, "text": passive.body(queued)},
+         {"op": "move_to", "uuid": uuid, "group": ef.REVIEW_PATH}])
+    return {"ok": True, "status": "waiting"}
 
 
 # ---------------------------------------------------------------------------
@@ -500,7 +527,7 @@ class ApplyScheduler:
                     continue
                 self._deadline = None
                 self.state = "running"
-            env = dict(os.environ, PIPELINE_MANUAL="1")
+            env = dict(os.environ, PIPELINE_MANUAL="1", ENTITY_FILING_SCHEDULED="1")
             try:
                 proc = subprocess.run(
                     ["/usr/bin/python3", os.path.join(BIN, "entity-filing.py"),
@@ -852,19 +879,89 @@ def handle_candidate(uuid, payload):
 
 
 def handle_proposal(uuid, payload):
+    import entity_passive as passive
     action = str(payload.get("action", ""))
-    if action == "approve" and (payload.get("people") is not None
-                                or payload.get("events") is not None):
-        result = approve_with_edits(uuid, payload,
-                                    confirm=bool(payload.get("confirm")))
-        if "confirm" in result:
-            return result
-    else:
-        ef.run_bridge(proposal_decision_ops(action, uuid))
-    log.info("proposal decision: %s", action, extra={"record_uuid": uuid})
-    if action != "undo":
+    if action == "reject":
+        run_lock = ef.acquire_lock()
+        if run_lock is None:
+            raise RequestError("Processing is still running. Try again shortly.", 409)
+        lock = ec.acquire_candidates_lock()
+        try:
+            fetched = ef.run_bridge([{"op": "get_text", "uuid": uuid}, {"op": "get_fields", "uuid": uuid}])
+            text = fetched[0]["text"]
+            required = "Passive v1" in str(fetched[1].get("md", {}).get("mddocumenttype", "")) or "\nPassive comparison: " in text
+            try:
+                envelope = passive.read(ef.proposal_ops(text) or [])
+            except (ValueError, KeyError, TypeError):
+                if required:
+                    raise ValueError("The passive rejection evidence is unreadable.") from None
+                envelope = None
+            if required and envelope is None:
+                raise ValueError("The passive rejection evidence is missing.")
+            if envelope and envelope.get("variant") == "oversized_evidence":
+                envelope = passive.load_evidence(envelope)
+            actions = proposal_decision_ops(action, uuid)
+            if envelope and envelope.get("origin"):
+                people = ef.run_bridge([{"op": "dump_people", "include_bodies": True}])[0]
+                passive.validate_people(envelope, people)
+                ef.validate_passive_origin(envelope, people)
+                actions = [{"op": "move_to", "uuid": envelope["origin"]["uuid"], "group": ec.CANDIDATES_PATH},
+                           {"op": "set_field", "uuid": envelope["origin"]["uuid"], "field": "tracktarget", "value": ""},
+                           {"op": "set_field", "uuid": envelope["origin"]["uuid"], "field": "createdistinct", "value": ""},
+                           ] + actions
+            ef.run_bridge(actions)
+        except ValueError as exc:
+            raise RequestError(str(exc), 409) from exc
+        finally:
+            lock.close()
+            run_lock.close()
         scheduler.kick()
-    return {"ok": True}
+        return {"ok": True}
+    if action != "approve":
+        ef.run_bridge(proposal_decision_ops(action, uuid))
+        if action != "undo":
+            scheduler.kick()
+        return {"ok": True}
+    driver = subprocess.run([os.path.expanduser("~/.local/bin/should-run-dt-driver")], capture_output=True, text=True)
+    if driver.returncode:
+        raise RequestError("This Mac is not the entity-processing driver.", 409)
+    run_lock = ef.acquire_lock()
+    if run_lock is None:
+        raise RequestError("Processing is still running. Try again shortly.", 409)
+    lock = ec.acquire_candidates_lock()
+    try:
+        fetched = ef.run_bridge([{"op": "get_text", "uuid": uuid}, {"op": "get_fields", "uuid": uuid}])
+        text = fetched[0]["text"]
+        envelope = passive.read(ef.proposal_ops(text) or [])
+        if envelope is None and ("Passive v1" in str(fetched[1].get("md", {}).get("mddocumenttype", "")) or "\nPassive comparison: " in text):
+            raise RequestError("The passive comparison plan is missing. Restore it before deciding.", 409)
+        if payload.get("people") is not None or payload.get("events") is not None:
+            result = approve_with_edits(uuid, payload, confirm=bool(payload.get("confirm")))
+        elif envelope:
+            if payload.get("revision") != passive.bio.digest(text):
+                raise RequestError("The proposal changed. Refresh before deciding.", 409)
+            ef.validate_passive_sources(envelope)
+            people = ef.run_bridge([{"op": "dump_people", "include_bodies": True}])[0]
+            passive.validate_people(envelope, people)
+            if envelope["status"] == "question":
+                envelope = passive.answer(envelope, payload.get("semantic_answers"), people)
+            passive.executable(envelope)
+            ef.run_bridge([{"op": "set_text", "uuid": uuid, "expected_text": text, "text": passive.body(envelope)},
+                           {"op": "move_to", "uuid": uuid, "group": ef.APPROVED_PATH}])
+            result = {"ok": True, "status": "queued"}
+        else:
+            ef.run_bridge(proposal_decision_ops(action, uuid))
+            result = {"ok": True}
+    except ValueError as exc:
+        if isinstance(exc, RequestError):
+            raise
+        raise RequestError(str(exc), 409) from None
+    finally:
+        lock.close()
+        run_lock.close()
+    if "confirm" not in result:
+        scheduler.kick()
+    return result
 
 
 class Handler(BaseHTTPRequestHandler):

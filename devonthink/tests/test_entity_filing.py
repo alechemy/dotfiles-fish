@@ -14,7 +14,7 @@ from helpers import load, person
 
 ef = load("entity-filing.py", "entity_filing")
 
-SOURCE = {"uuid": "SRC-1", "name": "2026-03-16 Call", "kind": "daily"}
+SOURCE = {"uuid": "SRC-1", "name": "2026-03-16 Call", "kind": "daily", "eventdate": "2026-03-16", "added": "2026-03-16"}
 
 
 def roster(*people):
@@ -760,7 +760,7 @@ class StripFlatTimeline(unittest.TestCase):
 
 
 FACT_SOURCE = {"uuid": "FACT-1", "name": "Fact 2026-03-16 at 3.00.00PM",
-               "kind": "fact", "modified": "2026-03-16T15:00:00"}
+               "kind": "fact", "eventdate": "2026-03-16", "added": "2026-03-16", "modified": "2026-03-16T15:00:00"}
 
 
 class MinWordsFor(unittest.TestCase):
@@ -1017,16 +1017,14 @@ class FileSourceReReadsBeforeAdoptingTheFreshStamp(unittest.TestCase):
                          "2026-03-16T10:05:00")
 
 
-class FileSourceProposalCreationMarksFiled(unittest.TestCase):
-    """C08: EntityFiled must be set the moment a proposal or review stub is
-    created, not only when it is later approved — otherwise --rebuild-state
-    can never learn a pending or rejected source was already seen."""
-
+class FileSourcePassiveProposal(unittest.TestCase):
     def setUp(self):
         self.calls = []
         self.saved = (ef.run_bridge, ef.save_state)
         ef.save_state = lambda s: None
         self.list_group_result = []
+        self.review_records = []
+        self.source_text = "some source text"
 
         def fake_bridge(ops):
             self.calls.append(ops)
@@ -1035,9 +1033,14 @@ class FileSourceProposalCreationMarksFiled(unittest.TestCase):
                 if op["op"] == "get_source":
                     out.append(dict(SOURCE))
                 elif op["op"] == "get_text":
-                    out.append({"text": "unchanged"})
+                    out.append({"text": self.source_text})
                 elif op["op"] == "create_record":
+                    self.review_records.append({"uuid": "NEW", "text": op["text"]})
                     out.append({"uuid": "NEW"})
+                elif op["op"] == "dump_people":
+                    out.append([])
+                elif op["op"] == "list_review":
+                    out.append({"pending": list(self.review_records), "approved": []})
                 elif op["op"] == "list_group":
                     out.append(list(self.list_group_result))
                 else:
@@ -1055,42 +1058,37 @@ class FileSourceProposalCreationMarksFiled(unittest.TestCase):
     def batches_with(self, op_name):
         return [b for b in self.calls if any(o["op"] == op_name for o in b)]
 
-    def test_a_new_proposal_batch_marks_the_source_filed(self):
+    def test_new_passive_proposal_keeps_mark_filed_inside_guarded_fence(self):
         plan = {"kind": "new", "name": "Wren", "single_token": True, "near": [],
                 "facts": [("2026-03-16", "attends Cedar Ridge")], "updates": {}}
         ef.file_source({}, self.state(), SOURCE, "2026-03-16", [plan], "suggest",
                        False, "some source text")
         batch = self.batches_with("create_record")[0]
-        self.assertEqual([o["op"] for o in batch], ["create_record", "mark_filed"])
-        self.assertEqual(batch[1]["uuid"], SOURCE["uuid"])
+        self.assertEqual([o["op"] for o in batch], ["create_record"])
+        import entity_passive as passive
+        envelope = passive.read(ef.proposal_ops(batch[0]["text"]))
+        self.assertEqual(envelope["inputs"][-1], {"op": "mark_filed", "uuid": SOURCE["uuid"]})
 
-    def test_a_proposal_matching_an_existing_review_name_is_not_duplicated(self):
+    def test_same_frozen_envelope_is_not_duplicated(self):
         self.list_group_result = [{"uuid": "EXISTING",
                                    "name": f"File: {SOURCE['name']}"}]
         plan = {"kind": "new", "name": "Wren", "single_token": True, "near": [],
                 "facts": [("2026-03-16", "attends Cedar Ridge")], "updates": {}}
         ef.file_source({}, self.state(), SOURCE, "2026-03-16", [plan], "suggest",
                        False, "some source text")
-        self.assertEqual(self.batches_with("create_record"), [])
-        self.assertTrue(self.batches_with("mark_filed"))
+        ef.file_source({}, self.state(), SOURCE, "2026-03-16", [plan], "suggest", False, "some source text")
+        self.assertEqual(len(self.batches_with("create_record")), 1)
+        self.assertEqual(self.batches_with("mark_filed"), [])
 
 
 class FileSourceFact(unittest.TestCase):
-    """file_source touches the bridge, so stub it and capture the op batches.
-    Locks the three fact outcomes: named clearly -> apply, bare name ->
-    proposal, nothing extracted -> review stub (never a silent mark-filed).
-
-    C71: a fact source that reaches a fully-filed terminal state (direct
-    apply, or a proposal/dup-guard batch that marks it filed) is also moved
-    into _Facts/Filed in that same batch, by UUID, so discovery's wholesale
-    enumeration of _Facts stops seeing it. A review stub leaves the source in
-    place — it is still pending human review."""
-
     def setUp(self):
         self.calls = []
         self.saved = (ef.run_bridge, ef.save_state)
         ef.save_state = lambda s: None
         self.list_group_result = []
+        self.review_records = []
+        self.source_text = "not a fact"
 
         def fake_bridge(ops):
             self.calls.append(ops)
@@ -1098,7 +1096,14 @@ class FileSourceFact(unittest.TestCase):
             for op in ops:
                 if op["op"] == "get_source":
                     out.append(dict(FACT_SOURCE))
+                elif op["op"] == "get_text":
+                    out.append({"text": self.source_text})
+                elif op["op"] == "dump_people":
+                    out.append([{"uuid": "U1", "name": "Dana Parker", "aliases": "Dana", "md": {"mdentitytype": "Person"}, "body": "# Dana Parker\n\n"}])
+                elif op["op"] == "list_review":
+                    out.append({"pending": list(self.review_records), "approved": []})
                 elif op["op"] == "create_record":
+                    self.review_records.append({"uuid": "NEW", "text": op["text"]})
                     out.append({"uuid": "NEW"})
                 elif op["op"] == "list_group":
                     out.append(list(self.list_group_result))
@@ -1129,43 +1134,45 @@ class FileSourceFact(unittest.TestCase):
                 "md": {}, "aliases": "Dana", "weak_match": False,
                 "interacted": False, "facts": [("2026-03-16", "kid at Reed")],
                 "updates": {}}
+        self.source_text = "Dana Parker's kid started at Reed"
         ef.file_source({}, self.state(), FACT_SOURCE, "2026-03-16", [plan], "auto",
-                       False, "Dana Parker's kid started at Reed")
+                       False, self.source_text)
         self.assertIn("append_log", self.applied())
         self.assertEqual(self.created(), [])
         batch = self.batch_with("mark_filed")
         self.assertEqual([o["op"] for o in batch],
-                         ["mark_filed", "ensure_group", "move_to"])
-        self.assertEqual(batch[2]["uuid"], FACT_SOURCE["uuid"])
-        self.assertEqual(batch[2]["group"], ef.FACTS_FILED_PATH)
+                         ["passive_plan", "append_log", "mark_filed", "ensure_group", "move_to"])
+        self.assertEqual(batch[-1]["uuid"], FACT_SOURCE["uuid"])
+        self.assertEqual(batch[-1]["group"], ef.FACTS_FILED_PATH)
 
     def test_bare_first_name_becomes_a_proposal(self):
         plan = {"kind": "existing", "name": "Dana Parker", "uuid": "U1",
                 "md": {}, "aliases": "Dana", "weak_match": False,
                 "interacted": False, "facts": [("2026-03-16", "moved")],
                 "updates": {}}
+        self.source_text = "Dana moved to Denver"
         ef.file_source({}, self.state(), FACT_SOURCE, "2026-03-16", [plan], "auto",
-                       False, "Dana moved to Denver")
+                       False, self.source_text)
         names = [op["name"] for op in self.created()]
         self.assertTrue(any(n.startswith("File:") for n in names), names)
         self.assertNotIn("append_log", self.applied())
         batch = self.batch_with("create_record")
         self.assertEqual([o["op"] for o in batch],
-                         ["create_record", "mark_filed", "ensure_group", "move_to"])
+                         ["create_record"])
 
-    def test_proposal_duplicate_guard_still_files_and_moves(self):
+    def test_duplicate_envelope_keeps_source_pending_until_guarded_application(self):
         self.list_group_result = [{"uuid": "EXISTING",
                                    "name": f"File: {FACT_SOURCE['name']}"}]
         plan = {"kind": "existing", "name": "Dana Parker", "uuid": "U1",
                 "md": {}, "aliases": "Dana", "weak_match": False,
                 "interacted": False, "facts": [("2026-03-16", "moved")],
                 "updates": {}}
+        self.source_text = "Dana moved to Denver"
         ef.file_source({}, self.state(), FACT_SOURCE, "2026-03-16", [plan], "auto",
-                       False, "Dana moved to Denver")
-        self.assertEqual(self.created(), [])
-        batch = self.batch_with("mark_filed")
-        self.assertEqual([o["op"] for o in batch],
-                         ["mark_filed", "ensure_group", "move_to"])
+                       False, self.source_text)
+        ef.file_source({}, self.state(), FACT_SOURCE, "2026-03-16", [plan], "auto", False, self.source_text)
+        self.assertEqual(len(self.created()), 1)
+        self.assertFalse(any(op["op"] == "mark_filed" for batch in self.calls for op in batch))
 
     def test_empty_extraction_surfaces_a_review_stub(self):
         ef.file_source({}, self.state(), FACT_SOURCE, "2026-03-16", [], "auto",
@@ -1565,22 +1572,21 @@ class PromoteCandidates(CandidateLockSandbox):
         ef.promote_candidates(False)
         return bridge
 
-    def test_clean_promotion_creates_person_and_files_evidence(self):
+    def test_hashless_candidate_evidence_blocks_without_person_writes(self):
         data = ec.new_candidate("Jordan Pike")
         ec.upsert_sighting(data, "dt:SRC-1", {
             "person": "Jordan Pike", "name": "Call", "kind": "granola",
-            "date": "2026-03-16", "hash": "h",
-            "interacted": True,
+            "date": "2026-03-16", "interacted": True,
             "facts": [["2026-03-16", "moved to Denver"]],
             "updates": {"employer": "Initech"}, "evidence": "extraction"})
         bridge = self.promote(data)
-        ensures = self.sent(bridge, "ensure_person")
-        self.assertEqual([o["name"] for o in ensures], ["Jordan Pike"])
-        self.assertTrue(self.sent(bridge, "append_log"))
-        self.assertTrue(self.sent(bridge, "set_field"))
-        self.assertTrue(self.sent(bridge, "bump_lastcontact"))
-        self.assertEqual([o["uuid"] for o in self.sent(bridge, "trash")],
-                         ["CAND-1"])
+        for name in ("ensure_person", "append_log", "set_field", "bump_lastcontact", "trash", "add_aliases"):
+            self.assertEqual(self.sent(bridge, name), [])
+        created = self.sent(bridge, "create_record")
+        import entity_passive as passive
+        envelope = passive.read(ef.proposal_ops(created[0]["text"]))
+        self.assertEqual(envelope["status"], "blocked")
+        self.assertEqual(envelope["reason"], "provenance_unverifiable")
 
     def test_calendar_candidate_email_reaches_the_person(self):
         data = ec.new_candidate("Jordan Pike")

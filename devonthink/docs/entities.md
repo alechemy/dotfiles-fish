@@ -701,9 +701,13 @@ no working-style observations, and "an empty list is a good answer".
 **Review loop:** proposals land in `/20_ENTITIES/_Review` with a human
 summary and the exact ops as a fenced JSON block. Move a proposal into
 `_Review/Approved` → next run (≤30 min, or `entity-filing.py --apply-only`)
-executes the ops and trashes the proposal. Delete a proposal to reject it.
-Editing the JSON block before approving is supported — the ops are the truth,
-the prose is just a rendering.
+executes approved, resolved ops and trashes the proposal. Deleting an ordinary
+source proposal rejects it. Reject candidate-origin proposals through the private
+review app's Reject action, which returns the candidate to Pending. Deleting only
+that proposal leaves its candidate Approved and can recreate the proposal.
+Older frozen JSON fences remain editable. New passive envelopes require the private
+review app for edits and equivalence answers; the worker analyzes changed plans
+before approval.
 
 A proposal's ops freeze at extraction time but the roster keeps growing, so
 apply re-verifies every `ensure_person` against the **live** roster first:
@@ -1033,7 +1037,7 @@ it through the osascript JXA harness, since the asset is served whole and
 can't be imported as a module.
 
 After a decision the server debounces a `--apply-only` run (~20 s,
-`PIPELINE_MANUAL=1`, retreating to the 30-minute tick if the run lock stays
+`PIPELINE_MANUAL=1` for watchdog suppression and `ENTITY_FILING_SCHEDULED=1` to retain driver, power, memory, idle and inference-lock gates, retreating to the 30-minute tick if the run lock stays
 busy), so the queue clears in seconds. Capture decisions apply under the existing mutation locks. The next reminder
 sync retires answered questions; task state cannot change the data decision.
 
@@ -1151,7 +1155,7 @@ Boundaries hard-coded regardless of config:
 
 ## Fact provenance and correction propagation
 
-The unified biographical update adds a versioned `bio:v2` marker to new Person assertions. It binds the assertion to its Person UUID and stores its content/date baseline and independent source references. Capture Undo removes only its own references. Passive exact matches add independent support, while protected historical or kept-edited content is never deleted by capture Undo. Grouped and flat logs remain readable by briefing and dedup consumers, which omit the hidden marker. Passive model-based equivalence is deferred.
+The unified biographical update adds a versioned `bio:v2` marker to new Person assertions. It binds the assertion to its Person UUID and stores its content/date baseline and independent source references. Capture Undo removes only its own references. Passive exact matches add independent support, while protected historical or kept-edited content is never deleted by capture Undo. Grouped and flat logs remain readable by briefing and dedup consumers, which omit the hidden marker. New passive proposals use local paraphrase suggestions and explicit reviewed choices. Waiting envelopes block every approval path; edited plans queue worker analysis. See [passive matching and its compatibility boundaries](entity-capture-implementation.md#passive-paraphrase-matching).
 
 The explicit migration upgrades only unchanged v1 capture blocks and fingerprint-verified legacy machine facts. It leaves manual edits and unfinished corrections intact. Preview, semantic review, apply, recovery, and rollback use exact private artifacts and a durable mutation fence. See [the v2 deployment procedure](entity-capture-implementation.md#explicit-v2-migration). This update is not yet installed; frozen v1 retries retain their original representation.
 

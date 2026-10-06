@@ -530,9 +530,15 @@ def extract_omlx(config, prompt):
             raise LLMUnavailable(
                 f"HTTP {exc.code}: {_http_error_detail(exc)}") from exc
         raise
-    except OSError as exc:
+    except (OSError, ValueError) as exc:
         raise LLMUnavailable(exc) from exc
-    return out["choices"][0]["message"]["content"]
+    try:
+        content = out["choices"][0]["message"]["content"]
+        if not isinstance(content, str) or not content.strip():
+            raise ValueError()
+        return content
+    except (KeyError, IndexError, TypeError, ValueError):
+        raise LLMUnavailable("Malformed local response.") from None
 
 
 def close_orphaned_arrays(text):
@@ -1084,6 +1090,15 @@ def ignored_conflicts(ops, index, ignored):
 
 
 def apply_approved(dry_run):
+    lock = ec.acquire_candidates_lock()
+    try:
+        return apply_approved_locked(dry_run)
+    finally:
+        lock.close()
+
+
+def apply_approved_locked(dry_run):
+    import entity_passive as passive
     approved = run_bridge([{"op": "list_group", "path": APPROVED_PATH}])[0]
     if not approved:
         return
@@ -1094,7 +1109,9 @@ def apply_approved(dry_run):
     index = roster_index(people)
     ignored = ec.CandidateIndex(listing).ignored_names()
     for rec in approved:
-        text = run_bridge([{"op": "get_text", "uuid": rec["uuid"]}])[0]["text"]
+        fetched = run_bridge([{"op": "get_text", "uuid": rec["uuid"]}, {"op": "get_fields", "uuid": rec["uuid"]}])
+        text = fetched[0]["text"]
+        passive_required = "Passive v1" in str(fetched[1].get("md", {}).get("mddocumenttype", "")) or "\nPassive comparison: " in text
         try:
             ops = proposal_ops(text)
         except ValueError as exc:
@@ -1106,6 +1123,21 @@ def apply_approved(dry_run):
             log.warning("approved proposal has no ops block, skipping",
                         extra={"record_name": rec["name"],
                                "record_uuid": rec["uuid"]})
+            continue
+        try:
+            envelope = passive.read(ops)
+            if passive_required and envelope is None:
+                raise ValueError("The passive plan is missing.")
+            if envelope:
+                passive.executable(envelope)
+                validate_passive_sources(envelope)
+                current_people = run_bridge([{"op": "dump_people", "include_bodies": True}])[0]
+                passive.validate_people(envelope, current_people)
+                validate_passive_origin(envelope, current_people)
+                ops = json.loads(json.dumps(ops))
+                ops[0]["proposal"] = {"uuid": rec["uuid"], "text": text}
+        except ValueError:
+            log.info("passive proposal is unresolved or stale", extra={"record_uuid": rec["uuid"]})
             continue
         conflicts = ignored_conflicts(ops, index, ignored)
         if conflicts:
@@ -1276,6 +1308,91 @@ def promotion_evidence_ops(data, target_uuid, current_md):
     return ops
 
 
+def prepare_candidate_passive(rec, data, target, people, dry_run):
+    import entity_passive as passive
+    listing = run_bridge([{"op": "list_review"}])[0]
+    for proposal in listing.get("pending", []) + listing.get("approved", []):
+        reserved = False
+        try:
+            held_ops = proposal_ops(proposal["text"]) or []
+            reserved = any(op.get("op") == "passive_plan" and op.get("variant") == "oversized_evidence" and
+                           isinstance(op.get("origin"), dict) and op["origin"].get("uuid") == rec["uuid"] for op in held_ops)
+            held = passive.read(held_ops)
+            if held and held.get("variant") == "oversized_evidence":
+                if not reserved:
+                    continue
+                held = passive.load_evidence(held)
+            if held and held.get("origin", {}) and held["origin"]["uuid"] == rec["uuid"] and held["origin"]["text"] == rec["text"] and held["origin"]["tracktarget"] == str(rec.get("md", {}).get("mdtracktarget", "") or "") and held["origin"]["createdistinct"] == md_flag(rec.get("md", {}).get("mdcreatedistinct", "")):
+                return
+        except ValueError:
+            if reserved:
+                log.info("candidate promotion retained with unreadable frozen evidence", extra={"record_uuid": rec["uuid"]})
+                return
+            continue
+    config = load_config()
+    target_uuid = target or "new:" + data["name"]
+    person = next((p for p in people if p["uuid"] == target), None)
+    ops = promotion_evidence_ops(data, target_uuid, person.get("md", {}) if person else {})
+    sources, assertions, lines, blocked = [], [], [], ""
+    for sid, sighting in data["sightings"].items():
+        if not sid.startswith("dt:"):
+            continue
+        if not sighting.get("hash"):
+            blocked = "provenance_unverifiable"
+            continue
+        source, raw = run_bridge([{"op": "get_source", "uuid": sid[3:]}, {"op": "get_text", "uuid": sid[3:]}])
+        text = normalize_source_text(source["kind"], raw["text"])
+        if (capture.revision(text) != sighting["hash"] or not source.get("ready", True) or
+                source["name"] != sighting.get("name") or source["kind"] != sighting.get("kind") or
+                source_date_of(source) != sighting.get("date") or
+                sighting.get("raw_revision") and sighting["raw_revision"] != capture.revision(raw["text"]) or
+                sighting.get("raw_field") and sighting["raw_field"] != raw.get("field", "plainText")):
+            blocked = "source_changed"
+        if sighting.get("input") and capture.revision(sighting["input"]) != sighting.get("input_revision"):
+            blocked = "provenance_unverifiable"
+        source_date = valid_date(sighting.get("date", "")) or source_date_of(source)
+        sources.append(passive.snapshot(source, raw["text"], text, source_date, sighting.get("input", cap_words(text)), raw.get("field", "plainText")))
+        plan = {"kind": "existing", "uuid": target_uuid, "name": data["name"], "aliases": ", ".join(data["name_variants"]),
+                "md": {}, "facts": sighting.get("facts") or [], "updates": {}}
+        for op in ops_for_plan(plan, dict(source, text_revision=sighting["hash"]), source_date):
+            if op["op"] == "append_log":
+                assertions.extend(op["assertions"])
+                lines.extend(op["lines"])
+    ops = [op for op in ops if op["op"] != "append_log"]
+    if assertions:
+        ops.insert(0, {"op": "append_log", "uuid": target_uuid, "lines": lines, "assertions": assertions})
+    variants = [data["name"]] + list(data["name_variants"])
+    if target:
+        ops.append({"op": "add_aliases", "uuid": target, "aliases": ", ".join(variants)})
+    else:
+        aliases = ", ".join(v for v in data["name_variants"] if norm(v) != norm(data["name"]))
+        for op in ops:
+            op["target_name"] = data["name"]
+        ops.insert(0, {"op": "ensure_person", "name": data["name"], "aliases": aliases})
+    ops.append({"op": "trash", "uuid": rec["uuid"], "expected_text": rec["text"]})
+    origin = {"uuid": rec["uuid"], "text": rec["text"],
+              "tracktarget": str(rec.get("md", {}).get("mdtracktarget", "") or ""),
+              "createdistinct": md_flag(rec.get("md", {}).get("mdcreatedistinct", "")),
+              "target": target_uuid,
+              "owners": passive.identity_owners(variants + list(data["emails"]), people)}
+    llm_lock = None
+    suggest = None
+    if not blocked and config["TRANSPORT"] != "off" and omlx_available(config) and memory_pressure_normal() and (
+            float(config["IDLE_MINUTES"]) <= 0 or (user_idle_seconds() or 0) >= float(config["IDLE_MINUTES"]) * 60):
+        llm_lock = acquire_llm_lock()
+        if llm_lock is not None:
+            suggest = semantic_suggestions(config)
+    try:
+        bodies = run_bridge([{"op": "dump_people", "include_bodies": True}])[0]
+        envelope = passive.prepare(ops, sources, bodies, suggest, origin=origin, blocked=blocked, auto=True)
+        if not dry_run:
+            run_bridge([{"op": "create_record", "name": "File candidate: " + data["name"], "path": APPROVED_PATH if envelope["status"] == "ready" else REVIEW_PATH,
+                        "text": passive.body(envelope), "fields": {"documenttype": "Entity Filing Proposal Passive v1"}}])
+    finally:
+        if llm_lock is not None:
+            llm_lock.close()
+
+
 def bounce_candidate(rec, data, reason, near, dry_run):
     if dry_run:
         log.info("[dry-run] would bounce candidate %r: %s", data["name"],
@@ -1334,6 +1451,9 @@ def promote_candidates(dry_run):
             if dry_run:
                 log.info("[dry-run] would promote %r into %s", data["name"],
                          target or "a new Person record")
+                continue
+            if any(sid.startswith("dt:") and (s.get("facts") or s.get("updates")) for sid, s in data["sightings"].items()):
+                prepare_candidate_passive(rec, data, target, people, dry_run)
                 continue
             variants = [data["name"]] + list(data["name_variants"])
             if target is None:
@@ -2546,7 +2666,9 @@ def scan(config, state, dry_run, force_uuid, user_invoked):
             continue
 
         source_date = source_date_of(source)
-        text = run_bridge([{"op": "get_text", "uuid": uuid}])[0]["text"]
+        raw_source = run_bridge([{"op": "get_text", "uuid": uuid}])[0]
+        source = dict(source, passive_raw_text=raw_source["text"], passive_raw_field=raw_source.get("field", "plainText"))
+        text = raw_source["text"]
         text = normalize_source_text("fact" if capture_path else source["kind"], text)
         entry = state["processed"].get(uuid)
         if not frozen_capture and uuid != force_uuid and entry is not None and entry.get("hash") == \
@@ -2699,9 +2821,9 @@ def scan(config, state, dry_run, force_uuid, user_invoked):
             plans, handled = divert_new_plans(
                 plans, source, source_date, text, index, ignored, dry_run)
             mode = effective_filing_mode(source["kind"], filing_mode)
-            file_source(config, state, source, source_date, plans, mode,
-                        dry_run, text, candidate_handled=handled)
-            progressed = True
+            result = file_source(config, state, source, source_date, plans, mode,
+                                 dry_run, text, candidate_handled=handled)
+            progressed = progressed or bool(result)
         except BridgeUnavailable:
             raise
         except Exception as exc:
@@ -2887,6 +3009,126 @@ def semantic_suggestions(config):
     return suggest
 
 
+def validate_passive_sources(envelope, bridge=None):
+    run = bridge or run_bridge
+    for frozen in envelope["sources"]:
+        source, body = run([{"op": "get_source", "uuid": frozen["uuid"]},
+                                   {"op": "get_text", "uuid": frozen["uuid"]}])
+        if (capture.revision(body["text"]) != frozen["raw_revision"] or body.get("field", "plainText") != frozen["raw_field"] or not source.get("ready", True) or
+                any(source.get(k, "") != frozen[k] for k in ("name", "kind", "eventdate", "added")) or
+                capture.revision(normalize_source_text(source["kind"], body["text"])) != frozen["revision"]):
+            raise ValueError("The passive source changed. Prepare a fresh source-grounded plan.")
+
+
+def validate_passive_origin(envelope, people, bridge=None):
+    origin = envelope.get("origin")
+    if not origin:
+        return
+    run = bridge or run_bridge
+    current, fields = run([{"op": "get_text", "uuid": origin["uuid"]}, {"op": "get_fields", "uuid": origin["uuid"]}])
+    md = fields.get("md", {})
+    if (current["text"] != origin["text"] or str(md.get("mdtracktarget", "") or "") != origin["tracktarget"] or
+            md_flag(md.get("mdcreatedistinct", "")) != origin["createdistinct"]):
+        raise ValueError("The candidate evidence or decision changed.")
+    import entity_passive as passive
+    allowed = origin["target"]
+    if allowed.startswith("new:"):
+        target = next(t for t in envelope["targets"] if "new:" + t["name"] == allowed)
+        owned = [p for p in people if "<!-- passive-created:" + target["creation"] + ":" + p["uuid"] + " -->" in p.get("body", "")]
+        allowed = owned[0]["uuid"] if len(owned) == 1 else None
+    owners = passive.identity_owners(origin["owners"], people)
+    if any(set(owners[k]) - {allowed} != set(v) - {allowed} for k, v in origin["owners"].items()):
+        raise ValueError("The candidate identity changed.")
+
+
+def passive_envelope(config, ops, source, source_date, text, auto=False, expected_people=()):
+    import entity_passive as passive
+    fresh, body, people = run_bridge([{"op": "get_source", "uuid": source["uuid"]},
+        {"op": "get_text", "uuid": source["uuid"]}, {"op": "dump_people", "include_bodies": True}])
+    blocked = ""
+    raw = source.get("passive_raw_text", body["text"])
+    raw_field = source.get("passive_raw_field", body.get("field", "plainText"))
+    if (normalize_source_text(fresh["kind"], body["text"]) != text or fresh["name"] != source["name"] or
+            fresh["kind"] != source["kind"] or source_date_of(fresh) != source_date or raw != body["text"] or
+            raw_field != body.get("field", "plainText")):
+        blocked = "source_changed"
+    frozen = passive.snapshot(source, raw, text, source_date, cap_words(text), raw_field)
+    for expected in expected_people:
+        current = next((p for p in people if p["uuid"] == expected["uuid"]), None)
+        if current is None:
+            people.append(expected)
+            blocked = blocked or "identity_changed"
+        elif (current["name"] != expected["name"] or current.get("aliases", "") != expected.get("aliases", "") or
+                any(str(current.get("md", {}).get(k, "") or "") != str(v or "") for k, v in expected.get("md", {}).items() if k in {"mdemail", "mdentitytype", "mdfilingssuppressed"})):
+            blocked = blocked or "identity_changed"
+    index = roster_index(people)
+    if any(op["op"] == "ensure_person" and index.get(norm(op["name"])) for op in ops):
+        blocked = blocked or "identity_unresolved"
+    envelope = passive.prepare(ops, [frozen], people, semantic_suggestions(config), auto=auto, blocked=blocked)
+    if not blocked:
+        passive.validate_people(envelope, people)
+    return envelope
+
+
+def retry_passive_proposals(config, dry_run, user_invoked):
+    import entity_passive as passive
+    listing = run_bridge([{"op": "list_review"}])[0]
+    rows = listing.get("pending", []) + listing.get("approved", [])
+    lock = None
+    healthy = True
+    try:
+        for rec in rows:
+            try:
+                envelope = passive.read(proposal_ops(rec["text"]) or [])
+                if not envelope:
+                    continue
+                if envelope["status"] == "blocked":
+                    healthy = False
+                    continue
+                if envelope["status"] != "waiting":
+                    continue
+                if envelope.get("variant") == "oversized_evidence":
+                    envelope = passive.load_evidence(envelope)
+                    if envelope["status"] == "blocked":
+                        healthy = False
+                        continue
+                previous_healthy = healthy
+                healthy = False
+                if config["TRANSPORT"] == "off" or not omlx_available(config):
+                    continue
+                if not user_invoked and (not memory_pressure_normal() or
+                        float(config["IDLE_MINUTES"]) > 0 and (user_idle_seconds() or 0) < float(config["IDLE_MINUTES"]) * 60):
+                    continue
+                if lock is None:
+                    lock = acquire_llm_lock()
+                if lock is None:
+                    continue
+                mutation_lock = ec.acquire_candidates_lock()
+                try:
+                    validate_passive_sources(envelope)
+                    people = run_bridge([{"op": "dump_people", "include_bodies": True}])[0]
+                    passive.validate_people(envelope, people)
+                    validate_passive_origin(envelope, people)
+                    updated = passive.analyze(envelope, people, semantic_suggestions(config))
+                    if not dry_run and passive.body(updated) != rec["text"]:
+                        actions = [{"op": "set_text", "uuid": rec["uuid"], "expected_text": rec["text"], "text": passive.body(updated)}]
+                        if updated["status"] == "ready" and updated["auto"]:
+                            actions.append({"op": "move_to", "uuid": rec["uuid"], "group": APPROVED_PATH})
+                        elif updated["status"] != "ready":
+                            actions.append({"op": "move_to", "uuid": rec["uuid"], "group": REVIEW_PATH})
+                        run_bridge(actions)
+                    healthy = previous_healthy and updated["status"] not in {"waiting", "blocked"}
+                finally:
+                    mutation_lock.close()
+            except ValueError:
+                healthy = False
+                log.info("passive comparison retained with stale evidence", extra={"record_uuid": rec["uuid"]})
+    finally:
+        if lock is not None:
+            lock.close()
+    return healthy
+
+
 def review_group_has_name(name):
     """True when a record named `name` already sits in `_Review` — the guard
     against a crash between create_record and save_state re-creating the
@@ -2914,6 +3156,10 @@ def candidate_mentions(plans, source, source_date, text):
                 "kind": source.get("kind", ""),
                 "date": source_date,
                 "hash": text_hash,
+                "input": cap_words(text),
+                "input_revision": capture.revision(cap_words(text)),
+                "raw_revision": capture.revision(source.get("passive_raw_text", text)),
+                "raw_field": source.get("passive_raw_field", "plainText"),
                 "interacted": bool(plan.get("interacted")),
                 "facts": [[d, f] for d, f in plan.get("facts", [])],
                 "updates": dict(plan.get("updates") or {}),
@@ -2971,24 +3217,31 @@ def file_source(config, state, source, source_date, plans, filing_mode,
         filed_ops += [{"op": "ensure_group", "path": FACTS_FILED_PATH},
                       {"op": "move_to", "uuid": source["uuid"],
                        "group": FACTS_FILED_PATH}]
+    import entity_passive as passive
     direct_ops = []
     proposal_plans = []
     for plan in plans:
-        strong = filing_mode == "auto" and plan["kind"] == "existing" \
-            and not plan.get("weak_match")
-        # A fact auto-applies only when its person is named unambiguously in
-        # the capture text; a bare first name the model expanded stays a proposal.
+        strong = filing_mode == "auto" and plan["kind"] == "existing" and not plan.get("weak_match")
         if strong and is_fact and not fact_match_is_strong(plan, text):
             strong = False
         if strong:
             direct_ops.extend(ops_for_plan(plan, source, source_date))
         else:
             proposal_plans.append(plan)
-
-    fence_ops = []
-    for plan in proposal_plans:
-        fence_ops.extend(ops_for_plan(plan, source, source_date))
-    fence_ops.append({"op": "mark_filed", "uuid": source["uuid"]})
+    fence_ops = [op for plan in proposal_plans for op in ops_for_plan(plan, source, source_date)]
+    envelope = None
+    if direct_ops or fence_ops:
+        all_ops = direct_ops + fence_ops + filed_ops
+        envelope = passive_envelope(config, all_ops, source, source_date, text,
+                                    auto=not proposal_plans, expected_people=[
+                                        {"uuid": p["uuid"], "name": p["name"], "aliases": p.get("aliases", ""), "md": p.get("md", {})}
+                                        for p in plans if p["kind"] == "existing"])
+        if proposal_plans or envelope["status"] != "ready":
+            direct_ops = []
+            proposal_plans = plans
+            fence_ops = passive.fence(envelope)
+        else:
+            direct_ops = passive.fence(envelope)
 
     # A deliberately-authored fact must never vanish: when extraction yields
     # nothing to apply, propose, or record on a candidate, surface the raw
@@ -3022,21 +3275,24 @@ def file_source(config, state, source, source_date, plans, filing_mode,
 
     if proposal_plans:
         proposal_name = f"File: {source['name']}"
-        if review_group_has_name(proposal_name):
-            log.warning("a proposal named %r already exists in _Review; not "
-                        "duplicating it", proposal_name,
-                        extra={"record_name": source["name"],
-                               "record_uuid": source["uuid"]})
-            run_bridge(filed_ops)
-        else:
-            body = proposal_body(source, source_date, proposal_plans, fence_ops)
+        existing = run_bridge([{"op": "list_review"}])[0]
+        matching = []
+        for record in existing.get("pending", []) + existing.get("approved", []):
+            try:
+                held = passive.read(proposal_ops(record["text"]) or [])
+                if held and held["id"] == envelope["id"]:
+                    matching.append(record)
+            except ValueError:
+                continue
+        if not matching:
+            body = passive.body(envelope)
             run_bridge([{
                 "op": "create_record",
                 "name": proposal_name,
                 "path": REVIEW_PATH,
                 "text": body,
-                "fields": {"documenttype": "Entity Filing Proposal"},
-            }] + filed_ops)
+                "fields": {"documenttype": "Entity Filing Proposal Passive v1"},
+            }])
             log.info("proposal created (%d people)", len(proposal_plans),
                      extra={"record_name": source["name"],
                             "record_uuid": source["uuid"]})
@@ -3059,7 +3315,7 @@ def file_source(config, state, source, source_date, plans, filing_mode,
             log.info("no filable fact extracted — capture surfaced for review",
                      extra={"record_name": source["name"],
                             "record_uuid": source["uuid"]})
-    else:
+    elif not direct_ops:
         run_bridge(filed_ops)
 
     # mark_filed just bumped the record's modification date; re-read it so
@@ -3079,6 +3335,7 @@ def file_source(config, state, source, source_date, plans, filing_mode,
         pass
     remember_processed(state, source, text, modified=modified)
     save_state(state)
+    return envelope is None or envelope["status"] not in {"waiting", "blocked"}
 
 
 # ---------------------------------------------------------------------------
@@ -3608,7 +3865,7 @@ def main():
             sys.exit(2)
     user_invoked = bool(dry_run or force_uuid or apply_only or scan_only
                         or rebuild_state or migrate or split_args
-                        or merge_args)
+                        or merge_args) and os.environ.get("ENTITY_FILING_SCHEDULED") != "1"
 
     if not dry_run:
         if not apply_only:
@@ -3667,6 +3924,7 @@ def main():
                 save_state(state)
             if rebuild_state:
                 return
+        passive_healthy = retry_passive_proposals(config, dry_run, user_invoked)
         if not scan_only:
             promote_candidates(dry_run)
             apply_approved(dry_run)
@@ -3681,7 +3939,7 @@ def main():
                 raise
             except Exception as exc:
                 log.warning("question reminders deferred: %s", exc)
-        if should_record_success(dry_run) and scan_healthy:
+        if should_record_success(dry_run) and scan_healthy and passive_healthy:
             record_success()
     except BridgeUnavailable as exc:
         log.info("skipping: %s", exc)

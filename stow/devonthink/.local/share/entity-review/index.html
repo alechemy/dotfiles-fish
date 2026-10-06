@@ -551,15 +551,15 @@ function comparisonCard(q, cv, o, index, total) {
   const input = value => '<input type="radio" name="' + esc(name) + '" data-semantic-key="' + esc(q.key) + '" value="' + esc(value) + '"' + (answer === value ? ' checked' : '') + '>';
   let html = '<fieldset class="comparison"><legend>Review fact ' + (index + 1) + ' of ' + total + '</legend>';
   if (q.person_name) html += '<p class="review-explanation">About ' + esc(q.person_name) + '</p>';
-  html += '<div class="comparison-grid"><div><h3>From your note</h3><p class="comparison-text">' + esc(q.assertion) +
+  html += '<div class="comparison-grid"><div><h3>' + (cv.passive ? 'New extracted information' : 'From your note') + '</h3><p class="comparison-text">' + esc(q.assertion) +
     '</p><span class="comparison-date">' + esc(comparisonDate(q.observed_date)) + '</span></div><div><h3>Already saved</h3>';
   for (const candidate of q.candidates) html += '<label class="comparison-choice">' + input(candidate.id) +
     '<span><strong>Already recorded; keep this entry</strong><span class="comparison-text">' + esc(candidate.text) +
     '</span><span class="comparison-date">' + esc(comparisonDate(candidate.log_date, candidate.temporal_context)) + '</span></span></label>';
   html += '</div></div><label class="comparison-choice">' + input("separate") + '<span><strong>Add as new information</strong>' +
     '<span>Keep a separate entry if any details differ or you are unsure.</span></span></label>';
-  html += '<details><summary>Original wording and other options</summary><div class="captured">' + esc(q.evidence) +
-    '</div><label class="comparison-choice">' + input("source") + '<span>Add a separate entry using my original wording</span></label></details></fieldset>';
+  html += '<details><summary>' + (cv.passive ? 'Extracted wording and other options' : 'Original wording and other options') + '</summary><div class="captured">' + esc(q.evidence) +
+    '</div><label class="comparison-choice">' + input("source") + '<span>' + (cv.passive ? 'Add a separate entry using the extracted wording' : 'Add a separate entry using my original wording') + '</span></label></details></fieldset>';
   return html;
 }
 
@@ -825,11 +825,26 @@ function proposalCard(pv, o) {
       "</div>";
     return html + "</div>";
   }
+  if (pv.passive) {
+    if (!local["c-" + pv.uuid]) local["c-" + pv.uuid] = o;
+    if (!o.passiveRevision) o.passiveRevision = pv.revision;
+    if (o.passiveRevision !== pv.revision) {
+      return html + '<div class="notice">The proposal changed. Reload the page to discard the old draft before deciding.</div></div>';
+    }
+    if (pv.status === "waiting" || pv.status === "blocked") {
+      html += '<div class="notice">' + (pv.status === "waiting" ? (pv.reason === 'oversized_review' ? 'Oversized review. Complete extracted evidence is retained privately; no preview or approval is available.' : 'Waiting for local comparison.') : 'Filing is blocked: ' + esc(pv.reason)) + '</div>';
+      pv.plans.forEach((plan, pi) => { html += planBlock(plan, pi, pv.editable, o); });
+      return html + '<div class="actions">' + (pv.editable ? '<button class="btn" data-act="passive-edit" data-uuid="' + u + '">Save changes for local comparison</button>' : '') + propBtn("danger", pv, "reject", "Reject", {noundo:true}) + '</div></div>';
+    }
+    (pv.semantic_questions || []).forEach((q, i) => {
+      html += comparisonCard(q, pv, o, i, pv.semantic_questions.length);
+    });
+  }
   pv.plans.forEach((plan, pi) => { html += planBlock(plan, pi, pv.editable, o); });
   if (!pv.editable)
     html += '<div class="chips"><span class="chip">applies exactly as written</span></div>';
   html += '<div class="actions">' +
-    '<button class="btn primary" data-act="approve" data-uuid="' + u + '">Approve</button>' +
+    '<button class="btn primary" data-act="approve" data-uuid="' + u + '"' + (pv.passive && pv.status === "question" && pv.semantic_questions.some(q => !(o.captureAnswers || {})[q.key]) ? " disabled" : "") + '>Approve</button>' +
     propBtn("danger", pv, "reject", "Reject", {msg: "Rejected", noundo: true}) +
     "</div>";
   return html + "</div>";
@@ -918,18 +933,26 @@ function startEdit(span) {
   input.focus();
 }
 
-async function approveProposal(uuid, confirm) {
+async function approveProposal(uuid, confirm, analysisOnly) {
   const pv = queue.proposals.find(p => p.uuid === uuid);
   let body = {action: "approve"};
+  if (pv.passive) {
+    body.revision = overlayOf(local, "c-" + uuid).passiveRevision;
+    body.semantic_answers = overlayOf(local, "c-" + uuid).captureAnswers || {};
+  }
   if (pv.editable) {
     const spec = buildSpec(pv, overlayOf(local, "c-" + uuid));
+    if (analysisOnly && !spec.changed) {
+      banner("Edit the proposal before saving changes for local comparison.");
+      return;
+    }
     if (spec.changed || confirm) {
       if (!spec.people.length && !spec.events.length) {
         banner("Nothing left to file — use Reject instead.");
         return;
       }
       body = {action: "approve", people: spec.people, events: spec.events,
-              confirm: !!confirm};
+              confirm: !!confirm, revision: overlayOf(local, "c-" + uuid).passiveRevision};
     }
   }
   let res;
@@ -945,6 +968,12 @@ async function approveProposal(uuid, confirm) {
     if (window.confirm("Create as a separate new person? " + names)) {
       return approveProposal(uuid, true);
     }
+    return;
+  }
+  if (res.status === "waiting") {
+    delete local["c-" + uuid];
+    toast("Waiting for local comparison");
+    await refresh(false);
     return;
   }
   removeCard("c-" + uuid, "Approved",
@@ -1080,6 +1109,7 @@ document.addEventListener("click", e => {
     }
     case "prop": decideProposal(d.uuid, d.action, d.msg, !!d.noundo); break;
     case "approve": approveProposal(d.uuid); break;
+    case "passive-edit": approveProposal(d.uuid, false, true); break;
   }
 });
 
@@ -1091,6 +1121,17 @@ document.addEventListener("input", e => {
   if (t.dataset.captureText) captureOverlay(uuid).captureText = t.value;
   if (t.dataset.captureRow !== undefined) captureOverlay(uuid).captureRows[Number(t.dataset.captureRow)][t.dataset.field] = t.value;
   if (t.dataset.semanticKey !== undefined) {
+    if (t.type === "radio" && !t.checked) return;
+    const pv = queue.proposals.find(p => p.uuid === uuid);
+    if (pv && pv.passive) {
+      const o = ov(key);
+      (o.captureAnswers || (o.captureAnswers = {}))[t.dataset.semanticKey] = t.value;
+      const button = t.closest("[data-key]").querySelector('[data-act="approve"]');
+      if (button) button.disabled = pv.semantic_questions.some(q => !o.captureAnswers[q.key]);
+      render();
+      return;
+    }
+
     if (t.type === "radio" && !t.checked) return;
     const o = captureOverlay(uuid);
     (o.captureAnswers || (o.captureAnswers = {}))[t.dataset.semanticKey] = t.value;

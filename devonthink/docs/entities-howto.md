@@ -58,6 +58,8 @@ Ordinary passive candidates and successful captures do not create Things tasks. 
 
 Meeting notes, handwritten notes, and daily jots retain `FILING_MODE`, defaulting to review. Use the review app for their proposals and candidate decisions. Unknown passive candidates remain quiet until you choose to track them. Deliberate capture does not promote their accumulated historical sightings.
 
+After the passive matching update is installed, possible paraphrases show **New extracted information** beside **Already saved**, with dates. Choose an existing entry only if it covers every detail; otherwise keep a separate entry. Waiting comparisons have no approval control. Save edited proposals for local comparison rather than approving them immediately. Moving a Waiting proposal to Approved in DEVONthink does not bypass that requirement. Older candidate sightings with unverifiable provenance stay blocked and intact; ask the operator for fresh source-grounded extraction or capture.
+
 Calendar entity processing ignores events with more than 10 raw invitees, including self, rooms, and resources. Exactly 10 remains eligible. The calendar and Messages passes maintain contact dates; a captured fact alone is not evidence of contact.
 
 For reconnect suggestions, set `Relationship` to `family`, `close-friend`, `friend`, or `colleague`. Set `EntityStatus=dormant` to stop reconnect suggestions. `FilingSuppressed` pauses filing; `BriefingSuppressed` controls the generated briefing. These controls have different purposes.
