@@ -38,7 +38,7 @@ Exact assertions with compatible temporal context share one visible bullet. Exac
 
 Undo removes that capture's references. Another capture or passive source keeps the assertion alive. Historical and keep-edited assertions stay protected, including when they have no remaining references. Only unchanged capture-created assertions lose their visible bullet with their last support. Corrections verify destination references before removing superseded references. Frozen v1 operations continue using their original blocks on retries.
 
-Future passive Person facts use subject-relative wording and provenance-aware attachment. Passive paraphrase matching is implemented in source but is not installed by this change. It keeps the configured passive review policy, field-transition history, Event logs, and LastContact behavior.
+Future passive Person facts use subject-relative wording and provenance-aware attachment. Passive paraphrase matching is installed from `56b97c299a04bcfbc44e462cea99366eb30acdd1`. The new helper links belong to the primary checkout, and the restarted review server serves the updated UI. It keeps the configured passive review policy, field-transition history, Event logs, and LastContact behavior. Installation did not rescan historical sources or run a migration.
 
 ### Passive paraphrase matching
 
@@ -54,7 +54,7 @@ Older frozen proposals without this envelope and frozen v1/v2 capture operations
 
 ### Exact-code recovery for the completed migration
 
-The migration digest remains strict. New filing/bridge/review code cannot recover or roll back the old applied plan. Before deployment, the operator must retain the published `e19d72378ede650ee8d8c4709468c037b4e478ad` runtime and the private plan/journal. The parent archived all 46 tracked bin files under `~/.local/state/devonthink/entity-biographical-runtime-e19d72378ede/stow/devonthink/.local/bin` and verified that fresh archived imports validate the retained applied plan's code digest. The historical CLI help also loads. No entity writes or rollback occurred during that check.
+The migration digest remains strict. New filing/bridge/review code cannot recover or roll back the old applied plan. Retain the published `e19d72378ede650ee8d8c4709468c037b4e478ad` runtime and the private plan/journal for recovery. The parent archived all 46 tracked bin files under `~/.local/state/devonthink/entity-biographical-runtime-e19d72378ede/stow/devonthink/.local/bin` and verified that fresh archived imports validate the retained applied plan's code digest. The historical CLI help also loads. No entity writes or rollback occurred during that check.
 
 After separate operator authorization, invoke the archived `entity-biographical-migrate` with `/usr/bin/python3`, `PIPELINE_MANUAL=1`, and the exact retained plan for `--recover` or `--rollback`. Its imports and bridge resolve relative to the archive, without changing HOME links. Keep the ordinary resource gates, locks, recovery fence and changed-record refusal. Do not bypass the digest or regenerate an artifact over partial work. Parent review and deployment approval remain required.
 
