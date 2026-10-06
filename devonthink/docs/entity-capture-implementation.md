@@ -26,9 +26,9 @@ Legacy proposal/candidate task interpretation and map reconstruction are disable
 
 ## Unified biographical filing update
 
-The v2 filing update is installed on the driver. The initial private preview planned eight Person normalizations and excluded six records. It did not apply record writes. The comparison fix invalidates that preview and its two questions; create a fresh preview before reviewing or applying it. The deployment history below describes the earlier capture release.
+The v2 filing update and reviewed migration are complete on the driver. Application normalized eight Person notes and upgraded one capture after the user confirmed its possible match. All eleven mutations were verified, the original capture body was preserved, and the recovery journal is complete. The six records excluded from the initial preview remain unchanged. No migration questions or recovery fence remain. Private previews and the applied journal are retained outside Git. The deployment history below describes the earlier capture release.
 
-The last synthetic model-assisted comparison check returned HTTP 507, so model comparison remains unverified. Failed, malformed, or oversized comparisons now retain complete source evidence in a waiting state without inventing possible matches. Existing Person support stays intact during a queued correction. Waiting comparisons block migration review and application.
+Local comparison completed during the refreshed preview. Routine `LastContact` updates no longer invalidate migration review. Failed, malformed, or oversized comparisons retain complete source evidence in a waiting state without inventing possible matches. Existing Person support stays intact during a queued correction. Waiting comparisons block migration review and application.
 
 New captures file assertions under `## Biographical Log`, without separate Captured sections. A conservative splitter preserves every source span. It omits a leading primary name only for recognized subject-relative wording, leaving quotations, links, compound subjects, and other people's names intact. Unsupported structures retain source wording. Original sources and operation history remain unchanged.
 
