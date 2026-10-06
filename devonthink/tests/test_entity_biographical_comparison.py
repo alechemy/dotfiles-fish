@@ -47,6 +47,21 @@ class Comparison(unittest.TestCase):
         with mock.patch.object(ef, "extract_omlx", return_value='{"candidates":[]}'):
             self.assertEqual(ef.semantic_suggestions({})("Has two siblings.", "2026-09-02", [candidate]), [])
 
+    def test_comparison_accepts_only_complete_bare_or_json_fenced_responses(self):
+        candidate = {"id": "a" * 64, "text": "Likes hiking.", "log_date": "2026-09-01",
+                     "temporal_context": "observed:2026-09-01", "origin": "capture"}
+        payload = '{"candidates":["' + candidate["id"] + '"]}'
+        for raw in (payload, "```json\n" + payload + "\n```", "```\n" + payload + "\n```",
+                    " \n```JSON\r\n" + payload + "\r\n```\n "):
+            with self.subTest(raw=raw), mock.patch.object(ef, "extract_omlx", return_value=raw):
+                self.assertEqual(ef.semantic_suggestions({})("Has two siblings.", "2026-09-02", [candidate]), [candidate["id"]])
+        for raw in (None, [], {}, "Explanation\n```json\n" + payload + "\n```",
+                    "```json\n" + payload + "\n```\nExplanation", "```json\n" + payload,
+                    '```json\n{"candidates":["unknown"]}\n```', '```json\n{"candidates":"all"}\n```'):
+            with self.subTest(raw=raw), mock.patch.object(ef, "extract_omlx", return_value=raw):
+                with self.assertRaises(bio.ComparisonUnavailable):
+                    ef.semantic_suggestions({})("Has two siblings.", "2026-09-02", [candidate])
+
     def test_unavailable_comparison_freezes_complete_waiting_plan_without_questions(self):
         text = "Wren has two siblings. Wren works in Denver."
         people = compared_people()

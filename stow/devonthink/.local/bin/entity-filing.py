@@ -2873,7 +2873,12 @@ def semantic_suggestions(config):
         if len(candidates) > 80 or len(prompt) > 32000:
             raise bio.ComparisonUnavailable("Local comparison is too large.")
         try:
-            selected = json.loads(extract_omlx(config, prompt))["candidates"]
+            response = extract_omlx(config, prompt)
+            if not isinstance(response, str):
+                raise TypeError("Comparison response must be text.")
+            text = response.strip()
+            fence = re.fullmatch(r"```(?:json)?\s*\n(.*?)\n```", text, re.DOTALL | re.IGNORECASE)
+            selected = json.loads(fence.group(1) if fence else text)["candidates"]
             if not isinstance(selected, list) or any(value not in known for value in selected):
                 raise bio.ComparisonUnavailable("Local comparison returned an invalid result.")
             return selected
