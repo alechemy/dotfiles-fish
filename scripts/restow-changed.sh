@@ -178,7 +178,7 @@ fi
 if grep -Eq '^stow/pi/\.pi/agent/models\.fragment\.json$|^scripts/merge-pi-settings\.sh$' <<<"$changed_files"; then
     rebuild merge-pi-settings.sh --models
 fi
-if grep -Eq '^scripts/(setup-cmux\.sh|cmux/worktrunk-feedback\.ts)$' <<<"$changed_files"; then
+if grep -Eq '^scripts/(setup-cmux\.sh|setup-cmux-gaps\.py|cmux/worktrunk-feedback\.ts)$' <<<"$changed_files"; then
     rebuild setup-cmux.sh --install-pi-hook
 fi
 if grep -Eq '^stow/worktrunk/|^scripts/setup-worktrunk\.sh$' <<<"$changed_files"; then

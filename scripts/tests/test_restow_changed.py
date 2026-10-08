@@ -209,6 +209,10 @@ class RestowChangedTests(unittest.TestCase):
             stream.write("\n")
         self.assertEqual(self.run_hook(), ["setup-cmux.sh --install-pi-hook"])
 
+    def test_cmux_gap_automation_change_runs_setup_without_stow(self):
+        self.write("scripts/setup-cmux-gaps.py", "fixture")
+        self.assertEqual(self.run_hook(), ["setup-cmux.sh --install-pi-hook"])
+
     def test_cmux_hunk_extension_change_runs_setup_without_stow(self):
         self.write("scripts/cmux/worktrunk-feedback.ts", "fixture")
         self.assertEqual(self.run_hook(), ["setup-cmux.sh --install-pi-hook"])
