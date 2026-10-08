@@ -308,6 +308,31 @@ class ViewerTests(Fixture):
         self.assertEqual(saved["payloads"]["R1"]["markup"], markup)
         review.preview_markup.assert_called_once_with(saved["payloads"]["R1"], 32)
 
+    def test_code_suggestion_is_verbatim_and_preserves_indentation_and_fallback(self):
+        suggestion = 'if (a < b && ready) {\n  return "<value>";\n}'
+        finding = self.finding(suggestion=suggestion)
+        self.send(finding)
+        self.assertIn('<code title="Suggested change">' + suggestion + '</code>', self.comments[0]["markup"])
+        self.assertIn("Suggested change:\n" + suggestion, self.comments[0]["rationale"])
+        saved = review.load_state(self.directory)
+        self.assertEqual(saved["findings"]["R1"]["suggestion"], suggestion)
+        self.send(finding)
+        self.assertEqual(len(self.comments), 1)
+        self.state["imports"] = {}
+        self.comments.clear()
+        self.send(finding)
+        self.assertEqual(self.state["payloads"]["R1"], saved["payloads"]["R1"])
+        self.context["experimentalFeatures"] = []
+        self.send(self.finding(id="R2", suggestion=suggestion))
+        self.assertNotIn("markup", self.comments[1])
+        self.assertIn(suggestion, self.comments[1]["rationale"])
+
+    def test_invalid_code_suggestion_fails_before_mutation(self):
+        for suggestion in ("", "   ", 1, [], "x" * 16001, "</code>", "</CoDe>", "</codex>"):
+            with self.assertRaises(review.ReviewError):
+                self.send(self.finding(suggestion=suggestion))
+        self.assertEqual(self.comments, [])
+
     def test_absent_capability_or_width_uses_explicit_plain_fallback(self):
         for context in ({"experimentalFeatures": []},
                         {"experimentalFeatures": ["stml"], "noteMarkupWidth": 0}):

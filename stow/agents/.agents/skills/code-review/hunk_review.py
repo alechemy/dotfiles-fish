@@ -512,16 +512,18 @@ def validate_findings(values):
         if not isinstance(value, dict):
             raise ReviewError("Each finding must be an object.")
         required = {"id", "axis", "priority", "scope", "title", "body"}
-        allowed = required | {"path", "side", "start_line", "end_line", "reference", "note", "correction"}
+        allowed = required | {"path", "side", "start_line", "end_line", "reference", "note", "correction", "suggestion"}
         if not required <= value.keys() or value.keys() - allowed:
             raise ReviewError("A finding has missing or unknown fields.")
         if not isinstance(value["id"], str) or not re.fullmatch(r"R[1-9][0-9]*", value["id"]) or value["id"] in result:
             raise ReviewError("Finding IDs must be distinct R1, R2, etc.")
         if value["axis"] not in ("Correctness", "Spec", "Standards") or value["priority"] not in ("P0", "P1", "P2", "optional"):
             raise ReviewError("Use the review skill's axes and P0/P1/P2 or optional priority.")
-        for field in ("title", "body", "reference", "note"):
+        for field in ("title", "body", "reference", "note", "suggestion"):
             if field in value and (not isinstance(value[field], str) or not value[field].strip() or len(value[field]) > 16000):
                 raise ReviewError("Finding text must be nonempty and at most 16,000 characters per field.")
+        if "suggestion" in value and "</code" in value["suggestion"].lower():
+            raise ReviewError("Hunk raw code cannot contain </code; keep that snippet in body instead of suggestion.")
         if "correction" in value and (
                 not isinstance(value["correction"], list) or not 1 <= len(value["correction"]) <= 5
                 or any(not isinstance(item, str) or not item.strip() or len(item) > 1000
@@ -561,6 +563,8 @@ def comment_payload(state, finding, files, *, rich=False):
     rationale = finding.get("note", finding["body"])
     if finding.get("correction"):
         rationale += "\n\n" + "\n".join("- " + item for item in finding["correction"])
+    if finding.get("suggestion"):
+        rationale += "\n\nSuggested change:\n" + finding["suggestion"]
     if finding["end_line"] != finding["start_line"]:
         rationale += f'\n\nReviewed range: {finding["side"]} lines {finding["start_line"]}-{finding["end_line"]}.'
     if finding.get("reference"):
@@ -575,6 +579,8 @@ def comment_payload(state, finding, files, *, rich=False):
         if finding.get("correction"):
             payload["markup"] += "<list>" + "".join(
                 "<item>" + escape(item) + "</item>" for item in finding["correction"]) + "</list>"
+        if finding.get("suggestion"):
+            payload["markup"] += '<code title="Suggested change">' + finding["suggestion"] + "</code>"
     return payload
 
 

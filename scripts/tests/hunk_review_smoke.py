@@ -108,7 +108,8 @@ def main():
                     finding = {"id": "R1", "axis": "Correctness", "priority": "P2", "scope": "line",
                                "path": "sample.txt", "side": "new", "start_line": 1, "end_line": 2,
                                "title": "Synthetic native integration check.", "body": "This is synthetic review feedback.",
-                               "note": "A < B & C needs validation.", "correction": ["Validate before using <input>."]}
+                               "note": "A < B & C needs validation.", "correction": ["Validate before using <input>."],
+                               "suggestion": "if (a < b && ready) {\n  validate(input);\n}"}
                     values = {"findings": [finding, {"id": "R2", "axis": "Spec", "priority": "optional", "scope": "review",
                                                      "title": "Synthetic general finding.", "body": "Keep this in the report."}]}
                     for _ in range(2):
@@ -120,7 +121,14 @@ def main():
                     assert "stml" in context["experimentalFeatures"]
                     notes = review.hunk("comment", "list", opened["session"])["comments"]
                     assert len(notes) == 1 and "&lt;" in state["payloads"]["R1"]["markup"]
-                    assert not review.preview_markup(state["payloads"]["R1"], context["noteMarkupWidth"])
+                    payload = state["payloads"]["R1"]
+                    assert '<code title="Suggested change">' in payload["markup"]
+                    assert not review.preview_markup(payload, context["noteMarkupWidth"])
+                    rendered = json.loads(review.run(
+                        ["hunk", "markup", "render", "-", "--width", str(context["noteMarkupWidth"]), "--json"],
+                        data=payload["markup"].encode()))
+                    assert any("if (a < b && ready) {" in line for line in rendered["lines"])
+                    assert any("  validate(input);" in line for line in rendered["lines"])
                     assert not imported["warnings"]
                     review.show_finding(directory, state, "R1")
                     assert review.open_viewer(directory, state)["reused"]
