@@ -1,6 +1,12 @@
 ---
 name: teach
 description: Explain a body of work plainly so a person understands what it is, how it works, and why it was built that way. Use for "teach me this", "help me understand X", or "explain this change or subsystem to me".
+license: MIT; see LICENSE
+metadata:
+  source: https://github.com/cursor/plugins/tree/main/pstack/skills/teach
+  upstream-baseline: 8f008c41981dca484d5beaf688d3aa2ea4ecf89b
+  baseline-kind: reconstructed-before-import
+  local-import-commit: 204226e946491cd4f08e0deee46e4761246288d5
 ---
 
 # Teach

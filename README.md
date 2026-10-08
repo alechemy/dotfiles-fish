@@ -92,6 +92,8 @@ This installs Homebrew + all dependencies from `Brewfile`, builds generated conf
 
 Each directory under `stow/` mirrors the path relative to `$HOME`. Stow creates symlinks from `$HOME` back into this repo. Editing stowed files requires no action since symlinks already point here -- only restow when adding or removing files.
 
+Shared skill sources, licenses, local adaptations, and upstream comparisons are documented in [Shared skill sources and upstream audit](docs/skill-upstreams.md).
+
 ## Runtimes (mise)
 
 Language runtimes and globally-installed CLIs are declared in `stow/mise/.config/mise/config.toml`. Running `mise install` on a fresh machine reproduces everything listed there.

@@ -2,6 +2,12 @@
 name: recall
 description: Reconstruct recent working context from handoff documents, normalized local agent transcripts, live repository state, and available shared records. Use for "recall my work on X", "catch me up", "what have I been working on", or "where did I leave off".
 compatibility: Requires agent-reader with JSON transcript commands, Python 3, Bash, and git. GitHub CLI and shared-record integrations are optional.
+license: MIT; see LICENSE
+metadata:
+  source: https://github.com/cursor/plugins/tree/main/pstack/skills/recall
+  upstream-baseline: e46364b8be46000b7df0f260550cd712afbb8d36
+  baseline-kind: reconstructed-before-import
+  local-import-commit: 63d0dd8fab3e11a9258a28a47e79d38040646a31
 ---
 
 # Recall

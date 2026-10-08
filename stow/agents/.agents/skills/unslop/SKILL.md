@@ -13,25 +13,18 @@ metadata:
 
 # Unslop
 
-Edit text to remove AI patterns and add human voice.
+Edit text to remove AI patterns while preserving voice and meaning.
 
 ## Process
 
 1. Scan for the patterns below.
 2. Rewrite. Preserve meaning, match intended tone.
-3. Add soul (see next section).
+3. Preserve voice and meaning (see next section).
 4. Self-audit: "What makes this obviously AI generated?" Fix remaining tells.
 
-## Adding soul
+## Preserve voice and meaning
 
-Removing patterns is half the job. Sterile, voiceless writing is just as obvious.
-
-- **Have opinions.** React to facts instead of neutrally listing pros and cons.
-- **Vary rhythm.** Short sentences. Then longer ones that take their time. Mix it up.
-- **Acknowledge complexity.** "Impressive but also kind of unsettling" beats "impressive."
-- **Use "I" when it fits.** Preserve a real first-person stance from the source or context. Never invent lived experience for an AI-authored response.
-- **Let some mess in.** Perfect structure looks machine-made.
-- **Be specific.** Not "this is concerning" but "there's something unsettling about agents churning away at 3am."
+Preserve the source's intended tone and point of view. Give recommendations when useful and explain their reasoning. Use concrete details and acknowledge uncertainty where the evidence requires it. Vary sentence length when it improves readability. Do not manufacture emotion, opinions, informality, or imperfections to sound human. Preserve genuine first-person statements, but never invent lived experience.
 
 ## Patterns to detect and fix
 
@@ -84,5 +77,18 @@ Removing patterns is half the job. Sterile, voiceless writing is just as obvious
 27. **Say what it does, not how it feels.** "the database stays close at hand", "SQL you can read", "types that follow your schema" name a feeling. The fix names the mechanism or a number: "`.toSQL()` returns the exact string sent to the database", "a column rename fails the build". Ask what the sentence tells the reader to do or know, then write that. If you can't restate it as a concrete instruction, fact, or number, cut it. One more check: if the sentence could appear unchanged in another project's docs, it says nothing about this one. Cut it.
 28. **Shorten or split dense sentences.** If the reader has to backtrack to parse a sentence, break it in two or drop unnecessary clauses. Preserve the actor, sequence, and necessary reason even when that takes more words.
 29. **Name the actor and action.** Prefer active voice. "Queries are validated" becomes "the compiler validates queries". Passive is fine when the actor is unknown or genuinely doesn't matter. Don't disguise instructions as facts. "The webhook URL stays out of chat" becomes "The webhook URL is sensitive, so don't paste it into our chat." When explaining a prohibition, put the reason first to avoid an ambiguous "don't ... because ..." construction.
+
+    In PR descriptions, commit messages, changelogs, and progress updates, attribute edits to their author, explicitly or implicitly. Don't describe components as moving code, refactoring themselves, or redesigning their own APIs. Conventional change summaries may omit "I", as in "Refactored the test suite to share fixture setup." Preserve the intended point of view and the project's commit style; don't insert "I" into every item or invent who made a change.
+
+    | Counter-example | Better |
+    | --- | --- |
+    | "The screen moves `pt-safe` out of `ResultList`." | "Moved `pt-safe` from `ResultList` to the screen container." |
+    | "The test suite refactors its fixtures to share setup." | "Refactored the test suite to share fixture setup." |
+    | "`ApiClient` extracts its retry loop into a helper." | "I extracted `ApiClient`'s retry loop into a helper." |
+
+    Code can still be the actor when describing execution. Keep literal statements such as "The parser rejects malformed input" and "The list forwards `onPress` to each row". Even "The codemod renames deprecated method calls" is accurate if that is what the tool does when run. Distinguish runtime or tool behavior from authorship of the changes under discussion.
+
 30. **Cut adverbs, or use a more precise verb.** "runs quickly" becomes "is fast" or the number. "significantly improves" becomes the measured delta. An adverb propping up a weak verb means the verb is wrong.
 31. **Prefer plain, literal wording.** "utilize" becomes "use", "leverage" becomes "use", "facilitate" becomes "help". Avoid brisk shorthand that obscures the action. "Once the card arrives" becomes "Once the script creates the card" when creation is what matters. Preserve the distinction between evidence and interpretation. "Logcat shows Android killing apps" becomes "In logcat, there are lines indicating that Android is killing apps to free up memory." Choose clarity over the shortest or most vivid verb.
+32. **Mannered prose.** Avoid decorative metaphors, rhetorical fragments, personified code, and stock framing phrases when direct wording is clearer. Name the actor and action. Keep an analogy only when it explains the mechanism more clearly than a literal description.
+33. **Over-compression.** In prose, avoid dropped articles, verbless fragments, symbol-speak, and abbreviations that make the reader decode instead of read. "Parser rejects bad date → exit 2, no write" becomes "The parser rejects a bad date, exits with code 2, and writes nothing." Write whole sentences with their articles and verbs in ordinary prose, and spell out arrows and abbreviations. Commit messages and change summaries may omit an implied author, as described in rule 29.

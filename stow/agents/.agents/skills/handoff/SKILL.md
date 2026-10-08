@@ -1,6 +1,12 @@
 ---
 name: handoff
 description: Compact the current conversation into a handoff document another session can pick up from. Use at a phase boundary, before clearing context, or when the user says "hand this off" or "write a handoff".
+license: MIT; see LICENSE
+metadata:
+  source: https://github.com/mattpocock/skills/tree/main/skills/productivity/handoff
+  upstream-baseline: d28dfdc39beadc3142a33359b5cfa4765dcbd0bc
+  baseline-kind: reconstructed-before-import
+  local-import-commit: 63d0dd8fab3e11a9258a28a47e79d38040646a31
 ---
 
 Write a handoff document summarising the current conversation so a fresh session can continue the work. If the invocation includes arguments, use them as the next session's intended focus.
@@ -75,4 +81,8 @@ no Hunk TUI.
 
 Write only sanitized task context suitable for a later agent session. Omit API keys, tokens, passwords, personal identifiers, unrelated private prose, and raw tool/config/transcript dumps. Reference sensitive artifacts by safe descriptions rather than copying their contents. When safe summarization is uncertain, request user-provided sanitized context.
 
-**Reply:** the path written, and the next action in one line.
+## Reply
+
+State the path written. If you started the receiving session and supplied its handoff instructions, confirm the launch and identify the session. Do not include a copy-paste prompt or ask the user to repeat the handoff.
+
+When the user must start or instruct the receiving session themselves, include a brief, copy-pastable prompt in a fenced `text` block. Tell the next session to read the handoff file and begin the stated next action. Use the file's absolute path so the prompt works from another workspace. Keep it self-contained without repeating the handoff's detailed requirements. If an attempted launch is unconfirmed, report that uncertainty and verify its status before suggesting a manual launch that could duplicate it.
