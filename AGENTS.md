@@ -26,6 +26,7 @@ Also read:
 - Keep secrets, credentials, machine identity, runtime state, and real third-party personal data out of git.
 - Multiple agent sessions may modify this repo concurrently. Before amending, verify `HEAD` is the intended commit; otherwise create a new commit.
 - Test tmux changes on an isolated socket. Never kill the default server.
+- On Navidrome 0.64.0, use `inPlaylist.id` for smart-playlist references. File-path references import but fail during evaluation and can empty the playlist. Verify live membership after importing rule changes.
 
 ## Validation
 
