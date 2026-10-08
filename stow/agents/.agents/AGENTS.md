@@ -4,6 +4,7 @@
 
 - Before writing any user-facing response or prose artifact, load `/Users/alec/.agents/skills/unslop/SKILL.md` if it has not been loaded in the current session. Apply it to every response and check the final text against it.
 - Be concise. Do the work without a preamble. Brief mid-task notes are fine when you find an important constraint or change direction. Keep replies short and direct without cutting corners in the work.
+- Lead progress updates with completion status and material verification gaps. Distinguish implementation, verification, and publication.
 - When I say "fix", fix the root cause rather than adding a workaround.
 - When I say "refactor", improve structure without changing behavior.
 - Write no code comments by default. Add one terse line only when the code cannot express a hidden constraint, subtle invariant, or necessary workaround. For API, function, or class documentation, follow the project's format and update the documentation when the documented signature or behavior changes.
@@ -11,12 +12,13 @@
 - Do not apologize for mistakes. Fix them and state what went wrong.
 - Never mention decisions about internal `<system-reminder>` messages in user-facing text.
 - Report what you did without discussing actions you chose not to take.
+- Write short PR descriptions for reviewers who have not read the conversation. Explain the problem and behavior changes using concrete examples. Omit routine verification results and merge-order sections unless requested.
 - Keep Jira stories concise. State scope, testable acceptance criteria, and implementation-critical pitfalls once; link existing repository rules instead of repeating them. Do not expand a story into a tutorial or repeat its requirements in multiple sections.
 
 ## Tone
 
 - Be direct, professional, and intellectually honest. Prioritize accuracy and clarity over pleasantries or praise.
-- Always write in complete sentences.
+- Write complete sentences in ordinary prose. Follow the unslop skill's exception for implied authors in commit messages and change summaries.
 
 ## Responding to corrections
 
@@ -31,11 +33,13 @@
 
 - Claude Code is retired. Do not install or configure it, its editor integrations, or compatibility files. Preserve historical transcript support and Pi's model/provider configuration.
 - Read the relevant implementation, callers, and tests before editing.
+- Keep reusable Python operator helpers import-safe. Put CLI dispatch behind an `if __name__ == "__main__":` guard.
 - Reuse existing code, standard libraries, platform features, and installed dependencies when they meet the requirements and fit the project's conventions.
 - Before patching a dependency, check applicable stable and prerelease releases and inspect their published fixes. The npm `latest` tag alone is not a complete update check.
 - Prefer the smallest maintainable change, not the fewest lines or files. Add abstractions, dependencies, and configuration only for a current requirement or a concrete reduction in complexity.
 - Preserve validation, error handling, security, accessibility, and operational constraints. Explain any proposed reduction in scope rather than silently implementing it.
 - When delegating, pass the relevant requirements and constraints explicitly; do not assume children inherit these instructions.
+- Build workflow task strings with JSON encoding or arrays of quoted strings. Validate workflow scripts before launch; prose apostrophes and backticks must not become JavaScript syntax.
 - Keep subagents on the current session's provider, except for the configured local roles when the root session currently uses GitHub Copilot. In those sessions, use the local `scout` only for short, mechanical fact gathering over one narrow source area or question: tracing one caller chain, locating relevant tests, or extracting configuration facts. Do not assign it merge-conflict analysis, cross-cutting synthesis, architecture decisions, or broad repository reconstruction. Keep those tasks on Copilot, using `delegate` or `reviewer` only when delegation adds value. Delegate before reading the same material yourself; use direct tools for a single quick lookup. Give the scout exact source paths, a specific read-only question, and a short report limit with file and line references. Read the cited sections needed for decisions rather than repeating its full search.
 - In Copilot-rooted sessions, prefer the local `local-editor` for small, well-specified changes with explicit files or a narrow source area and clear acceptance criteria. Suitable work includes mechanical refactors, configuration edits, documentation edits, and focused bug fixes that do not require a new product, architecture, security, or scope decision. The parent must inspect the resulting diff and run the relevant checks. Keep broad implementation, ambiguous changes, and substantive review on Copilot.
 - Only a Copilot root may launch local roles, using provider-scoped defaults and the enforced guard. Use fresh context and run at most one local role at a time. Cap foreground local runs at three minutes and do not retry timed-out local work. Local roles must not use bash or extension tools, delegate, or fall back to a cloud model; only `local-editor` may edit or write. All other sessions and roles retain same-provider routing. Do not bypass the guard with another CLI, change its settings, or switch subscriptions when a quota is exhausted.
@@ -43,6 +47,14 @@
 - Budget workflow deadlines for all sequential stages, including review. Otherwise, omit the parent deadline and keep per-child limits.
 
 ## Verification and tests
+
+- Keep verification proportional to the change. These limits override blanket project requirements for local verification; preserve required test coverage and CI checks.
+- Choose the smallest checks that directly cover the changed behavior. For small changes, use focused tests and relevant static checks. Leave full regression suites to CI.
+- Run local native builds when needed for native compatibility, requested screenshots, or scoped device testing. Local builds, app installation, and booting existing simulators/emulators do not require approval. Start with one affected platform.
+- Unless I already requested that scope, ask before adding a second platform build, a broad E2E run, or unrelated verification expected to exceed ten minutes in total. Do not ask solely because a necessary local build or device setup may exceed ten minutes.
+- Once the chosen checks establish the requested outcome, stop. Do not add verification opportunistically.
+- If a failure appears unrelated or intermittent, report it and ask before expanding the investigation.
+- Normal commit and push hooks may run.
 
 - For code-review requests, load `~/.agents/skills/code-review/SKILL.md` and follow it without requiring a slash command. Explicit simplification-only reviews use `~/.agents/skills/simplify-review/SKILL.md` instead. Assigned review subagents follow their bounded axis rather than starting another full review.
 - Keep user-assisted QA bounded and agreed in advance. Automate repeatable checks and reserve manual testing for platform behavior or private account interaction that automation cannot verify. Missing device automation is a coverage gap, not a reason to give the user an open-ended manual checklist.
@@ -66,7 +78,11 @@
 - You may amend a local, unpushed commit when I ask you to fix its message or content.
 - To undo a local, unpushed commit, use `git reset --soft HEAD~1`. You may instead revert a specific file and amend. Never run `git reset --hard` while unrelated uncommitted changes exist because it would discard them. Check `git status` for unrelated changes before any command that discards working-tree changes.
 - Keep pre-existing changes out of task branches, commits, and PRs unless I explicitly include them. Preserve them separately; do not treat related work as an authorized prerequisite.
+- Resolve source commits in the source checkout before operating on another worktree with `git -C`. Pass commit IDs because `HEAD` and branch names resolve in the destination checkout.
+- Before launching a remote build or workflow, resolve the intended remote revision and pass its immutable commit ID when supported. CLIs such as EAS can resolve `--ref main` against a stale local branch. Verify the launch receipt matches the intended commit.
 - Use `git rebase --no-update-refs` unless I explicitly ask to move other local branches too. A configured `rebase.updateRefs=true` can otherwise move the source branch when rebasing a new integration branch.
+- When creating dependent PRs, register them as a native GitHub PR stack through `gh stack`, rather than only chaining their base branches.
+- Before changing PR bases or restacking a published chain, inspect GitHub's native stack membership. GitHub blocks direct base changes for stack members; update their membership through supported stack operations.
 - Remote reads do not require approval. Run `git fetch`, `git ls-remote`, `git clone`, read-only `gh` commands, and read-only API requests as needed for the task. Network access alone is not a reason to ask.
 - Expo's `buildCacheProvider: "eas"` can upload fingerprint sources and binaries during local `expo run:*` commands. Inspect and disable automatic remote caching before local verification unless I authorize those uploads; `--no-build-cache` does not disable that provider.
 - Remote writes require my explicit instruction in the current turn. Approval does not carry forward. This includes every form of `git push`, including force pushes, and any operation that creates, changes, or deletes remote state, such as publishing PR reviews or comments, merging PRs, editing issues, or creating releases. A request to review a PR authorizes inspection and local findings, not publishing a review.
@@ -83,7 +99,7 @@
 ## Missing CLI tools
 
 - Request CLI help from the underlying executable. Project wrappers may install dependencies, regenerate files, or reset shared caches before forwarding `--help`; inspect their side effects before invoking them.
-- Run required CLIs directly instead of checking whether they are installed. If one is missing, report it rather than substituting another tool, installing anything, or running a package through one-off `npx`.
+- Run required CLIs directly instead of checking whether they are installed. If one is missing, ask for permission to install it rather than substituting another tool or running a package through one-off `npx`. Local builds, app installation on local simulators/emulators, and booting existing local test devices do not require approval when needed for the task, including screenshot capture. Treat an unbooted simulator or missing local build as setup work and perform it before declaring verification blocked. Necessary local build/setup time alone is not an approval boundary. Ask when setup needs a user decision, credentials, missing-tool installation, remote writes, or an expansion beyond the requested verification scope.
 
 ## When something goes wrong
 
