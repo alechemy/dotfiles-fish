@@ -14,7 +14,8 @@
     "npm:pi-web-access@0.27.0",
     "npm:@gotgenes/pi-anthropic-auth@3.3.1",
     "npm:@sting8k/pi-vcc@0.8.0",
-    { "source": "npm:pi-cmux@0.1.24", "extensions": [] }
+    { "source": "npm:pi-cmux@0.1.24", "extensions": [] },
+    "npm:pi-autoresearch@1.9.0"
   ],
   "enabledModels": [
     "openai-codex/gpt-5.6-sol",

@@ -32,19 +32,25 @@ class MeasureAgentToolingTests(unittest.TestCase):
         self.fragment = self.repo / "stow/pi/.pi/agent/settings.fragment.json"
         declared = measurement.PACKAGES
         self.put(self.fragment, json.dumps({"packages": [
-            measurement.SUBAGENTS_SOURCE if n == "pi-subagents" else f"npm:{n}@{v}"
-            for n, v in declared.items()
+            measurement.SUBAGENTS_SOURCE if n == "pi-subagents" else
+            {"source": f"npm:{n}@{v}", **measurement.PACKAGE_FILTERS[n]} if n in measurement.PACKAGE_FILTERS else
+            f"npm:{n}@{v}" for n, v in declared.items()
         ]}))
         for name, version in declared.items():
             manifest = {"name": name, "version": version, "pi": {"extensions": ["./index.ts"]}}
             if name in ("@upstash/context7-pi", "pi-subagents"):
                 manifest["pi"]["skills"] = ["./skills"]
                 self.put(self.packages / name / "skills" / "one" / "SKILL.md", skill(name.split("/")[-1]))
+            if name == "pi-autoresearch":
+                manifest["pi"] = {"extensions": ["./extensions"], "skills": ["./skills"]}
+                for skill_name in ("autoresearch-create", "autoresearch-finalize", "autoresearch-hooks"):
+                    self.put(self.packages / name / "skills" / skill_name / "SKILL.md", skill(skill_name))
             self.put(self.packages / name / "package.json", json.dumps(manifest))
         self.put(self.shared / "visible" / "SKILL.md", skill("visible", "A café 🐈."))
         for name in ("recall", "handoff", "simplify-review", "grill-me", "teach"):
             self.put(self.shared / name / "SKILL.md", skill(name, manual=True))
         sources = {
+            "pi-autoresearch/extensions/pi-autoresearch/index.ts": 'pi.registerTool({name: "init_experiment"});',
             "@sting8k/pi-vcc/src/tools/recall.ts": 'description: "Recall " + "history.", promptSnippet: "Recall", parameters: {},',
             "@gotgenes/pi-anthropic-auth/src/index.ts": 'pi.registerProvider("anthropic", {});',
             "@upstash/context7-pi/lib/prompts.ts": 'export const RESOLVE_LIBRARY_ID_DESCRIPTION = "Find";\nexport const QUERY_DOCS_DESCRIPTION = `Docs`;',
@@ -87,7 +93,7 @@ class MeasureAgentToolingTests(unittest.TestCase):
     def test_default_projection_manual_exclusion_and_utf8(self):
         result = self.measure()
         self.assertEqual(result["tool_descriptions"]["count"], 10)
-        self.assertEqual(result["advertised_skill_descriptions"]["count"], 3)
+        self.assertEqual(result["advertised_skill_descriptions"]["count"], 6)
         self.assertEqual(result["manual_skills_excluded"], ["grill-me", "handoff", "recall", "simplify-review", "teach"])
         visible = next(row for row in result["skills"] if row["name"] == "visible")
         self.assertEqual((visible["characters"], visible["utf8_bytes"]), (9, 13))
@@ -120,6 +126,34 @@ class MeasureAgentToolingTests(unittest.TestCase):
         self.put(self.packages / "@sting8k/pi-vcc/src/tools/recall.ts", "changed registration")
         with self.assertRaisesRegex(ValueError, "source drift"):
             self.measure()
+
+    def test_autoresearch_skills_are_measured_but_inactive_tools_are_excluded(self):
+        result = self.measure()
+        self.assertEqual(result["declared_versions"]["pi-autoresearch"], "1.9.0")
+        self.assertEqual({row["name"] for row in result["skills"] if row["package"] == "pi-autoresearch"},
+                         {"autoresearch-create", "autoresearch-finalize", "autoresearch-hooks"})
+        self.assertEqual(result["inactive_tools_excluded"], ["init_experiment", "run_experiment", "log_experiment"])
+        self.assertFalse(any(row["package"] == "pi-autoresearch" for row in result["tools"]))
+        self.put(self.packages / "pi-autoresearch/extensions/pi-autoresearch/index.ts", "changed activation")
+        with self.assertRaisesRegex(ValueError, "source drift"):
+            self.measure()
+
+    def test_cmux_filter_is_exact_and_adds_no_package_descriptions(self):
+        result = self.measure()
+        self.assertEqual(result["declared_versions"]["pi-cmux"], "0.1.24")
+        self.assertFalse(any(row["package"] == "pi-cmux" for row in result["tools"] + result["skills"]))
+        fragment = json.loads(self.fragment.read_text())
+        entry = next(entry for entry in fragment["packages"] if isinstance(entry, dict))
+        entry["extensions"] = ["./extensions/index.ts"]
+        self.put(self.fragment, json.dumps(fragment))
+        with self.assertRaisesRegex(ValueError, "set/filters changed"):
+            self.measure()
+
+    def test_tracked_declarations_match_projection(self):
+        root = HELPER.parent.parent
+        fragment = json.loads((root / "stow/pi/.pi/agent/settings.fragment.json").read_text())
+        fixture = json.loads(self.fragment.read_text())
+        self.assertEqual(fragment["packages"], fixture["packages"])
 
     def test_concatenated_description_accepts_only_json_strings(self):
         self.assertEqual(measurement.concatenated_description(
@@ -189,7 +223,8 @@ class MeasureAgentToolingTests(unittest.TestCase):
         self.put(self.packages / "pi-subagents/skills/top.md", skill("package-root"))
         self.put(self.shared / "group/nested/SKILL.md", skill("nested"))
         names = [row["name"] for row in self.measure()["skills"]]
-        self.assertEqual(set(names), {"visible", "nested", "package-root", "pi-subagents", "context7-pi"})
+        self.assertEqual(set(names), {"visible", "nested", "package-root", "pi-subagents", "context7-pi",
+                                      "autoresearch-create", "autoresearch-finalize", "autoresearch-hooks"})
 
     def test_ignore_rules_symlinks_and_duplicate_skills_fail(self):
         for filename in (".gitignore", ".ignore", ".fdignore"):

@@ -11,7 +11,10 @@ import textwrap
 
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGES = {"@upstash/context7-pi": "0.1.2", "pi-subagents": "0.65.0", "pi-web-access": "0.27.0",
-            "@gotgenes/pi-anthropic-auth": "3.3.1", "@sting8k/pi-vcc": "0.8.0"}
+            "@gotgenes/pi-anthropic-auth": "3.3.1", "@sting8k/pi-vcc": "0.8.0",
+            "pi-cmux": "0.1.24", "pi-autoresearch": "1.9.0"}
+PACKAGE_FILTERS = {"pi-cmux": {"extensions": []}}
+INACTIVE_TOOLS = ["init_experiment", "run_experiment", "log_experiment"]
 SUBAGENTS_SOURCE = "./local/copilot-delegation/node_modules/pi-subagents"
 SOURCE_SHA256 = {
     "@upstash/context7-pi/package.json": "367f6565087be5e89315d3cb171d9f391017124b598b744662c3500705adcb11",
@@ -52,7 +55,16 @@ SOURCE_SHA256 = {
     "@sting8k/pi-vcc/src/tools/recall.ts": "0fce5dea65fb6390a0666521e57974ead7d0ad8ba652dd6962ffeea44dc50ef7",
     "@sting8k/pi-vcc/src/hooks/before-compact.ts": "5d97b089e04ccf9e081775a5216aa2ffb3b9b3630eaba84cc45b98de2528142a",
     "@sting8k/pi-vcc/src/commands/pi-vcc.ts": "132041aa8e73a14d56a360bfd50ae7413e46f875d768a233594ce1a4e1fecf36",
-    "@sting8k/pi-vcc/src/commands/vcc-recall.ts": "a0b4933965a394f2ba05f4f723f6ce736e20dd2b89c7383fa269cb7000a78245"
+    "@sting8k/pi-vcc/src/commands/vcc-recall.ts": "a0b4933965a394f2ba05f4f723f6ce736e20dd2b89c7383fa269cb7000a78245",
+    "pi-cmux/package.json": "58c3aa49b3d6e27ff08bd1a9eb0a7f0e676cd156c6ba6b2b79ebc04f7dbd33a5",
+    "pi-autoresearch/package.json": "a9a16608ec70816ede63ba36d67f656d913d084cff624e837934c0a8e4dbcbf5",
+    "pi-autoresearch/extensions/pi-autoresearch/index.ts": "f9232c2ff5301e79050c3c4a898a887825787e005a87f5543af04e4e71eb5814",
+    "pi-autoresearch/extensions/pi-autoresearch/commands.ts": "ec820f686d1fd95893d78d4ffbc6fe1d00fbab12fa0fa5dc4dd0f16b68640258",
+    "pi-autoresearch/extensions/pi-autoresearch/compaction.ts": "62221a3616041d397d819b5f79103279dbe0a3dae3615e77b8d374d0eafaf670",
+    "pi-autoresearch/extensions/pi-autoresearch/hooks.ts": "eaa1796aa8fefcb6a0ff23f19c239a977b9e80b2eee9c4f6171b684607634aad",
+    "pi-autoresearch/extensions/pi-autoresearch/jsonl.ts": "a1e3eed77a35c08bbd54270e3a36aee6eea5c5375c36aa6fdd0ef13a33898226",
+    "pi-autoresearch/extensions/pi-autoresearch/paths.ts": "57d0453bda5ee5ad67e2822642d5647f135c5f6479b2e1e125f3be6be9adc98b",
+    "pi-autoresearch/extensions/pi-autoresearch/shortcuts.ts": "b75dbd5aecb2ddf267f4ae952a1a687f491660065f2a805ddc84da745ed3f680"
 }
 
 
@@ -181,8 +193,9 @@ def measure(repo, packages_root, subagents_root):
     fragment_data = source_file(repo, "stow/pi/.pi/agent/settings.fragment.json").read_bytes()
     fragment = json.loads(fragment_data)
     declared = PACKAGES
-    expected = [SUBAGENTS_SOURCE if name == "pi-subagents" else f"npm:{name}@{version}"
-                for name, version in declared.items()]
+    expected = [SUBAGENTS_SOURCE if name == "pi-subagents" else
+                {"source": f"npm:{name}@{version}", **PACKAGE_FILTERS[name]} if name in PACKAGE_FILTERS else
+                f"npm:{name}@{version}" for name, version in declared.items()]
     package_roots = {name: subagents_root if name == "pi-subagents" else packages_root / name
                      for name in declared}
     require(fragment.get("packages") == expected, "Declared package set/filters changed; review the projection")
@@ -273,8 +286,11 @@ def measure(repo, packages_root, subagents_root):
         "tools": tools, "tool_descriptions": total(tools),
         "skills": skills, "advertised_skill_descriptions": total(skills),
         "manual_skills_excluded": sorted(manual),
+        "inactive_tools_excluded": INACTIVE_TOOLS,
         "assumptions": ["Parent session after ordinary session_start; no environment or project overrides",
                         "Default Subagents description and enabled bg_wait; all four default Web Access tools",
+                        "Autoresearch mode inactive; its three package skills remain advertised",
+                        "Pi cmux direct extensions disabled; stowed wrapper outside this projection",
                         "Declared packages and tracked shared skills only"],
         "exclusions": ["Tool schemas and names/labels, promptSnippet, promptGuidelines",
                        "Skill XML escaping/wrappers, names, locations, instructions and bodies",
