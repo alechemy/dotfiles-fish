@@ -56,6 +56,18 @@ def selection(manifest, allow_missing=False):
     return name, ids, missing
 
 
+def unique_batches(ids):
+    batch, seen = [], set()
+    for ident in ids:
+        if ident in seen:
+            yield batch
+            batch, seen = [], set()
+        batch.append(ident)
+        seen.add(ident)
+    if batch:
+        yield batch
+
+
 def replace_receipt(path, data):
     fd, temporary = tempfile.mkstemp(prefix=".receipt-", dir=path.parent)
     try:
@@ -96,15 +108,19 @@ async def create(client, manifest, receipt_path, allow_missing=False):
             if str(track["id"]) != ident or track.get("streamable") is not True:
                 raise ImportError("A selected recording is no longer streamable.")
         receipt = {"manifest_sha256": digest, "status": "creating",
-                   "matched_count": len(ids), "missing_positions": missing}
+                   "matched_count": len(ids), "missing_positions": missing,
+                   "populate_tracks": len(set(ids)) != len(ids)}
         save_new(receipt_path, receipt)
         description = "Manually matched playlist import."
         if missing:
             description += " Partial reconstruction; missing source positions: " + ", ".join(map(str, missing)) + "."
+        parameters = {"name": name, "description": description, "is_public": "0",
+                      "is_collaborative": "0"}
+        if not receipt["populate_tracks"]:
+            parameters["track_ids"] = ",".join(ids)
         async with client.session.post(
                 "https://www.qobuz.com/api.json/0.2/playlist/create",
-                data={"name": name, "description": description, "is_public": "0",
-                      "is_collaborative": "0", "track_ids": ",".join(ids)}) as response:
+                data=parameters) as response:
             if response.status != 200:
                 raise ImportError("Qobuz creation failed. The receipt records an uncertain outcome; inspect Qobuz before retrying.")
             result = await response.json()
@@ -113,6 +129,22 @@ async def create(client, manifest, receipt_path, allow_missing=False):
             raise ImportError("Qobuz returned an invalid playlist ID.")
         receipt.update(playlist_id=ident, status="created")
         replace_receipt(receipt_path, receipt)
+    if receipt.get("populate_tracks") and receipt["status"] == "created":
+        await verify(client, receipt["playlist_id"], name, [])
+        receipt["status"] = "populating"
+        replace_receipt(receipt_path, receipt)
+        populated = 0
+        for batch in unique_batches(ids):
+            async with client.session.post(
+                    "https://www.qobuz.com/api.json/0.2/playlist/addTracks",
+                    data={"playlist_id": receipt["playlist_id"],
+                          "track_ids": ",".join(batch), "no_duplicate": "false"}) as response:
+                if response.status != 200:
+                    raise ImportError("Qobuz population has an uncertain outcome. Inspect the existing playlist before retrying.")
+            populated += len(batch)
+            await verify(client, receipt["playlist_id"], name, ids[:populated])
+            receipt["populated_count"] = populated
+            replace_receipt(receipt_path, receipt)
     await verify(client, receipt["playlist_id"], name, ids)
     receipt.update(status="verified", url=f"https://open.qobuz.com/playlist/{receipt['playlist_id']}")
     replace_receipt(receipt_path, receipt)

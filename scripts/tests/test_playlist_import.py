@@ -143,6 +143,14 @@ class SelectionTests(unittest.TestCase):
         data["tracks"][1]["qobuz"]["id"] = "1"
         self.assertEqual(qobuz.selection(data)[1], ["1", "1"])
 
+    def test_unique_batches_preserve_order_and_repeated_appearances(self):
+        ids = ["1", "2", "1", "3", "3", "4", "1"]
+        batches = list(qobuz.unique_batches(ids))
+        self.assertEqual(batches, [["1", "2"], ["1", "3"], ["3", "4", "1"]])
+        self.assertEqual([ident for batch in batches for ident in batch], ids)
+        self.assertTrue(all(len(batch) == len(set(batch)) for batch in batches))
+        self.assertEqual(list(qobuz.unique_batches([])), [])
+
     def test_summary_projects_only_catalog_fields(self):
         result = qobuz.track_summary({"id": 1, "user": {"secret": "DO_NOT_PROJECT"}})
         self.assertNotIn("DO_NOT_PROJECT", json.dumps(result))
@@ -177,6 +185,43 @@ class CreateTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(client.session.post.call_args.kwargs["data"]["track_ids"], "1,2")
             self.assertEqual(client.session.post.call_args.kwargs["data"]["is_public"], "0")
 
+    async def test_creation_preserves_repeated_recording_appearances(self):
+        data = manifest()
+        data["tracks"][1]["qobuz"]["id"] = "1"
+        client = self.client()
+        ids = []
+
+        async def metadata(ident, kind):
+            if kind == "track":
+                return {"id": ident, "streamable": True}
+            return {"id": "42", "name": data["album"], "is_public": False,
+                    "is_collaborative": False,
+                    "tracks": {"total": len(ids), "items": [{"id": i} for i in ids]}}
+
+        def post(url, *, data):
+            selected = data.get("track_ids", "").split(",") if data.get("track_ids") else []
+            selected = list(dict.fromkeys(selected))
+            if url.endswith("/create") or data.get("no_duplicate") != "false":
+                selected = [i for i in selected if i not in ids]
+            ids.extend(selected)
+            response = AsyncMock()
+            response.status = 200
+            response.json.return_value = {"id": 42}
+            context = AsyncMock()
+            context.__aenter__.return_value = response
+            return context
+
+        client.get_metadata.side_effect = metadata
+        client.session.post.side_effect = post
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "receipt.json"
+            result = await qobuz.create(client, data, path)
+            self.assertEqual(result["matched_count"], 2)
+            self.assertEqual(ids, ["1", "1"])
+            self.assertEqual(result["status"], "verified")
+            await qobuz.create(client, data, path)
+            self.assertEqual(client.session.post.call_count, 3)
+
     async def test_unknown_outcome_never_retries_write(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "receipt.json"
@@ -188,6 +233,42 @@ class CreateTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(spotify.ImportError):
                 await qobuz.create(client, manifest(), path)
             client.session.post.assert_called_once()
+
+    async def test_unknown_population_never_repeats_write(self):
+        data = manifest()
+        data["tracks"][1]["qobuz"]["id"] = "1"
+        client = self.client()
+        initial_post = client.session.post.return_value
+        client.session.post.side_effect = [initial_post, TimeoutError()]
+
+        async def metadata(ident, kind):
+            if kind == "track":
+                return {"id": ident, "streamable": True}
+            return {"name": data["album"], "is_public": False,
+                    "is_collaborative": False, "tracks": {"total": 0, "items": []}}
+
+        client.get_metadata.side_effect = metadata
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "receipt.json"
+            with self.assertRaises(TimeoutError):
+                await qobuz.create(client, data, path)
+            self.assertEqual(json.loads(path.read_text())["status"], "populating")
+            with self.assertRaises(spotify.ImportError):
+                await qobuz.create(client, data, path)
+            self.assertEqual(client.session.post.call_count, 2)
+
+    async def test_population_refuses_unexpected_existing_tracks(self):
+        data = manifest()
+        data["tracks"][1]["qobuz"]["id"] = "1"
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "receipt.json"
+            path.write_text(json.dumps({
+                "manifest_sha256": qobuz.hashlib.sha256(json.dumps(data, sort_keys=True).encode()).hexdigest(),
+                "status": "created", "playlist_id": "42", "populate_tracks": True}))
+            client = self.client()
+            with self.assertRaises(spotify.ImportError):
+                await qobuz.create(client, data, path)
+            client.session.post.assert_not_called()
 
     async def test_verification_rejects_wrong_order(self):
         client = AsyncMock()

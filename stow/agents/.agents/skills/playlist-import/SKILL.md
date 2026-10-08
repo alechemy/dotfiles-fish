@@ -37,6 +37,8 @@ Confirm the total independently from Spotify's playlist page or the user. Do not
 
 The public embed exposes titles, artist credit strings, durations, explicit flags, and Spotify track URIs. It does not provide structured artist arrays, album names, or ISRCs. Do not infer artist boundaries by splitting every comma. Enrich ambiguous matches from the public track or album page, or a legitimately configured Spotify Web API client. Follow every pagination link when using that API.
 
+When splitting a soundtrack, confirm what the user means by excluding score. A score album can contain vocal songs. Classify recordings individually rather than excluding an entire release by its album label. Keep appendix-only songs separate until their appearance order is established or the user approves bonus-track placement.
+
 If Spotify blocks the embed or its total cannot be confirmed, stop and request a complete text/CSV export or the total. Do not silently treat an embed preview as a complete playlist. URL extraction worked for a 23-track playlist during implementation; that is not a guarantee for every playlist.
 
 Never print or retain raw embed HTML or its full `__NEXT_DATA__` object. The state includes anonymous session access tokens. The helper projects music metadata only.
@@ -73,9 +75,9 @@ After matching and obtaining the required authorization:
   --receipt "$JOB/receipt.json" --apply
 ```
 
-Only add `--allow-missing` for an explicitly accepted partial import. The helper retains matched tracks in source order, records omitted source positions, creates a private non-collaborative playlist, and reads it back to check name, count, privacy, and exact ID order. Duplicates remain duplicates; if Qobuz drops one, verification fails. Manifests are limited to 500 source rows because this workflow does not implement large-playlist batching.
+Only add `--allow-missing` for an explicitly accepted partial import. The helper retains matched tracks in source order, records omitted source positions, creates a private non-collaborative playlist, and reads it back to check name, count, privacy, and exact ID order. Qobuz removes repeated IDs within a single request. For repeated recordings, the helper creates an empty playlist, then appends ordered batches without repeated IDs using `no_duplicate=false`. It verifies each completed prefix before appending the next batch. Manifests are limited to 500 source rows because large-playlist pagination is not implemented.
 
-Keep the receipt. Reusing it with the same manifest verifies the existing playlist instead of creating another. A changed manifest is rejected. If a request times out after sending the remote write, the receipt remains in an uncertain state. Inspect the account for the created playlist, verify its exact contents, and recover its ID into the receipt before retrying. Never delete the receipt or choose a fresh receipt merely to retry an uncertain creation. Do not blindly repeat a remote write.
+Keep the receipt. Reusing it with the same manifest verifies the existing playlist instead of creating another. A changed manifest is rejected. If a request times out after sending the remote write, the receipt remains in an uncertain state. Inspect the account for the created playlist, verify its exact contents, and recover its ID into the receipt before retrying. Never delete the receipt or choose a fresh receipt merely to retry an uncertain creation. An interrupted population also requires inspecting the existing playlist. The receipt retains the last verified prefix count, and rerunning the helper does not repeat an uncertain append. Do not blindly repeat a remote write.
 
 The receipt's `url` is the input to riptag. Do not pass the Spotify URL to riptag or search Qobuz for an album named after the soundtrack.
 
@@ -105,9 +107,11 @@ Find the local library root with `/usr/bin/python3 ~/.local/bin/_music_nas.py ge
 
 Use `--allow-missing` consistently for an accepted partial import. The second command is optional. It audits all tracks before writing, sets consecutive track totals and disc 1 of 1, optionally embeds the reviewed cover, and rereads the files. Saves are per-file, not transactional. If a save fails, verify and repair before replacing anything.
 
-The audit checks file count, source order, reviewed title and primary artist, duration within two seconds, album identity, genre, year, compilation flag, ALAC codec, and unified artwork. Artist recasing is tolerated because the organizer adopts existing library spelling. Other discrepancies stop the import. A longer legitimate duration difference needs explicit investigation rather than loosening the check for every track. For additional confidence, decode the files with installed `ffmpeg` before removing the old album.
+The audit checks file count, source order, reviewed title and primary artist, duration within two seconds, album identity, genre, year, compilation flag, ALAC codec, and unified artwork. Artist recasing is tolerated because the organizer adopts existing library spelling. Other discrepancies stop the import. A longer legitimate duration difference needs explicit investigation rather than loosening the check for every track. Qobuz can serve different durations at CD and high-resolution quality under the same track ID. If a downloaded file fails the duration audit, compare the actual source-file durations at each lossless quality. Use a lower-quality file only when it matches the reviewed recording, retain the replaced file outside the scanned library, and record the evidence. Do not relax the album-wide duration tolerance. For additional confidence, decode the files with installed `ffmpeg` before removing the old album.
 
 For an unrelated or wrongly matched old album, `riptag --replaces` is not an identity test: its guard compares track count and quality. Keep that guard for genuine re-downloads. Instead, after verifying the new compilation, move the exact old directory to a uniquely named quarantine outside the scanned library, preferably by an NAS-side rename on the same filesystem. Confirm both paths and expected counts first, refuse existing quarantine destinations, and leave unrelated folders alone. Record the recovery path in the private job receipt or notes.
+
+Stage large audio transfers in a private directory under the configured NAS inbox. NAS `/tmp` can be too small for lossless files; reserve it for small helper and manifest deployments.
 
 NAS permissions matter. Riptag fixes them during import; after any SMB-side retagging, check the album's readability and restore permissions on the exact NAS album directory if necessary. Follow the worker's existing permission convention, not a library-wide chmod.
 
@@ -117,7 +121,7 @@ Report the imported count versus the source count, any missing tracks or approve
 
 ## Maintenance
 
-The Qobuz helper uses the installed streamrip client for authentication and catalog reads. Private playlist creation uses Qobuz's `playlist/create` endpoint with initial `track_ids`, followed by `playlist/get` verification. This endpoint is documented by the existing [clj-qobuz client](https://cljdoc.org/d/audiogum/clj-qobuz/0.1.15/api/clj-qobuz.playlist). Qobuz's partner API documentation is not reliably public. Check current provider and client documentation before changing this integration.
+The Qobuz helper uses the installed streamrip client for authentication and catalog reads. Private playlist creation uses Qobuz's `playlist/create` endpoint, followed by `playlist/get` verification. Repeated recordings require `playlist/addTracks` calls with `no_duplicate=false` and duplicate-free batches. These endpoints are documented by the existing [clj-qobuz client](https://cljdoc.org/d/audiogum/clj-qobuz/0.1.15/api/clj-qobuz.playlist) and the [Minim client](https://github.com/bbye98/minim/blob/eb0a754ed222ddc7da61e707be62a34817e6680b/src/minim/qobuz.py). Qobuz's partner API documentation is not reliably public. Check current provider and client documentation before changing this integration.
 
 Run the synthetic helper tests from the dotfiles repository:
 
