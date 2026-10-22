@@ -6,7 +6,7 @@ import test from "node:test";
 
 const piRoot = process.env.PI_PACKAGE_ROOT;
 const fragment = JSON.parse(readFileSync(new URL("../../stow/pi/.pi/agent/models.fragment.json", import.meta.url)));
-const id = "Qwen3.8-27B-oQ8e-mtp";
+const id = "Qwen3.8-27B-oQ4e-mtp";
 
 test("Pi sends explicit Qwen thinking controls", {
   skip: !piRoot && "Set PI_PACKAGE_ROOT to the installed Pi package",
@@ -22,8 +22,10 @@ test("Pi sends explicit Qwen thinking controls", {
     ...fragment.providers.omlx.modelOverrides[id],
   };
   const context = {
-    systemPrompt: "Return the requested fixture value.",
-    messages: [{ role: "user", content: "Read the fixture.", timestamp: 0 }],
+    messages: [
+      { role: "system", content: "Return the requested fixture value.", timestamp: 0 },
+      { role: "user", content: "Read the fixture.", timestamp: 0 },
+    ],
   };
   const originalFetch = globalThis.fetch;
   globalThis.fetch = () => { throw new Error("Network access is forbidden"); };

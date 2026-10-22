@@ -50,6 +50,9 @@ if ! jq -S -n --slurpfile current "$current_input" --slurpfile fragment "$FRAGME
         else error("expected exactly one JSON object") end;
     ($fragment | one_object) as $managed |
     (if $missing then {} else ($current | one_object) end) * $managed |
+    if $kind == "settings" and ($managed.subagents.modelScope.localDelegation.rootProviders | type) == "array" then
+        del(.subagents.modelScope.localDelegation.rootProvider)
+    else . end |
     if $kind == "models" and (.providers | type) == "object" then
         .providers |= with_entries(
             .key as $provider |

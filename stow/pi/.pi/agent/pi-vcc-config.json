@@ -4,5 +4,6 @@
   "continueAfterThresholdCompact": false,
   "debug": false,
   "skipForProviders": [],
-  "skipCustomTypes": []
+  "skipCustomTypes": [],
+  "trackCommands": []
 }

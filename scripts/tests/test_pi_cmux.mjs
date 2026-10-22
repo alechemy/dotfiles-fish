@@ -15,10 +15,10 @@ const expected = {
   PI_CMUX_AUTOTITLE_DISABLED: "1",
 };
 
-test("pi-cmux is pinned and loaded only through the lifecycle preferences entry point", () => {
+test("pi-cmux follows stable updates and loads only through the lifecycle preferences entry point", () => {
   const fragment = JSON.parse(readFileSync(join(repo, "stow/pi/.pi/agent/settings.fragment.json"), "utf8"));
-  const declaration = fragment.packages.find((value) => value.source === "npm:pi-cmux@0.1.24");
-  assert.deepEqual(declaration, { source: "npm:pi-cmux@0.1.24", extensions: [] });
+  const declaration = fragment.packages.find((value) => value.source === "npm:pi-cmux");
+  assert.deepEqual(declaration, { source: "npm:pi-cmux", extensions: [] });
   assert.ok(existsSync(entry));
 });
 

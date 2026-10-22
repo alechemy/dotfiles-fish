@@ -11,9 +11,9 @@ const config = JSON.parse(configText);
 const piRoot = process.env.PI_PACKAGE_ROOT;
 const extensionRoot = process.env.PI_VCC_ROOT;
 
-test("VCC is pinned for automatic compaction on all providers", () => {
+test("VCC follows stable updates with automatic compaction on all providers", () => {
   const fragment = JSON.parse(readFileSync(join(repo, "stow/pi/.pi/agent/settings.fragment.json"), "utf8"));
-  assert.ok(fragment.packages.includes("npm:@sting8k/pi-vcc@0.8.0"));
+  assert.ok(fragment.packages.includes("npm:@sting8k/pi-vcc"));
   assert.deepEqual(config, {
     overrideDefaultCompaction: true,
     smartKeepTail: true,
@@ -21,6 +21,7 @@ test("VCC is pinned for automatic compaction on all providers", () => {
     debug: false,
     skipForProviders: [],
     skipCustomTypes: [],
+    trackCommands: [],
   });
 });
 

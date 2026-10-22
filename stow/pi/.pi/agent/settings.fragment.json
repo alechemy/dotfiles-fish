@@ -1,81 +1,102 @@
 {
   "theme": "dark",
   "defaultProvider": "openai-codex",
-  "defaultModel": "gpt-6-astra",
+  "defaultModel": "gpt-6.1-sol",
   "defaultThinkingLevel": "high",
   "defaultProjectTrust": "ask",
   "enableInstallTelemetry": false,
   "hideThinkingBlock": true,
   "tuiMode": "fullscreen",
   "fullscreenExitOutput": "transcript",
+  "npmCommand": ["npm", "--ignore-scripts"],
   "packages": [
-    "npm:@upstash/context7-pi@0.1.2",
-    "./local/copilot-delegation/node_modules/pi-subagents",
-    "npm:pi-web-access@0.27.0",
-    "npm:@gotgenes/pi-anthropic-auth@3.3.1",
-    "npm:@sting8k/pi-vcc@0.8.0",
-    { "source": "npm:pi-cmux@0.1.24", "extensions": [] },
-    "npm:pi-autoresearch@1.9.0"
+    "npm:@upstash/context7-pi",
+    "./local/provider-local-delegation-fff-8a0e972/node_modules/pi-subagents",
+    "npm:pi-web-access",
+    "npm:@gotgenes/pi-anthropic-auth",
+    "npm:@sting8k/pi-vcc",
+    { "source": "npm:pi-cmux", "extensions": [] },
+    "npm:pi-autoresearch",
+    "npm:pi-agent-browser-native",
+    "npm:@ff-labs/pi-fff"
   ],
   "enabledModels": [
-    "openai-codex/gpt-5.6-sol",
-    "github-copilot/claude-opus-5",
-    "omlx/Qwen3.8-27B-oQ8e-mtp",
-    "omlx/Qwen3.8-27B-oQ4e-mtp",
+    "openai-codex/gpt-6.1-sol",
     "openai-codex/gpt-6-astra",
-    "github-copilot/claude-fable-5.1",
-    "github-copilot/gemini-3.8-flash"
+    "openai-codex/gpt-6-luna",
+    "github-copilot/claude-opus-5",
+    "github-copilot/gpt-6-astra",
+    "omlx/Qwen3.8-27B-oQ4e-mtp"
   ],
   "subagents": {
     "worktreeProvider": "worktrunk",
+    "defaultExtensions": ["~/.pi/agent/extensions/copilot-guard"],
     "modelScope": {
       "allow": ["inherit-provider"],
       "enforce": true,
       "strict": true,
       "localDelegation": {
-        "rootProvider": "github-copilot",
+        "rootProviders": ["github-copilot", "openai-codex"],
         "agents": {
-          "scout": ["omlx/Qwen3.8-27B-oQ8e-mtp"],
-          "local-editor": ["omlx/Qwen3.8-27B-oQ8e-mtp"]
+          "scout": ["omlx/Qwen3.8-27B-oQ4e-mtp"],
+          "local-editor": ["omlx/Qwen3.8-27B-oQ4e-mtp"]
         }
       }
     },
     "agentOverridesByProvider": {
       "github-copilot": {
-        "delegate": { "model": "github-copilot/gpt-5.6-luna" },
+        "delegate": { "model": "github-copilot/gpt-6.1-sol", "thinking": "medium" },
         "local-editor": {
-          "model": "omlx/Qwen3.8-27B-oQ8e-mtp",
+          "model": "omlx/Qwen3.8-27B-oQ4e-mtp",
           "fallbackModels": [],
           "thinking": false,
           "defaultContext": "fresh",
-          "tools": ["read", "grep", "find", "ls", "edit", "write"],
+          "tools": ["read", "grep", "find", "ls", "fffind", "ffgrep", "edit", "write"],
           "extensions": [],
           "output": false,
-          "description": "Local editor for small, well-specified changes under a Copilot root. Give it explicit files or a narrow source area and acceptance criteria; the parent reviews and validates the result."
+          "description": "Local editor for small, well-specified changes under a Copilot or Codex root. Give it explicit files or a narrow source area and acceptance criteria; the parent reviews and validates the result."
         },
-        "oracle": { "model": "github-copilot/gpt-6-astra" },
-        "researcher": { "model": "github-copilot/gpt-5.6-luna" },
-        "reviewer": { "model": "github-copilot/gpt-5.6-sol" },
+        "oracle": { "model": "github-copilot/gpt-6-astra", "thinking": "high" },
+        "researcher": { "model": "github-copilot/gpt-6.1-sol", "thinking": "medium" },
+        "reviewer": { "model": "github-copilot/gpt-6-astra", "thinking": "high" },
         "scout": {
-          "model": "omlx/Qwen3.8-27B-oQ8e-mtp",
+          "model": "omlx/Qwen3.8-27B-oQ4e-mtp",
           "fallbackModels": [],
           "thinking": false,
           "defaultContext": "fresh",
-          "tools": ["read", "grep", "find", "ls"],
+          "tools": ["read", "grep", "find", "ls", "fffind", "ffgrep"],
           "extensions": [],
           "output": false,
-          "description": "Local scout for short, mechanical retrieval under a Copilot root. Use it for one narrow source area or question, such as tracing one caller chain, locating tests, or extracting configuration facts. Do not use it for merge-conflict analysis, cross-cutting synthesis, architecture, or broad repository reconstruction; keep those tasks on Copilot. Return a short answer with file and line references."
+          "description": "Local scout for short, mechanical retrieval under a Copilot or Codex root. Use it for one narrow source area or question, such as tracing one caller chain, locating tests, or extracting configuration facts. Do not use it for merge-conflict analysis, cross-cutting synthesis, architecture, or broad repository reconstruction; keep those tasks on the parent provider. Return a short answer with file and line references."
         },
-        "worker": { "model": "github-copilot/gpt-5.6-luna" }
+        "worker": { "model": "github-copilot/gpt-6.1-sol", "thinking": "high" }
       },
       "openai-codex": {
-        "delegate": { "model": "openai-codex/gpt-5.6-luna" },
-        "local-editor": { "model": "openai-codex/gpt-5.6-luna" },
-        "oracle": { "model": "openai-codex/gpt-6-astra" },
-        "researcher": { "model": "openai-codex/gpt-5.6-luna" },
-        "reviewer": { "model": "openai-codex/gpt-5.6-sol" },
-        "scout": { "model": "openai-codex/gpt-5.6-luna" },
-        "worker": { "model": "openai-codex/gpt-5.6-luna" }
+        "delegate": { "model": "openai-codex/gpt-6.1-sol", "thinking": "medium" },
+        "local-editor": {
+          "model": "omlx/Qwen3.8-27B-oQ4e-mtp",
+          "fallbackModels": [],
+          "thinking": false,
+          "defaultContext": "fresh",
+          "tools": ["read", "grep", "find", "ls", "fffind", "ffgrep", "edit", "write"],
+          "extensions": [],
+          "output": false,
+          "description": "Local editor for small, well-specified changes under a Copilot or Codex root. Give it explicit files or a narrow source area and acceptance criteria; the parent reviews and validates the result."
+        },
+        "oracle": { "model": "openai-codex/gpt-6-astra", "thinking": "high" },
+        "researcher": { "model": "openai-codex/gpt-6.1-sol", "thinking": "medium" },
+        "reviewer": { "model": "openai-codex/gpt-6-astra", "thinking": "high" },
+        "scout": {
+          "model": "omlx/Qwen3.8-27B-oQ4e-mtp",
+          "fallbackModels": [],
+          "thinking": false,
+          "defaultContext": "fresh",
+          "tools": ["read", "grep", "find", "ls", "fffind", "ffgrep"],
+          "extensions": [],
+          "output": false,
+          "description": "Local scout for short, mechanical retrieval under a Copilot or Codex root. Use it for one narrow source area or question, such as tracing one caller chain, locating tests, or extracting configuration facts. Do not use it for merge-conflict analysis, cross-cutting synthesis, architecture, or broad repository reconstruction; keep those tasks on the parent provider. Return a short answer with file and line references."
+        },
+        "worker": { "model": "openai-codex/gpt-6.1-sol", "thinking": "high" }
       }
     }
   }

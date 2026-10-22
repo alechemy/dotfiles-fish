@@ -18,7 +18,7 @@ The flag additionally runs cmux's official `hooks setup pi --yes`. The official 
 
 ## Pi convenience commands
 
-Pi's settings fragment pins `npm:pi-cmux@0.1.24`. The package adds session-launch commands, terminal splits and tabs, and browser panes with user-written annotations. It does not connect Pi to cmux Computer Use.
+Pi's settings fragment declares unversioned `npm:pi-cmux`, with [automatic stable updates](software-updates.md#pi-packages). The reviewed snapshot is `0.1.24`. The package adds session-launch commands, terminal splits and tabs, and browser panes with user-written annotations. It does not connect Pi to cmux Computer Use.
 
 The stowed `~/.pi/agent/extensions/pi-cmux.ts` disables package notifications, sidebar updates, and automatic model-generated titles before invoking the installed package's entry point. The package declaration uses `extensions: []` to prevent a second direct load. Applying preferences inside Pi also covers package-launched sessions, whose shell command forwards only `PATH`. cmux's official hook retains lifecycle display, notifications, and restoration. Worktrunk retains activity records and Hunk feedback delivery. Run `/reload` or restart Pi after installation.
 

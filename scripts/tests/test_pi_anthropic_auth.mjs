@@ -7,7 +7,7 @@ import test from "node:test";
 
 const piRoot = process.env.PI_PACKAGE_ROOT;
 const extensionRoot = process.env.PI_ANTHROPIC_AUTH_ROOT;
-const version = "3.3.1";
+const version = extensionRoot ? JSON.parse(readFileSync(resolve(extensionRoot, "package.json"), "utf8")).version : undefined;
 const versionVariable = "PI_ANTHROPIC_AUTH_CLAUDE_CODE_VERSION";
 const fishEnvironment = readFileSync(new URL("../../stow/fish/.config/fish/conf.d/env.fish", import.meta.url), "utf8");
 
@@ -36,9 +36,9 @@ function errorResponse(requiredVersion) {
   });
 }
 
-test("Anthropic auth is pinned without a fixed compatibility-version override", () => {
+test("Anthropic auth follows stable updates without a fixed compatibility-version override", () => {
   const fragment = JSON.parse(readFileSync(new URL("../../stow/pi/.pi/agent/settings.fragment.json", import.meta.url), "utf8"));
-  assert.ok(fragment.packages.includes(`npm:@gotgenes/pi-anthropic-auth@${version}`));
+  assert.ok(fragment.packages.includes("npm:@gotgenes/pi-anthropic-auth"));
   assert.doesNotMatch(fishEnvironment, /^set\s+-gx\s+PI_ANTHROPIC_AUTH_CLAUDE_CODE_VERSION\s/m);
 });
 
@@ -78,6 +78,7 @@ test("Anthropic auth uses Pi's current transcript and transport contracts", {
     let diagnostics;
     await extension.commands.get("anthropic-auth:status").handler("", {
       hasUI: true, ui: { notify: (text) => { diagnostics = text; } },
+      modelRegistry: { getApiKeyForProvider: async () => undefined },
     });
     assert.ok(diagnostics.includes(`version: ${version}`));
     assert.match(diagnostics, /built-in Anthropic transport: resolved/);

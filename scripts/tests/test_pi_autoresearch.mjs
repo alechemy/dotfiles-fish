@@ -11,9 +11,9 @@ const extensionRoot = process.env.PI_AUTORESEARCH_ROOT;
 const vccRoot = process.env.PI_VCC_ROOT;
 const experimentTools = ["init_experiment", "run_experiment", "log_experiment"];
 
-test("autoresearch is an exact package pin with bundled extensions and skills", () => {
+test("autoresearch follows stable updates with bundled extensions and skills", () => {
   const fragment = JSON.parse(readFileSync(join(repo, "stow/pi/.pi/agent/settings.fragment.json"), "utf8"));
-  assert.equal(fragment.packages.filter((entry) => entry === "npm:pi-autoresearch@1.9.0").length, 1);
+  assert.equal(fragment.packages.filter((entry) => entry === "npm:pi-autoresearch").length, 1);
 });
 
 test("autoresearch loads, gates its tools, and composes with VCC without executing experiments", {

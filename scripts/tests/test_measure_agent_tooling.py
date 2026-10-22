@@ -33,9 +33,9 @@ class MeasureAgentToolingTests(unittest.TestCase):
         declared = measurement.PACKAGES
         self.put(self.fragment, json.dumps({"packages": [
             measurement.SUBAGENTS_SOURCE if n == "pi-subagents" else
-            {"source": f"npm:{n}@{v}", **measurement.PACKAGE_FILTERS[n]} if n in measurement.PACKAGE_FILTERS else
-            f"npm:{n}@{v}" for n, v in declared.items()
-        ]}))
+            {"source": f"npm:{n}", **measurement.PACKAGE_FILTERS[n]} if n in measurement.PACKAGE_FILTERS else
+            f"npm:{n}" for n in declared
+        ] + [f"npm:{name}" for name in measurement.UNMEASURED_PACKAGES]}))
         for name, version in declared.items():
             manifest = {"name": name, "version": version, "pi": {"extensions": ["./index.ts"]}}
             if name in ("@upstash/context7-pi", "pi-subagents"):
@@ -102,7 +102,7 @@ class MeasureAgentToolingTests(unittest.TestCase):
     def test_projection_requires_only_retained_packages(self):
         result = self.measure()
         self.assertEqual(result["declared_versions"], measurement.PACKAGES)
-        self.assertEqual(result["unmeasured_packages"], {})
+        self.assertEqual(result["unmeasured_packages"], measurement.UNMEASURED_PACKAGES)
         self.assertFalse((self.packages / "@plannotator/pi-extension").exists())
         self.assertNotIn("@plannotator/pi-extension/package.json", measurement.SOURCE_SHA256)
         self.assertFalse(any("plannotator" in name for name in result["input_sha256"]))

@@ -14,8 +14,12 @@ PACKAGES = {"@upstash/context7-pi": "0.1.2", "pi-subagents": "0.65.0", "pi-web-a
             "@gotgenes/pi-anthropic-auth": "3.3.1", "@sting8k/pi-vcc": "0.8.0",
             "pi-cmux": "0.1.24", "pi-autoresearch": "1.9.0"}
 PACKAGE_FILTERS = {"pi-cmux": {"extensions": []}}
+UNMEASURED_PACKAGES = {
+    "pi-agent-browser-native": "Browser tool descriptions are not included in this reviewed-source projection.",
+    "@ff-labs/pi-fff": "FFF tool descriptions are not included in this reviewed-source projection.",
+}
 INACTIVE_TOOLS = ["init_experiment", "run_experiment", "log_experiment"]
-SUBAGENTS_SOURCE = "./local/copilot-delegation/node_modules/pi-subagents"
+SUBAGENTS_SOURCE = "./local/provider-local-delegation-fff-8a0e972/node_modules/pi-subagents"
 SOURCE_SHA256 = {
     "@upstash/context7-pi/package.json": "367f6565087be5e89315d3cb171d9f391017124b598b744662c3500705adcb11",
     "@upstash/context7-pi/extensions/context7.ts": "b8b3ae539981a1469678e19771c061e692838e8c1fde6a5a3990962a8671c8e7",
@@ -194,8 +198,8 @@ def measure(repo, packages_root, subagents_root):
     fragment = json.loads(fragment_data)
     declared = PACKAGES
     expected = [SUBAGENTS_SOURCE if name == "pi-subagents" else
-                {"source": f"npm:{name}@{version}", **PACKAGE_FILTERS[name]} if name in PACKAGE_FILTERS else
-                f"npm:{name}@{version}" for name, version in declared.items()]
+                {"source": f"npm:{name}", **PACKAGE_FILTERS[name]} if name in PACKAGE_FILTERS else
+                f"npm:{name}" for name in declared] + [f"npm:{name}" for name in UNMEASURED_PACKAGES]
     package_roots = {name: subagents_root if name == "pi-subagents" else packages_root / name
                      for name in declared}
     require(fragment.get("packages") == expected, "Declared package set/filters changed; review the projection")
@@ -209,7 +213,7 @@ def measure(repo, packages_root, subagents_root):
 
     for name, version in declared.items():
         manifest = json.loads(read(package_roots[name], "package.json", f"{name}/package.json"))
-        require(manifest.get("name") == name and manifest.get("version") == version, f"Installed version mismatch: {name}")
+        require(manifest.get("name") == name and manifest.get("version") == version, f"Reviewed snapshot version mismatch: {name}; automatic updates require a new projection review")
         manifests[name] = manifest
     for relative, digest in SOURCE_SHA256.items():
         name = next(name for name in declared if relative.startswith(name + "/"))
@@ -282,7 +286,7 @@ def measure(repo, packages_root, subagents_root):
     return {
         "method": "source-derived default-registration projection; not observed runtime registration",
         "declared_versions": declared,
-        "unmeasured_packages": {},
+        "unmeasured_packages": dict(UNMEASURED_PACKAGES),
         "tools": tools, "tool_descriptions": total(tools),
         "skills": skills, "advertised_skill_descriptions": total(skills),
         "manual_skills_excluded": sorted(manual),
