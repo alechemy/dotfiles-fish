@@ -582,13 +582,42 @@ class ViewerTests(Fixture):
     def test_new_open_captures_exact_process_and_surface(self):
         self.state.pop("launch")
         self.state.pop("session")
-        response = {"workspace_id": "workspace", "surface_id": "viewer", "type": "terminal"}
-        with patch.object(review, "cmux", return_value=response) as client, patch.object(review.shutil, "which", return_value="/hunk"):
+        identity = {"caller": {"workspace_id": "workspace", "surface_id": "pi",
+                               "pane_id": "pi-pane", "surface_type": "terminal"}}
+        response = {"workspace_id": "workspace", "surface_id": "viewer",
+                    "pane_id": "pi-pane", "type": "terminal"}
+        with patch.object(review, "cmux", side_effect=[identity, response]) as client, patch.object(review.shutil, "which", return_value="/hunk"):
             result = review.open_viewer(self.directory, self.state)
         self.assertEqual(result["session"], "session")
-        call = client.call_args.args
-        self.assertEqual(call[:6], ("new-split", "right", "--workspace", "workspace", "--surface", "pi"))
+        self.assertEqual(client.call_args_list[0].args,
+                         ("identify", "--workspace", "workspace", "--surface", "pi"))
+        call = client.call_args_list[1].args
+        self.assertEqual(call[:7], ("new-surface", "--type", "terminal", "--workspace", "workspace", "--pane", "pi-pane"))
         self.assertEqual(call[-2:], ("--focus", "false"))
+        self.assertEqual(self.state["launch"]["pane"], "pi-pane")
+
+    def test_new_open_rejects_another_callers_pane(self):
+        self.state.pop("launch")
+        self.state.pop("session")
+        identity = {"caller": {"workspace_id": "workspace", "surface_id": "other",
+                               "pane_id": "other-pane", "surface_type": "terminal"}}
+        with patch.object(review, "cmux", return_value=identity) as client, patch.object(review.shutil, "which", return_value="/hunk"):
+            with self.assertRaisesRegex(review.ReviewError, "caller pane"):
+                review.open_viewer(self.directory, self.state)
+        self.assertEqual(client.call_count, 1)
+        self.assertNotIn("launch", self.state)
+
+    def test_new_open_rejects_a_tab_in_another_pane(self):
+        self.state.pop("launch")
+        self.state.pop("session")
+        identity = {"caller": {"workspace_id": "workspace", "surface_id": "pi",
+                               "pane_id": "pi-pane", "surface_type": "terminal"}}
+        response = {"workspace_id": "workspace", "surface_id": "viewer",
+                    "pane_id": "other-pane", "type": "terminal"}
+        with patch.object(review, "cmux", side_effect=[identity, response]), patch.object(review.shutil, "which", return_value="/hunk"):
+            with self.assertRaisesRegex(review.ReviewError, "incomplete launch identity"):
+                review.open_viewer(self.directory, self.state)
+        self.assertNotIn("surface", self.state["launch"])
 
     def test_uncertain_launch_is_not_retried(self):
         self.state.pop("session")

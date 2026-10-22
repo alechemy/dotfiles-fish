@@ -1,6 +1,6 @@
 # Inline review in Hunk
 
-The parent Pi session automatically opens a Hunk pane for an ordinary code review in native cmux, unless the user requests text-only output. Keep review generation, independent reviewer assignments, evidence checks, and final synthesis in Pi. Children must not open viewers or import findings. Outside native cmux, keep the grouped report; do not launch an interactive TUI in the Bash tool or start another agent.
+The parent Pi session automatically opens a Hunk tab for an ordinary code review in native cmux, unless the user requests text-only output. Always use a separate tab in the invoking Pi terminal's pane for new and reopened reviews. Do not create splits. Keep review generation, independent reviewer assignments, evidence checks, and final synthesis in Pi. Children must not open viewers or import findings. Outside native cmux, keep the grouped report; do not launch an interactive TUI in the Bash tool or start another agent.
 
 Use the bundled `../hunk_review.py` with `/usr/bin/python3`. The commands below assume `helper` is its absolute path. Resolve it relative to this reference file, not the repository being reviewed. Load the current vendor command reference with `hunk skill path` when you need Hunk navigation or highlighting syntax. The local launcher replaces the vendor skill's instruction to ask the human to open Hunk; its other live-session guidance still applies.
 
@@ -27,7 +27,7 @@ Pass `--repo /absolute/worktree` in every prepare call. Omit `--include-untracke
 /usr/bin/python3 "$helper" open --review "$review_id"
 ```
 
-`open` creates an unfocused split beside the invoking Pi terminal and returns once Hunk registers. Repeating it for the same review reuses the recorded session. It never adopts an arbitrary existing Hunk window, selects by title, or repoints another review. Do not retry `prepare` to recover a slow launch. Inspect the existing pane and retry `open` with the original ID. An incomplete cmux identity fails closed instead of creating another pane.
+`open` resolves the invoking Pi terminal's pane and creates an unfocused terminal tab there, then returns once Hunk registers. Repeating it for the same review reuses the recorded session. It never adopts an arbitrary existing Hunk window, selects by title, or repoints another review. Do not retry `prepare` to recover a slow launch. Inspect the existing tab and retry `open` with the original ID. An incomplete cmux identity fails closed instead of creating another tab.
 
 The helper launches every native comparison and saved-patch view with `hunk --experimental`. A reload cannot enable STML. An unsupported launch flag or missing CLI contract leaves the review in the text report; do not relaunch without the flag to bypass verification.
 
@@ -107,7 +107,7 @@ This checks freshness and selects the exact imported comment. For a follow-up th
 
 Worktrunk-managed tasks retain their existing Ctrl+Shift+F delivery shortcut. It requires the recorded idle task Pi session and a matching acknowledgement. Standalone Pi reviews use `comments` on request instead of adopting a Worktrunk task binding.
 
-A different comparison gets a new review ID. Preserve unresolved conclusions before switching the visible comparison. Do not reload a bound viewer behind the helper and then reuse its findings. After closing a review's old pane and Hunk process, `open --review "$review_id" --reopen` explicitly opens the same still-current comparison with `--experimental` and restores the saved agent findings. It keeps the original markup or plain fallback, checks rich payloads at the new width, and does not regenerate their text. This restoration can bring back findings previously removed from the viewer, so use it deliberately. It does not acknowledge, clear, or deliver human notes.
+A different comparison gets a new review ID. Preserve unresolved conclusions before switching the visible comparison. Do not reload a bound viewer behind the helper and then reuse its findings. After closing a review's old tab and Hunk process, `open --review "$review_id" --reopen` explicitly opens the same still-current comparison in a new tab with `--experimental` and restores the saved agent findings. It keeps the original markup or plain fallback, checks rich payloads at the new width, and does not regenerate their text. This restoration can bring back findings previously removed from the viewer, so use it deliberately. It does not acknowledge, clear, or deliver human notes.
 
 ## Storage and limits
 

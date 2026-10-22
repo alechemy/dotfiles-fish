@@ -471,14 +471,20 @@ def open_viewer(directory, state, reopen=False):
         binary = shutil.which("hunk")
         if not binary:
             raise ReviewError("Hunk is unavailable; install the Homebrew-managed binary before opening a review.")
+        identity = cmux("identify", "--workspace", workspace, "--surface", caller).get("caller", {})
+        pane = identity.get("pane_id")
+        if (identity.get("workspace_id") != workspace or identity.get("surface_id") != caller
+                or identity.get("surface_type") != "terminal" or not pane):
+            raise ReviewError("cmux could not identify the caller pane; no review tab was opened.")
         state["hunk_binary"] = str(Path(binary).resolve())
-        state["launch"] = {"workspace": workspace, "caller": caller, "status": "requested"}
+        state["launch"] = {"workspace": workspace, "caller": caller, "pane": pane, "status": "requested"}
         save_state(directory, state)
-        response = cmux("new-split", "right", "--workspace", workspace, "--surface", caller,
+        response = cmux("new-surface", "--type", "terminal", "--workspace", workspace, "--pane", pane,
                         "--command", launch_command(directory), "--focus", "false")
         if (response.get("workspace_id") != workspace or not response.get("surface_id")
-                or response.get("type") != "terminal" or response["surface_id"] == caller):
-            raise ReviewError("cmux returned an incomplete launch identity; inspect the pane before retrying.")
+                or response.get("pane_id") != pane or response.get("type") != "terminal"
+                or response["surface_id"] == caller):
+            raise ReviewError("cmux returned an incomplete launch identity; inspect the tab before retrying.")
         state["launch"].update(surface=response["surface_id"], status="created")
         save_state(directory, state)
     launch = state["launch"]
