@@ -1,0 +1,556 @@
+#!/usr/bin/python3
+from __future__ import annotations
+
+import argparse
+import contextlib
+import ctypes
+import errno
+import fcntl
+import json
+import os
+from pathlib import Path
+import re
+import shlex
+import signal
+import socket
+import subprocess
+import sys
+import tempfile
+import time
+import uuid
+
+TTL = 1800
+ORPHAN_GRACE = 300
+HEARTBEAT = 300
+MAX_HOLD = 7200
+STATE = Path.home() / ".local/state/agent-devices/state.json"
+
+
+class DeviceError(RuntimeError):
+    pass
+
+
+class ProcessIdentity:
+    def __init__(self):
+        self.libproc = ctypes.CDLL("/usr/lib/libproc.dylib", use_errno=True)
+        self.libproc.proc_pid_rusage.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_void_p]
+        self.libproc.proc_pid_rusage.restype = ctypes.c_int
+        self.libproc.proc_pidpath.argtypes = [ctypes.c_int, ctypes.c_void_p, ctypes.c_uint32]
+        self.libproc.proc_pidpath.restype = ctypes.c_int
+        libc = ctypes.CDLL("/usr/lib/libc.dylib")
+        value = ctypes.create_string_buffer(128)
+        size = ctypes.c_size_t(len(value))
+        if libc.sysctlbyname(b"kern.bootsessionuuid", value, ctypes.byref(size), None, 0):
+            raise DeviceError("Cannot establish the current macOS boot identity")
+        self.boot = value.value.decode("ascii")
+
+    def get(self, pid):
+        buf = ctypes.create_string_buffer(1024)
+        if self.libproc.proc_pid_rusage(pid, 4, buf):
+            if ctypes.get_errno() in (errno.ESRCH, errno.ENOENT):
+                return None
+            raise DeviceError("Cannot verify process identity; refusing cleanup")
+        if ctypes.c_uint64.from_buffer(buf, 88).value:
+            return None
+        start = ctypes.c_uint64.from_buffer(buf, 80).value
+        if not start:
+            return None
+        return {"pid": pid, "start": start, "boot": self.boot}
+
+    def alive(self, identity):
+        return self.get(identity["pid"]) == identity
+
+    def executable(self, pid):
+        buf = ctypes.create_string_buffer(4096)
+        if self.libproc.proc_pidpath(pid, buf, len(buf)) <= 0:
+            raise DeviceError("Cannot establish device executable identity")
+        return buf.value.decode()
+
+
+def command(argv, timeout=30):
+    try:
+        result = subprocess.run(argv, capture_output=True, text=True, timeout=timeout)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise DeviceError("Device command failed: " + str(exc)) from exc
+    if result.returncode:
+        raise DeviceError("Device command failed: " + " ".join(argv[:3]))
+    return result.stdout
+
+
+def processes():
+    result = []
+    for line in command(["/bin/ps", "-axo", "pid=,args="]).splitlines():
+        fields = line.split(None, 1)
+        if len(fields) == 2:
+            result.append((int(fields[0]), fields[1]))
+    return result
+
+
+class Devices:
+    def __init__(self, identities):
+        self.identities = identities
+        sdk = Path(os.environ.get("ANDROID_SDK_ROOT") or os.environ.get("ANDROID_HOME")
+                   or Path.home() / "Library/Android/sdk")
+        self.adb = str(sdk / "platform-tools/adb")
+        self.emulator = str(sdk / "emulator/emulator")
+
+    def identity(self, platform, device):
+        matches = []
+        for pid, args in processes():
+            if platform == "ios":
+                match = "launchd_sim" in args and "/" + device + "/" in args
+            else:
+                try:
+                    argv = shlex.split(args)
+                except ValueError:
+                    continue
+                match = ("qemu-system" in args and "-avd" in argv
+                         and argv.index("-avd") + 1 < len(argv)
+                         and argv[argv.index("-avd") + 1] == device)
+            if match:
+                identity = self.identities.get(pid)
+                if not identity:
+                    continue
+                executable = Path(self.identities.executable(pid)).name
+                if (platform == "ios" and executable == "launchd_sim") or (
+                        platform == "android" and executable.startswith("qemu-system")):
+                    matches.append(identity)
+        if len(matches) > 1:
+            raise DeviceError("Multiple device instances match; refusing ambiguous ownership")
+        return matches[0] if matches else None
+
+    def ios_device(self, device):
+        data = json.loads(command(["/usr/bin/xcrun", "simctl", "list", "devices", "--json"]))
+        for group in data["devices"].values():
+            for item in group:
+                if item["udid"] == device and item.get("isAvailable"):
+                    return item
+        raise DeviceError("No available iOS simulator has that UDID")
+
+    def prepare(self, platform, device):
+        if platform == "ios":
+            if self.ios_device(device)["state"] != "Shutdown":
+                raise DeviceError("An unmanaged simulator is already running; leave it alone")
+            return device
+        avds = command([self.emulator, "-list-avds"]).splitlines()
+        if device not in avds:
+            raise DeviceError("Unknown Android AVD")
+        for port in range(5554, 5683, 2):
+            with contextlib.ExitStack() as stack:
+                try:
+                    for number in (port, port + 1):
+                        sock = stack.enter_context(socket.socket())
+                        sock.bind(("127.0.0.1", number))
+                except OSError:
+                    continue
+                return "emulator-" + str(port)
+        raise DeviceError("No available Android emulator port")
+
+    def boot(self, platform, device, target):
+        if platform == "ios":
+            command(["/usr/bin/xcrun", "simctl", "boot", device], timeout=120)
+        else:
+            logs = Path.home() / "Library/Logs/agent-devices"
+            logs.mkdir(parents=True, exist_ok=True, mode=0o700)
+            log = logs / (device + ".log")
+            fd = os.open(log, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, "w") as stream:
+                subprocess.Popen([self.emulator, "-avd", device, "-port", target.split("-")[1],
+                                  "-no-window", "-no-audio"], stdin=subprocess.DEVNULL,
+                                 stdout=stream, stderr=stream, start_new_session=True)
+        deadline = time.monotonic() + 120
+        while time.monotonic() < deadline:
+            identity = self.identity(platform, device)
+            if identity:
+                return identity
+            time.sleep(1)
+        raise DeviceError("Device startup did not produce an identifiable process")
+
+    def ready(self, entry):
+        if entry["platform"] == "ios":
+            command(["/usr/bin/xcrun", "simctl", "bootstatus", entry["target"], "-b"], timeout=180)
+        else:
+            deadline = time.monotonic() + 180
+            while time.monotonic() < deadline:
+                try:
+                    result = command([self.adb, "-s", entry["target"], "shell", "getprop",
+                                      "sys.boot_completed"], timeout=10)
+                    if result.strip() == "1":
+                        return
+                except DeviceError:
+                    pass
+                time.sleep(2)
+            raise DeviceError("Android emulator did not become ready")
+
+    def stop(self, entry):
+        if not self.identities.alive(entry["generation"]):
+            return "forgot-replaced-or-stopped-device"
+        if self.identity(entry["platform"], entry["device"]) != entry["generation"]:
+            raise DeviceError("Device identity cannot be confirmed; refusing shutdown")
+        if entry["platform"] == "ios":
+            command(["/usr/bin/xcrun", "simctl", "shutdown", entry["target"]], timeout=60)
+        else:
+            name = command([self.adb, "-s", entry["target"], "emu", "avd", "name"], timeout=10)
+            if name.splitlines()[0].strip() != entry["device"]:
+                raise DeviceError("Android serial now belongs to a different AVD")
+            command([self.adb, "-s", entry["target"], "emu", "kill"], timeout=15)
+        deadline = time.monotonic() + 30
+        while self.identities.alive(entry["generation"]):
+            if time.monotonic() >= deadline:
+                raise DeviceError("Device shutdown is still pending; watchdog will retry")
+            time.sleep(0.5)
+        return "shutdown"
+
+
+def validate_state(data):
+    if not isinstance(data, dict) or data.get("version") != 1 or not isinstance(data.get("devices"), dict):
+        raise DeviceError("Invalid device state; refusing cleanup")
+    for key, entry in data["devices"].items():
+        if not isinstance(entry, dict):
+            raise DeviceError("Invalid device entry")
+        validate_device(entry.get("platform"), entry.get("device"))
+        if key != entry["platform"] + ":" + entry["device"] or not isinstance(entry.get("leases"), dict):
+            raise DeviceError("Invalid device ownership")
+        target = entry.get("target", "")
+        if (entry["platform"] == "ios" and target != entry["device"]) or (
+                entry["platform"] == "android" and not re.fullmatch(r"emulator-\d+", target)):
+            raise DeviceError("Invalid device target")
+        for identity in [entry.get("generation"), entry.get("starter")]:
+            if identity is not None:
+                validate_identity(identity)
+        if not isinstance(entry.get("created"), (int, float)):
+            raise DeviceError("Invalid device timestamp")
+        for token, lease in entry["leases"].items():
+            if not re.fullmatch(r"[a-f0-9]{32}", token) or not isinstance(lease, dict):
+                raise DeviceError("Invalid lease")
+            if not isinstance(lease.get("expires"), (int, float)) or not isinstance(lease.get("held"), bool):
+                raise DeviceError("Invalid lease expiry")
+            for identity in (lease.get("owner"), lease.get("job")):
+                if identity is not None:
+                    validate_identity(identity)
+            if lease.get("owner") is None and not lease["held"]:
+                raise DeviceError("An ordinary lease requires an owner")
+            if not isinstance(lease.get("session"), str):
+                raise DeviceError("Invalid session owner")
+    return data
+
+
+def validate_identity(identity):
+    if (not isinstance(identity, dict) or not isinstance(identity.get("pid"), int)
+            or identity["pid"] <= 1 or not isinstance(identity.get("start"), int)
+            or identity["start"] <= 0 or not isinstance(identity.get("boot"), str)):
+        raise DeviceError("Invalid process identity")
+
+
+def validate_device(platform, device):
+    pattern = r"[A-Fa-f0-9]{8}(?:-[A-Fa-f0-9]{4}){3}-[A-Fa-f0-9]{12}" if platform == "ios" else r"[A-Za-z0-9_.-]{1,100}"
+    if platform not in ("ios", "android") or not isinstance(device, str) or not re.fullmatch(pattern, device):
+        raise DeviceError("Expected an iOS UDID or Android AVD name")
+
+
+class Store:
+    def __init__(self, path=STATE):
+        self.path = Path(path)
+
+    @contextlib.contextmanager
+    def locked(self, nonblocking=False):
+        self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        fd = os.open(self.path.parent / "lock", os.O_RDWR | os.O_CREAT, 0o600)
+        with os.fdopen(fd, "r+") as lock:
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | (fcntl.LOCK_NB if nonblocking else 0))
+            except BlockingIOError:
+                yield None
+                return
+            data = validate_state(json.loads(self.path.read_text())) if self.path.exists() else {"version": 1, "devices": {}}
+            yield data
+
+    def save(self, data):
+        validate_state(data)
+        fd, path = tempfile.mkstemp(dir=self.path.parent, prefix="state-")
+        try:
+            with os.fdopen(fd, "w") as stream:
+                json.dump(data, stream, separators=(",", ":"))
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(path, self.path)
+        finally:
+            if os.path.exists(path):
+                os.unlink(path)
+
+
+class Manager:
+    def __init__(self, store, devices, identities, clock=time.time):
+        self.store, self.devices, self.identities, self.clock = store, devices, identities, clock
+
+    def lease(self, pid, session):
+        owner = self.identities.get(pid)
+        if not owner:
+            raise DeviceError("Cannot establish device owner process identity")
+        return {"owner": owner, "session": session, "expires": self.clock() + TTL, "held": False}
+
+    def acquire(self, platform, device, pid, session):
+        validate_device(platform, device)
+        if platform == "ios":
+            device = device.upper()
+        key = platform + ":" + device
+        token = uuid.uuid4().hex
+        lease = self.lease(pid, session)
+        with self.store.locked() as data:
+            entry = data["devices"].get(key)
+            current = self.devices.identity(platform, device)
+            if entry and entry["generation"] and entry["generation"] != current:
+                del data["devices"][key]
+                entry = None
+            if entry and not entry["generation"]:
+                raise DeviceError("An interrupted startup needs inspection; refusing to guess ownership")
+            if not entry:
+                if current:
+                    raise DeviceError("An unmanaged device is already running; leave it alone")
+                target = self.devices.prepare(platform, device)
+                entry = {"platform": platform, "device": device, "target": target,
+                         "generation": None, "starter": self.identities.get(os.getpid()),
+                         "created": self.clock(), "leases": {token: lease}}
+                data["devices"][key] = entry
+                self.store.save(data)
+                try:
+                    entry["generation"] = self.devices.boot(platform, device, target)
+                except BaseException:
+                    entry["generation"] = self.devices.identity(platform, device)
+                    entry["leases"].pop(token, None)
+                    self.store.save(data)
+                    raise
+            else:
+                entry["leases"][token] = lease
+            self.store.save(data)
+            result = {"lease": token, "platform": platform, "device": device, "target": entry["target"],
+                      "expires": lease["expires"]}
+        try:
+            self.devices.ready(entry)
+        except BaseException:
+            self.release(token)
+            raise
+        return result
+
+    def locate(self, data, token):
+        for key, entry in data["devices"].items():
+            if token in entry["leases"]:
+                return key, entry, entry["leases"][token]
+        raise DeviceError("Lease is absent or expired; acquire the device again")
+
+    def renew(self, token):
+        with self.store.locked() as data:
+            _, entry, lease = self.locate(data, token)
+            if lease["held"]:
+                raise DeviceError("A manual QA hold cannot be automatically renewed")
+            if not self.identities.alive(lease["owner"]):
+                raise DeviceError("Lease owner has exited")
+            if not self.identities.alive(entry["generation"]):
+                raise DeviceError("Device was stopped or replaced")
+            lease["expires"] = self.clock() + TTL
+            lease.pop("orphaned", None)
+            self.store.save(data)
+            return {"lease": token, "expires": lease["expires"]}
+
+    def protect_job(self, token, pid):
+        with self.store.locked() as data:
+            _, _, lease = self.locate(data, token)
+            job = self.identities.get(pid)
+            if not job:
+                return
+            lease["job"] = job
+            self.store.save(data)
+
+    def hold(self, token, minutes):
+        if not 1 <= minutes <= MAX_HOLD // 60:
+            raise DeviceError("Manual QA holds must be between 1 and 120 minutes")
+        with self.store.locked() as data:
+            _, entry, lease = self.locate(data, token)
+            if not self.identities.alive(entry["generation"]):
+                raise DeviceError("Device was stopped or replaced")
+            lease.update(owner=None, held=True, expires=self.clock() + minutes * 60)
+            lease.pop("orphaned", None)
+            self.store.save(data)
+            return {"lease": token, "expires": lease["expires"], "held": True}
+
+    def collect(self, data):
+        events = []
+        now = self.clock()
+        for key, entry in list(data["devices"].items()):
+            for token, lease in list(entry["leases"].items()):
+                if lease.get("job") and self.identities.alive(lease["job"]):
+                    continue
+                expired = now >= lease["expires"]
+                if not lease["held"] and not self.identities.alive(lease["owner"]):
+                    lease.setdefault("orphaned", now)
+                    expired = expired or now - lease["orphaned"] >= ORPHAN_GRACE
+                if expired:
+                    del entry["leases"][token]
+            if entry["leases"]:
+                continue
+            if entry["generation"] is None:
+                if self.devices.identity(entry["platform"], entry["device"]):
+                    events.append({"device": key, "action": "unconfirmed-startup-needs-inspection"})
+                    continue
+                del data["devices"][key]
+                continue
+            try:
+                action = self.devices.stop(entry)
+                del data["devices"][key]
+                events.append({"device": key, "action": action})
+            except DeviceError as exc:
+                events.append({"device": key, "action": "shutdown-retry", "error": str(exc)})
+        return events
+
+    def release(self, token=None, session=None, owner_pid=None):
+        with self.store.locked() as data:
+            if token:
+                try:
+                    _, entry, _ = self.locate(data, token)
+                    del entry["leases"][token]
+                except DeviceError:
+                    pass
+            else:
+                identity = self.identities.get(owner_pid)
+                for entry in data["devices"].values():
+                    for key, lease in list(entry["leases"].items()):
+                        if not lease["held"] and lease["session"] == session and lease["owner"] == identity:
+                            del entry["leases"][key]
+            events = self.collect(data)
+            self.store.save(data)
+            return events
+
+    def sweep(self):
+        if not self.store.path.exists():
+            return []
+        with self.store.locked(nonblocking=True) as data:
+            if data is None or not data["devices"]:
+                return []
+            before = json.dumps(data, sort_keys=True)
+            events = self.collect(data)
+            if json.dumps(data, sort_keys=True) != before:
+                self.store.save(data)
+            return events
+
+    def status(self):
+        if not self.store.path.exists():
+            return {"devices": []}
+        with self.store.locked() as data:
+            return {"devices": [{"platform": e["platform"], "device": e["device"], "target": e["target"],
+                                 "confirmed": e["generation"] is not None,
+                                 "leases": [{"lease": token, "session": lease["session"],
+                                             "expires": lease["expires"], "held": lease["held"]}
+                                            for token, lease in e["leases"].items()]}
+                                for e in data["devices"].values()]}
+
+
+def run_with_device(manager, args):
+    argv = args.command
+    if argv and argv[0] == "--":
+        argv = argv[1:]
+    if not argv:
+        raise DeviceError("run requires a command after --")
+    result = manager.acquire(args.platform, args.device, os.getpid(), "job:" + uuid.uuid4().hex)
+    env = {**os.environ, "AGENT_DEVICE_TARGET": result["target"], "AGENT_DEVICE_LEASE": result["lease"]}
+    child = None
+    previous = {}
+    previous_timer = signal.getitimer(signal.ITIMER_REAL)
+
+    def renew(_number, _frame):
+        manager.renew(result["lease"])
+
+    try:
+        for number in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+            previous[number] = signal.signal(number, interrupted)
+        previous[signal.SIGALRM] = signal.signal(signal.SIGALRM, renew)
+        child = subprocess.Popen(argv, env=env, start_new_session=True)
+        manager.protect_job(result["lease"], child.pid)
+        signal.setitimer(signal.ITIMER_REAL, HEARTBEAT, HEARTBEAT)
+        code = child.wait()
+        return code if code >= 0 else 128 - code
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        for number in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+            signal.signal(number, signal.SIG_IGN)
+        try:
+            if child is not None and child.poll() is None:
+                os.killpg(child.pid, signal.SIGTERM)
+                try:
+                    child.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    os.killpg(child.pid, signal.SIGKILL)
+                    child.wait()
+            manager.release(result["lease"])
+        finally:
+            for number, handler in previous.items():
+                signal.signal(number, handler)
+            signal.setitimer(signal.ITIMER_REAL, *previous_timer)
+
+
+def parser():
+    root = argparse.ArgumentParser(description="Own local test devices and shut down abandoned instances")
+    sub = root.add_subparsers(dest="action", required=True)
+    acquire = sub.add_parser("acquire")
+    acquire.add_argument("platform", choices=["ios", "android"])
+    acquire.add_argument("device", help="iOS simulator UDID or Android AVD name")
+    acquire.add_argument("--owner-pid", type=int, required=True)
+    acquire.add_argument("--session", required=True)
+    for name in ("renew", "release", "hold"):
+        item = sub.add_parser(name)
+        item.add_argument("lease")
+        if name == "hold":
+            item.add_argument("--minutes", type=int, default=60)
+    release = sub.add_parser("release-session")
+    release.add_argument("--session", required=True)
+    release.add_argument("--owner-pid", type=int, required=True)
+    run = sub.add_parser("run")
+    run.add_argument("platform", choices=["ios", "android"])
+    run.add_argument("device")
+    run.add_argument("command", nargs=argparse.REMAINDER)
+    sub.add_parser("sweep")
+    sub.add_parser("status")
+    return root
+
+
+def interrupted(_number, _frame):
+    raise KeyboardInterrupt
+
+
+def main(argv=None):
+    args = parser().parse_args(argv)
+    for number in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+        signal.signal(number, interrupted)
+    if args.action == "sweep" and not STATE.exists():
+        return 0
+    try:
+        identities = ProcessIdentity()
+        manager = Manager(Store(), Devices(identities), identities)
+        if args.action == "acquire":
+            result = manager.acquire(args.platform, args.device, args.owner_pid, args.session)
+        elif args.action == "renew":
+            result = manager.renew(args.lease)
+        elif args.action == "release":
+            result = manager.release(args.lease)
+        elif args.action == "release-session":
+            result = manager.release(session=args.session, owner_pid=args.owner_pid)
+        elif args.action == "hold":
+            result = manager.hold(args.lease, args.minutes)
+        elif args.action == "run":
+            return run_with_device(manager, args)
+        elif args.action == "sweep":
+            result = manager.sweep()
+            if not result:
+                return 0
+        else:
+            result = manager.status()
+        print(json.dumps(result))
+        return 0
+    except (DeviceError, OSError, ValueError, KeyError) as exc:
+        print("agent-device: " + str(exc), file=sys.stderr)
+        return 1
+    except KeyboardInterrupt:
+        return 130
+
+
+if __name__ == "__main__":
+    sys.exit(main())

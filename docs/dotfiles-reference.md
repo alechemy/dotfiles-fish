@@ -275,6 +275,10 @@ The declared package versions are `@upstash/context7-pi@0.1.2`, a local guarded 
 
 Pi Web Access reads the separately stowed `~/.pi/web-search.json`. The tracked file never contains the Gemini API key: `geminiApiKey` is a command-backed credential source that calls the absolute 1Password CLI path with the existing item's stable ID. Pi Web Access resolves it only when a Gemini request needs it. Keep future provider credentials command-backed or environment-backed rather than pasting keys into this tracked JSON.
 
+### Agent-owned test devices
+
+[Agent-owned test devices](agent-devices.md) documents the `agent_device` Pi tool, `agent-device` command wrapper, shared leases, manual QA holds, and the five-minute launchd cleanup watchdog. Startup must go through the manager; cleanup preserves unregistered devices and replacement process instances. The watchdog exits without device enumeration when no cleanup is due and deliberately runs on battery to reclaim abandoned emulators.
+
 ### Worktrunk task worktrees
 
 [Worktrunk integration](worktrunk.md) documents the complete Pi, cmux, and Hunk workflow. Homebrew owns `worktrunk`; Fish loads its official wrapper. `setup-worktrunk.sh` seeds the app-owned user config copy-if-absent. The `worktrunk` Stow package links the native Pi activity extension, while `bin` exposes `wt pi` through `wt-pi` and `agents` owns its shared skill and Python helper. Approvals, task bindings, activity records, and Worktrunk runtime state stay outside Stow and Git.

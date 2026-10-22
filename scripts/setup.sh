@@ -526,6 +526,8 @@ EOF
     # fire immediately. DEVONthink agents load in the opt-in block below.
     load_launch_agent "$HOME/Library/LaunchAgents/com.user.mount-nas.plist" "NAS auto-mount"
     load_launch_agent "$HOME/Library/LaunchAgents/com.user.check-stale-dev-servers.plist" "stale-dev-servers"
+    mkdir -p "$HOME/Library/Logs"
+    load_launch_agent "$HOME/Library/LaunchAgents/com.user.agent-device-watchdog.plist" "agent device cleanup"
     load_launch_agent "$HOME/Library/LaunchAgents/com.user.aerospace-gaps-heartbeat.plist" "aerospace-gaps heartbeat"
     load_launch_agent "$HOME/Library/LaunchAgents/com.user.caddy.plist" "Caddy (oMLX CSP proxy)"
     /usr/bin/python3 "$DOTFILES/scripts/setup-software-updates.py"
