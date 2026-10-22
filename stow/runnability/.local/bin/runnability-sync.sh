@@ -1,8 +1,7 @@
 #!/bin/sh
 
 # Nightly runnability sync: analyze new/changed library audio into the feature
-# store, then write RUNNABILITY tags. NAS-side rips (riptag remote mode) have
-# no on-arrival scoring hook, so this run is what scores them.
+# store, then write RUNNABILITY tags.
 
 "$HOME/.local/bin/should-run-background-job" || exit 0
 LIBRARY_ROOT=$(/usr/bin/python3 "$HOME/.local/bin/_music_nas.py" get local_library_root) || exit 1

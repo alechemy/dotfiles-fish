@@ -437,12 +437,58 @@ function __riptag_invoke -a local_mode nas python rip tagger music_tags organize
         if test $worker_status -eq 2
             set -g __riptag_resume_id (ssh -n "$nas" "cat '$remote_dir/resume-id'" 2>/dev/null)
         end
+        if test $worker_status -eq 0
+            set -l albums_file (mktemp)
+            if test -z "$albums_file"
+                echo "WARNING: Could not retrieve scoring targets; the nightly sync will retry."
+            else
+                if not ssh -n "$nas" "cat '$remote_dir/organized-albums'" >"$albums_file"
+                    echo "WARNING: Could not retrieve scoring targets; the nightly sync will retry."
+                else if not __riptag_score_remote "$albums_file"
+                    echo "WARNING: Runnability scoring failed or was deferred; the nightly sync will retry."
+                end
+                rm -f "$albums_file"
+            end
+        end
         # Retain a failed deployment for diagnostics. Successful runs need no copy.
         if test $worker_status -eq 0 -o $worker_status -eq 3
             ssh -n "$nas" "rm -rf '$remote_dir'" >/dev/null 2>&1
         end
     end
     return $worker_status
+end
+
+function __riptag_score_remote -a manifest
+    set -l helper "$HOME/.local/bin/_music_nas.py"
+    set -l library (/usr/bin/python3 "$helper" get local_library_root)
+    or return 1
+    if not test -d "$library"
+        if test -x "$HOME/.local/bin/mount-nas.sh"
+            "$HOME/.local/bin/mount-nas.sh" >/dev/null 2>&1
+        end
+        test -d "$library"; or return 1
+    end
+    set -l scorer "$HOME/.local/bin/runnability.py"
+    test -x "$scorer"; or return 1
+    set -l albums
+    while read -l remote_album
+        test -n "$remote_album"; or continue
+        set -l album (/usr/bin/python3 "$helper" map-remote-path "$remote_album")
+        or return 1
+        test -d "$album"; or return 1
+        set -a albums "$album"
+    end <"$manifest"
+    test (count $albums) -gt 0; or return 1
+    echo "--> Scoring runnability for imported albums on this Mac..."
+    set -l failed 0
+    for album in $albums
+        if not "$scorer" analyze --force "$album"
+            set failed 1
+        else if not "$scorer" write --force "$album"
+            set failed 1
+        end
+    end
+    return $failed
 end
 
 function __riptag_done

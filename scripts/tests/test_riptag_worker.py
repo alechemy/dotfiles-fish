@@ -225,6 +225,21 @@ class OwnedDownloadTests(LibraryPreflightTests):
         self.assertIn(remote_root + "/Artist's name/Album $(not-command)", words)
         self.assertNotIn(str(self.library), chmod)
 
+    def test_remote_success_publishes_only_organized_album_paths(self):
+        self.config_path.write_text(json.dumps({'version': 1, 'remote': self.config['remote']}))
+        (self.root / 'tagger.py').write_text('pass\n')
+        album = self.library / "Artist's name" / 'Album $(not-command)'
+        organizer = self.root / 'organizer.py'
+        organizer.write_text('import sys\nfrom pathlib import Path\n' +
+                             'Path(sys.argv[sys.argv.index("--manifest")+1]).write_text(' + repr(str(album) + '\n') + ')\n')
+        self.env['ORGANIZER_SCRIPT'] = str(organizer)
+        self.env['RIPTAG_RESULT_DIR'] = str(self.root / 'result')
+        result = self.run_worker('https://example.com/album/one', 'Rock')
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        receipt = self.root / 'result/organized-albums'
+        self.assertEqual(receipt.read_text(), str(album) + '\n')
+        self.assertEqual(receipt.stat().st_mode & 0o777, 0o600)
+
     def test_projected_remote_config_drives_worker_without_full_private_file(self):
         unusual_rip = self.bin / "rip with ' punctuation;"
         self.rip.rename(unusual_rip)
@@ -320,6 +335,125 @@ class FishResumeTests(unittest.TestCase):
             self.assertNotIn("--local", workers[1])
             self.assertIn("riptag --resume=abc123", result.stdout)
             self.assertTrue(any(cmd.startswith("cat ~/.local/state") for cmd in commands))
+
+
+class FishScoringTests(unittest.TestCase):
+    source = WORKER.parents[3] / 'fish/.config/fish/functions/riptag.fish'
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.bin = self.root / '.local/bin'
+        self.bin.mkdir(parents=True)
+        (self.bin / '_music_nas.py').write_text(WORKER.with_name('_music_nas.py').read_text())
+        self.config = json.loads((WORKER.parents[4] / 'docs/examples/music-nas.example.json').read_text())
+        self.config['local_library_root'] = str(self.root / 'Example Library')
+        self.config_path = self.root / 'nas.json'
+        self.config_path.write_text(json.dumps(self.config))
+        self.relative = ["Artist's name/Album $(not-command)", 'Other Artist/Other Album']
+        for relative in self.relative:
+            (Path(self.config['local_library_root']) / relative).mkdir(parents=True)
+        self.calls = self.root / 'score-calls.jsonl'
+        self.remote_calls = self.root / 'remote-calls.jsonl'
+        self.env = dict(os.environ, HOME=str(self.root), MUSIC_NAS_CONFIG=str(self.config_path),
+                        PATH=str(self.bin) + os.pathsep + os.environ['PATH'],
+                        CALLS=str(self.calls), REMOTE_CALLS=str(self.remote_calls),
+                        ALBUMS=json.dumps([self.config['remote']['library_root'] + '/' + p for p in self.relative]))
+        ssh = self.bin / 'ssh'
+        ssh.write_text('#!' + sys.executable + '\n' +
+            'import json,os,sys\n'
+            'with open(os.environ["REMOTE_CALLS"],"a") as f:f.write(json.dumps(sys.argv[1:])+"\\n")\n'
+            'cmd=sys.argv[-1]\n'
+            'if "mktemp -d /tmp/riptag." in cmd:print("/tmp/riptag.fixture123")\n'
+            'elif "bash " in cmd:sys.exit(int(os.environ.get("WORKER_STATUS","0")))\n'
+            'elif cmd.endswith("/organized-albums\\\'"):\n'
+            ' if os.environ.get("MISSING_RECEIPT"):sys.exit(1)\n'
+            ' print("\\n".join(json.loads(os.environ["ALBUMS"])))\n'
+            'elif cmd.startswith("cat "):print("abc123")\n')
+        ssh.chmod(0o755)
+        scp = self.bin / 'scp'
+        scp.write_text('#!/bin/sh\nexit 0\n')
+        scp.chmod(0o755)
+        scorer = self.bin / 'runnability.py'
+        scorer.write_text('#!' + sys.executable + '\n' +
+            'import json,os,sys\n'
+            'with open(os.environ["CALLS"],"a") as f:f.write(json.dumps(sys.argv[1:])+"\\n")\n'
+            'sys.exit(1 if sys.argv[1]==os.environ.get("FAIL_SCORE") else 0)\n')
+        scorer.chmod(0o755)
+
+    def invoke(self, **env):
+        command = f'source {shlex.quote(str(self.source))}; __riptag_invoke 0 music@nas.example.invalid {shlex.quote(sys.executable)} rip tagger tags organizer worker https://example.com/album/one Rock'
+        return subprocess.run(['fish', '--no-config', '--private', '-c', command],
+                              env=dict(self.env, **env), capture_output=True, text=True, timeout=20)
+
+    def score_calls(self):
+        return [json.loads(line) for line in self.calls.read_text().splitlines()] if self.calls.exists() else []
+
+    def test_success_scores_only_mapped_imported_albums(self):
+        result = self.invoke()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        expected = [[command, '--force', str(Path(self.config['local_library_root']) / relative)]
+                    for relative in self.relative for command in ('analyze', 'write')]
+        self.assertEqual(self.score_calls(), expected)
+        self.assertFalse((self.root / 'not-command').exists())
+
+    def test_failed_partial_kept_and_permission_failed_imports_are_not_scored(self):
+        for status in ('1', '2', '3', '4'):
+            with self.subTest(status=status):
+                result = self.invoke(WORKER_STATUS=status)
+                self.assertEqual(result.returncode, int(status), result.stdout + result.stderr)
+                self.assertEqual(self.score_calls(), [])
+
+    def test_scoring_failure_preserves_import_success_and_skips_write_after_analysis_failure(self):
+        for failure in ('analyze', 'write'):
+            with self.subTest(failure=failure):
+                self.calls.unlink(missing_ok=True)
+                result = self.invoke(FAIL_SCORE=failure)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertIn('nightly sync will retry', result.stdout)
+                if failure == 'analyze':
+                    self.assertEqual([c[0] for c in self.score_calls()], ['analyze', 'analyze'])
+                else:
+                    self.assertEqual([c[0] for c in self.score_calls()], ['analyze', 'write', 'analyze', 'write'])
+
+    def test_missing_and_unsafe_targets_defer_scoring_without_changing_import_success(self):
+        remote = self.config['remote']['library_root']
+        cases = [dict(MISSING_RECEIPT='1'), dict(ALBUMS='[]'),
+                 dict(ALBUMS=json.dumps([remote])), dict(ALBUMS=json.dumps([remote + '-other/Album'])),
+                 dict(ALBUMS=json.dumps([remote + '/../outside'])),
+                 dict(ALBUMS=json.dumps([remote + '/Missing Album']))]
+        for env in cases:
+            with self.subTest(env=env):
+                result = self.invoke(**env)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertIn('nightly sync will retry', result.stdout)
+                self.assertEqual(self.score_calls(), [])
+
+    def test_missing_mount_is_attempted_before_scoring(self):
+        original = Path(self.config['local_library_root'])
+        moved = original.with_name('Available Library')
+        original.rename(moved)
+        marker = self.root / 'mount-called'
+        mount = self.bin / 'mount-nas.sh'
+        mount.write_text('#!/bin/sh\ntouch ' + shlex.quote(str(marker)) + '\nmv ' +
+                         shlex.quote(str(moved)) + ' ' + shlex.quote(str(original)) + '\n')
+        mount.chmod(0o755)
+        result = self.invoke()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertTrue(marker.exists())
+        self.assertEqual(len(self.score_calls()), 4)
+
+    def test_unavailable_mount_defers_scoring(self):
+        original = Path(self.config['local_library_root'])
+        original.rename(original.with_name('Unavailable Library'))
+        mount = self.bin / 'mount-nas.sh'
+        mount.write_text('#!/bin/sh\nexit 0\n')
+        mount.chmod(0o755)
+        result = self.invoke()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('nightly sync will retry', result.stdout)
+        self.assertEqual(self.score_calls(), [])
 
 
 if __name__ == "__main__":

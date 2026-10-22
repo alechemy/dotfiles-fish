@@ -156,6 +156,22 @@ def remote_path(path, config=None):
     return posixpath.normpath(posixpath.join(config["remote"]["library_root"], os.path.relpath(path, root)))
 
 
+def local_path(path, config=None):
+    """Map a NAS album path to its mounted location, refusing library-wide targets."""
+    config = load() if config is None else config
+    _path(path, "remote path")
+    root = posixpath.normpath(config["remote"]["library_root"])
+    path = posixpath.normpath(path)
+    if path == root or posixpath.commonpath((root, path)) != root:
+        raise ConfigError("cannot map a path outside or equal to remote.library_root")
+    local = os.path.normpath(os.path.join(config["local_library_root"], posixpath.relpath(path, root)))
+    resolved_root = os.path.realpath(config["local_library_root"])
+    resolved_local = os.path.realpath(local)
+    if resolved_local == resolved_root or os.path.commonpath((resolved_root, resolved_local)) != resolved_root:
+        raise ConfigError("mapped path escapes local_library_root")
+    return local
+
+
 def get(config, field):
     if field == "mount.urls":
         mount = config["mount"]
@@ -182,6 +198,8 @@ def main(argv=None):
     getter.add_argument("field")
     mapper = sub.add_parser("map-path")
     mapper.add_argument("path")
+    inverse = sub.add_parser("map-remote-path")
+    inverse.add_argument("path")
     project = sub.add_parser("project-worker")
     project.add_argument("output", help="new mode-600 file; existing files are never overwritten")
     quoter = sub.add_parser("quote")
@@ -198,6 +216,10 @@ def main(argv=None):
             if args.worker:
                 raise ConfigError("map-path requires full local config")
             print(remote_path(args.path, config))
+        elif args.command == "map-remote-path":
+            if args.worker:
+                raise ConfigError("map-remote-path requires full local config")
+            print(local_path(args.path, config))
         elif args.command == "project-worker":
             if args.worker:
                 raise ConfigError("projection requires full local config")

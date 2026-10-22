@@ -76,6 +76,14 @@ for the next run. `--force` bypasses these checks; write dry runs also bypass th
 Neither launchd plist embeds private topology. The local streamrip credential
 template is unchanged.
 
+Successful NAS `riptag` imports return their organized album paths to the Mac.
+The wrapper mounts the configured share if needed, maps those paths to the local
+library, and runs album-scoped analysis and tag writing immediately. Explicit
+imports use the same `--force` power override as local imports. Failed downloads,
+kept existing copies, and permission failures do not start scoring. Missing
+mounts, invalid paths, or scoring failures produce a warning without changing
+the successful import status. The nightly sync retries missed or changed files.
+
 ## Getter and remote deployment
 
 Shell and Fish consumers invoke the getter. They never source or evaluate its
@@ -89,7 +97,10 @@ check the exit status before using values. For example:
 This prints private topology. Use it only when the value is needed, not for a
 configuration dump. `map-path` converts a path under `local_library_root` to the
 same relative path under `remote.library_root`. It rejects paths outside the
-local root rather than replacing a string prefix.
+local root rather than replacing a string prefix. `map-remote-path` maps an
+organized NAS album back to its mounted location. It rejects paths outside the
+remote library, the library root itself, traversal, and local symlinks escaping
+the configured library.
 
 Fish deploys `_music_nas.py` beside the worker and its tagging/organizer helpers.
 `project-worker` writes a new mode-600 JSON file with only `version` and `remote`.

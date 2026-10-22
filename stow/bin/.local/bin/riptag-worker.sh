@@ -34,7 +34,7 @@
 #   ORGANIZER_SCRIPT     Path to music-organize.py (auto-set by riptag remotely)
 #   STREAMRIP_DOWNLOADS  Local download dir (default: ~/StreamripDownloads)
 #   LOCAL_RIP            Path to local rip command (default: rip)
-#   RIPTAG_RESULT_DIR    Private caller-owned result directory (default: run dir)
+#   RIPTAG_RESULT_DIR    Private caller-owned results: resume-id or organized-albums
 #   RIPTAG_STATE_DIR     Session metadata directory (default: ~/.local/state/riptag)
 #   RIPTAG_LOCK_DIR      Host-wide lock override (default: /tmp/riptag-worker.lock)
 #
@@ -181,7 +181,7 @@ MANIFEST_FILE="$RUN_DIR/organize-manifest.txt"
 RESULT_DIR="${RIPTAG_RESULT_DIR:-$RUN_DIR}"
 mkdir -p "$RESULT_DIR" || exit 1
 RESUME_FILE="$RESULT_DIR/resume-id"
-rm -f "$RESUME_FILE"
+rm -f "$RESUME_FILE" "$RESULT_DIR/organized-albums"
 printf "%s\n" "Run files: $RUN_DIR"
 
 # --- STEP 1: DOWNLOAD ---
@@ -359,8 +359,6 @@ if [ "$PERM_FAILED" -eq 1 ]; then
 fi
 
 # --- STEP 6: RUNNABILITY SCORING ---
-# Local mode only: the NAS can't run essentia. NAS-mode rips are scored by the
-# nightly runnability-sync launchd job instead.
 if [ $LOCAL_MODE -eq 1 ] && [ -f "$MANIFEST_FILE" ]; then
   printf "%s\n" "--> Step 6: Scoring runnability..."
   while IFS= read -r album_dir; do
@@ -370,6 +368,10 @@ if [ $LOCAL_MODE -eq 1 ] && [ -f "$MANIFEST_FILE" ]; then
       printf "%s\n" "    WARNING: runnability scoring failed; the nightly sync will retry."
     fi
   done < "$MANIFEST_FILE"
+elif [ $LOCAL_MODE -eq 0 ]; then
+  if [ ! -s "$MANIFEST_FILE" ] || ! cp "$MANIFEST_FILE" "$RESULT_DIR/organized-albums"; then
+    printf "%s\n" "WARNING: Organized album paths unavailable; the nightly scoring sync will retry."
+  fi
 fi
 
 rm -f "$MANIFEST_FILE"

@@ -123,6 +123,29 @@ class ConfigTests(unittest.TestCase):
             with self.assertRaises(nas.ConfigError):
                 nas.remote_path(path)
 
+    def test_remote_mapping_preserves_album_paths_and_rejects_unsafe_inputs(self):
+        root = self.config['remote']['library_root']
+        relative = "Artist's name/Album $(not-command)"
+        self.assertEqual(nas.local_path(root + '/' + relative), self.config['local_library_root'] + '/' + relative)
+        result = self.cli('map-remote-path', root + '/' + relative)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.rstrip('\n'), self.config['local_library_root'] + '/' + relative)
+        for path in (root, root + '-other/Album', root + '/../outside', root + '/Album\ncontrol', 'relative'):
+            with self.subTest(path=path), self.assertRaises(nas.ConfigError):
+                nas.local_path(path)
+        self.assertFalse((self.root / 'not-command').exists())
+
+    def test_remote_mapping_refuses_worker_config_and_escaping_symlinks(self):
+        target = self.root / 'worker.json'
+        self.assertEqual(self.cli('project-worker', str(target)).returncode, 0)
+        result = self.cli('--worker', 'map-remote-path', self.config['remote']['library_root'] + '/Album', MUSIC_NAS_CONFIG=str(target))
+        self.assertNotEqual(result.returncode, 0)
+        library = Path(self.config['local_library_root'])
+        library.mkdir()
+        (library / 'Outside').symlink_to(self.root)
+        with self.assertRaises(nas.ConfigError):
+            nas.local_path(self.config['remote']['library_root'] + '/Outside/Album')
+
     def test_projection_is_worker_only_mode600_and_exclusive(self):
         target = self.root / "worker.json"
         result = self.cli("project-worker", str(target))
