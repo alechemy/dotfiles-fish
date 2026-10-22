@@ -19,6 +19,12 @@ The helper requires the calling cmux surface to be real and the shell cwd to bel
 
 `wt switch` opens Worktrunk's picker. `wt switch <branch>` navigates to an existing worktree, and `wt switch -` returns to the previous one. For an ordinary worktree outside the task launcher's ownership, `wt switch <branch> -x pi` launches Pi in the current shell pane. The launcher does not adopt or delete those worktrees.
 
+`try-branch <local-or-remote-branch>` creates a `try/<branch>` worktree and changes into it. For a remote-qualified name such as `origin/feature/account`, it fetches that branch before allocation, including when the cached ref already exists. A failed fetch stops the command. Existing local branches take precedence and do not fetch.
+
+```fish
+try-branch origin/feature/account
+```
+
 Sibling paths use `{{ repo_path }}/../{{ repo }}.{{ branch | sanitize }}`. Existing repositories stay where they are. Work repositories retain the `~/Work` layout. The picker uses noninteractive Delta output; Git's normal pager remains Hunk.
 
 The [Fish shortcuts](agentic-coding-workflow.md#fish-shortcuts) cover task launch,
