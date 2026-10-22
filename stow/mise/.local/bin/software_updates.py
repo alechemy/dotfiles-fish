@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-"""Run global Mise updates and record scheduled software maintenance outcomes."""
+"""Run global software updates and record scheduled maintenance outcomes."""
 
 import argparse
 from datetime import datetime, timedelta, timezone
@@ -181,12 +181,12 @@ class Job:
             except CheckError:
                 pass
 
-    def notify(self, signature, message):
+    def notify(self, signature, message, level="ERROR"):
         if self.state.get("notified") == signature:
             return
-        self.log("ERROR", message)
+        self.log(level, message)
         try:
-            if (self.home / ".local/bin/pipeline-log").is_file():
+            if level == "ERROR" and (self.home / ".local/bin/pipeline-log").is_file():
                 self.state["notified"] = signature
                 save_json(self.path, self.state)
                 return
@@ -203,6 +203,8 @@ class Job:
                           last_completion=now())
         if not failures:
             self.state.update(last_success=now(), notified=None)
+            self.state.pop("reason", None)
+            self.state.pop("first_deferred_at", None)
         save_json(self.path, self.state)
         if failures:
             self.notify(",".join(failures), "Software maintenance failed. Check ~/.local/state/software-updates/.")
@@ -325,7 +327,7 @@ def run_homebrew(job):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("job", choices=("mise", "audit", "homebrew"))
+    parser.add_argument("job", choices=("mise", "pi", "uv", "audit", "homebrew"))
     parser.add_argument("--force", action="store_true", help="Bypass power and recency gates")
     args = parser.parse_args(argv)
     try:
@@ -337,6 +339,9 @@ def main(argv=None):
                 return update_mise(job)
             if args.job == "homebrew":
                 return run_homebrew(job)
+            if args.job in ("pi", "uv"):
+                from software_package_updates import update_pi, update_uv
+                return update_pi(job) if args.job == "pi" else update_uv(job)
             from software_update_audit import audit
             return audit(job)
     except (CheckError, OSError, ValueError, KeyError, TypeError):

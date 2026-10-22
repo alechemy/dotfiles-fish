@@ -15,6 +15,7 @@ from xml.parsers.expat import ExpatError
 
 from software_updates import (CheckError, DAY, age, command, global_tools, json_command,
                               now, policy, read_json, safe_name, safe_version, save_json)
+from software_package_updates import UV_TOOLS, pi_packages
 
 BUNDLES = {"microsoft-teams": "Microsoft Teams.app", "nordvpn": "NordVPN.app",
            "tailscale-app": "Tailscale.app", "karabiner-elements": "Karabiner-Elements.app"}
@@ -242,30 +243,29 @@ def uv_rows(home, env):
     rows = []
     for name, version in re.findall(r"^([\w.-]+) v([\w.+-]+)", installed, re.M):
         rows.append(dict(category="uv", name=name, installed=version, available=latest.get(name),
-                         owner="review" if name == "agent-reader" else "uv",
-                         status="review-required" if name == "agent-reader" else "outdated" if name in latest else "current"))
+                         owner="uv" if name in UV_TOOLS else "review",
+                         status="review-required" if name not in UV_TOOLS else "outdated" if name in latest else "current"))
     return rows
 
 
 def reviewed_packages(home, env):
-    packages = {
-        "@upstash/context7-pi": home / ".pi/agent/npm/node_modules/@upstash/context7-pi/package.json",
-        "pi-web-access": home / ".pi/agent/npm/node_modules/pi-web-access/package.json",
-        "pi-subagents": home / ".pi/agent/local/copilot-delegation/node_modules/pi-subagents/package.json",
-    }
     rows = []
-    for name, manifest in packages.items():
-        package = read_json(manifest)
-        if package.get("name") != name:
-            rows.append(dict(category="reviewed-extension", name=name, installed=None,
-                             available=None, owner="review", status="unknown"))
+    for declaration in pi_packages(home):
+        package = read_json(declaration["path"] / "package.json")
+        name = declaration["name"]
+        automatic = declaration["automatic"]
+        if not isinstance(name, str) or package.get("name") != name:
+            rows.append(dict(category="pi-extension", name=safe_name(name), installed=None,
+                             available=None, owner="pi" if automatic else "review", status="unknown"))
             continue
-        tags = json_command(["npm", "view", name, "dist-tags", "--json"], home, env, timeout=30)
-        rows.append(dict(category="reviewed-extension", name=name,
+        tags = json_command(["npm", "view", name, "dist-tags", "--json",
+                             "--registry=https://registry.npmjs.org"], home, env, timeout=30) if declaration["public_registry"] else {}
+        rows.append(dict(category="pi-extension", name=safe_name(name),
                          installed=safe_version(package.get("version")),
                          available=safe_version(tags.get("latest")),
                          channels={safe_name(key): safe_version(value) for key, value in tags.items()},
-                         owner="review", status="review-required"))
+                         owner="pi" if automatic else "review",
+                         status=classify(package.get("version"), tags.get("latest")) if automatic else "review-required"))
     return rows
 
 
@@ -344,7 +344,7 @@ def audit(job):
             rows.append(independent_row(path, info))
     sources["independent-apps"] = "checked where public metadata is supported; otherwise unknown"
     jobs = [job_status(job.directory, name, interval) for name, interval in
-            (("mise", DAY), ("homebrew", DAY), ("audit", 7 * DAY))]
+            (("mise", DAY), ("pi", DAY), ("uv", DAY), ("homebrew", DAY), ("audit", 7 * DAY))]
     problems = [item["name"] for item in jobs if item["name"] != "audit" and
                 (item["overdue"] or item["status"] == "failed")]
     jobs[-1].update(status="failed" if failures else "success", failures=failures)

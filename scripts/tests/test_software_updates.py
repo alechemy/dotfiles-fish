@@ -198,6 +198,24 @@ else: sys.exit(2)
             updates.command(["/bin/sleep", "5"], self.home, updates.environment(self.home), timeout=0.02)
 
 
+class NotificationTests(unittest.TestCase):
+    def test_reload_reminder_uses_native_notification_even_with_pipeline_logging(self):
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            helper = home / ".local/bin/pipeline-log"
+            helper.parent.mkdir(parents=True)
+            helper.touch()
+            with patch.object(updates, "command", return_value="") as run:
+                with updates.Job(home, "pi", updates.DAY, True) as job:
+                    job.notify("reload:fixture", "Run /reload in open Pi sessions.", level="INFO")
+                    job.notify("reload:fixture", "Run /reload in open Pi sessions.", level="INFO")
+                    notifications = [call.args[0] for call in run.call_args_list if call.args[0][0] == "/usr/bin/osascript"]
+                    self.assertEqual(len(notifications), 1)
+                    self.assertIn("/reload", notifications[0][-1])
+                    self.assertNotIn(" ERROR ", (job.directory / "pi.log").read_text())
+                    job.finish([])
+
+
 class AuditTests(unittest.TestCase):
     def test_weekly_schedule_does_not_skip_for_completion_time(self):
         sunday = datetime(2026, 9, 20, 10, 15, tzinfo=timezone.utc)
