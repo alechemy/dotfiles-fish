@@ -26,12 +26,25 @@ class AgentBrowserConfigTests(unittest.TestCase):
             "idleTimeout": "20m",
         })
 
-    def test_shared_skill_uses_explicit_configuration(self):
-        skill = (ROOT / "stow/agents/.agents/skills/agent-browser/SKILL.md").read_text()
-        self.assertIn("name: agent-browser\n", skill)
-        self.assertIn("agent-browser skills get core", skill)
-        self.assertIn('--config "$HOME/.config/agent-browser/config.json"', skill)
-        self.assertIn("Never use `close --all`", skill)
+    def test_upstream_extension_replaces_shared_skill(self):
+        fragment = json.loads(
+            (ROOT / "stow/pi/.pi/agent/settings.fragment.json").read_text()
+        )
+        self.assertIn("npm:pi-agent-browser-native", fragment["packages"])
+        self.assertFalse(
+            (ROOT / "stow/agents/.agents/skills/agent-browser/SKILL.md").exists()
+        )
+
+    def test_shell_and_policy_select_explicit_configuration(self):
+        environment = (ROOT / "stow/fish/.config/fish/conf.d/env.fish").read_text()
+        self.assertIn(
+            'set -gx AGENT_BROWSER_CONFIG "$HOME/.config/agent-browser/config.json"',
+            environment,
+        )
+        instructions = (ROOT / "stow/agents/.agents/AGENTS.md").read_text()
+        self.assertIn("Use `pi-agent-browser-native` tools", instructions)
+        self.assertIn("never use `close --all`", instructions)
+        self.assertIn("requires explicit authorization", instructions)
 
 
 if __name__ == "__main__":

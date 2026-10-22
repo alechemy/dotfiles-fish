@@ -1,5 +1,6 @@
 set -gx DOTFILES ~/.dotfiles
 set -gx PROJECTS ~/Developer
+set -gx AGENT_BROWSER_CONFIG "$HOME/.config/agent-browser/config.json"
 fish_add_path ~/.local/bin
 
 # Homebrew — must be early so brew-installed tools (starship, mise, etc.) are

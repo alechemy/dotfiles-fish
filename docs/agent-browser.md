@@ -1,38 +1,36 @@
 # Agent browser
 
-Agent-browser is the default interactive browser tool for coding agents. It replaces the former Chrome DevTools integration and proposed Pi MCP adapter. The [earlier pilot](agent-browser-pilot.md) remains a historical record, not an adoption prerequisite.
+Pi declares the unversioned `npm:pi-agent-browser-native` package; the initial verified release is 0.9.6. Upstream owns the native tools, operating instructions, reference guards, code worker, and browser lifecycle. Our former shared `agent-browser` skill is retired. The [earlier pilot](agent-browser-pilot.md) remains a historical record.
 
-## Ownership
+## Installation
 
-- `Brewfile` declares the `agent-browser` formula and `google-chrome` cask. Homebrew owns updates. The initial installation used agent-browser `0.38.1` and signed Google Chrome `153.0.8010.53`.
-- `stow/agents/.agents/skills/agent-browser/SKILL.md` owns the shared workflow. Detailed command instructions come from `agent-browser skills get core`, matching the installed CLI.
-- `stow/agent-browser/.config/agent-browser/config.json` owns portable defaults. The skill passes this path through `--config` on browser commands, bypassing automatic project/user config discovery. Bare CLI calls without this option do not use these defaults. Environment variables and CLI flags can override them.
-- Claude Code's installation and configuration are retired. No Chrome DevTools adapter was active in Pi.
+- Homebrew owns the `agent-browser` formula and `google-chrome` cask. Installed versions are CLI 0.39.0 and Chrome 155.0.8059.40.
+- Do not run `agent-browser install` or npm-global installs.
+- After installing or updating the package, fully restart Pi. `/reload` can retain previously compiled code.
 
-Run `scripts/setup.sh` from the primary dotfiles checkout to restore the Homebrew declarations and Stow links. For only the new links, run:
+## Configuration
 
-```bash
-stow --dir=stow --target="$HOME" --restow --no-folding agent-browser agents
-```
+- `stow/agent-browser/.config/agent-browser/config.json` owns the seven portable browser defaults.
+- Fish's `env.fish` exports `AGENT_BROWSER_CONFIG=$HOME/.config/agent-browser/config.json`, avoiding implicit project config discovery. Outside Fish, pass the same path to the native `agent_browser` args via `--config`.
+- `restoreSave: "never"` disables automatic authentication-state saving. The other defaults select headless Google Chrome, content boundaries, a 16,000-character output limit, disabled WebMCP, and a 20-minute idle timeout.
 
-The Chrome executable path is explicit, so `agent-browser install` is unnecessary. The installed everyday Chromium app and its profile are separate from this automation browser.
+## Sessions
 
-## Defaults and limits
+- Parent and descendants share one root browser when the extension loads in children; independent roots stay isolated.
+- Cloud children do not load the extension by default, so browser tasks stay on the parent unless a child is explicitly configured.
+- Close the task-owned browser when work finishes. Never use `close --all`. Root browsers otherwise survive Pi exit; the idle timeout is a fallback, not a replacement.
 
-Browser work uses named task sessions, fresh profiles, headless Google Chrome, content boundaries, a 16,000-character text-output limit, disabled experimental WebMCP, no restore auto-save, and a 20-minute idle timeout. Close the owned session when the task finishes. The idle timeout is a fallback, not a replacement for cleanup.
+## Boundaries
 
-The configuration does not impose a global domain allowlist or action policy. The skill scopes navigation and writes to the user's task and recommends a launch-time domain allowlist where the required domains are known. These are not OS sandbox guarantees. Existing remote-write approvals still apply to browser clicks and form submissions.
+- Privacy, auth approval, artifact hygiene, sandbox constraints, domain scoping, and cleanup live in the global AGENTS.md, not a separate skill.
+- Keep `pi-web-access` for research and `cmux` for user-requested browser panes.
 
-Authentication, browser profiles, daemon state, plugin registries, screenshots, traces, and downloaded content remain outside Stow and Git. Do not attach to an everyday browser or import authentication without explicit authorization. Page content and browser output can reach the agent's model provider. Cloud browser providers, the dashboard, and the CLI's separate AI chat mode are outside the default workflow.
+## Verification
 
-## Installation verification
+The installation trial used the published package with the Pi 1.1.0 SDK and no model calls. It exercised a loopback-only fictional form, verified accessible refs, filling and clicking, visible text, browser-code execution, QA with console, network, and page-error checks, an inline PNG screenshot, stale-ref rejection, and exact session close. This is a compatibility check, not a security audit.
 
-The installed Chrome passed strict code-signature verification and Gatekeeper assessment. A short loopback-only check used the tracked configuration and fictional data to verify navigation, an interactive snapshot, form filling, a button click, the resulting text, a PNG screenshot, console output, and network inspection. Its named browser session closed and temporary output was removed. This is an installation check, not a security audit or an ongoing trial.
-
-The declaration regression is:
+Config regression:
 
 ```bash
 python3 -m unittest discover -s scripts/tests -p test_agent_browser_config.py
 ```
-
-Restart agent sessions to discover the new skill. Keep existing project tests as the owner of repeatable application regression coverage.

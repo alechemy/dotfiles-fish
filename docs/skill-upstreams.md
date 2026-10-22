@@ -85,9 +85,9 @@ The follow-up skill has SHA-256 `24f3777d3e137ad8384bfdc7632420490a2d5c3d8e594b0
 
 ## Other skills and scope limits
 
-No public-skill origin was identified in the inspected source metadata and repository history for `agent-browser`, `devonthink`, `jira`, `md-to-pdf`, `playlist-import`, `things`, or `worktrunk`. This is a provenance limit, not proof of independent authorship. `simplify-review` is a local workflow with the shared attribution noted above.
+No public-skill origin was identified in the inspected source metadata and repository history for `devonthink`, `jira`, `md-to-pdf`, `playlist-import`, `things`, or `worktrunk`. This is a provenance limit, not proof of independent authorship. `simplify-review` is a local workflow with the shared attribution noted above.
 
-`agent-browser` intentionally reads version-matched instructions from its installed CLI rather than vendoring that guide. External CLI/package implementations, package-provided skills such as Context7 and pi-subagents, and the separately documented `agent-reader` overlay are outside this fork audit. Their maintenance is covered by [agent tooling maintenance](agent-tooling-maintenance.md).
+The custom `agent-browser` skill is retired; `pi-agent-browser-native` owns browser tools and operating guidance. External CLI/package implementations, package-provided skills such as Context7 and pi-subagents, and the separately documented `agent-reader` overlay are outside this fork audit. Their maintenance is covered by [agent tooling maintenance](agent-tooling-maintenance.md).
 
 ## Repeating the comparison
 
