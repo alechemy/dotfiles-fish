@@ -26,7 +26,44 @@ Use `/cmo <command>` or `/cmt <command>` for requested tool views and `/cmb <url
 
 Session commands need separate ownership decisions. `/cmn`, `/cmv`, and `/cmh` create independent Pi sessions in the current checkout, not isolated worktrees. `/cmcv` and `/cmch` fork the conversation while retaining the source session; their `-c` option creates a Git worktree outside the tracked Worktrunk launcher. `cmux_start_pi` exposes the same choices to the agent. These commands do not transfer a `wt pi` task binding or apply Subagents' provider and execution guards. Do not use them for managed delegation or tracked task handoffs, and never create a second writer in one checkout. Keep `wt pi new/open/remove` for human tracked tasks and Subagents for managed delegation. A partial launch may leave a workspace behind; inspect it before retrying.
 
-The published archive has no dependency lifecycle scripts or runtime dependencies beyond Pi peers. Selected registration, lifecycle, launch, configuration, and browser-annotation paths were source-reviewed. `scripts/tests/test_pi_cmux.mjs` checks the filtered pin, then optionally loads the stowed entry point and reviewed package through Pi's loader in a disposable HOME to verify enforced preferences, registration, and quiet lifecycle behavior. This does not verify live session launches or browser annotation delivery.
+The published archive has no dependency lifecycle scripts or runtime dependencies beyond Pi peers. Selected registration, lifecycle, launch, configuration, and browser-annotation paths were source-reviewed. `scripts/tests/test_pi_cmux.mjs` checks the filtered stable-update declaration, then optionally loads the stowed entry point and reviewed package through Pi's loader in a disposable HOME to verify enforced preferences, registration, and quiet lifecycle behavior. This does not verify live session launches or browser annotation delivery.
+
+## Repository workspace colors
+
+The stowed `~/.pi/agent/extensions/workspace-colors/` extension assigns a color when an interactive Pi session starts inside cmux, including session restoration and `/reload`. All worktrees and subdirectories of a repository share the canonical common Git directory as their identity. Outside Git, the canonical working directory is the identity. Symlink aliases resolve to the same identity.
+
+Automatic selection hashes that identity into a fixed copy of cmux's 16 built-in colors. Assignments remain stable across sessions, but unrelated repositories can receive the same color. Moving a repository changes its identity. The extension targets the calling terminal's explicit workspace ID, never the focused workspace. It does not run in print, JSON, RPC, or non-cmux sessions. If multiple interactive Pi sessions in different repositories share a workspace, the last session to start sets its color.
+
+Use these Pi commands:
+
+```text
+/workspace-color
+/workspace-color teal
+/workspace-color #7A4FD8
+/workspace-color auto
+```
+
+With no argument, or `status`, the command shows the identity, configured color, and configuration path. A built-in color name or six-digit hex saves an override and applies it to the current workspace. `auto` removes that identity's override and restores its automatic color. Other live workspaces pick up changes when Pi restarts or reloads. Color changes through cmux's context menu affect only that workspace and are replaced at the next Pi startup or reload.
+
+Overrides live in app-owned `~/.pi/agent/workspace-colors.json`, outside Stow and Git. A custom Pi agent directory relocates this file. You can also edit it directly, then reload Pi:
+
+```json
+{
+  "version": 1,
+  "overrides": {
+    "git:/absolute/project/.git": "#7A4FD8",
+    "dir:/absolute/non-repository": "teal"
+  }
+}
+```
+
+Use the exact canonical key shown by `/workspace-color`, including its `git:` or `dir:` prefix. Invalid or symlinked configuration is rejected without replacement. Command writes use a short-lived sibling `.lock` directory and atomic replacement to preserve concurrent updates. A crashed writer can leave a lock behind. Verify that no color command is active before removing a stale lock directory.
+
+After adding the extension, restow `pi` from the primary checkout and reload existing Pi sessions. Focused identity, persistence, concurrency, and SDK-loading checks run with:
+
+```sh
+PI_PACKAGE_ROOT=/opt/homebrew/Cellar/pi-coding-agent/1.1.0/libexec/lib/node_modules/@earendil-works/pi-coding-agent node --test scripts/tests/test_workspace_colors.mjs
+```
 
 ## Native Computer Use in Pi
 
