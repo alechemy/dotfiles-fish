@@ -8,8 +8,10 @@ import { fileURLToPath } from "node:url";
 const policyScript = fileURLToPath(new URL("./policy.py", import.meta.url));
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+export class AuthorityError extends Error {}
+
 export function requireAuthority(condition, message) {
-  if (!condition) throw new Error(message);
+  if (!condition) throw new AuthorityError(message);
 }
 
 export function runCommand(file, args, env = process.env) {
@@ -58,20 +60,27 @@ export async function resolveAuthority(options = {}) {
   requireAuthority(typeof cli === "string" && isAbsolute(cli) && cli.endsWith("/Contents/Resources/bin/cmux"), "The app-bundled cmux CLI is required.");
   const bundle = dirname(dirname(dirname(dirname(cli))));
   requireAuthority(bundle.endsWith(".app"), "The cmux application owner is invalid.");
-  const client = join(dirname(cli), "cmux-cua");
   const socket = env.CMUX_CUA_SOCKET_PATH;
   const cmuxSocket = env.CMUX_SOCKET_PATH;
   const tokenFile = env.CMUX_CUA_AUTH_TOKEN_FILE;
   const state = join(home, "Library/Application Support/cmux/cmux-cua/runtime", scope, "state");
-  const helper = join(home, "Library/Application Support/cmux/cmux-cua/helper", scope, "cmux Computer Use.app/Contents/MacOS/cmux-cua");
+  const client = join(home, "Library/Application Support/cmux/cmux-cua/helper", scope, "cmux Computer Use.app/Contents/MacOS/cmux-cua");
   requireAuthority(typeof socket === "string" && isAbsolute(socket) && basename(socket) === "cmux-cua.sock" && basename(dirname(socket)) === scope && basename(dirname(dirname(socket))) === `cmux-cua-${uid}`, "The exact native cmux endpoint is required.");
   const runtimeRoot = await io.realpath(dirname(dirname(dirname(socket))));
   const allowedRoots = await Promise.all([temp, "/tmp"].map((path) => io.realpath(path)));
   requireAuthority(allowedRoots.includes(runtimeRoot), "The cmux endpoint is outside its private runtime.");
-  requireAuthority(socket !== env.CMUX_CUA_CODEX_SOCKET_PATH && tokenFile === join(dirname(socket), "auth-token") && env.CMUX_CUA_STATE_DIR === state && env.CMUX_CUA_CLIENT_PATH === helper, "The cmux runtime paths do not share one native authority.");
+  requireAuthority(socket !== env.CMUX_CUA_CODEX_SOCKET_PATH && tokenFile === join(dirname(socket), "auth-token") && env.CMUX_CUA_STATE_DIR === state && env.CMUX_CUA_CLIENT_PATH === client, "The cmux runtime paths do not share one native authority.");
   requireAuthority(typeof cmuxSocket === "string" && isAbsolute(cmuxSocket), "The live cmux control socket is required.");
   const stamps = [];
-  for (const [path, kind, privateMode] of [[client, "file"], [cli, "file"], [dirname(socket), "directory", 0o700], [socket, "socket", 0o600], [cmuxSocket, "socket", 0o600], [state, "directory", 0o700]]) {
+  for (let path = client; ; path = dirname(path)) {
+    let s;
+    try { s = await io.lstat(path); } catch { throw new AuthorityError("The installed cmux Computer Use helper or an ancestor directory is unavailable."); }
+    const executable = path === client;
+    requireAuthority(!s.isSymbolicLink() && [0, uid].includes(s.uid) && (s.mode & 0o022) === 0 && (executable ? s.isFile() && (s.mode & 0o6000) === 0 && (s.mode & 0o111) !== 0 : s.isDirectory()), "The installed cmux Computer Use helper or an ancestor directory has unsafe ownership or permissions.");
+    if (executable) stamps.push([s.dev, s.ino, s.size, s.mtimeMs]);
+    if (dirname(path) === path) break;
+  }
+  for (const [path, kind, privateMode] of [[cli, "file"], [dirname(socket), "directory", 0o700], [socket, "socket", 0o600], [cmuxSocket, "socket", 0o600], [state, "directory", 0o700]]) {
     const s = await io.lstat(path);
     requireAuthority(!s.isSymbolicLink() && (kind === "file" ? s.isFile() && (s.mode & 0o6022) === 0 && (s.mode & 0o111) !== 0 && [0, uid].includes(s.uid) : s.uid === uid && (s.mode & 0o777) === privateMode && (kind === "socket" ? s.isSocket() : s.isDirectory())), "A cmux executable or private runtime has unsafe ownership.");
     if (kind === "file") stamps.push([s.dev, s.ino, s.size, s.mtimeMs]);

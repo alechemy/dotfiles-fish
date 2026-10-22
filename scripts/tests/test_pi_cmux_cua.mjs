@@ -6,13 +6,13 @@ import { dirname, join, resolve } from "node:path";
 import { PassThrough } from "node:stream";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import test from "node:test";
-import { proxyEnvironment, readToken, resolveAuthority } from "../../stow/pi/.pi/agent/extensions/cmux-cua/authority.mjs";
+import { AuthorityError, proxyEnvironment, readToken, resolveAuthority } from "../../stow/pi/.pi/agent/extensions/cmux-cua/authority.mjs";
 import { desktopTools, NativeProxy, validateArguments } from "../../stow/pi/.pi/agent/extensions/cmux-cua/client.mjs";
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const entry = join(repo, "stow/pi/.pi/agent/extensions/cmux-cua/index.ts");
 const credential = "SyntheticCredentialForTestsOnly0000000000000000000000000000000000";
-const authority = { key: "synthetic-authority", token: credential, client: "/synthetic/cmux.app/Contents/Resources/bin/cmux-cua", socket: "/tmp/cmux-cua-501/com.cmuxterm.app/cmux-cua.sock", state: "/synthetic/state", surface: "22222222-2222-4222-8222-222222222222", workspace: "11111111-1111-4111-8111-111111111111", pid: 42, scope: "com.cmuxterm.app" };
+const authority = { key: "synthetic-authority", token: credential, client: "/synthetic/Library/Application Support/cmux/cmux-cua/helper/com.cmuxterm.app/cmux Computer Use.app/Contents/MacOS/cmux-cua", socket: "/tmp/cmux-cua-501/com.cmuxterm.app/cmux-cua.sock", state: "/synthetic/state", surface: "22222222-2222-4222-8222-222222222222", workspace: "11111111-1111-4111-8111-111111111111", pid: 42, scope: "com.cmuxterm.app" };
 const catalog = desktopTools.map((name) => ({ name, description: `Synthetic ${name}`, inputSchema: { type: "object", additionalProperties: false, properties: { value: { type: "string" } } } }));
 
 function proxyFixture(options = {}) {
@@ -74,7 +74,7 @@ function authorityFixture() {
   const io = {
     realpath: async (path) => path,
     lstat: async (path) => {
-      const isFile = path.endsWith("/cmux") || path.endsWith("/cmux-cua");
+      const isFile = path === env.CMUX_BUNDLED_CLI_PATH || path === env.CMUX_CUA_CLIENT_PATH;
       const isSocket = path.endsWith(".sock");
       return { uid: 501, dev: 1, ino: 2, size: 3, mtimeMs: 4, mode: isFile ? 0o755 : isSocket ? 0o600 : 0o700, isFile: () => isFile, isSocket: () => isSocket, isDirectory: () => !isFile && !isSocket, isSymbolicLink: () => false };
     },
@@ -95,7 +95,7 @@ function authorityFixture() {
   return { env, io, identity, commands, setPolicy: (value) => { policy = value; }, options: { env, io, platform: "darwin", uid: 501, home: "/synthetic", temp: "/tmp", pid: 42 } };
 }
 
-test("authority requires the exact live caller rather than focus, bundled client, private native paths, and current policy", async () => {
+test("authority requires the exact live caller rather than focus, bundled CLI, private native paths, and current policy", async () => {
   const fixture = authorityFixture();
   const result = await resolveAuthority(fixture.options);
   assert.equal(result.surface, authority.surface);
@@ -109,6 +109,46 @@ test("authority requires the exact live caller rather than focus, bundled client
   await assert.rejects(resolveAuthority(fixture.options));
   fixture.setPolicy({ enabled: false, policyDisabled: false });
   await assert.rejects(resolveAuthority(fixture.options));
+});
+
+test("authority selects the installed helper without requiring the retired bundled client", async () => {
+  const f = authorityFixture();
+  const lstat = f.io.lstat;
+  const paths = [];
+  f.io.lstat = async (path) => {
+    paths.push(path);
+    if (path === "/synthetic/cmux.app/Contents/Resources/bin/cmux-cua") throw Object.assign(new Error("Missing legacy client"), { code: "ENOENT" });
+    return lstat(path);
+  };
+  const result = await resolveAuthority(f.options);
+  assert.equal(result.client, f.env.CMUX_CUA_CLIENT_PATH);
+  assert.ok(paths.includes(result.client));
+  assert.ok(paths.includes(dirname(result.client)));
+  assert.ok(!paths.includes("/synthetic/cmux.app/Contents/Resources/bin/cmux-cua"));
+});
+
+test("installed helper and every ancestor must be trusted, with no legacy fallback", async () => {
+  for (const location of ["client", "parent", "home", "root"]) {
+    for (const defect of ["missing", "symlink", "foreign", "group-write", "world-write", "wrong-kind", "setuid"]) {
+      if (defect === "setuid" && location !== "client") continue;
+      const f = authorityFixture();
+      const target = { client: f.env.CMUX_CUA_CLIENT_PATH, parent: dirname(f.env.CMUX_CUA_CLIENT_PATH), home: "/synthetic", root: "/" }[location];
+      const lstat = f.io.lstat;
+      f.io.lstat = async (path) => {
+        if (path !== target) return lstat(path);
+        if (defect === "missing") throw Object.assign(new Error(credential), { code: "ENOENT" });
+        const metadata = await lstat(path);
+        if (defect === "symlink") metadata.isSymbolicLink = () => true;
+        if (defect === "foreign") metadata.uid = 502;
+        if (defect === "group-write") metadata.mode |= 0o020;
+        if (defect === "world-write") metadata.mode |= 0o002;
+        if (defect === "setuid") metadata.mode |= 0o4000;
+        if (defect === "wrong-kind") { metadata.isFile = () => false; metadata.isDirectory = () => false; }
+        return metadata;
+      };
+      await assert.rejects(resolveAuthority(f.options), (error) => error instanceof AuthorityError && !error.message.includes(credential), `${location}: ${defect}`);
+    }
+  }
 });
 
 test("disabled, child, stale, foreign, ambient and compatibility-profile authority fails closed", async () => {
@@ -293,6 +333,7 @@ async function extensionFixture() {
   const commands = new Map();
   const handlers = new Map();
   const notifications = [];
+  const messages = [];
   const clients = [];
   let active = ["read", "mcp__cmux_cua__unrelated"];
   let sessionId = "synthetic-one";
@@ -304,6 +345,7 @@ async function extensionFixture() {
     getActiveTools: () => active,
     getAllTools: () => [...tools.values()],
     setActiveTools: (names) => { active = names; },
+    sendMessage: (message, options) => messages.push({ message, options }),
   };
   registerComputerUse(pi, {
     resolveAuthority: () => verify(),
@@ -312,7 +354,7 @@ async function extensionFixture() {
     },
   });
   const ctx = { model: { input: ["text", "image"] }, sessionManager: { getSessionId: () => sessionId }, ui: { notify: (message, type) => notifications.push({ message, type }) }, waitForIdle: async () => {} };
-  return { tools, handlers, clients, ctx, notifications, command: (args) => commands.get("cmux-cua").handler(args, ctx), active: () => active, session: (id) => { sessionId = id; }, verifier: (fn) => { verify = fn; } };
+  return { tools, handlers, clients, ctx, notifications, messages, command: (args) => commands.get("cmux-cua").handler(args, ctx), active: () => active, session: (id) => { sessionId = id; }, verifier: (fn) => { verify = fn; } };
 }
 
 const piOnly = { skip: !process.env.PI_PACKAGE_ROOT && "Set PI_PACKAGE_ROOT to reviewed Pi" };
@@ -339,6 +381,56 @@ test("user activation preserves schemas, unrelated active tools, sequential exec
   await f.handlers.get("session_shutdown")({}, f.ctx);
   assert.deepEqual(f.active(), ["read", "mcp__cmux_cua__unrelated"]);
   assert.equal(f.clients[0].client.closed, true);
+});
+
+test("compaction reminds the model of live Computer Use without reconnecting or starting a turn", piOnly, async () => {
+  const f = await extensionFixture();
+  await f.command("on");
+  try {
+    const activeTools = [...f.active()];
+    const calls = [...f.clients[0].calls];
+    for (const reason of ["manual", "threshold", "overflow"]) {
+      await f.handlers.get("session_compact")({ type: "session_compact", reason }, f.ctx);
+    }
+    assert.equal(f.messages.length, 3);
+    for (const { message, options } of f.messages) {
+      assert.equal(message.customType, "cmux-cua-reminder");
+      assert.equal(message.display, false);
+      assert.equal(message.details, undefined);
+      assert.match(message.content, /remains enabled.*after compaction/);
+      assert.match(message.content, /mcp__cmux_cua__/);
+      assert.match(message.content, /requested native-app task/);
+      assert.match(message.content, /fresh get_window_state/);
+      assert.match(message.content, /do not retry uncertain actions/);
+      assert.deepEqual(options, { triggerTurn: false });
+    }
+    assert.equal(f.clients.length, 1);
+    assert.equal(f.clients[0].client.closed, false);
+    assert.deepEqual(f.clients[0].calls, calls);
+    assert.deepEqual(f.active(), activeTools);
+  } finally {
+    await f.command("off");
+  }
+});
+
+test("compaction never advertises inactive, closed, foreign or unavailable Computer Use", piOnly, async () => {
+  for (const state of ["inactive", "off", "closed", "foreign", "text-only", "no-tools", "shutdown"]) {
+    const f = await extensionFixture();
+    try {
+      if (state !== "inactive") await f.command("on");
+      if (state === "off") await f.command("off");
+      if (state === "closed") await f.clients[0].client.close();
+      if (state === "foreign") f.session("synthetic-two");
+      if (state === "text-only") f.ctx.model.input = ["text"];
+      if (state === "no-tools") f.active().splice(0, f.active().length, "read", "mcp__cmux_cua__unrelated");
+      if (state === "shutdown") await f.handlers.get("session_shutdown")({}, f.ctx);
+      await f.handlers.get("session_compact")({ type: "session_compact", reason: "manual" }, f.ctx);
+      assert.deepEqual(f.messages, [], state);
+      assert.equal(f.clients.length, state === "inactive" ? 0 : 1, state);
+    } finally {
+      await f.command("off");
+    }
+  }
 });
 
 test("authority changes revoke tools before a GUI request", piOnly, async () => {
@@ -478,11 +570,27 @@ test("MCP rejection preserves bounded redacted diagnostics and closes the connec
   await f.client.close();
 });
 
+test("activation reports safe authority diagnostics and hides unexpected error content", piOnly, async () => {
+  const f = await extensionFixture();
+  f.verifier(async () => { throw new AuthorityError("The installed cmux Computer Use helper is unavailable."); });
+  await f.command("on");
+  assert.match(f.notifications.at(-1).message, /native authority verification/);
+  assert.match(f.notifications.at(-1).message, /installed cmux Computer Use helper is unavailable/);
+  f.verifier(async () => { throw new Error(credential); });
+  await f.command("on");
+  assert.match(f.notifications.at(-1).message, /native authority verification/);
+  assert.ok(!f.notifications.at(-1).message.includes(credential));
+  assert.equal(f.clients.length, 0);
+  assert.deepEqual(f.active(), ["read", "mcp__cmux_cua__unrelated"]);
+});
+
 test("text-only models cannot activate or continue desktop operations", piOnly, async () => {
   const f = await extensionFixture();
   f.ctx.model.input = ["text"];
   await f.command("on");
   assert.equal(f.clients.length, 0);
+  assert.match(f.notifications.at(-1).message, /model and session validation/);
+  assert.match(f.notifications.at(-1).message, /image-capable model/);
   f.ctx.model.input = ["text", "image"];
   await f.command("on");
   f.ctx.model.input = ["text"];

@@ -1,6 +1,6 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { TSchema } from "typebox";
-import { resolveAuthority } from "./authority.mjs";
+import { AuthorityError, requireAuthority, resolveAuthority } from "./authority.mjs";
 import { NativeProxy } from "./client.mjs";
 
 const prefix = "mcp__cmux_cua__";
@@ -51,9 +51,11 @@ export function registerComputerUse(pi: ExtensionAPI, dependencies = { resolveAu
       const waitingGeneration = generation;
       const sessionId = ctx.sessionManager.getSessionId();
       let client: NativeProxy | undefined;
+      let stage = "model and session validation";
       try {
         await ctx.waitForIdle();
-        if (waitingGeneration !== generation || sessionId !== ctx.sessionManager.getSessionId() || !ctx.model?.input.includes("image")) throw new Error();
+        requireAuthority(waitingGeneration === generation && sessionId === ctx.sessionManager.getSessionId(), "The Pi session changed during activation.");
+        requireAuthority(ctx.model?.input.includes("image"), "Select an image-capable model before enabling Computer Use.");
         if (active && !active.client.closed && active.sessionId === sessionId) {
           notify(ctx, "Computer Use is already enabled for this Pi session.");
           return;
@@ -61,11 +63,14 @@ export function registerComputerUse(pi: ExtensionAPI, dependencies = { resolveAu
         const activationGeneration = generation + 1;
         await deactivate();
         if (activationGeneration !== generation || sessionId !== ctx.sessionManager.getSessionId()) throw new Error();
+        stage = "native authority verification";
         const authority = await dependencies.resolveAuthority();
         if (activationGeneration !== generation || sessionId !== ctx.sessionManager.getSessionId()) throw new Error();
+        stage = "native MCP discovery";
         client = new dependencies.NativeProxy(authority);
         const tools = await client.discover();
         if (activationGeneration !== generation || sessionId !== ctx.sessionManager.getSessionId()) throw new Error();
+        stage = "desktop tool registration";
         const current = { client, sessionId, authorityKey: authority.key };
         const existingTools = pi.getActiveTools();
         const occupied = new Set(pi.getAllTools().map((tool) => tool.name));
@@ -104,14 +109,26 @@ export function registerComputerUse(pi: ExtensionAPI, dependencies = { resolveAu
         active = current;
         pi.setActiveTools([...existingTools, ...tools.map((tool) => prefix + tool.name)]);
         notify(ctx, "Native Computer Use is enabled for this Pi session. cmux owns permissions and its helper. UI text and screenshots can reach the selected model provider.");
-      } catch {
+      } catch (error) {
         await client?.close();
         await deactivate();
-        notify(ctx, "Computer Use activation failed. An image-capable model and a live, enabled, policy-allowed cmux terminal with its private native runtime are required. No desktop operation was sent.", "error");
+        const diagnostic = error instanceof AuthorityError ? ` ${error.message}` : "";
+        notify(ctx, `Computer Use activation failed during ${stage}.${diagnostic} No desktop operation was sent.`, "error");
       } finally {
         activating = false;
       }
     },
+  });
+
+  pi.on("session_compact", (_event, ctx) => {
+    if (!active || active.client.closed || active.sessionId !== ctx.sessionManager.getSessionId() || !ctx.model?.input.includes("image")) return;
+    if (!pi.getActiveTools().some((name) => registeredTools.has(name))) return;
+    pi.sendMessage({
+      customType: "cmux-cua-reminder",
+      content: "Computer Use remains enabled for this Pi session after compaction. Use the available mcp__cmux_cua__ tools for the user's requested native-app task without asking them to enable it again. Inspect the target with fresh get_window_state before acting and do not retry uncertain actions.",
+      display: false,
+      details: undefined,
+    }, { triggerTurn: false });
   });
 
   pi.on("session_start", deactivate);
