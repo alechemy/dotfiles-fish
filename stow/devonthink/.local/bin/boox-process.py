@@ -34,14 +34,14 @@ re-enters processing automatically. Per-page transcriptions are cached
 in the state file, so a one-page edit re-OCRs one page.
 
 RAM safety: OCR holds the shared local-LLM lock that entity-filing.py
-also honors, so two ~18 GB models are never loaded into unified memory
-simultaneously; oMLX's LRU eviction handles sequential swaps.
+also honors, serializing their inference requests. oMLX's memory guard
+and LRU eviction control model residency.
 
 Config (~/.config/dt-pipeline/journal.conf, KEY=VALUE; OMLX_URL and
 OMLX_API_KEY default from entities.conf so the shared server is
 configured once):
   OMLX_MODEL=<name>      vision model id as listed by /v1/models
-                         (default Qwen3-VL-32B-Instruct-4bit)
+                         (default Qwen3.8-27B-oQ4e-mtp)
   OMLX_URL=http://127.0.0.1:8000
   OMLX_API_KEY=<key>
   MAX_PER_RUN=<n>        OCR budget per run (backfill pacing), default 5
@@ -109,7 +109,7 @@ TIFF_DENSITY = 300
 MAX_TIFF_MB = 50
 
 DEFAULTS = {
-    "OMLX_MODEL": "Qwen3-VL-32B-Instruct-4bit",
+    "OMLX_MODEL": "Qwen3.8-27B-oQ4e-mtp",
     "OMLX_URL": "http://127.0.0.1:8000",
     "OMLX_API_KEY": "",
     "MAX_PER_RUN": "5",

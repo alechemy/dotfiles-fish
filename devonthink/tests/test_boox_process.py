@@ -128,7 +128,7 @@ class LoadConfig(unittest.TestCase):
             jp.ENTITIES_CONFIG, jp.CONFIG_FILE = saved
         self.assertEqual(config["OMLX_URL"], "http://127.0.0.1:9999")
         self.assertEqual(config["OMLX_API_KEY"], "k")
-        self.assertEqual(config["OMLX_MODEL"], jp.DEFAULTS["OMLX_MODEL"])
+        self.assertEqual(config["OMLX_MODEL"], "Qwen3.8-27B-oQ4e-mtp")
 
     def test_journal_conf_overrides(self):
         saved = (jp.ENTITIES_CONFIG, jp.CONFIG_FILE)

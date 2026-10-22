@@ -1063,7 +1063,7 @@ web queue scrolled to that card.
 
 ```
 TRANSPORT=local       # local | off
-OMLX_MODEL=Qwen3-VL-32B-Instruct-4bit
+OMLX_MODEL=Qwen3.8-27B-oQ4e-mtp
 OMLX_URL=http://127.0.0.1:8000
 OMLX_API_KEY=…        # oMLX auth key (Settings → auth.api_key); conf is 600
 FILING_MODE=suggest   # suggest | auto
@@ -1087,26 +1087,25 @@ THINGS_PROJECT=Entity Filing   # project holding question reminders
 Resource behavior: a run with nothing to extract never loads the model (the
 availability check is a tags ping), and local extraction runs only on AC
 power and while macOS reports normal memory pressure
-(`kern.memorystatus_vm_pressure_level`), so a ~19 GB model load never lands
-on an already-tight machine — set `IDLE_MINUTES` to also require user
-inactivity (HIDIdleTime). Any manual flag (`--dry-run`, `--force`,
+(`kern.memorystatus_vm_pressure_level`). The Q4 checkpoint has about 16 GiB
+of weights, with additional memory needed for inference. Set `IDLE_MINUTES`
+to also require user inactivity through HIDIdleTime. Any manual flag (`--dry-run`, `--force`,
 `--apply-only`, `--scan-only`, `--rebuild-state`) bypasses all three gates.
 oMLX's own load-time memory guard is the backstop: a refusal (or any 5xx/429
 or connection failure) raises `LLMUnavailable`, which ends the extraction
 pass quietly without charging the source an attempt — the next tick retries.
-oMLX's per-model idle TTL (admin panel, seconds) unloads the ~18 GB of
-weights shortly after each batch. Once the backlog drains, inference happens
+oMLX's per-model idle TTL, configured in seconds in the admin panel,
+unloads weights after inactivity. Once the backlog drains, inference happens
 only when a new meeting/handwritten/daily note appears — a few short runs a
 day.
 
 The deployed posture is **local-only** (`TRANSPORT=local`), which is also the
 **code default** — the value the script uses when `entities.conf` is missing
 or unreadable — so a lost or damaged config fails safe on-device. Extraction
-runs on **oMLX** (`Qwen3-VL-32B-Instruct-4bit`, MLX backend, ~10–60 s per
-extraction — the model is shared with journal OCR so only one ~18 GB set
-of weights is ever resident) and
-*waits* when the server is down rather than falling back anywhere else —
-filing is latency-tolerant by design, so an outage costs nothing but delay.
+runs on **oMLX** with `Qwen3.8-27B-oQ4e-mtp`, also selected for journal OCR.
+The shared pipeline lock serializes those requests, but does not cover Pi
+subagents. oMLX controls model residency. Extraction waits when the server
+is down rather than falling back elsewhere; an outage delays filing.
 There is no cloud transport: the privacy boundary holds by construction, not
 by a config gate. `TRANSPORT=off` pauses extraction entirely.
 
@@ -1130,11 +1129,17 @@ workflow trivia and hard-failed constrained JSON). Extraction then
 consolidated onto `Qwen3-VL-32B-Instruct-4bit` — the journal-OCR vision
 model — after an A/B on the production prompt showed comparable
 attribution quality (~2.7× slower per token, irrelevant at background
-cadence), trading a little speed for a single resident model. Any future
-replacement must pass the same gate: run a few extractions on known notes
+cadence), trading a little speed for a single resident model. The current
+machine-local configuration selects `Qwen3.8-27B-oQ4e-mtp` for both pipelines.
+A seven-case synthetic comparison found no substantive accuracy advantage for
+Q8; real handwriting remains unvalidated. To roll back, set `OMLX_MODEL` to
+`Qwen3.8-27B-oQ8e-mtp` in both `entities.conf` and `journal.conf`. Changes apply
+on the next worker invocation. Any future replacement must pass the same gate: run a few extractions on known notes
 and check attribution, omissions, and JSON validity before trusting it
 unattended. Requirements: instruction-tuned, reliable JSON output at
-temperature 0, ≥16k usable context, ≤~25 GB quantized.
+temperature 0, at least 16k usable context, and enough memory for weights,
+caches, and other active workloads. oMLX's load-time memory guard remains
+essential.
 
 Boundaries hard-coded regardless of config:
 

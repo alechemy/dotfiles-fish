@@ -35,9 +35,10 @@ for markdown, bookmarks, and other non-handwritten record types.
    - files the notebook according to its type (below).
 4. OCR holds the shared local-LLM flock
    (`~/.local/state/devonthink/local-llm.lock`) that `entity-filing.py`
-   also honors, so two ~18 GB models are never resident at once. Both
-   pipelines currently run the same model (`Qwen3-VL-32B-Instruct-4bit`,
-   set in `entities.conf`), so the lock only serializes heavy inference.
+   also honors, serializing their inference requests. Both pipelines use
+   `Qwen3.8-27B-oQ4e-mtp`, selected independently in `journal.conf` and
+   `entities.conf`. oMLX's memory guard and LRU eviction control residency;
+   Pi subagents do not acquire this pipeline lock.
 
 ## Regular notebooks (everything except the journal)
 
@@ -119,7 +120,7 @@ One page per day, each page starting with a handwritten date line.
 server is configured once; `OMLX_MODEL` is deliberately *not* inherited.
 
 ```
-OMLX_MODEL=Qwen3-VL-32B-Instruct-4bit
+OMLX_MODEL=Qwen3.8-27B-oQ4e-mtp
 MAX_PER_RUN=5        # pages OCR'd per tick
 IDLE_MINUTES=0       # optional idle gate on top of the memory-pressure
                      # check; 0 (default) = off

@@ -816,9 +816,9 @@ accrue backlinks without any extra effort.
 
 Division of labor: the LLM only converts messy text to structured JSON;
 deterministic scripts do all matching and writing through a single JXA
-gateway (`entity-dt-bridge.js`). Extraction is local-only (`TRANSPORT=local`:
-Qwen3-VL-32B-Instruct-4bit via oMLX/MLX in seconds, never cloud — it waits out server
-outages instead); recurring standup-class meetings are skipped
+gateway (`entity-dt-bridge.js`). Extraction uses `Qwen3.8-27B-oQ4e-mtp`
+through local oMLX/MLX inference with `TRANSPORT=local`. It waits out server
+outages without a cloud fallback. Recurring standup-class meetings are skipped
 by title regex; the brief also bumps `LastContact` from yesterday's completed
 calendar so the reconnect digest doesn't depend on jot discipline. Its identity
 resolver ranks attendee email, full names, calendar-context history, and bare
@@ -854,7 +854,7 @@ State the repo can't stow or seed — reproduce by hand (or with the noted one-l
 - **MCP server privacy** (Settings → AI): private-information **redaction is enabled** on the MCP server; re-toggle it on a fresh machine and confirm which databases are exposed before pointing any external AI client at them. Record/group AI exclusions (`/10_DAILY`, `20_ENTITIES/People`, `20_ENTITIES/_Review`, `20_ENTITIES/_Review/Approved`, `20_ENTITIES/_Facts`) are database-level state and sync on their own.
 - **Keyboard Maestro macros** — the AppleScripts they run are tracked in [`../keyboard-maestro/`](../keyboard-maestro/); the macro wrappers (hotkey triggers → Execute AppleScript) sync via KM's own iCloud syncing (`~/Library/Mobile Documents/com~apple~CloudDocs/Keyboard Maestro/Keyboard Maestro Macros.kmsync`), so a fresh machine gets them by signing into iCloud and enabling KM sync.
 - **Calendars access for osascript** — the morning brief reads EventKit from `/usr/bin/osascript`; the TCC grant can only be created interactively. Run `osascript -l JavaScript ~/.local/bin/calendar-events-json.js` once in a terminal and approve the prompt (or toggle osascript under System Settings → Privacy & Security → Calendars).
-- **oMLX (entity-extraction server)** — install the `.dmg` from the omlx GitHub releases (the Homebrew formula does not build on macOS 27), complete the app's first-run setup so `omlx start` manages the server across reboots, download the MLX model into `~/.omlx/models/` (`uvx --from 'huggingface_hub[cli]' hf download mlx-community/Qwen3-VL-32B-Instruct-4bit --local-dir ~/.omlx/models/Qwen3-VL-32B-Instruct-4bit`), copy `auth.api_key` from `~/.omlx/settings.json` into `OMLX_API_KEY` in `~/.config/dt-pipeline/entities.conf` (chmod 600), and set the per-model idle TTL in `http://localhost:8000/admin` — the field is **seconds** (300 ≈ 5 min). oMLX is the only extraction transport; extraction simply waits when it is down.
+- **oMLX (entity-extraction server)** — install the `.dmg` from the omlx GitHub releases (the Homebrew formula does not build on macOS 27), complete the app's first-run setup so `omlx start` manages the server across reboots, download `Jundot/Qwen3.8-27B-oQ4e-mtp` through oMLX's model manager and select `Qwen3.8-27B-oQ4e-mtp` as `OMLX_MODEL` in both `entities.conf` and `journal.conf`, copy `auth.api_key` from `~/.omlx/settings.json` into `OMLX_API_KEY` in `~/.config/dt-pipeline/entities.conf` (chmod 600), and set the per-model idle TTL in `http://localhost:8000/admin` — the field is **seconds** (300 ≈ 5 min). oMLX is the only extraction transport; extraction simply waits when it is down.
 - **Entity metadata display titles** — the entity fields were created by script, so DT shows their identifiers (`entitytype`, `lastcontact`, …) rather than CamelCase titles in the Info inspector. Cosmetic only; add display names in Settings → Data if it grates.
 - **Work calendar in macOS Calendar** — the brief only sees calendars added to macOS Calendar. Add your company email account with Calendars enabled in Settings → Internet Accounts for work-meeting briefs.
 - **Calendar identity contexts** — add `PERSONAL_CALENDARS` and
