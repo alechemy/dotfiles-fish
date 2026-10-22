@@ -7,7 +7,7 @@ PLUGIN_DIR="$CONFIG_DIR/plugins"
 # notch_width reserves a center gap on notched displays (MacBook built-in) so
 # items in left/right positions don't render under the notch. Ignored on
 # external displays, so the same config works clamshell or standalone.
-sketchybar --bar position=top height=40 blur_radius=30 color=0x40000000 topmost=window_level notch_width=200
+sketchybar --bar position=top height=40 blur_radius=30 color=0x40000000 topmost=on notch_width=200
 
 ##### Changing Defaults #####
 default=(
@@ -168,7 +168,8 @@ sketchybar --add item feishin right \
   label="" \
   label.padding_right=8 \
   click_script="$PLUGIN_DIR/feishin_click.sh" \
-  script="$PLUGIN_DIR/feishin.sh"
+  script="$PLUGIN_DIR/feishin.sh" \
+  --subscribe feishin display_change system_woke
 
 ##### Force all scripts to run the first time (never do this in a script) #####
 sketchybar --update

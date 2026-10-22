@@ -22,11 +22,16 @@ pgrep -xq "Qobuz" && QOBUZ_RUNNING=1
 
 if (( ! FEISHIN_RUNNING && ! QOBUZ_RUNNING )); then
   rm -f "$ACTIVE_SOURCE_FILE"
-  sketchybar --set "$NAME" icon="" label=" Nothing playing" \
+  source "$CONFIG_DIR/plugins/lib/display_mode.sh"
+  DRAWING=on
+  [ "$(display_mode)" = "compact" ] && DRAWING=off
+  sketchybar --set "$NAME" drawing="$DRAWING" icon="" label=" Nothing playing" \
     label.font="Helvetica Neue:Regular:14.0" \
     icon.color="0xffffffff" label.color="0xffffffff"
   exit 0
 fi
+
+sketchybar --set "$NAME" drawing=on
 
 # Qobuz does not reliably claim macOS's global media session. Its local player
 # state identifies an active stream, and its cache database holds the metadata.
