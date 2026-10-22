@@ -62,6 +62,27 @@ Other upstream edits and local decisions:
 
 The user approved the scoped versions of rules 32 and 33 on 2026-09-27, followed by the replacement for "Adding soul". These selectively adapt the reviewed `cursor/plugins` head recorded above. The user also chose to retain all five deleted rules and automatic invocation. The user chose clarity and sequential numbering over upstream's stable-ID policy. The user also chose to retain rule 13's explanation. All identified upstream differences have a recorded disposition; future audits should revisit retained differences only when new evidence or changed requirements warrants it. Unslop's `revision` and `upstream-version` still identify its original import baseline, not a full adoption of the reviewed upstream version.
 
+## Unslop additions on 2026-10-14
+
+The user approved small instruction improvements after comparison with JIA YI's MIT-licensed `agent-simple-english` 0.8.0 at [`ecd7b58d20f52d4f3f90aa632594478e68f3957d`](https://github.com/jyooi/agent-simple-english/tree/ecd7b58d20f52d4f3f90aa632594478e68f3957d). The relevant sources are its [phrasal-verb examples](https://github.com/jyooi/agent-simple-english/blob/ecd7b58d20f52d4f3f90aa632594478e68f3957d/src/dictionary/data/phrasal-verbs.json), [rule and feedback documentation](https://github.com/jyooi/agent-simple-english/blob/ecd7b58d20f52d4f3f90aa632594478e68f3957d/README.md), and [Pi adapter](https://github.com/jyooi/agent-simple-english/blob/ecd7b58d20f52d4f3f90aa632594478e68f3957d/src/extension/index.ts).
+
+Applied to [`unslop/SKILL.md`](../stow/agents/.agents/skills/unslop/SKILL.md):
+
+- Added plain-wording examples for "spin up", "dive into", and "circle back", conditional on preserving meaning.
+- Made sentence length a readability cue.
+- Scoped style corrections to the passages being changed, with surrounding context checked for coherence. Broader rewrites remain available when requested.
+- Kept self-audits silent and made requested writing-review feedback specific to the text, problem, and proposed revision.
+
+Existing safeguards for meaning, uncertainty, voice, and complete sentences remain. Automated gates remain deferred pending representative false-positive testing and Pi compatibility checks. The pstack import and reviewed revisions recorded above are unchanged.
+
+The skill was clean at local commit `184bfdf097af5f815729e10295103782016cfb9b`, with SHA-256 `4f29f0421c69c6474d37ff5b8e1d3b96de55c18b28f79b9d53fe92c00b6d107d`. The first verified result has SHA-256 `692d8964e41c047ac6cd1c3b2edf971b604e455c46c4226b564aef85374a090f`. Verification covered the scoped diff, unchanged surrounding contents and frontmatter, sequential rule numbering, the installed skill symlink, and `git diff --check`. Model compliance remains unmeasured.
+
+### Formulaic contrast follow-up
+
+The user requested deletion by default because these sentences rarely add information. Expanded the rule to cover changed verbs and sentence fragments, added a final scan of paragraph and response endings, and limited rewriting to preserving necessary information. Accurate distinctions and substitutions such as "rather than" still require removing the stock construction. Deleted redundant contrast sentences from this audit record and removed the same framing from the sentence-length guidance.
+
+The follow-up skill has SHA-256 `24f3777d3e137ad8384bfdc7632420490a2d5c3d8e594b0084716d1942f8e67c`. Verification covered the scoped diff, preserved frontmatter and rule numbering, the installed skill symlink, and `git diff --check`.
+
 ## Other skills and scope limits
 
 No public-skill origin was identified in the inspected source metadata and repository history for `agent-browser`, `devonthink`, `jira`, `md-to-pdf`, `playlist-import`, `things`, or `worktrunk`. This is a provenance limit, not proof of independent authorship. `simplify-review` is a local workflow with the shared attribution noted above.

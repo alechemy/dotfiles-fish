@@ -20,7 +20,12 @@ Edit text to remove AI patterns while preserving voice and meaning.
 1. Scan for the patterns below.
 2. Rewrite. Preserve meaning, match intended tone.
 3. Preserve voice and meaning (see next section).
-4. Self-audit: "What makes this obviously AI generated?" Fix remaining tells.
+4. Self-audit: "What makes this obviously AI generated?" Fix remaining tells. Before sending, scan for formulaic contrast, especially at paragraph and response endings. Default to deleting the sentence.
+5. Check the final sentences for unrequested caveats and status bookkeeping. Delete them unless they materially qualify a result, identify an unmet requirement, or affect the reader's next decision. Stop when the useful information is complete.
+
+Keep the self-audit silent unless the user asks for a writing review. For review feedback, quote the affected text or give its location, name the problem, and suggest a concrete revision.
+
+When editing an existing document, focus style corrections on the passages being changed. Check surrounding text for coherence, but leave unrelated wording alone unless a broader rewrite is requested.
 
 ## Preserve voice and meaning
 
@@ -41,7 +46,7 @@ Preserve the source's intended tone and point of view. Give recommendations when
 
 7. **AI vocabulary.** Additionally, crucial, delve, enduring, enhance, fostering, garner, interplay, intricate, landscape (abstract), pivotal, showcase, tapestry (abstract), testament, underscore, vibrant. Replace with plain words.
 8. **Fancy ways to say "is".** "serves as", "stands as", "boasts", "features". Just say "is" or "has".
-9. **Formulaic contrast.** "Not just X, but Y", "This is X, not Y", "It's not X, it's Y". State the point directly. Preserve necessary distinctions without the stock framing.
+9. **Formulaic contrast.** Do not use "Not just X, but Y", "This is X, not Y", "These remain X, not Y", "It's not X, it's Y", or fragments such as "Instructions, not enforcement." Delete the sentence by default. These sentences often repeat a point or add an unnecessary closing caveat. Rewrite only if deletion would lose necessary information, placing that information directly where it belongs. An accurate distinction does not justify the construction. Changing the verb or substituting "rather than" does not fix the same rhetorical pattern.
 10. **Rule of three.** Forcing ideas into groups of three. Use the natural number.
 11. **Synonym cycling.** Protagonist, main character, central figure, hero all in one paragraph. Pick one, repeat it.
 12. **False ranges.** "from X to Y" where X and Y aren't on a meaningful scale. List topics directly.
@@ -75,7 +80,7 @@ Preserve the source's intended tone and point of view. Give recommendations when
 ### Plain speech
 
 27. **Say what it does, not how it feels.** "the database stays close at hand", "SQL you can read", "types that follow your schema" name a feeling. The fix names the mechanism or a number: "`.toSQL()` returns the exact string sent to the database", "a column rename fails the build". Ask what the sentence tells the reader to do or know, then write that. If you can't restate it as a concrete instruction, fact, or number, cut it. One more check: if the sentence could appear unchanged in another project's docs, it says nothing about this one. Cut it.
-28. **Shorten or split dense sentences.** If the reader has to backtrack to parse a sentence, break it in two or drop unnecessary clauses. Preserve the actor, sequence, and necessary reason even when that takes more words.
+28. **Shorten or split dense sentences.** If the reader has to backtrack to parse a sentence, break it in two or drop unnecessary clauses. Use sentence length as a readability cue. Avoid fixed word limits. Preserve the actor, sequence, and necessary reason even when that takes more words.
 29. **Name the actor and action.** Prefer active voice. "Queries are validated" becomes "the compiler validates queries". Passive is fine when the actor is unknown or genuinely doesn't matter. Don't disguise instructions as facts. "The webhook URL stays out of chat" becomes "The webhook URL is sensitive, so don't paste it into our chat." When explaining a prohibition, put the reason first to avoid an ambiguous "don't ... because ..." construction.
 
     In PR descriptions, commit messages, changelogs, and progress updates, attribute edits to their author, explicitly or implicitly. Don't describe components as moving code, refactoring themselves, or redesigning their own APIs. Conventional change summaries may omit "I", as in "Refactored the test suite to share fixture setup." Preserve the intended point of view and the project's commit style; don't insert "I" into every item or invent who made a change.
@@ -89,6 +94,7 @@ Preserve the source's intended tone and point of view. Give recommendations when
     Code can still be the actor when describing execution. Keep literal statements such as "The parser rejects malformed input" and "The list forwards `onPress` to each row". Even "The codemod renames deprecated method calls" is accurate if that is what the tool does when run. Distinguish runtime or tool behavior from authorship of the changes under discussion.
 
 30. **Cut adverbs, or use a more precise verb.** "runs quickly" becomes "is fast" or the number. "significantly improves" becomes the measured delta. An adverb propping up a weak verb means the verb is wrong.
-31. **Prefer plain, literal wording.** "utilize" becomes "use", "leverage" becomes "use", "facilitate" becomes "help". Avoid brisk shorthand that obscures the action. "Once the card arrives" becomes "Once the script creates the card" when creation is what matters. Preserve the distinction between evidence and interpretation. "Logcat shows Android killing apps" becomes "In logcat, there are lines indicating that Android is killing apps to free up memory." Choose clarity over the shortest or most vivid verb.
+31. **Prefer plain, literal wording.** "utilize" becomes "use", "leverage" becomes "use", "facilitate" becomes "help". When the meaning is unchanged, prefer "start" to "spin up", "examine" to "dive into", and "return" to "circle back". Avoid brisk shorthand that obscures the action. "Once the card arrives" becomes "Once the script creates the card" when creation is what matters. Preserve the distinction between evidence and interpretation. "Logcat shows Android killing apps" becomes "In logcat, there are lines indicating that Android is killing apps to free up memory." Choose clarity over the shortest or most vivid verb.
 32. **Mannered prose.** Avoid decorative metaphors, rhetorical fragments, personified code, and stock framing phrases when direct wording is clearer. Name the actor and action. Keep an analogy only when it explains the mechanism more clearly than a literal description.
 33. **Over-compression.** In prose, avoid dropped articles, verbless fragments, symbol-speak, and abbreviations that make the reader decode instead of read. "Parser rejects bad date → exit 2, no write" becomes "The parser rejects a bad date, exits with code 2, and writes nothing." Write whole sentences with their articles and verbs in ordinary prose, and spell out arrows and abbreviations. Commit messages and change summaries may omit an implied author, as described in rule 29.
+34. **Closing caveat inventories.** Do not append lists of what remains unverified, was not tested, was untouched, or needs clarification merely to sound thorough. "Saves were untouched; gameplay and save compatibility were not tested" adds nothing when the task did not involve saves or gameplay. Delete it. Keep a limitation when omitting it would mislead the reader about the requested outcome, including failed checks or incomplete requested verification. Put it beside the affected claim and state the consequence. If a missing decision blocks the task, ask the specific question where it arises instead of ending with "requirements need clarification". Do not hide a real blocker, imply unperformed verification, or add a generic disclaimer after an otherwise complete answer.
