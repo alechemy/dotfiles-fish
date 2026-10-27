@@ -23,6 +23,8 @@ TTL = 1800
 ORPHAN_GRACE = 300
 HEARTBEAT = 300
 MAX_HOLD = 7200
+JOB_TERM_GRACE = 10
+JOB_KILL_GRACE = 5
 STATE = Path.home() / ".local/state/agent-devices/state.json"
 
 
@@ -37,6 +39,9 @@ class ProcessIdentity:
         self.libproc.proc_pid_rusage.restype = ctypes.c_int
         self.libproc.proc_pidpath.argtypes = [ctypes.c_int, ctypes.c_void_p, ctypes.c_uint32]
         self.libproc.proc_pidpath.restype = ctypes.c_int
+        self.libproc.proc_listpids.argtypes = [ctypes.c_uint32, ctypes.c_uint32,
+                                             ctypes.c_void_p, ctypes.c_int]
+        self.libproc.proc_listpids.restype = ctypes.c_int
         libc = ctypes.CDLL("/usr/lib/libc.dylib")
         value = ctypes.create_string_buffer(128)
         size = ctypes.c_size_t(len(value))
@@ -59,6 +64,35 @@ class ProcessIdentity:
 
     def alive(self, identity):
         return self.get(identity["pid"]) == identity
+
+    def group(self, pgid):
+        capacity = 64
+        empty_pids = None
+        for _ in range(8):
+            pids = (ctypes.c_int * capacity)()
+            ctypes.set_errno(0)
+            size = self.libproc.proc_listpids(2, pgid, pids, ctypes.sizeof(pids))
+            if size < 0 or (size == 0 and ctypes.get_errno()):
+                raise DeviceError("Cannot verify job process group; retaining device protection")
+            if size < ctypes.sizeof(pids):
+                members = []
+                for pid in pids[:size // ctypes.sizeof(ctypes.c_int)]:
+                    identity = self.get(pid)
+                    if identity:
+                        try:
+                            if os.getpgid(pid) == pgid:
+                                members.append(identity)
+                        except ProcessLookupError:
+                            pass
+                if members:
+                    return members
+                snapshot = frozenset(pids[:size // ctypes.sizeof(ctypes.c_int)])
+                if snapshot == empty_pids:
+                    return []
+                empty_pids = snapshot
+            else:
+                capacity *= 2
+        raise DeviceError("Job process group is too large to verify; retaining device protection")
 
     def executable(self, pid):
         buf = ctypes.create_string_buffer(4096)
@@ -230,6 +264,16 @@ def validate_state(data):
                     validate_identity(identity)
             if lease.get("owner") is None and not lease["held"]:
                 raise DeviceError("An ordinary lease requires an owner")
+            group = lease.get("job_group")
+            if group is not None:
+                if (not isinstance(group, dict) or not isinstance(group.get("pgid"), int)
+                        or group["pgid"] <= 1 or not isinstance(group.get("boot"), str)
+                        or not isinstance(group.get("members"), list)):
+                    raise DeviceError("Invalid job process group")
+                for member in group["members"]:
+                    validate_identity(member)
+                    if member["boot"] != group["boot"]:
+                        raise DeviceError("Invalid job process group boot identity")
             if not isinstance(lease.get("session"), str):
                 raise DeviceError("Invalid session owner")
     return data
@@ -316,7 +360,6 @@ class Manager:
                 try:
                     entry["generation"] = self.devices.boot(platform, device, target)
                 except BaseException:
-                    entry["generation"] = self.devices.identity(platform, device)
                     entry["leases"].pop(token, None)
                     self.store.save(data)
                     raise
@@ -355,11 +398,11 @@ class Manager:
     def protect_job(self, token, pid):
         with self.store.locked() as data:
             _, _, lease = self.locate(data, token)
-            job = self.identities.get(pid)
-            if not job:
-                return
-            lease["job"] = job
+            group = {"pgid": pid, "boot": self.identities.boot,
+                     "members": self.identities.group(pid)}
+            lease["job_group"] = group
             self.store.save(data)
+            return group
 
     def hold(self, token, minutes):
         if not 1 <= minutes <= MAX_HOLD // 60:
@@ -378,7 +421,7 @@ class Manager:
         now = self.clock()
         for key, entry in list(data["devices"].items()):
             for token, lease in list(entry["leases"].items()):
-                if lease.get("job") and self.identities.alive(lease["job"]):
+                if self.job_active(lease):
                     continue
                 expired = now >= lease["expires"]
                 if not lease["held"] and not self.identities.alive(lease["owner"]):
@@ -402,20 +445,35 @@ class Manager:
                 events.append({"device": key, "action": "shutdown-retry", "error": str(exc)})
         return events
 
+    def job_active(self, lease):
+        group = lease.get("job_group")
+        if group is not None:
+            return group["boot"] == self.identities.boot and bool(self.identities.group(group["pgid"]))
+        job = lease.get("job")
+        return bool(job and job["boot"] == self.identities.boot and self.identities.group(job["pid"]))
+
+    def release_lease(self, entry, token):
+        lease = entry["leases"][token]
+        if self.job_active(lease):
+            lease["expires"] = 0
+        else:
+            del entry["leases"][token]
+
     def release(self, token=None, session=None, owner_pid=None):
         with self.store.locked() as data:
             if token:
                 try:
                     _, entry, _ = self.locate(data, token)
-                    del entry["leases"][token]
                 except DeviceError:
                     pass
+                else:
+                    self.release_lease(entry, token)
             else:
                 identity = self.identities.get(owner_pid)
                 for entry in data["devices"].values():
                     for key, lease in list(entry["leases"].items()):
                         if not lease["held"] and lease["session"] == session and lease["owner"] == identity:
-                            del entry["leases"][key]
+                            self.release_lease(entry, key)
             events = self.collect(data)
             self.store.save(data)
             return events
@@ -444,6 +502,68 @@ class Manager:
                                 for e in data["devices"].values()]}
 
 
+def cleanup_job(identities, group):
+    if group is None or group["boot"] != identities.boot:
+        return
+    known = group["members"]
+    for number, timeout in ((signal.SIGTERM, JOB_TERM_GRACE), (signal.SIGKILL, JOB_KILL_GRACE)):
+        deadline = time.monotonic() + timeout
+        sent = False
+        while True:
+            members = identities.group(group["pgid"])
+            if not members:
+                return
+            anchors = [member for member in members if member in known]
+            if not anchors:
+                raise DeviceError("Job process group is unconfirmed; retaining device protection")
+            known = members
+            if not sent:
+                anchor = anchors[0]
+                try:
+                    if (os.getpgid(anchor["pid"]) != group["pgid"]
+                            or not identities.alive(anchor)):
+                        raise DeviceError("Job process group is unconfirmed; retaining device protection")
+                    os.killpg(group["pgid"], number)
+                except ProcessLookupError:
+                    if time.monotonic() >= deadline:
+                        break
+                    continue
+                sent = True
+            if time.monotonic() >= deadline:
+                break
+            time.sleep(0.1)
+    raise DeviceError("Job workers survived bounded cleanup; retaining device protection")
+
+
+def wait_job_unreaped(pid):
+    # An unreaped leader reserves its PID through all group signalling.
+    libc = ctypes.CDLL("/usr/lib/libc.dylib", use_errno=True)
+    libc.waitid.argtypes = [ctypes.c_int, ctypes.c_uint, ctypes.c_void_p, ctypes.c_int]
+    libc.waitid.restype = ctypes.c_int
+    info = ctypes.create_string_buffer(256)
+    while libc.waitid(os.P_PID, pid, info, os.WEXITED | os.WNOWAIT):
+        error = ctypes.get_errno()
+        if error != errno.EINTR:
+            raise OSError(error, os.strerror(error))
+
+
+def gated_job(fd, argv):
+    try:
+        if os.read(fd, 1) != b"1":
+            return 125
+    finally:
+        os.close(fd)
+    for name in ("SIGPIPE", "SIGXFZ", "SIGXFSZ"):
+        number = getattr(signal, name, None)
+        if number is not None:
+            signal.signal(number, signal.SIG_DFL)
+    try:
+        os.execvpe(argv[0], argv, os.environ)
+    except OSError as exc:
+        print("agent-device: " + str(exc), file=sys.stderr)
+        return 127 if isinstance(exc, FileNotFoundError) else 126
+
+
 def run_with_device(manager, args):
     argv = args.command
     if argv and argv[0] == "--":
@@ -453,6 +573,8 @@ def run_with_device(manager, args):
     result = manager.acquire(args.platform, args.device, os.getpid(), "job:" + uuid.uuid4().hex)
     env = {**os.environ, "AGENT_DEVICE_TARGET": result["target"], "AGENT_DEVICE_LEASE": result["lease"]}
     child = None
+    group = None
+    gate_read = gate_write = None
     previous = {}
     previous_timer = signal.getitimer(signal.ITIMER_REAL)
 
@@ -463,28 +585,41 @@ def run_with_device(manager, args):
         for number in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
             previous[number] = signal.signal(number, interrupted)
         previous[signal.SIGALRM] = signal.signal(signal.SIGALRM, renew)
-        child = subprocess.Popen(argv, env=env, start_new_session=True)
-        manager.protect_job(result["lease"], child.pid)
+        previous[signal.SIGCHLD] = signal.signal(signal.SIGCHLD, signal.SIG_DFL)
+        gate_read, gate_write = os.pipe()
+        child = subprocess.Popen([sys.executable, __file__, "_run-job", str(gate_read), *argv],
+                                 env=env, start_new_session=True, pass_fds=(gate_read,))
+        os.close(gate_read)
+        gate_read = None
+        group = manager.protect_job(result["lease"], child.pid)
+        os.write(gate_write, b"1")
+        os.close(gate_write)
+        gate_write = None
         signal.setitimer(signal.ITIMER_REAL, HEARTBEAT, HEARTBEAT)
-        code = child.wait()
-        return code if code >= 0 else 128 - code
+        wait_job_unreaped(child.pid)
     finally:
         signal.setitimer(signal.ITIMER_REAL, 0)
         for number in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
             signal.signal(number, signal.SIG_IGN)
         try:
-            if child is not None and child.poll() is None:
-                os.killpg(child.pid, signal.SIGTERM)
+            for fd in (gate_read, gate_write):
+                if fd is not None:
+                    os.close(fd)
+            try:
+                if group is not None:
+                    group["members"] = manager.identities.group(child.pid)
                 try:
-                    child.wait(timeout=10)
-                except subprocess.TimeoutExpired:
-                    os.killpg(child.pid, signal.SIGKILL)
-                    child.wait()
-            manager.release(result["lease"])
+                    cleanup_job(manager.identities, group)
+                finally:
+                    if child is not None:
+                        code = child.wait(timeout=1)
+            finally:
+                manager.release(result["lease"])
         finally:
             for number, handler in previous.items():
                 signal.signal(number, handler)
             signal.setitimer(signal.ITIMER_REAL, *previous_timer)
+    return code if code >= 0 else 128 - code
 
 
 def parser():
@@ -517,6 +652,9 @@ def interrupted(_number, _frame):
 
 
 def main(argv=None):
+    argv = sys.argv[1:] if argv is None else argv
+    if argv and argv[0] == "_run-job":
+        return gated_job(int(argv[1]), argv[2:])
     args = parser().parse_args(argv)
     for number in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
         signal.signal(number, interrupted)

@@ -29,7 +29,9 @@ The command receives `AGENT_DEVICE_TARGET` and `AGENT_DEVICE_LEASE`. To expand t
 agent-device run ios <simulator-UDID> -- /bin/sh -c 'xcrun simctl spawn "$AGENT_DEVICE_TARGET" /usr/bin/true'
 ```
 
-The wrapper renews its lease every five minutes while waiting for the command, without a polling thread. It records the child process identity so an active job remains protected even if the wrapper crashes. A hung but live job must be cancelled explicitly; CPU activity is not a reliable indication that a job is useful. Do not daemonize a job inside the wrapper. On cancellation, the wrapper terminates its command's process group before releasing its lease.
+The wrapper renews its lease every five minutes while waiting for the command, without a polling thread. A pipe-gated launcher starts user work only after its process group and member identities are durably registered; loss of the wrapper before acknowledgement exits without running the command. Active group members remain protected even if the wrapper or command leader exits. A hung but live job must be cancelled explicitly; CPU activity is not a reliable indication that a job is useful. Do not daemonize a job or move workers out of its process group.
+
+On completion or cancellation, the wrapper checks the group before reaping its leader, then allows up to ten seconds after SIGTERM and five seconds after SIGKILL for workers to exit. Signals require a still-matching recorded member; replacement or unconfirmed groups are not signalled. If cleanup cannot confirm that all workers exited, release and watchdog cleanup retain device protection until the group is empty. This conservative protection can also persist for an unconfirmed replacement group until it exits; inspect it rather than forcing device shutdown.
 
 If an agent already owns the device through `agent_device`, the wrapper acquires a separate job lease. The agent must still release its original lease after verification.
 
@@ -37,13 +39,13 @@ If an agent already owns the device through `agent_device`, the wrapper acquires
 
 `com.user.agent-device-watchdog` invokes `agent-device sweep` every five minutes as a low-priority launchd job. It is not a persistent daemon and has no `KeepAlive`, network traffic, desktop automation, or sleep-wake request.
 
-With no state file, it exits before loading process identity APIs. With an empty registry, it reads local state and exits. With live leases, it checks only their kernel process identities and expiry; it does not enumerate devices or call `simctl` or `adb`. It skips a tick rather than waiting if an acquisition or shutdown holds the registry lock. Unchanged ownership does not rewrite state.
+With no state file, it exits before loading process identity APIs. With an empty registry, it reads local state and exits. With live leases, it checks only their kernel process identities, registered job-group members, and expiry; it does not enumerate devices or call `simctl` or `adb`. It skips a tick rather than waiting if an acquisition or shutdown holds the registry lock. Unchanged ownership does not rewrite state.
 
 An owner that has exited gets a five-minute grace period from the first observed exit. Expired leases are removed even when Pi remains open. Last-owner release triggers immediate graceful shutdown; abandoned ownership is cleaned up on a watchdog tick. Shutdown failures remain registered for retry.
 
 Cleanup intentionally runs on battery. Its short local check is cheaper than leaving an abandoned emulator running. launchd coalesces interval ticks across sleep rather than waking the machine for this job. The policy follows the battery-awareness guidance in [the architecture reference](dotfiles-reference.md#hardware-setup).
 
-Startup is recorded before booting. If the helper is killed before it can confirm the device process, the watchdog refuses to guess ownership of a running instance and reports `unconfirmed-startup-needs-inspection`. After explicitly shutting down that device, run `agent-device sweep` to remove the incomplete record. This preserves manually started devices during an ambiguous startup interruption.
+Startup is recorded before booting. If boot fails or the helper is killed before it can confirm the device process, the watchdog refuses to guess ownership of a running instance and reports `unconfirmed-startup-needs-inspection`. After explicitly shutting down that device, run `agent-device sweep` to remove the incomplete record. This preserves manually started devices during an ambiguous startup interruption.
 
 ## Installation and diagnostics
 

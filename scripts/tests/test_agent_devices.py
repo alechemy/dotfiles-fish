@@ -1,9 +1,13 @@
 import importlib.machinery
 import importlib.util
 import json
+import os
 from pathlib import Path
 import plistlib
+import subprocess
+import sys
 import tempfile
+import time
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import Mock, patch
@@ -19,6 +23,7 @@ UDID = "11111111-1111-4111-8111-111111111111"
 
 class Identities:
     def __init__(self):
+        self.boot = "synthetic-boot"
         self.live = {10: self.identity(10), 20: self.identity(20)}
 
     def identity(self, pid, start=1):
@@ -29,6 +34,9 @@ class Identities:
 
     def alive(self, identity):
         return self.get(identity["pid"]) == identity
+
+    def group(self, pgid):
+        return [self.live[pgid]] if pgid in self.live else []
 
     def executable(self, pid):
         return getattr(self, "device_executable", "/sdk/qemu-system-aarch64-headless")
@@ -163,6 +171,23 @@ class OwnershipTests(unittest.TestCase):
         self.assertEqual(self.devices.boots, 0)
         self.assertEqual(self.devices.stops, 0)
 
+    def test_failed_boot_does_not_adopt_racing_unmanaged_device(self):
+        def failed_boot(*_args):
+            self.devices.running = self.identities.identity(30, 99)
+            self.identities.live[30] = self.devices.running
+            raise ad.DeviceError("Boot lost the race")
+
+        with patch.object(self.devices, "boot", side_effect=failed_boot):
+            with self.assertRaisesRegex(ad.DeviceError, "lost the race"):
+                self.acquire()
+        entry = next(iter(self.state().values()))
+        self.assertIsNone(entry["generation"])
+        self.assertEqual(entry["leases"], {})
+        self.assertEqual(self.manager.sweep()[0]["action"], "unconfirmed-startup-needs-inspection")
+        self.assertEqual(self.devices.stops, 0)
+        with self.assertRaisesRegex(ad.DeviceError, "interrupted startup"):
+            self.acquire()
+
     def test_expired_owner_cannot_renew_a_stopped_device(self):
         lease = self.acquire()
         self.now += ad.TTL
@@ -210,6 +235,77 @@ class OwnershipTests(unittest.TestCase):
         del self.identities.live[40]
         self.manager.sweep()
         self.assertEqual(self.devices.stops, 1)
+
+    def test_legacy_job_record_protects_workers_after_leader_exit(self):
+        lease = self.acquire()
+        with self.store.locked() as data:
+            _, _, record = self.manager.locate(data, lease)
+            record["job"] = self.identities.identity(40)
+            self.store.save(data)
+        self.now += ad.TTL * 2
+        with patch.object(self.identities, "group", return_value=[self.identities.identity(41)]):
+            self.manager.release(lease)
+            self.manager.sweep()
+        self.assertEqual(self.devices.stops, 0)
+        with patch.object(self.identities, "group", return_value=[]):
+            self.manager.sweep()
+        self.assertEqual(self.devices.stops, 1)
+
+    def test_group_verification_failure_retains_registered_protection(self):
+        lease = self.acquire()
+        self.identities.live[40] = self.identities.identity(40)
+        self.manager.protect_job(lease, 40)
+        before = self.store.path.read_bytes()
+        with patch.object(self.identities, "group", side_effect=ad.DeviceError("cannot verify")):
+            with self.assertRaisesRegex(ad.DeviceError, "cannot verify"):
+                self.manager.release(lease)
+            self.now += ad.TTL * 2
+            with self.assertRaisesRegex(ad.DeviceError, "cannot verify"):
+                self.manager.sweep()
+        self.assertEqual(self.store.path.read_bytes(), before)
+        self.assertEqual(self.devices.stops, 0)
+
+    def test_watchdog_protects_workers_after_wrapper_and_leader_exit(self):
+        lease = self.acquire()
+        self.identities.live[40] = self.identities.identity(40)
+        self.identities.live[41] = self.identities.identity(41)
+        with patch.object(self.identities, "group", return_value=[self.identities.live[40],
+                                                                 self.identities.live[41]]):
+            self.manager.protect_job(lease, 40)
+        del self.identities.live[10]
+        del self.identities.live[40]
+        self.now += ad.TTL * 2
+        with patch.object(self.identities, "group", return_value=[self.identities.live[41]]):
+            self.manager.sweep()
+        self.assertEqual(self.devices.stops, 0)
+        with patch.object(self.identities, "group", return_value=[]):
+            self.manager.sweep()
+        self.assertEqual(self.devices.stops, 1)
+
+    def test_release_and_watchdog_protect_workers_after_leader_exit(self):
+        for session_release in (False, True):
+            with self.subTest(session_release=session_release):
+                lease = self.acquire()
+                self.identities.live[40] = self.identities.identity(40)
+                self.identities.live[41] = self.identities.identity(41)
+                with patch.object(self.identities, "group", return_value=[self.identities.live[40],
+                                                                         self.identities.live[41]]):
+                    self.manager.protect_job(lease, 40)
+                del self.identities.live[40]
+                with patch.object(self.identities, "group", return_value=[self.identities.live[41]]):
+                    if session_release:
+                        self.manager.release(session="session-a", owner_pid=10)
+                    else:
+                        self.manager.release(lease)
+                    self.now += ad.TTL * 2
+                    self.identities.live.pop(10, None)
+                    self.manager.sweep()
+                    self.assertEqual(self.devices.stops, int(session_release))
+                    self.assertIn(lease, next(iter(self.state().values()))["leases"])
+                with patch.object(self.identities, "group", return_value=[]):
+                    self.manager.sweep()
+                self.assertEqual(self.devices.stops, 1 + int(session_release))
+                self.identities.live[10] = self.identities.identity(10)
 
     def test_shutdown_failure_is_retained_for_retry(self):
         lease = self.acquire()
@@ -280,6 +376,251 @@ class OwnershipTests(unittest.TestCase):
             self.acquire()
 
 
+class ProcessGroupTests(unittest.TestCase):
+    def setUp(self):
+        self.identities = ad.ProcessIdentity.__new__(ad.ProcessIdentity)
+        self.identities.libproc = Mock()
+
+    def test_zero_result_with_errno_is_not_an_empty_group(self):
+        def fail(*_args):
+            ad.ctypes.set_errno(ad.errno.ENOMEM)
+            return 0
+
+        self.identities.libproc.proc_listpids.side_effect = fail
+        with self.assertRaisesRegex(ad.DeviceError, "retaining device protection"):
+            self.identities.group(40)
+
+    def test_empty_group_does_not_inherit_stale_errno(self):
+        ad.ctypes.set_errno(ad.errno.ENOMEM)
+        self.identities.libproc.proc_listpids.return_value = 0
+        self.assertEqual(self.identities.group(40), [])
+
+
+class JobCleanupTests(unittest.TestCase):
+    def setUp(self):
+        self.identities = Identities()
+        self.leader = self.identities.identity(40)
+        self.worker = self.identities.identity(41)
+        self.identities.live.update({40: self.leader, 41: self.worker})
+        self.group = {"pgid": 40, "boot": self.identities.boot,
+                      "members": [self.leader, self.worker]}
+        self.now = 0
+        self.signals = []
+        self.addCleanup(patch.stopall)
+        patch.object(ad.time, "monotonic", side_effect=lambda: self.now).start()
+        patch.object(ad.time, "sleep", side_effect=self.advance).start()
+        patch.object(ad.os, "getpgid", return_value=40).start()
+        patch.object(self.identities, "group", side_effect=lambda _: [
+            item for pid, item in self.identities.live.items() if pid in (40, 41)]).start()
+        patch.object(ad.os, "killpg", side_effect=self.signal_group).start()
+
+    def advance(self, delay):
+        self.now += delay
+
+    def signal_group(self, pgid, number):
+        self.signals.append((pgid, number))
+        self.identities.live.pop(40, None)
+        if number == ad.signal.SIGKILL:
+            self.identities.live.pop(41, None)
+
+    def test_escalates_after_leader_exits_but_worker_ignores_term(self):
+        ad.cleanup_job(self.identities, self.group)
+        self.assertEqual(self.signals, [(40, ad.signal.SIGTERM), (40, ad.signal.SIGKILL)])
+        self.assertLessEqual(self.now, 16)
+        self.assertNotIn(41, self.identities.live)
+
+    def test_cleans_workers_when_leader_is_already_gone(self):
+        del self.identities.live[40]
+        ad.cleanup_job(self.identities, self.group)
+        self.assertEqual(self.signals, [(40, ad.signal.SIGTERM), (40, ad.signal.SIGKILL)])
+
+    def test_preserves_reused_unconfirmed_group(self):
+        self.identities.live[40] = self.identities.identity(40, 2)
+        del self.identities.live[41]
+        with self.assertRaisesRegex(ad.DeviceError, "unconfirmed"):
+            ad.cleanup_job(self.identities, self.group)
+        self.assertEqual(self.signals, [])
+
+    def test_preserves_replacement_between_term_and_kill(self):
+        def replace_group(pgid, number):
+            self.signals.append((pgid, number))
+            self.identities.live[40] = self.identities.identity(40, 2)
+            del self.identities.live[41]
+
+        ad.os.killpg.side_effect = replace_group
+        with self.assertRaisesRegex(ad.DeviceError, "unconfirmed"):
+            ad.cleanup_job(self.identities, self.group)
+        self.assertEqual(self.signals, [(40, ad.signal.SIGTERM)])
+
+    def test_surviving_workers_timeout_is_bounded(self):
+        ad.os.killpg.side_effect = lambda pid, number: self.signals.append((pid, number))
+        with self.assertRaisesRegex(ad.DeviceError, "surviv"):
+            ad.cleanup_job(self.identities, self.group)
+        self.assertLessEqual(self.now, 16)
+        self.assertIn(41, self.identities.live)
+
+    def test_old_boot_does_not_signal_current_processes(self):
+        self.group["boot"] = "old-boot"
+        ad.cleanup_job(self.identities, self.group)
+        self.assertEqual(self.signals, [])
+
+
+@unittest.skipUnless(sys.platform == "darwin", "uses macOS process identities")
+class SyntheticJobTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+        self.identities = ad.ProcessIdentity()
+        self.backend = Mock()
+        self.backend.identity.return_value = None
+        self.backend.prepare.return_value = UDID
+        self.backend.boot.return_value = self.identities.get(os.getpid())
+        self.backend.stop.return_value = "synthetic-shutdown"
+        self.manager = ad.Manager(ad.Store(self.root / "state.json"), self.backend, self.identities)
+        self.worker = None
+        self.addCleanup(self.stop_worker)
+        patch.object(ad, "JOB_TERM_GRACE", 0.2).start()
+        patch.object(ad, "JOB_KILL_GRACE", 2).start()
+        self.addCleanup(patch.stopall)
+
+    def stop_worker(self):
+        if self.worker and self.identities.alive(self.worker):
+            os.kill(self.worker["pid"], ad.signal.SIGKILL)
+
+    def args(self, code, *extra):
+        return Mock(platform="ios", device=UDID, command=[sys.executable, "-c", code, *extra])
+
+    def wait_for_file(self, path):
+        deadline = time.monotonic() + 5
+        while not path.exists() and time.monotonic() < deadline:
+            time.sleep(0.01)
+        self.assertTrue(path.exists(), "task-owned child did not reach its checkpoint")
+
+    def run_worker_case(self, cancel):
+        ready = self.root / "worker.json"
+        code = '''import json, os, signal, sys, time
+pid = os.fork()
+if pid == 0:
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
+    with open(sys.argv[1], "w") as stream:
+        json.dump(os.getpid(), stream)
+    while True:
+        time.sleep(1)
+while not os.path.exists(sys.argv[1]):
+    time.sleep(0.01)
+if sys.argv[2] == "exit":
+    os._exit(0)
+while not os.path.exists(sys.argv[1] + ".armed"):
+    time.sleep(0.01)
+time.sleep(0.05)
+os.kill(os.getppid(), signal.SIGTERM)
+while True:
+    time.sleep(1)
+'''
+        original_wait = ad.wait_job_unreaped
+
+        def wait(pid):
+            self.wait_for_file(ready)
+            self.worker = self.identities.get(json.loads(ready.read_text()))
+            self.assertIsNotNone(self.worker)
+            if cancel:
+                Path(str(ready) + ".armed").touch()
+            original_wait(pid)
+
+        def stop(_entry):
+            self.assertFalse(self.identities.alive(self.worker), "device released with surviving worker")
+            return "synthetic-shutdown"
+
+        self.backend.stop.side_effect = stop
+        with patch.object(ad, "wait_job_unreaped", side_effect=wait):
+            if cancel:
+                with self.assertRaises(KeyboardInterrupt):
+                    ad.run_with_device(self.manager, self.args(code, str(ready), "wait"))
+            else:
+                self.assertEqual(ad.run_with_device(self.manager, self.args(code, str(ready), "exit")), 0)
+        self.backend.stop.assert_called_once()
+        self.assertFalse(self.identities.alive(self.worker))
+        self.assertEqual(self.manager.status(), {"devices": []})
+
+    def test_cancellation_kills_term_ignoring_worker_before_synthetic_release(self):
+        self.run_worker_case(cancel=True)
+
+    def test_leader_exit_kills_surviving_worker_before_synthetic_release(self):
+        self.run_worker_case(cancel=False)
+
+    def test_gated_command_preserves_argv_environment_and_exit_code(self):
+        marker = self.root / "command.json"
+        literal = "spaces ; $HOME $(not-a-command)"
+        code = '''import json, os, sys
+with open(sys.argv[1], "w") as stream:
+    json.dump([sys.argv[2], os.environ["AGENT_DEVICE_TARGET"],
+               os.environ["AGENT_DEVICE_LEASE"]], stream)
+sys.exit(7)
+'''
+        previous = ad.signal.signal(ad.signal.SIGCHLD, ad.signal.SIG_IGN)
+        try:
+            self.assertEqual(ad.run_with_device(self.manager, self.args(code, str(marker), literal)), 7)
+            self.assertEqual(ad.signal.getsignal(ad.signal.SIGCHLD), ad.signal.SIG_IGN)
+        finally:
+            ad.signal.signal(ad.signal.SIGCHLD, previous)
+        saved = json.loads(marker.read_text())
+        self.assertEqual(saved[:2], [literal, UDID])
+        self.assertRegex(saved[2], r"^[a-f0-9]{32}$")
+        self.backend.stop.assert_called_once()
+
+    def test_gated_native_command_preserves_default_sigpipe(self):
+        command = ["/bin/sh", "-c", "kill -PIPE $$; exit 0"]
+        direct = subprocess.run(command, check=False)
+        self.assertEqual(direct.returncode, -ad.signal.SIGPIPE)
+        args = Mock(platform="ios", device=UDID, command=command)
+        self.assertEqual(ad.run_with_device(self.manager, args), 128 + ad.signal.SIGPIPE)
+        self.backend.stop.assert_called_once()
+
+    def test_registration_failure_never_executes_user_command(self):
+        marker = self.root / "must-not-run"
+        args = self.args("from pathlib import Path; import sys; Path(sys.argv[1]).touch()", str(marker))
+        with patch.object(self.manager, "protect_job", side_effect=ad.DeviceError("registration failed")):
+            with self.assertRaisesRegex(ad.DeviceError, "registration failed"):
+                ad.run_with_device(self.manager, args)
+        self.assertFalse(marker.exists())
+        self.backend.stop.assert_called_once()
+
+    def test_wrapper_sigkill_before_ack_never_executes_user_command(self):
+        pid_file = self.root / "launcher-pid"
+        marker = self.root / "must-not-run"
+        code = '''import importlib.machinery, os, signal, sys
+from pathlib import Path
+from unittest.mock import Mock
+ad = importlib.machinery.SourceFileLoader("owned_device_fixture", sys.argv[1]).load_module()
+manager = Mock()
+manager.acquire.return_value = {"lease": "synthetic", "target": "synthetic"}
+manager.identities = ad.ProcessIdentity()
+def lose_wrapper(token, pid):
+    Path(sys.argv[2]).write_text(str(pid))
+    os.kill(os.getpid(), signal.SIGKILL)
+manager.protect_job.side_effect = lose_wrapper
+args = Mock(platform="ios", device="synthetic", command=[sys.executable, "-c",
+    "from pathlib import Path; import sys; Path(sys.argv[1]).touch()", sys.argv[3]])
+ad.run_with_device(manager, args)
+'''
+        wrapper = subprocess.Popen([sys.executable, "-c", code, str(SOURCE), str(pid_file), str(marker)])
+        try:
+            self.assertEqual(wrapper.wait(timeout=5), -ad.signal.SIGKILL)
+            self.wait_for_file(pid_file)
+            pid = int(pid_file.read_text())
+            self.worker = self.identities.get(pid)
+            deadline = time.monotonic() + 5
+            while self.worker and self.identities.alive(self.worker) and time.monotonic() < deadline:
+                time.sleep(0.01)
+            self.assertFalse(self.worker and self.identities.alive(self.worker))
+            self.assertFalse(marker.exists())
+        finally:
+            if wrapper.poll() is None:
+                wrapper.kill()
+                wrapper.wait(timeout=5)
+
+
 class BackendTests(unittest.TestCase):
     def setUp(self):
         self.identities = Identities()
@@ -287,6 +628,9 @@ class BackendTests(unittest.TestCase):
         self.identities.live[30] = self.identities.identity(30)
         self.entry = {"platform": "android", "device": "test_avd", "target": "emulator-5554",
                       "generation": self.identities.live[30]}
+        self.wait_job = patch.object(ad, "wait_job_unreaped").start()
+        patch.object(ad.os, "write", return_value=1).start()
+        self.addCleanup(patch.stopall)
 
     def test_android_identity_matches_exact_avd(self):
         with patch.object(ad, "processes", return_value=[
@@ -316,35 +660,53 @@ class BackendTests(unittest.TestCase):
     def test_wrapper_releases_lease_and_exports_target_after_command_failure(self):
         manager = Mock()
         manager.acquire.return_value = {"lease": "synthetic", "target": UDID}
+        manager.protect_job.return_value = {"members": []}
         child = Mock()
-        def wait():
+        def wait(timeout=None):
             ad.signal.getsignal(ad.signal.SIGALRM)(ad.signal.SIGALRM, None)
             return 7
 
         child.wait.side_effect = wait
         child.poll.return_value = 7
         args = Mock(platform="ios", device=UDID, command=["--", "test-command"])
-        with patch.object(ad.subprocess, "Popen", return_value=child) as popen:
+        with patch.object(ad.subprocess, "Popen", return_value=child) as popen, \
+                patch.object(ad, "cleanup_job"):
             self.assertEqual(ad.run_with_device(manager, args), 7)
         self.assertEqual(popen.call_args.kwargs["env"]["AGENT_DEVICE_TARGET"], UDID)
         manager.protect_job.assert_called_once_with("synthetic", child.pid)
         manager.renew.assert_called_once_with("synthetic")
         manager.release.assert_called_once_with("synthetic")
 
+    def test_wrapper_cleans_group_even_when_leader_already_exited(self):
+        manager = Mock()
+        manager.acquire.return_value = {"lease": "synthetic", "target": UDID}
+        manager.protect_job.return_value = {"members": []}
+        child = Mock(pid=4321)
+        child.wait.return_value = 0
+        child.poll.return_value = 0
+        args = Mock(platform="ios", device=UDID, command=["test-command"])
+        with patch.object(ad.subprocess, "Popen", return_value=child), \
+                patch.object(ad, "cleanup_job") as cleanup:
+            ad.run_with_device(manager, args)
+        cleanup.assert_called_once_with(manager.identities, manager.protect_job.return_value)
+        manager.release.assert_called_once_with("synthetic")
+
     def test_wrapper_cancels_its_job_before_releasing_device(self):
         manager = Mock()
         manager.acquire.return_value = {"lease": "synthetic", "target": UDID}
+        manager.protect_job.return_value = {"members": []}
+        self.wait_job.side_effect = KeyboardInterrupt()
         child = Mock(pid=4321)
-        child.wait.side_effect = [KeyboardInterrupt(), 0]
         child.poll.return_value = None
         args = Mock(platform="ios", device=UDID, command=["test-command"])
         calls = []
+        child.wait.side_effect = lambda **kwargs: calls.append("reap") or 0
         manager.release.side_effect = lambda token: calls.append("release")
         with patch.object(ad.subprocess, "Popen", return_value=child), \
-                patch.object(ad.os, "killpg", side_effect=lambda pid, sig: calls.append((pid, sig))):
+                patch.object(ad, "cleanup_job", side_effect=lambda *_: calls.append("cleanup")):
             with self.assertRaises(KeyboardInterrupt):
                 ad.run_with_device(manager, args)
-        self.assertEqual(calls, [(4321, ad.signal.SIGTERM), "release"])
+        self.assertEqual(calls, ["cleanup", "reap", "release"])
 
     def test_failed_command_start_still_releases_device(self):
         manager = Mock()
