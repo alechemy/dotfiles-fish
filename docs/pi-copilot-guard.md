@@ -62,7 +62,7 @@ Run the credential-free tests with the installed host and guarded Subagents pack
 
 ```bash
 PI_PACKAGE_ROOT="$(brew --prefix pi-coding-agent)/libexec/lib/node_modules/@earendil-works/pi-coding-agent" \
-PI_SUBAGENTS_ROOT="$HOME/.pi/agent/local/provider-local-delegation/node_modules/pi-subagents" \
+PI_SUBAGENTS_ROOT="$HOME/.pi/agent/local/provider-local-delegation-fff-8a0e972/node_modules/pi-subagents" \
 node --test scripts/tests/test_pi_copilot_guard.mjs
 ```
 

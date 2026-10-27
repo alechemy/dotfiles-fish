@@ -369,9 +369,9 @@ chmod +x "$DOTFILES/scripts/build-vscode-config.sh"
 # Pi rewrites settings.json itself. Merge the portable preferences rather than
 # stowing the live settings file, leaving runtime fields and OAuth credentials
 # local.
-if [ ! -f "$HOME/.pi/agent/local/copilot-delegation/node_modules/pi-subagents/package.json" ]; then
-    info "WARNING: the local Copilot delegation guard is missing. Restore the reviewed local package before starting Pi."
-    info "  See docs/agent-tooling-maintenance.md#copilot-local-delegation."
+if [ ! -f "$HOME/.pi/agent/local/provider-local-delegation-fff-8a0e972/node_modules/pi-subagents/package.json" ]; then
+    info "WARNING: the local delegation guard is missing. Restore the reviewed local package before starting Pi."
+    info "  See docs/agent-tooling-maintenance.md#copilot-and-codex-local-delegation."
 fi
 chmod +x "$DOTFILES/scripts/merge-pi-settings.sh"
 "$DOTFILES/scripts/merge-pi-settings.sh" \

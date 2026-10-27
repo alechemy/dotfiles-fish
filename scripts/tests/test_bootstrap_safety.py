@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Bootstrap safety with fictional disposable state; never run a live setup."""
 
+import json
 import os
 from pathlib import Path
 import plistlib
@@ -103,6 +104,30 @@ esac""")
                     continue
                 label = plistlib.loads((REPO / name).read_bytes())["Label"]
                 self.assertIn(f'{label}.plist', source, name)
+
+    def test_guard_recovery_references_match_declared_package(self):
+        fragment = json.loads((REPO / "stow/pi/.pi/agent/settings.fragment.json").read_text())
+        sources = [item if isinstance(item, str) else item["source"] for item in fragment["packages"]]
+        guards = [source for source in sources if source.endswith("/node_modules/pi-subagents")]
+        self.assertEqual(len(guards), 1)
+        self.assertTrue(guards[0].startswith("./local/"))
+        relative = ".pi/agent/" + guards[0].removeprefix("./")
+        setup = (REPO / "scripts/setup.sh").read_text()
+        self.assertIn(f'if [ ! -f "$HOME/{relative}/package.json" ]; then', setup)
+        migration = (REPO / "MIGRATION.md").read_text()
+        guard = (REPO / "docs/pi-copilot-guard.md").read_text()
+        self.assertIn(f"~/{relative}", migration)
+        self.assertIn(f'PI_SUBAGENTS_ROOT="$HOME/{relative}"', guard)
+        anchor = "#copilot-and-codex-local-delegation"
+        for text in (setup, migration):
+            self.assertIn(anchor, text)
+            self.assertNotIn("#copilot-local-delegation", text)
+        maintenance = (REPO / "docs/agent-tooling-maintenance.md").read_text()
+        self.assertIn("## Copilot and Codex local delegation", maintenance)
+        for identity in ("~/Developer/pi-subagents.codex-local-delegation",
+                         "8a0e972724f9639e84e33c9287cd0586eb34c7ea"):
+            self.assertIn(identity, migration)
+            self.assertIn(identity, maintenance)
 
     def test_manual_hooks_recipe_from_unrelated_directory(self):
         self.init_repo()
