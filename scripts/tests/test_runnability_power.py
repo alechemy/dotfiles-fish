@@ -156,6 +156,45 @@ class RunnabilityPower(unittest.TestCase):
         self.assertEqual(conn.execute("SELECT COUNT(*) FROM features").fetchone()[0], len(self.paths))
         conn.close()
 
+    def test_failed_analysis_retries_without_replacing_cached_success(self):
+        paths = self.paths[:2]
+        failing = {paths[1].name}
+
+        def submit(fn, abspath, relpath):
+            future = Future()
+            future.set_result(dict(relpath=relpath, size=5, mtime=0,
+                                   file_identity=self.runn.file_identity(abspath),
+                                   error="fixture failure" if relpath in failing else None,
+                                   bpm=100.0, beat_confidence=1.0, danceability=0.5))
+            return future
+
+        with patch.object(self.runn.subprocess, "run") as power, \
+                patch.object(self.runn, "collect_paths", return_value=paths), \
+                patch.object(self.runn, "ensure_models", return_value={}), \
+                patch.object(self.runn, "ProcessPoolExecutor") as pool:
+            power.return_value.returncode = 0
+            worker = pool.return_value.__enter__.return_value
+            worker.submit.side_effect = submit
+            self.assertEqual(self.runn.cmd_analyze(self.args), 1)
+            conn = self.runn.open_db()
+            before = conn.execute("SELECT * FROM features WHERE relpath=?", (paths[0].name,)).fetchone()
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM features").fetchone()[0], 2)
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM features WHERE error IS NOT NULL").fetchone()[0], 1)
+            conn.close()
+
+            failing.clear()
+            worker.submit.reset_mock()
+            self.assertEqual(self.runn.cmd_analyze(self.args), 0)
+            worker.submit.assert_called_once_with(self.runn._analyze_one, str(paths[1]), paths[1].name)
+            conn = self.runn.open_db()
+            self.assertEqual(conn.execute("SELECT * FROM features WHERE relpath=?", (paths[0].name,)).fetchone(), before)
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM features WHERE error IS NOT NULL").fetchone()[0], 0)
+            conn.close()
+
+            pool.reset_mock()
+            self.assertEqual(self.runn.cmd_analyze(self.args), 0)
+            pool.assert_not_called()
+
     def test_gate_caches_checks_but_refreshes_and_honors_force(self):
         with patch.object(self.runn.subprocess, "run") as power, \
                 patch.object(self.runn.time, "monotonic", return_value=0) as clock:

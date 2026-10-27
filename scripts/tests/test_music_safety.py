@@ -366,7 +366,7 @@ class MetadataSafety(unittest.TestCase):
                 with patch.object(runn, "ProcessPoolExecutor") as pool, patch.object(runn, "ensure_models", return_value={}):
                     worker = pool.return_value.__enter__.return_value
                     worker.submit.return_value = future
-                    self.assertEqual(runn.cmd_analyze(args), 0)
+                    self.assertEqual(runn.cmd_analyze(args), 1 if error is not None else 0)
                     worker.submit.assert_called_once_with(runn._analyze_one, str(path), "song.m4a")
                 conn = runn.open_db()
                 self.assertEqual(conn.execute("SELECT file_identity, error FROM features").fetchone(),

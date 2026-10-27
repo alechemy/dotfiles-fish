@@ -298,6 +298,7 @@ def cmd_analyze(args) -> int:
         if not gate.allowed(refresh=True):
             return 0
         done = 0
+        failed = False
         stopped = False
         index = 0
         with ProcessPoolExecutor(
@@ -324,7 +325,8 @@ def cmd_analyze(args) -> int:
                     )
                     conn.commit()
                     done += 1
-                    tag = f"ERROR {row['error']}" if row["error"] else (
+                    failed = failed or row["error"] is not None
+                    tag = f"ERROR {row['error']}" if row["error"] is not None else (
                         f"bpm={row.get('bpm', 0):.1f} conf={row.get('beat_confidence', 0):.2f} "
                         f"dance={row.get('danceability', 0):.2f}"
                     )
@@ -332,7 +334,7 @@ def cmd_analyze(args) -> int:
                     pending.remove(fut)
     finally:
         conn.close()
-    return 0
+    return 1 if failed else 0
 
 
 def load_config() -> dict:

@@ -6,6 +6,7 @@ import sys
 import shlex
 import subprocess
 import tempfile
+import textwrap
 import unittest
 from pathlib import Path
 
@@ -416,6 +417,44 @@ class FishScoringTests(unittest.TestCase):
                     self.assertEqual([c[0] for c in self.score_calls()], ['analyze', 'analyze'])
                 else:
                     self.assertEqual([c[0] for c in self.score_calls()], ['analyze', 'write', 'analyze', 'write'])
+
+    def test_handled_analyzer_failure_warns_without_failing_import(self):
+        source = WORKER.with_name('runnability.py')
+        for relative in self.relative:
+            (Path(self.config['local_library_root']) / relative / 'track.m4a').write_bytes(b'music')
+        scorer = self.bin / 'runnability.py'
+        scorer.write_text('#!' + sys.executable + '\n' + textwrap.dedent(f'''\
+            import importlib.util, json, os, sys
+            from concurrent.futures import Future
+            from pathlib import Path
+            from unittest.mock import patch
+
+            with open(os.environ["CALLS"], "a") as stream:
+                stream.write(json.dumps(sys.argv[1:]) + "\\n")
+            if sys.argv[1] != "analyze":
+                sys.exit(0)
+            spec = importlib.util.spec_from_file_location("fixture_runnability", {str(source)!r})
+            runn = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(runn)
+            runn.DB_PATH = Path.home() / "features.db"
+
+            def submit(fn, abspath, relpath):
+                future = Future()
+                future.set_result(dict(relpath=relpath, size=5, mtime=0,
+                                       file_identity=runn.file_identity(abspath),
+                                       error="fixture analysis failure"))
+                return future
+
+            with patch.object(runn, "ensure_models", return_value={{}}), \\
+                    patch.object(runn, "ProcessPoolExecutor") as pool:
+                pool.return_value.__enter__.return_value.submit.side_effect = submit
+                sys.exit(runn.main())
+            '''))
+        result = self.invoke()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('fixture analysis failure', result.stderr)
+        self.assertIn('nightly sync will retry', result.stdout)
+        self.assertEqual([call[0] for call in self.score_calls()], ['analyze', 'analyze'])
 
     def test_missing_and_unsafe_targets_defer_scoring_without_changing_import_success(self):
         remote = self.config['remote']['library_root']

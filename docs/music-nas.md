@@ -82,7 +82,10 @@ library, and runs album-scoped analysis and tag writing immediately. Explicit
 imports use the same `--force` power override as local imports. Failed downloads,
 kept existing copies, and permission failures do not start scoring. Missing
 mounts, invalid paths, or scoring failures produce a warning without changing
-the successful import status. The nightly sync retries missed or changed files.
+the successful import status. Analysis also returns failure when individual tracks
+fail, while retaining completed rows in the cache. A retry analyzes failed tracks
+again and skips unchanged successful tracks. The nightly sync retries missed or
+changed files.
 
 ## Getter and remote deployment
 
