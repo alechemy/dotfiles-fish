@@ -229,6 +229,43 @@ test("guard forwards streams and blocks the transport, including compaction and 
   });
 });
 
+test("only successful provider completion reconciles reported usage", {
+  skip: !piRoot && "Set PI_PACKAGE_ROOT to the installed Pi package",
+}, async () => {
+  const { createAssistantMessageEventStream } = await import(pathToFileURL(join(piRoot, "node_modules/@earendil-works/pi-ai/dist/index.js")));
+  for (const method of ["stream", "streamSimple"]) {
+    for (const outcome of ["error", "aborted", "throw", "incomplete", "done"]) {
+      await fixture(async (ledger) => {
+        const message = { role: "assistant", content: [], api: model.api,
+          provider: model.provider, model: model.id, usage: unitsUsage(),
+          stopReason: outcome === "done" ? "stop" : "error", timestamp: 0 };
+        const base = {
+          getModels: () => [model],
+          async *stream() {
+            yield { type: "start", partial: message };
+            if (outcome === "throw") throw new Error("fixture interruption");
+            if (outcome === "incomplete") return;
+            if (outcome === "done") yield { type: "done", reason: "stop", message };
+            else yield { type: "error", reason: outcome,
+              error: { ...message, stopReason: outcome, errorMessage: "fixture interruption" } };
+          },
+          streamSimple(...args) { return this.stream(...args); },
+        };
+        const guarded = wrapProvider(base, ledger, config, createAssistantMessageEventStream, () => "fixture");
+        const events = [];
+        for await (const event of guarded[method](model, { messages: [] })) events.push(event);
+        const expected = outcome === "done" ? usageUnits(message.usage, rates, config.estimateMargin) :
+          requestUnits(model, model.maxTokens, rates, config.estimateMargin);
+        const status = await ledger.status("fixture");
+        assert.equal(status.daily, expected, `${method}/${outcome}: daily`);
+        assert.equal(status.session, expected, `${method}/${outcome}: session`);
+        assert.equal(events.at(-1).type, outcome === "done" ? "done" : "error");
+        if (outcome === "error" || outcome === "aborted") assert.equal(events.at(-1).reason, outcome);
+      });
+    }
+  }
+});
+
 test("Pi SDK installs the native guard before prompting, without changing other providers", {
   skip: !piRoot && "Set PI_PACKAGE_ROOT to the installed Pi package",
   timeout: 20000,

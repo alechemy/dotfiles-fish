@@ -23,7 +23,8 @@ export function wrapProvider(provider, ledger, config, createStream, getSessionI
         for await (const event of inner) {
           lastMessage = event.message ?? event.error ?? event.partial ?? lastMessage;
           if (event.type === "done" || event.type === "error") {
-            await ledger.settle(reservation, usageUnits(lastMessage?.usage, rates, config.estimateMargin));
+            await ledger.settle(reservation, event.type === "done" ?
+              usageUnits(lastMessage?.usage, rates, config.estimateMargin) : undefined);
             settled = true;
           }
           output.push(event);
