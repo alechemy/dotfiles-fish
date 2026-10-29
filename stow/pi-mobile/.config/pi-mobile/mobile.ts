@@ -28,6 +28,7 @@ export default function (pi: ExtensionAPI) {
       const name = ctx.sessionManager.getSessionName() || ctx.sessionManager.getSessionId().slice(0, 8);
       const title = `pi: ${basename(ctx.cwd)} / ${name}`.replace(/[\x00-\x1f\x7f-\x9f]/g, " ").slice(0, 100);
       await pi.exec("tmux", ["rename-window", "-t", pane, title], { timeout: 2000 });
+      await pi.exec("tmux", ["set-option", "-p", "-t", pane, "@pi_mobile_cwd", ctx.cwd], { timeout: 2000 });
     }
   });
 

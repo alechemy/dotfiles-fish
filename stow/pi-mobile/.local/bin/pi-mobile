@@ -9,7 +9,10 @@ import termios
 
 
 SOCKET_NAME = "pi-mobile"
-SESSION_NAME = "mobile"
+SESSION_LABEL = (
+    "#{window_name} | #{?@pi_mobile_cwd,#{@pi_mobile_cwd},#{pane_current_path}} | "
+    "#{session_windows} window(s) | #{?session_attached,attached,detached}"
+)
 
 
 def mobile_environment(environment):
@@ -33,13 +36,48 @@ def run_pi(environment):
     os.execvpe("pi", ["pi", "--extension", str(extension), "--resume"], environment)
 
 
+def list_mobile_sessions(tmux, environment):
+    result = subprocess.run(tmux + ["list-sessions", "-F", "#{session_id}"],
+                            env=environment, text=True, capture_output=True, check=False)
+    if result.returncode:
+        if "no server running on " in result.stderr or "(No such file or directory)" in result.stderr:
+            return []
+        raise ValueError(result.stderr.strip() or "Unable to list mobile sessions.")
+    sessions = []
+    for identifier in result.stdout.splitlines():
+        if not identifier.startswith("$") or not identifier[1:].isdigit():
+            raise ValueError("Unexpected mobile session identifier.")
+        label = subprocess.run(tmux + ["display-message", "-p", "-t", identifier, SESSION_LABEL],
+                               env=environment, text=True, capture_output=True, check=False)
+        if label.returncode == 0:
+            text = "".join(character if character.isprintable() else " " for character in label.stdout.strip())
+            sessions.append((identifier, text))
+    return sessions
+
+
+def choose_mobile_session(sessions):
+    for number, (_, label) in enumerate(sessions, 1):
+        print(f"{number}. {label}")
+    while True:
+        try:
+            choice = input("Reconnect to session number (Enter to cancel): ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return None
+        if not choice or choice.lower() == "q":
+            return None
+        if choice.isdecimal() and 1 <= int(choice) <= len(sessions):
+            return sessions[int(choice) - 1][0]
+        print(f"Choose a number from 1 to {len(sessions)}, or press Enter to cancel.")
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(
-        description="Resume Pi conversations from a phone in a separate tmux server.",
+        description="Open Pi's picker in the current directory in an independent mobile tmux session.",
         epilog="Quit Pi on the other device first. Ctrl+B then D detaches; Ctrl+B then R opens another picker.",
     )
-    parser.add_argument("action", nargs="?", choices=["attach", "resume", "list", "_run"], default="attach",
-                        help="attach reconnects or opens the first picker; resume opens another picker; list shows mobile windows")
+    parser.add_argument("action", nargs="?", choices=["attach", "resume", "list", "_run"], default="resume",
+                        help="resume opens a new session (default); attach shows a reconnect menu; list shows running sessions")
     args = parser.parse_args(argv)
     environment = mobile_environment(os.environ)
     if args.action == "_run":
@@ -55,24 +93,22 @@ def main(argv=None):
     if not config.is_file():
         raise ValueError("Missing mobile tmux config. Restow pi-mobile from the primary dotfiles checkout.")
     tmux = ["tmux", "-L", SOCKET_NAME, "-f", str(config)]
-    if args.action == "list":
-        return subprocess.run(tmux + ["list-windows", "-t", "=" + SESSION_NAME,
-                                      "-F", "#{window_index}: #{window_name} (#{window_panes} panes)"],
-                              env=environment, check=False).returncode
-    if not sys.stdin.isatty() or not sys.stdout.isatty():
+    if args.action != "list" and (not sys.stdin.isatty() or not sys.stdout.isatty()):
         raise ValueError("Pi mobile requires an interactive terminal.")
+    if args.action in {"attach", "list"}:
+        sessions = list_mobile_sessions(tmux, environment)
+        if not sessions:
+            print("No running mobile sessions. Run pi-mobile to open a picker.")
+        elif args.action == "list":
+            for number, (_, label) in enumerate(sessions, 1):
+                print(f"{number}. {label}")
+        else:
+            selected = choose_mobile_session(sessions)
+            if selected:
+                os.execvpe("tmux", tmux + ["attach-session", "-t", selected], environment)
+        return 0
     launch = [sys.executable, str(Path(__file__).resolve()), "_run"]
-    if args.action == "resume":
-        existing = subprocess.run(tmux + ["has-session", "-t", "=" + SESSION_NAME],
-                                  env=environment, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                                  check=False)
-        if existing.returncode == 0:
-            subprocess.run(tmux + ["new-window", "-t", SESSION_NAME + ":", "-n", "resume",
-                                   "-c", str(Path.home())] + launch, env=environment, check=True)
-            os.execvpe("tmux", tmux + ["attach-session", "-t", "=" + SESSION_NAME], environment)
-            return 0
-    os.execvpe("tmux", tmux + ["new-session", "-A", "-s", SESSION_NAME, "-n", "resume",
-                              "-c", str(Path.home())] + launch, environment)
+    os.execvpe("tmux", tmux + ["new-session", "-n", "resume", "-c", str(Path.cwd())] + launch, environment)
     return 0
 
 

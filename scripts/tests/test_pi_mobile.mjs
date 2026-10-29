@@ -48,10 +48,12 @@ test("mobile startup uses runtime cwd and names only its own tmux window", async
   assert.notEqual(process.cwd(), f.ctx.cwd);
   await f.handlers.get("session_start")({}, f.ctx);
   assert.equal(f.shutdowns(), 0);
-  assert.equal(f.calls.length, 1);
+  assert.equal(f.calls.length, 2);
   assert.equal(f.calls[0][0], "tmux");
   assert.deepEqual(f.calls[0][1].slice(0, 3), ["rename-window", "-t", "%7"]);
   assert.match(f.calls[0][1][3], /Fictional task/);
+  assert.equal(f.calls[1][0], "tmux");
+  assert.deepEqual(f.calls[1][1], ["set-option", "-p", "-t", "%7", "@pi_mobile_cwd", f.ctx.cwd]);
   assert.equal(f.handlers.get("tool_call")({}, f.ctx), undefined);
 });
 

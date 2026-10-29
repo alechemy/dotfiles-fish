@@ -1,8 +1,10 @@
 import importlib.machinery
 import importlib.util
+import io
 import json
 import os
 from pathlib import Path
+import shlex
 import shutil
 import subprocess
 import sys
@@ -25,6 +27,11 @@ loader.exec_module(mobile)
 
 class Executed(Exception):
     pass
+
+
+class TerminalOutput(io.StringIO):
+    def isatty(self):
+        return True
 
 
 class LauncherTests(unittest.TestCase):
@@ -52,38 +59,76 @@ class LauncherTests(unittest.TestCase):
                 mobile.main(action)
         return execute.call_args.args
 
-    def test_attach_creates_or_reuses_without_detaching_other_clients(self):
-        executable, args, environment = self.execute([])
-        self.assertEqual(executable, "tmux")
-        self.assertEqual(args[:3], ["tmux", "-L", "pi-mobile"])
-        self.assertIn("new-session", args)
-        self.assertIn("-A", args)
-        self.assertNotIn("-D", args)
+    def test_new_launches_create_independent_sessions_in_callers_directory(self):
+        project = self.home / "project with spaces"
+        project.mkdir()
+        for action in [[], ["resume"]]:
+            with self.subTest(action=action), patch.object(mobile.Path, "cwd", return_value=project):
+                with patch.object(mobile.subprocess, "run") as run:
+                    executable, args, environment = self.execute(action)
+                run.assert_not_called()
+                self.assertEqual(executable, "tmux")
+                self.assertEqual(args[:3], ["tmux", "-L", "pi-mobile"])
+                self.assertIn("new-session", args)
+                for option in ["-A", "-D", "-d", "-s", "-t"]:
+                    self.assertNotIn(option, args)
+                self.assertEqual(args[args.index("-c") + 1], str(project))
+                self.assertEqual(args[-3:], [sys.executable, str(LAUNCHER.resolve()), "_run"])
+                self.assertEqual(environment["HOME"], str(self.home))
+
+    def session_results(self):
+        return [
+            subprocess.CompletedProcess([], 0, "$4\n$9\n", ""),
+            subprocess.CompletedProcess([], 0, "pi: alpha / First task | /projects/alpha | 1 window(s) | detached\n", ""),
+            subprocess.CompletedProcess([], 0, "pi: beta / Second task | /projects/beta | 2 window(s) | attached\n", ""),
+        ]
+
+    def test_attach_uses_a_numbered_menu_and_exact_session_id(self):
+        with patch.object(mobile.subprocess, "run", side_effect=self.session_results()) as run:
+            with patch("builtins.input", side_effect=["bad", "0", "3", "2"]):
+                with patch("sys.stdout", new_callable=TerminalOutput) as output:
+                    _, args, _ = self.execute(["attach"])
+        self.assertEqual(args[-3:], ["attach-session", "-t", "$9"])
         self.assertNotIn("-d", args)
-        self.assertEqual(args[-3:], [sys.executable, str(LAUNCHER.resolve()), "_run"])
-        self.assertEqual(environment["HOME"], str(self.home))
+        self.assertIn("1. pi: alpha / First task", output.getvalue())
+        self.assertIn("2. pi: beta / Second task", output.getvalue())
+        self.assertIn("/projects/beta", output.getvalue())
+        self.assertNotIn("$9", output.getvalue())
+        self.assertEqual(run.call_args_list[0].args[0][-3:], ["list-sessions", "-F", "#{session_id}"])
+        self.assertEqual(run.call_args_list[2].args[0][-2:], ["$9", mobile.SESSION_LABEL])
 
-    def test_resume_creates_one_window_then_attaches(self):
-        with patch.object(mobile.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)) as run:
-            _, args, _ = self.execute(["resume"])
-        self.assertEqual(len(run.call_args_list), 2)
-        self.assertIn("has-session", run.call_args_list[0].args[0])
-        self.assertIn("new-window", run.call_args_list[1].args[0])
-        self.assertEqual(args[-3:], ["attach-session", "-t", "=mobile"])
+    def test_attach_can_be_cancelled_without_creating_a_session(self):
+        for response in ["", "q", EOFError(), KeyboardInterrupt()]:
+            with self.subTest(response=response):
+                with patch.object(mobile.subprocess, "run", side_effect=self.session_results()):
+                    with patch("builtins.input", side_effect=[response]):
+                        with patch.object(mobile.os, "execvpe") as execute, patch("sys.stdout", new_callable=TerminalOutput):
+                            self.assertEqual(mobile.main(["attach"]), 0)
+                        execute.assert_not_called()
 
-    def test_resume_creates_first_session_if_absent(self):
-        with patch.object(mobile.subprocess, "run", return_value=subprocess.CompletedProcess([], 1)):
-            _, args, _ = self.execute(["resume"])
-        self.assertIn("new-session", args)
+    def test_attach_with_no_server_does_not_create_a_session(self):
+        for error in ["no server running on /tmp/test\n", "error connecting to /tmp/test (No such file or directory)\n"]:
+            with self.subTest(error=error):
+                with patch.object(mobile.subprocess, "run", return_value=subprocess.CompletedProcess([], 1, "", error)):
+                    with patch.object(mobile.os, "execvpe") as execute, patch("sys.stdout", new_callable=TerminalOutput) as output:
+                        self.assertEqual(mobile.main(["attach"]), 0)
+                    execute.assert_not_called()
+                    self.assertIn("No running mobile sessions", output.getvalue())
 
-    def test_failed_window_creation_does_not_attach_or_retry(self):
-        results = [subprocess.CompletedProcess([], 0), subprocess.CalledProcessError(1, "tmux")]
-        with patch.object(mobile.subprocess, "run", side_effect=results) as run:
-            with patch.object(mobile.os, "execvpe") as execute:
-                with self.assertRaises(subprocess.CalledProcessError):
-                    mobile.main(["resume"])
-        self.assertEqual(run.call_count, 2)
-        execute.assert_not_called()
+    def test_session_listing_failure_is_reported(self):
+        with patch.object(mobile.subprocess, "run", return_value=subprocess.CompletedProcess([], 1, "", "permission denied")):
+            with self.assertRaisesRegex(ValueError, "permission denied"):
+                mobile.main(["list"])
+
+    def test_disappeared_sessions_are_skipped_and_labels_are_terminal_safe(self):
+        results = [
+            subprocess.CompletedProcess([], 0, "$4\n$9\n", ""),
+            subprocess.CompletedProcess([], 1, "", "session disappeared"),
+            subprocess.CompletedProcess([], 0, "pi: task\n/project\x1b[2J\tattached\n", ""),
+        ]
+        with patch.object(mobile.subprocess, "run", side_effect=results):
+            sessions = mobile.list_mobile_sessions(["tmux"], {})
+        self.assertEqual(sessions, [("$9", "pi: task /project [2J attached")])
 
     def test_desktop_and_nested_launches_are_refused(self):
         for key in ["CMUX_SURFACE_ID", "TMUX"]:
@@ -131,10 +176,12 @@ class LauncherTests(unittest.TestCase):
 
     def test_list_does_not_require_tty_or_create_a_session(self):
         with patch.object(sys.stdin, "isatty", return_value=False):
-            with patch.object(mobile.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)) as run:
-                self.assertEqual(mobile.main(["list"]), 0)
-        self.assertIn("list-windows", run.call_args.args[0])
-        self.assertNotIn("new-session", run.call_args.args[0])
+            with patch.object(mobile.subprocess, "run", side_effect=self.session_results()) as run:
+                with patch("sys.stdout", new_callable=io.StringIO) as output:
+                    self.assertEqual(mobile.main(["list"]), 0)
+        self.assertIn("list-sessions", run.call_args_list[0].args[0])
+        self.assertIn("First task", output.getvalue())
+        self.assertIn("Second task", output.getvalue())
 
 
 @unittest.skipUnless(shutil.which("tmux"), "tmux is required for the isolated integration check")
@@ -156,7 +203,7 @@ class TmuxTests(unittest.TestCase):
             fake_pi.write_text(
                 "#!" + sys.executable + "\n"
                 "import json, os, pathlib, sys, termios, time\n"
-                "record = {'args': sys.argv[1:], 'cmux': any(k.startswith('CMUX_') for k in os.environ), "
+                "record = {'args': sys.argv[1:], 'cwd': os.getcwd(), 'cmux': any(k.startswith('CMUX_') for k in os.environ), "
                 "'mobile': os.environ.get('PI_MOBILE'), 'ixon': bool(termios.tcgetattr(0)[0] & termios.IXON)}\n"
                 "pathlib.Path(os.environ['HOME'], os.environ['TMUX_PANE'][1:] + '.json').write_text(json.dumps(record))\n"
                 "time.sleep(60)\n"
@@ -171,8 +218,14 @@ class TmuxTests(unittest.TestCase):
                 return subprocess.run(base + list(arguments), env=environment, text=True, capture_output=True,
                                       timeout=10, check=True).stdout.strip()
 
+            project = home / "project with spaces"
+            other_project = home / "other-project"
+            project.mkdir()
+            other_project.mkdir()
+            selected_project = home / "selected #{session_name}, with spaces"
+            selected_project.mkdir()
             try:
-                tmux("new-session", "-d", "-s", "mobile", "-c", str(home))
+                first = tmux("new-session", "-d", "-P", "-F", "#{session_id}", "-c", str(project))
                 deadline = time.monotonic() + 5
                 while not list(home.glob("*.json")) and time.monotonic() < deadline:
                     time.sleep(0.05)
@@ -182,18 +235,50 @@ class TmuxTests(unittest.TestCase):
                 self.assertFalse(record["cmux"])
                 self.assertFalse(record["ixon"])
                 self.assertEqual(record["mobile"], "1")
+                self.assertEqual(record["cwd"], str(project.resolve()))
                 self.assertEqual(record["args"], ["--extension", str(home / ".config/pi-mobile/mobile.ts"), "--resume"])
-                self.assertEqual(tmux("display-message", "-p", "-t", "=mobile:", "#{session_attached}"), "0")
+                self.assertEqual(tmux("display-message", "-p", "-t", first, "#{session_attached}"), "0")
                 self.assertEqual(tmux("show-options", "-gv", "history-limit"), "50000")
                 self.assertEqual(tmux("show-options", "-gv", "destroy-unattached"), "off")
                 self.assertEqual(tmux("show-options", "-gwv", "window-size"), "latest")
-                self.assertIn("new-window", tmux("list-keys", "-T", "prefix", "r"))
-                tmux("new-window", "-t", "mobile:", "-n", "resume", "-c", str(home))
+                binding = tmux("list-keys", "-T", "prefix", "r")
+                self.assertIn("new-window", binding)
+                self.assertIn('#{pane_current_path}', binding)
+                tmux("rename-window", "-t", first + ":", "pi: project / Fictional task")
+                first_window = tmux("display-message", "-p", "-t", first, "#{window_id}")
+                second = tmux("new-session", "-d", "-P", "-F", "#{session_id}", "-c", str(other_project))
+                self.assertNotEqual(first, second)
+                for session in [first, second]:
+                    self.assertEqual(tmux("display-message", "-p", "-t", session, "#{session_group}"), "")
+                binding_args = shlex.split(binding)
+                new_window = binding_args[binding_args.index("new-window"):]
+                tmux(*new_window, "-t", second + ":")
                 deadline = time.monotonic() + 5
-                while len(list(home.glob("*.json"))) < 2 and time.monotonic() < deadline:
+                while len(list(home.glob("*.json"))) < 3 and time.monotonic() < deadline:
                     time.sleep(0.05)
-                self.assertEqual(len(list(home.glob("*.json"))), 2)
-                self.assertEqual(len(tmux("list-windows", "-t", "=mobile", "-F", "#{window_id}").splitlines()), 2)
+                records = [json.loads(path.read_text()) for path in home.glob("*.json")]
+                self.assertEqual(len(records), 3)
+                self.assertEqual(sum(record["cwd"] == str(other_project.resolve()) for record in records), 2)
+                self.assertEqual(tmux("display-message", "-p", "-t", first, "#{window_id}"), first_window)
+                self.assertEqual(len(tmux("list-windows", "-t", first, "-F", "#{window_id}").splitlines()), 1)
+                self.assertEqual(len(tmux("list-windows", "-t", second, "-F", "#{window_id}").splitlines()), 2)
+                sessions = dict(mobile.list_mobile_sessions(base, environment))
+                self.assertEqual(set(sessions), {first, second})
+                self.assertIn("Fictional task", sessions[first])
+                self.assertIn(str(project.resolve()), sessions[first])
+                self.assertIn("detached", sessions[first])
+                self.assertIn(str(other_project.resolve()), sessions[second])
+                tmux("set-option", "-p", "-t", second, "@pi_mobile_cwd", str(selected_project))
+                sessions = dict(mobile.list_mobile_sessions(base, environment))
+                self.assertIn(str(selected_project), sessions[second])
+                tmux(*new_window, "-t", second + ":")
+                deadline = time.monotonic() + 5
+                while len(list(home.glob("*.json"))) < 4 and time.monotonic() < deadline:
+                    time.sleep(0.05)
+                records = [json.loads(path.read_text()) for path in home.glob("*.json")]
+                self.assertEqual(len(records), 4)
+                self.assertEqual(sum(record["cwd"] == str(selected_project.resolve()) for record in records), 1)
+                self.assertEqual(tmux("display-message", "-p", "-t", first, "#{window_id}"), first_window)
             finally:
                 subprocess.run(base + ["kill-server"], env=environment, capture_output=True, timeout=10)
 
