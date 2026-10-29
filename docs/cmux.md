@@ -16,6 +16,10 @@ scripts/setup-cmux.sh --install-pi-hook
 
 The flag additionally runs cmux's official `hooks setup pi --yes`. The official hook owns cmux lifecycle state, notifications, and application restart restoration. `worktrunk.ts` separately owns Worktrunk markers and authenticated Hunk feedback delivery.
 
+## iPhone continuation
+
+[Pi from an iPhone](pi-mobile.md) uses Termius, Tailscale, and a separate mobile tmux server. Quit desktop Pi before resuming its saved conversation on the phone, then quit mobile Pi before returning through `wt pi open` or Pi's session picker. The trial leaves native desktop launching unchanged and adds no session locking.
+
 ## Pi convenience commands
 
 Pi's settings fragment declares unversioned `npm:pi-cmux`, with [automatic stable updates](software-updates.md#pi-packages). The reviewed snapshot is `0.1.24`. The package adds session-launch commands, terminal splits and tabs, and browser panes with user-written annotations. It does not connect Pi to cmux Computer Use.

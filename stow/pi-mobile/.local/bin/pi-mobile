@@ -1,0 +1,84 @@
+#!/usr/bin/env python3
+
+import argparse
+import os
+from pathlib import Path
+import subprocess
+import sys
+import termios
+
+
+SOCKET_NAME = "pi-mobile"
+SESSION_NAME = "mobile"
+
+
+def mobile_environment(environment):
+    return {
+        key: value for key, value in environment.items()
+        if not key.startswith("CMUX_")
+        and key not in {"TERM_PROGRAM", "TERM_PROGRAM_VERSION", "GHOSTTY_RESOURCES_DIR", "GHOSTTY_BIN_DIR"}
+    }
+
+
+def run_pi(environment):
+    if not environment.get("TMUX") or not environment.get("TMUX_PANE"):
+        raise ValueError("The internal Pi command must run inside tmux.")
+    extension = Path.home() / ".config/pi-mobile/mobile.ts"
+    if not extension.is_file():
+        raise ValueError("Missing mobile extension. Restow pi-mobile from the primary dotfiles checkout.")
+    attributes = termios.tcgetattr(sys.stdin.fileno())
+    attributes[0] &= ~termios.IXON
+    termios.tcsetattr(sys.stdin.fileno(), termios.TCSANOW, attributes)
+    environment["PI_MOBILE"] = "1"
+    os.execvpe("pi", ["pi", "--extension", str(extension), "--resume"], environment)
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(
+        description="Resume Pi conversations from a phone in a separate tmux server.",
+        epilog="Quit Pi on the other device first. Ctrl+B then D detaches; Ctrl+B then R opens another picker.",
+    )
+    parser.add_argument("action", nargs="?", choices=["attach", "resume", "list", "_run"], default="attach",
+                        help="attach reconnects or opens the first picker; resume opens another picker; list shows mobile windows")
+    args = parser.parse_args(argv)
+    environment = mobile_environment(os.environ)
+    if args.action == "_run":
+        if not sys.stdin.isatty() or not sys.stdout.isatty():
+            raise ValueError("Pi mobile requires an interactive terminal.")
+        run_pi(environment)
+        return 0
+    if os.environ.get("CMUX_SURFACE_ID"):
+        raise ValueError("Use pi-mobile from Termius or a non-cmux terminal. Desktop Pi stays in cmux.")
+    if os.environ.get("TMUX"):
+        raise ValueError("Already inside tmux. Use Ctrl+B then R for a picker, or detach before running pi-mobile.")
+    config = Path.home() / ".config/tmux/pi-mobile.conf"
+    if not config.is_file():
+        raise ValueError("Missing mobile tmux config. Restow pi-mobile from the primary dotfiles checkout.")
+    tmux = ["tmux", "-L", SOCKET_NAME, "-f", str(config)]
+    if args.action == "list":
+        return subprocess.run(tmux + ["list-windows", "-t", "=" + SESSION_NAME,
+                                      "-F", "#{window_index}: #{window_name} (#{window_panes} panes)"],
+                              env=environment, check=False).returncode
+    if not sys.stdin.isatty() or not sys.stdout.isatty():
+        raise ValueError("Pi mobile requires an interactive terminal.")
+    launch = [sys.executable, str(Path(__file__).resolve()), "_run"]
+    if args.action == "resume":
+        existing = subprocess.run(tmux + ["has-session", "-t", "=" + SESSION_NAME],
+                                  env=environment, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                  check=False)
+        if existing.returncode == 0:
+            subprocess.run(tmux + ["new-window", "-t", SESSION_NAME + ":", "-n", "resume",
+                                   "-c", str(Path.home())] + launch, env=environment, check=True)
+            os.execvpe("tmux", tmux + ["attach-session", "-t", "=" + SESSION_NAME], environment)
+            return 0
+    os.execvpe("tmux", tmux + ["new-session", "-A", "-s", SESSION_NAME, "-n", "resume",
+                              "-c", str(Path.home())] + launch, environment)
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except (OSError, ValueError, subprocess.CalledProcessError, termios.error) as error:
+        print(f"pi-mobile: {error}", file=sys.stderr)
+        sys.exit(1)
