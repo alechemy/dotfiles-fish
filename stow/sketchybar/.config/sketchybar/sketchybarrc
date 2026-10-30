@@ -7,7 +7,7 @@ PLUGIN_DIR="$CONFIG_DIR/plugins"
 # notch_width reserves a center gap on notched displays (MacBook built-in) so
 # items in left/right positions don't render under the notch. Ignored on
 # external displays, so the same config works clamshell or standalone.
-sketchybar --bar position=top height=40 blur_radius=30 color=0x40000000 topmost=on notch_width=200
+sketchybar --bar position=top height=40 blur_radius=30 color=0x40000000 topmost=window notch_width=200
 
 ##### Changing Defaults #####
 default=(
