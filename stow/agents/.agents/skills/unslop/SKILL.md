@@ -7,6 +7,8 @@ metadata:
   source: https://github.com/cursor/plugins/tree/main/pstack/skills/unslop
   revision: bdf7aa355337897f167153e05069aca505dae17c
   upstream-version: "0.14.3"
+  supplemental-source: https://github.com/razakiau/skills/tree/main/skills/no-slop
+  supplemental-adopted-revision: 82016fbe775447997f3df6501bf43d71723188bd
 ---
 
 <!-- markdownlint-disable MD013 MD029 -->
@@ -17,19 +19,25 @@ Edit text to remove AI patterns while preserving voice and meaning.
 
 ## Process
 
-1. Scan for the patterns below.
+1. Scan for the patterns below at sentence, paragraph, and section level. Check for contrasts split across sentences, redundant negative clarifications, repeated claim-example-lesson sequences, and repeated closers. Preserve purposeful repetition and structures required by the format.
 2. Rewrite. Preserve meaning, match intended tone.
 3. Preserve voice and meaning (see next section).
 4. Self-audit: "What makes this obviously AI generated?" Fix remaining tells. Before sending, scan for formulaic contrast, especially at paragraph and response endings. Default to deleting the sentence.
 5. Check the final sentences for unrequested caveats and status bookkeeping. Delete them unless they materially qualify a result, identify an unmet requirement, or affect the reader's next decision. Stop when the useful information is complete.
 
-Keep the self-audit silent unless the user asks for a writing review. For review feedback, quote the affected text or give its location, name the problem, and suggest a concrete revision.
+Keep the self-audit silent unless the user asks for a writing review. For review feedback, quote the affected text or give its location, name the problem, and suggest a concrete revision. When asked only to detect or audit patterns, report findings without rewriting the whole text. Describe observable patterns without assigning an AI score or claiming who wrote the text.
 
 When editing an existing document, focus style corrections on the passages being changed. Check surrounding text for coherence, but leave unrelated wording alone unless a broader rewrite is requested.
 
 ## Preserve voice and meaning
 
 Preserve the source's intended tone and point of view. Give recommendations when useful and explain their reasoning. Use concrete details and acknowledge uncertainty where the evidence requires it. Vary sentence length when it improves readability. Do not manufacture emotion, opinions, informality, or imperfections to sound human. Preserve genuine first-person statements, but never invent lived experience.
+
+When editing for style, preserve negation, conditions, scope, uncertainty, attribution, and obligation strength. Keep quantities and units attached to the same subjects and claims. Preserve code, commands, paths, identifiers, citations, and verbatim quotations exactly unless the user explicitly requests changes to them. These preservation requirements take precedence over the style patterns below.
+
+Never invent a number, example, mechanism, causal explanation, or personal experience to make prose more concrete. Use only supplied or verified details. If a necessary detail is missing, keep the uncertainty or ask for that detail when it blocks the task.
+
+Repair only passages with an identifiable clarity or style problem. Leave acceptable passages unchanged, and return an already-good text unchanged. Do not replace filler with clipped fragments or decorative plain-sounding prose.
 
 ## Patterns to detect and fix
 
@@ -57,7 +65,7 @@ Preserve the source's intended tone and point of view. Give recommendations when
 14. **Colon overuse.** Colons are fine before a list or example. Not as mid-sentence connectors. "If you're coming from traditional automation: instead of registering event handlers, you describe conditions" adds nothing with the colon. Rewrite to let the point stand on its own without comparison framing. "Describing when the scheduler should fire works best as plain English." Same meaning, no crutch punctuation.
 15. **Boldface overuse.** Don't bold every proper noun or acronym.
 16. **Inline-header lists.** The tell is a bold label and colon that restates the line: "**Performance:** Performance improved...". Convert those to prose. A bold lead-in that ends in a period, names the item, and is followed by genuinely new detail ("**Schema in TypeScript.** Tables live in one file.") is fine, not a tell.
-17. **Title case headings.** Use sentence case.
+17. **Decorative and redundant headings.** Use sentence case and name what the section contains. Cut a heading that merely repeats the document title and an opening sentence that merely repeats its heading. Replace headings written for effect with descriptive ones. Keep short sections when their headings help readers find information.
 18. **Decorative emojis.** Remove from headings and bullets.
 19. **Curly quotes.** Replace with straight quotes.
 
@@ -71,7 +79,7 @@ Preserve the source's intended tone and point of view. Give recommendations when
 
 23. **Filler phrases.** "In order to" becomes "To". "Due to the fact that" becomes "Because". "It is important to note that" gets deleted.
 24. **Excessive hedging.** "could potentially possibly be argued that it might" becomes "may".
-25. **Generic conclusions.** "The future looks bright." State specific plans or facts.
+25. **Redundant endings.** Delete a recap, lesson, or emphatic closer that adds nothing: "That is the real win", "That distinction matters", or a paragraph restating the preceding example. Do not replace it with a better metaphor or a new slogan. End on the last useful point or next action. Keep summaries the user requests or readers need to navigate a long document.
 
 ### Jargon
 
@@ -98,3 +106,8 @@ Preserve the source's intended tone and point of view. Give recommendations when
 32. **Mannered prose.** Avoid decorative metaphors, rhetorical fragments, personified code, and stock framing phrases when direct wording is clearer. Name the actor and action. Keep an analogy only when it explains the mechanism more clearly than a literal description.
 33. **Over-compression.** In prose, avoid dropped articles, verbless fragments, symbol-speak, and abbreviations that make the reader decode instead of read. "Parser rejects bad date → exit 2, no write" becomes "The parser rejects a bad date, exits with code 2, and writes nothing." Write whole sentences with their articles and verbs in ordinary prose, and spell out arrows and abbreviations. Commit messages and change summaries may omit an implied author, as described in rule 29.
 34. **Closing caveat inventories.** Do not append lists of what remains unverified, was not tested, was untouched, or needs clarification merely to sound thorough. "Saves were untouched; gameplay and save compatibility were not tested" adds nothing when the task did not involve saves or gameplay. Delete it. Keep a limitation when omitting it would mislead the reader about the requested outcome, including failed checks or incomplete requested verification. Put it beside the affected claim and state the consequence. If a missing decision blocks the task, ask the specific question where it arises instead of ending with "requirements need clarification". Do not hide a real blocker, imply unperformed verification, or add a generic disclaimer after an otherwise complete answer.
+35. **Staged introductions and imaginary objections.** Cut introductions such as "Here's the thing", "What most people miss", and "Let me be clear" when they only announce the point. Remove self-answered rhetorical questions and defenses against objections that the reader has not raised and has no reason to consider. State any necessary claim directly. Preserve questions, concerns, and alternatives that help the reader learn or decide.
+
+    **Redundant negative clarification.** After giving a sufficient instruction or explanation, stop. Delete follow-up sentences that negate an unstated alternative, repeat an already-clear condition, or disclaim an unrequested requirement. "Install the new version, then open it. Reopening the old version alone does not install an update" becomes "Install the new version, then open it." Keep a qualification when it answers an explicit question, resolves genuine ambiguity, or prevents a specific consequential mistake established by the task context. Place essential conditions in the instruction itself. A technically accurate caveat does not automatically deserve inclusion.
+
+36. **Re-explaining known context.** In a reply, lead with the answer or decision. Omit background that the visible conversation shows the reader already has. Keep necessary rationale, requested evidence, and consequential limitations. Do not assume shared context when it is unavailable. Standalone documents and PR descriptions need enough context for their intended readers.
